@@ -4,6 +4,8 @@
 
 [alias]
     c = commit
+    ca = commit --amend
+    cf = commit --fixup
     s = status
     b = branch
     co = checkout
@@ -12,3 +14,4 @@
     p = push
     pnv = push --no-verify
     d = diff
+    a = add
