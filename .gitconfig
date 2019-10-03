@@ -11,3 +11,4 @@
     lo = log --oneline
     p = push
     pnv = push --no-verify
+    d = diff
