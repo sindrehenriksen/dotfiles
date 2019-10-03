@@ -5,6 +5,7 @@
 !.gitignore
 !.vimrc
 !.vim_runtime
+!.bashrc
 
 !.ssh
 .ssh/*
