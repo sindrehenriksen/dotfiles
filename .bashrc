@@ -21,6 +21,7 @@ alias sbashrc="source ~/.bashrc"
 alias vbashrc="vim ~/.bashrc"
 alias shg="ssh gpu"
 alias shgp="ssh gpu-public"
+alias g="git"
 
 # ~/.bashrc: executed by bash(1) for non-login shells.
 # see /usr/share/doc/bash/examples/startup-files (in the package bash-doc)

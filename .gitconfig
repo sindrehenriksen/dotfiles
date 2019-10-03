@@ -1,0 +1,11 @@
+[user]
+	name = sindrehenriksen
+	email = sindrehenriksen93@gmail.com
+
+[alias]
+    c = commit
+    s = status
+    b = branch
+    co = checkout
+    l = log
+    lo = log --oneline
