@@ -1,0 +1,11 @@
+# Ignore everything
+/*
+
+# But not these files...
+!.gitignore
+!.vimrc
+!.vim_runtime
+
+!.ssh
+.ssh/*
+!.ssh/config
