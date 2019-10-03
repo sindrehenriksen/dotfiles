@@ -6,6 +6,7 @@
 !.vimrc
 !.vim_runtime
 !.bashrc
+!.tmux.conf
 
 !.ssh
 .ssh/*
