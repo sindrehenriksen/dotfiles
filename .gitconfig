@@ -15,3 +15,4 @@
     pnv = push --no-verify
     d = diff
     a = add
+    f = fetch
