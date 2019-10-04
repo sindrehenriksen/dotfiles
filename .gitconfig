@@ -11,8 +11,9 @@
     co = checkout
     l = log
     lo = log --oneline
-    p = push
+    ps = push
     pnv = push --no-verify
+    pl = pull
     d = diff
     a = add
     f = fetch
