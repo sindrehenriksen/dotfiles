@@ -7,22 +7,25 @@ export WORKON_HOME=~/.virtualenvs
 export PROJECT_HOME=~/dev
 source ~/.local/bin/virtualenvwrapper.sh
 
-# Aliases
+## Aliases
+alias cdsp="cd /mnt/c/Users/sindr/Google\ Drive/NTNU/Emner/SpecCourse"
+alias g="git"
+alias c="clear"
+alias sbashrc="source ~/.bashrc"
+alias vbashrc="vim ~/.bashrc"
+
+# RRG
 alias gloga="git log --oneline --decorate --graph --all --color"
 alias wgloga="watch --color git log --oneline --decorate --graph --all --color"
 #alias mountgputmp='mkdir -p /tmp/gputmp && sshfs -o reconnect,ServerAliveInterval=15,ServerAliceCountMax=3 gpu:/tmp /tmp/gputmp'
 alias mgtmp="rsync -avu --delete -e ssh gpu:tmp/ /tmp/gputmp"
 alias mgtmpp="rsync -avu --delete -e ssh gpu-public:tmp/ /tmp/gputmp"
-alias cdsp="cd /mnt/c/Users/sindr/Google\ Drive/NTNU/Emner/SpecCourse"
 alias cdrrg="cd /mnt/c/Users/sindr/Google\ Drive/RagnaRock\ Geo/Dev"
 alias itool="ssh gpu -N -L 8050:localhost:8050"
 alias itoolp="ssh gpu-public -N -L 8050:localhost:8050"
-alias sbashrc="source ~/.bashrc"
-alias vbashrc="vim ~/.bashrc"
 alias shg="ssh gpu"
 alias shgp="ssh gpu-public"
-alias g="git"
-alias c="clear"
+alias fwdgpup="ssh gpu-public -N -L 6000:localhost:22"
 
 # ~/.bashrc: executed by bash(1) for non-login shells.
 # see /usr/share/doc/bash/examples/startup-files (in the package bash-doc)
