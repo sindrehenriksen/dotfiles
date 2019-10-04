@@ -17,3 +17,5 @@
     d = diff
     a = add
     f = fetch
+    ui = update-index
+    uia = update-index --again
