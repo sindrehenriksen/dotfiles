@@ -20,3 +20,4 @@
     ui = update-index
     uia = update-index --again
     sh = stash
+    r = reset
