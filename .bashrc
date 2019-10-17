@@ -13,6 +13,7 @@ alias g="git"
 alias c="clear"
 alias sbashrc="source ~/.bashrc"
 alias vbashrc="vim ~/.bashrc"
+alias wo="workon"
 
 # RRG
 alias gloga="git log --oneline --decorate --graph --all --color"
