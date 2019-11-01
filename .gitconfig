@@ -21,3 +21,4 @@
     uia = update-index --again
     sh = stash
     r = reset
+    rb = rebase
