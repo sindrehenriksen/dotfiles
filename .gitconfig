@@ -22,3 +22,6 @@
     sh = stash
     r = reset
     rb = rebase
+
+[rebase]
+	autosquash = true
