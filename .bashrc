@@ -1,3 +1,8 @@
+# Zsh
+if [ -t 1 ]; then
+    exec zsh
+fi
+
 # Personal
 source .shellrc
 alias sbash="source ~/.bashrc"
