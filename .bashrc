@@ -1,7 +1,7 @@
 # Personal
 source .shellrc
-alias sbashrc="source ~/.bashrc"
-alias vbashrc="vim ~/.bashrc"
+alias sbash="source ~/.bashrc"
+alias vbash="vim ~/.bashrc"
 
 # ~/.bashrc: executed by bash(1) for non-login shells.
 # see /usr/share/doc/bash/examples/startup-files (in the package bash-doc)
