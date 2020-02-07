@@ -8,7 +8,9 @@ export PROJECT_HOME=~/dev
 source ~/.local/bin/virtualenvwrapper.sh
 
 ## Aliases
-alias cdsp="cd /mnt/c/Users/sindr/Google\ Drive/NTNU/Emner/SpecCourse"
+alias scourse="cd /mnt/c/Users/sindr/Google\ Drive/NTNU/Emner/SpecCourse"
+alias downloads="cd /mnt/c/Users/sindr/Downloads"
+alias master="cd /mnt/c/Users/sindr/Google\ Drive/NTNU/Emner/Master"
 alias g="git"
 alias c="clear"
 alias sbashrc="source ~/.bashrc"
