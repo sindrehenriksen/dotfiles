@@ -8,6 +8,7 @@
 !.bashrc
 !.tmux.conf
 !.gitconfig
+!.profile
 
 !.ssh
 .ssh/*
