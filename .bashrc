@@ -16,10 +16,9 @@ alias c="clear"
 alias sbashrc="source ~/.bashrc"
 alias vbashrc="vim ~/.bashrc"
 alias wo="workon"
+alias wc="watch --color "
 
 # RRG
-alias gloga="git log --oneline --decorate --graph --all --color"
-alias wgloga="watch --color git log --oneline --decorate --graph --all --color"
 #alias mountgputmp='mkdir -p /tmp/gputmp && sshfs -o reconnect,ServerAliveInterval=15,ServerAliceCountMax=3 gpu:/tmp /tmp/gputmp'
 alias mgtmp="rsync -avu --delete -e ssh gpu:tmp/ /tmp/gputmp"
 alias mgtmpp="rsync -avu --delete -e ssh gpu-public:tmp/ /tmp/gputmp"
