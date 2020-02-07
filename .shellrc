@@ -1,0 +1,28 @@
+# Personal
+export VISUAL=vim
+export EDITOR="$VISUAL"
+export DISPLAY=localhost:0
+export VIRTUALENV_PYTHON=/usr/bin/python3
+export WORKON_HOME=~/.virtualenvs
+export PROJECT_HOME=~/dev
+source ~/.local/bin/virtualenvwrapper.sh
+
+## Aliases
+alias scourse="cd /mnt/c/Users/sindr/Google\ Drive/NTNU/Emner/SpecCourse"
+alias downloads="cd /mnt/c/Users/sindr/Downloads"
+alias master="cd /mnt/c/Users/sindr/Google\ Drive/NTNU/Emner/Master"
+alias g="git"
+alias c="clear"
+alias wo="workon"
+alias wc="watch --color "
+
+# RRG
+#alias mountgputmp='mkdir -p /tmp/gputmp && sshfs -o reconnect,ServerAliveInterval=15,ServerAliceCountMax=3 gpu:/tmp /tmp/gputmp'
+alias mgtmp="rsync -avu --delete -e ssh gpu:tmp/ /tmp/gputmp"
+alias mgtmpp="rsync -avu --delete -e ssh gpu-public:tmp/ /tmp/gputmp"
+alias cdrrg="cd /mnt/c/Users/sindr/Google\ Drive/RagnaRock\ Geo/Dev"
+alias itool="ssh gpu -N -L 5000:localhost:5000"
+alias itoolp="ssh gpu-public -N -L 5000:localhost:5000"
+alias shg="ssh gpu"
+alias shgp="ssh gpu-public"
+alias fwdgpup="ssh gpu-public -N -L 6000:localhost:22"
