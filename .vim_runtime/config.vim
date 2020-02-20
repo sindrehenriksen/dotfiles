@@ -33,6 +33,9 @@ au FocusGained,BufEnter * checktime
 " (useful for handling the permission-denied error)
 command! W execute 'w !sudo tee % > /dev/null' <bar> edit!
 
+" Useful for e.g. vim-gitgutter
+set updatetime=100
+
 
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 " => VIM user interface
