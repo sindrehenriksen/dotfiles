@@ -40,7 +40,7 @@ set updatetime=100
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 " => VIM user interface
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
-set relativenumber
+set number relativenumber
 
 " Highlight cursor in normal mode (wsltty)
 let &t_ti.="\e[1 q"
