@@ -3,7 +3,6 @@
 source ~/.zplug/init.zsh
 
 #### General
-source .shellrc
 alias szsh="source ~/.zshrc"
 alias vzsh="vim ~/.zshrc"
 
@@ -29,3 +28,6 @@ zplug "b4b4r07/enhancd", use:init.sh
 
 # Load
 zplug load
+
+#### Load common shell settings
+source .shellrc
