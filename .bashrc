@@ -9,7 +9,7 @@ if [ -t 1 ]; then
     exec zsh
 fi
 
-# Personal
+# General
 source .shellrc
 alias sbash="source ~/.bashrc"
 alias vbash="vim ~/.bashrc"
