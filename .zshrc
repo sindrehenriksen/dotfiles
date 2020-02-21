@@ -1,4 +1,5 @@
 ## Init
+. ~/.zprofile
 source ~/.zplug/init.zsh
 
 ## General
