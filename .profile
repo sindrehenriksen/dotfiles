@@ -28,3 +28,9 @@ fi
 
 # turn of LESS beep
 export LESS="$LESS -R -Q"
+
+# Add cargo to path
+if [ -d "$HOME/.cargo/bin" ] ; then
+    PATH="$HOME/.cargo/bin:$PATH"
+fi
+
