@@ -1,15 +1,23 @@
 #### Init
 . ~/.zprofile
-source ~/.zplug/init.zsh
 
-#### General
+
+#### Aliases
 alias szsh="source ~/.zshrc"
 alias vzsh="vim ~/.zshrc"
+
 
 #### ZSH keybindings
 bindkey '^ ' autosuggest-accept
 
+
+#### fzf init
+[ -f ~/.fzf.zsh ] && source ~/.fzf.zsh && source ~/dotfiles/.fzf_config
+
+
 #### Plugins
+source ~/.zplug/init.zsh
+
 # Fish like autocompletions
 zplug "zsh-users/zsh-autosuggestions"
 
@@ -29,5 +37,7 @@ zplug "b4b4r07/enhancd", use:init.sh
 # Load
 zplug load
 
+
 #### Load common shell settings
 source .shellrc
+

@@ -1,0 +1,2 @@
+export FZF_DEFAULT_COMMAND='rg --smart-case --files --hidden --follow -g "!.git"'
+export FZF_DEFAULT_OPTS='-m --height 40% --layout=reverse'
