@@ -94,6 +94,10 @@ set mat=2
 " Add a bit extra margin to the left
 "set foldcolumn=1
 
+" Open new splits to the right or below current
+set splitbelow
+set splitright
+
 
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 " => Colors and Fonts
