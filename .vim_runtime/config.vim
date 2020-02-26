@@ -36,6 +36,12 @@ command! W execute 'w !sudo tee % > /dev/null' <bar> edit!
 " Useful for e.g. vim-gitgutter
 set updatetime=100
 
+" Turn on filetype detection and plugins
+filetype plugin on
+
+" Latex as default for .tex files
+let g:tex_flavor = "latex"
+
 
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 " => VIM user interface
