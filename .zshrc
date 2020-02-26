@@ -1,6 +1,9 @@
 #### Init
 . ~/.zprofile
 
+# Cache zplug plugins in order to improve zsh startup time
+export ZPLUG_USE_CACHE=true
+
 
 #### Aliases
 alias szsh="source ~/.zshrc"
