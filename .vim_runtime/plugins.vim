@@ -10,4 +10,7 @@ Plug 'airblade/vim-gitgutter'
 Plug 'junegunn/fzf', { 'do': './install --bin' }
 Plug 'junegunn/fzf.vim'
 
+" vimtex
+Plug 'lervag/vimtex'
+
 call plug#end()
