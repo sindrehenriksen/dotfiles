@@ -124,7 +124,10 @@ set ffs=unix,dos,mac
 " Turn backup off, since most stuff is in SVN, git etc. anyway...
 set nobackup
 set nowb
-set noswapfile
+
+" But we want swapfiles
+set swapfile
+set directory^=$HOME/.vim/tmp//
 
 
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
