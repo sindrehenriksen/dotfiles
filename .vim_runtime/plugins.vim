@@ -13,4 +13,7 @@ Plug 'junegunn/fzf.vim'
 " vimtex
 Plug 'lervag/vimtex'
 
+" ale
+Plug 'dense-analysis/ale'
+
 call plug#end()
