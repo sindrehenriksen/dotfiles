@@ -16,4 +16,7 @@ Plug 'lervag/vimtex'
 " ale
 Plug 'dense-analysis/ale'
 
+" coc.nvim
+Plug 'neoclide/coc.nvim', {'branch': 'release'}
+
 call plug#end()
