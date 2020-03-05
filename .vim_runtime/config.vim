@@ -42,6 +42,9 @@ filetype plugin on
 " Latex as default for .tex files
 let g:tex_flavor = "latex"
 
+" Hide buffers when abandoned - also important (?) for coc.nvim
+set hidden
+
 
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 " => VIM user interface
@@ -103,6 +106,15 @@ set mat=2
 " Open new splits to the right or below current
 set splitbelow
 set splitright
+
+" More space for displaying messages
+set cmdheight=2
+
+" Don't pass messages to |ins-completion-menu| (coc.nvim)
+set shortmess+=c
+
+"Always show signcolumn
+set signcolumn=yes
 
 
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
