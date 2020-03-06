@@ -26,6 +26,7 @@ alias g="git"
 alias c="clear"
 alias wo="workon"
 alias wc="watch --color "
+alias del="mv -t ~/.Trash/"
 
 # Use exa as replacement for ls if available
 if command_exists exa; then
