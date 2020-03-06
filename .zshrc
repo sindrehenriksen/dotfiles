@@ -1,5 +1,5 @@
 #### Init
-. ~/.zprofile
+source ~/.zprofile
 
 # Cache zplug plugins in order to improve zsh startup time
 export ZPLUG_USE_CACHE=true
@@ -42,5 +42,5 @@ zplug load
 
 
 #### Load common shell settings
-source .shellrc
+source ~/.shellrc
 
