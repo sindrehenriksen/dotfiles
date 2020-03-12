@@ -194,9 +194,10 @@ map <leader>ba :bufdo bd<cr>
 map <leader>j :bnext<cr>
 map <leader>k :bprevious<cr>
 
-" Useful mappings for managing tabs
-map <leader>tn :tabnew<cr>
+" Useful mappings for managing windows and tabs
+map <leader>wo :only<cr>
 map <leader>to :tabonly<cr>
+map <leader>tn :tabnew<cr>
 map <leader>tc :tabclose<cr>
 map <leader>tm :tabmove 
 map <leader>t<leader> :tabnext 
