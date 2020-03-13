@@ -176,8 +176,9 @@ vnoremap <silent> # :<C-u>call VisualSelection('', '')<CR>?<C-R>=@/<CR><CR>
 map <space> /
 map <C-space> ?
 
-" <c-i> is tab, so change next jumplist map
-nnoremap <c-u> <c-i>
+" <c-i> is tab, so change next/prev jumplist maps
+nnoremap <c-o> <c-i>
+nnoremap <c-p> <c-o>
 
 " Disable highlight when <leader><cr> is pressed
 map <silent> <leader><cr> :noh<cr>
