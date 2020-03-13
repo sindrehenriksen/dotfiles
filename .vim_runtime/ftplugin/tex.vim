@@ -13,3 +13,7 @@ let b:ale_tex_chktex_options = '-n2 -n24'
 " Next/prev error/warning map
 nmap <silent> <leader>ak <Plug>(ale_previous_wrap)
 nmap <silent> <leader>aj <Plug>(ale_next_wrap)
+
+" Turn of syntax highlighting for underscorers in custom ref commands
+syn match texInputFile "\\.*ref\s*\(\[.*\]\)\={.\{-}}"
+     \ contains=texStatement,texInputCurlies,texInputFileOpt
