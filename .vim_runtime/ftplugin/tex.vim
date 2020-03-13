@@ -17,3 +17,6 @@ nmap <silent> <leader>aj <Plug>(ale_next_wrap)
 " Turn of syntax highlighting for underscorers in custom ref commands
 syn match texInputFile "\\.*ref\s*\(\[.*\]\)\={.\{-}}"
      \ contains=texStatement,texInputCurlies,texInputFileOpt
+
+" Increase textwidth (before automatich hard wrap)
+set textwidth=1000
