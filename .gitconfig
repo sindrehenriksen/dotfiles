@@ -25,4 +25,4 @@
     loga = log --oneline --decorate --graph --all --color
 
 [rebase]
-	autosquash = true
+    autosquash = true
