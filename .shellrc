@@ -21,7 +21,7 @@ function command_exists() {
 alias v="vim"
 alias scourse="cd /mnt/c/Users/sindr/Google\ Drive/NTNU/Emner/SpecCourse"
 alias downloads="cd /mnt/c/Users/sindr/Downloads"
-alias master="cd /mnt/c/Users/sindr/Google\ Drive/NTNU/Master"
+alias master="cd /mnt/c/Users/sindr/Google\ Drive/NTNU/Master/mamosa && workon master"
 alias master-tex="cd /mnt/c/Users/sindr/Google\ Drive/NTNU/Master/tex_files && workon master-tex"
 alias g="git"
 alias c="clear"
