@@ -15,7 +15,15 @@ nmap <silent> <leader>ak <Plug>(ale_previous_wrap)
 nmap <silent> <leader>aj <Plug>(ale_next_wrap)
 
 " Turn of syntax highlighting for underscorers in custom ref commands
-syn match texInputFile "\\.*ref\s*\(\[.*\]\)\={.\{-}}"
+syn match texInputFile "\\eqref\s*\(\[.*\]\)\={.\{-}}"
+     \ contains=texStatement,texInputCurlies,texInputFileOpt
+syn match texInputFile "\\figref\s*\(\[.*\]\)\={.\{-}}"
+     \ contains=texStatement,texInputCurlies,texInputFileOpt
+syn match texInputFile "\\chapref\s*\(\[.*\]\)\={.\{-}}"
+     \ contains=texStatement,texInputCurlies,texInputFileOpt
+syn match texInputFile "\\secref\s*\(\[.*\]\)\={.\{-}}"
+     \ contains=texStatement,texInputCurlies,texInputFileOpt
+syn match texInputFile "\\algref\s*\(\[.*\]\)\={.\{-}}"
      \ contains=texStatement,texInputCurlies,texInputFileOpt
 
 " Increase textwidth (before automatich hard wrap)
