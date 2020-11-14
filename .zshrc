@@ -10,12 +10,22 @@ alias szsh="source ~/.zshrc"
 alias vzsh="vim ~/.zshrc"
 
 
-#### ZSH keybindings
-bindkey '^ ' autosuggest-accept
-
-
 #### fzf init
 [ -f ~/.fzf.zsh ] && source ~/.fzf.zsh && source ~/dotfiles/.fzf_config
+
+
+#### vim keybindings
+## Use vim editing mode in terminal [escape to enter normal mode]
+bindkey -v
+
+# Restore some keymaps removed by vim keybind mode
+bindkey '^P' up-history
+bindkey '^N' down-history
+bindkey '^ ' autosuggest-accept
+#bindkey '^ ' fill autosuggest
+#bindkey '^?' backward-delete-char
+#bindkey '^h' backward-delete-char
+#bindkey '^w' backward-kill-word
 
 
 #### Plugins
