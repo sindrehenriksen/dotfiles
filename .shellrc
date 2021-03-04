@@ -2,10 +2,14 @@
 export VISUAL=vim
 export EDITOR="$VISUAL"
 export DISPLAY=localhost:0
+
+
+#### Virtualenv
 export VIRTUALENV_PYTHON=/usr/bin/python3
+export VIRTUALENVWRAPPER_PYTHON=/usr/bin/python3
 export WORKON_HOME=~/.virtualenvs
 export PROJECT_HOME=~/dev
-source ~/.local/bin/virtualenvwrapper.sh
+source /usr/local/bin/virtualenvwrapper.sh
 
 #### Helper functions
 # Check if the given command is available for gradual degradation purposes
