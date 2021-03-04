@@ -40,22 +40,22 @@ alias wc="watch --color "
 alias del="mv -t ~/.Trash/"
 
 # Use exa as replacement for ls if available
-if command_exists exa; then
+#if command_exists exa; then
     alias ls='exa -F --group-directories-first'
     alias ll='exa -lF --group-directories-first'
     alias la='exa -alF --group-directories-first'
-else
-    if [ -x /usr/bin/dircolors ]; then
-	test -r ~/.dircolors && eval "$(dircolors -b ~/.dircolors)" || eval "$(dircolors -b)"
-	alias ls='ls -F --group-directories-first --color=auto'
-	alias ll='ls -lF --group-directories-first --color=auto'
-	alias la='ls -AlF --group-directories-first --color=auto'
-    else
-	alias ls='ls -F --group-directories-first'
-	alias ll='ls -lF --group-directories-first'
-	alias la='ls -AlF --group-directories-first'
-    fi
-fi
+#else
+#    if [ -x /usr/bin/dircolors ]; then
+#	test -r ~/.dircolors && eval "$(dircolors -b ~/.dircolors)" || eval "$(dircolors -b)"
+#	alias ls='ls -F --group-directories-first --color=auto'
+#	alias ll='ls -lF --group-directories-first --color=auto'
+#	alias la='ls -AlF --group-directories-first --color=auto'
+#    else
+#	alias ls='ls -F --group-directories-first'
+#	alias ll='ls -lF --group-directories-first'
+#	alias la='ls -AlF --group-directories-first'
+#    fi
+#fi
 
 #### RRG
 #alias mountgputmp='mkdir -p /tmp/gputmp && sshfs -o reconnect,ServerAliveInterval=15,ServerAliceCountMax=3 gpu:/tmp /tmp/gputmp'
