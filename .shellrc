@@ -11,6 +11,11 @@ export WORKON_HOME=~/.virtualenvs
 export PROJECT_HOME=~/dev
 source /usr/local/bin/virtualenvwrapper.sh
 
+
+#### Java
+export JAVA_HOME=$(/usr/libexec/java_home -v 1.8.0_202)
+
+
 #### Helper functions
 # Check if the given command is available for gradual degradation purposes
 function command_exists() {
