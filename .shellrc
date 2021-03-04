@@ -26,6 +26,7 @@ function command_exists() {
     return 0
 }
 
+
 #### Aliases
 alias v="vim"
 alias scourse="cd /mnt/c/Users/sindr/Google\ Drive/NTNU/Emner/SpecCourse"
