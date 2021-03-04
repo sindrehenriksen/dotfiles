@@ -57,3 +57,5 @@ alias del="mv -t ~/.Trash/"
 #    fi
 #fi
 
+#### Visma
+alias idf="~/dev/deployment-framework/tools.sh"
