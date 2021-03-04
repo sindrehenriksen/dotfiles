@@ -24,6 +24,7 @@
     rb = rebase
     loga = log --oneline --decorate --graph --all --color
     lom = log --oneline master..
+    fd = diff-tree --no-commit-id --name-only -r
 
 [rebase]
     autosquash = true
