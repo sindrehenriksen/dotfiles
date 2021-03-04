@@ -23,6 +23,7 @@
     r = reset
     rb = rebase
     loga = log --oneline --decorate --graph --all --color
+    lom = log --oneline master..
 
 [rebase]
     autosquash = true
