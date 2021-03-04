@@ -48,9 +48,16 @@ zplug "sindresorhus/pure", use:pure.zsh, from:github, as:theme
 # Fuzzy searchable cd command
 zplug "b4b4r07/enhancd", use:init.sh
 
+# Install plugins if there are plugins that have not been installed
+if ! zplug check --verbose; then
+    printf "Install? [y/N]: "
+    if read -q; then
+        echo; zplug install
+    fi
+fi
+
 # Load
 zplug load
-
 
 #### Load common shell settings
 source ~/.shellrc
