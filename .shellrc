@@ -5,11 +5,17 @@ export DISPLAY=localhost:0
 
 
 #### Virtualenv
-export VIRTUALENV_PYTHON=/usr/bin/python3
-export VIRTUALENVWRAPPER_PYTHON=/usr/bin/python3
+export VIRTUALENV_PYTHON=/usr/local/bin/python3.9
+export VIRTUALENVWRAPPER_PYTHON=/usr/local/bin/python3.9
 export WORKON_HOME=~/.virtualenvs
 export PROJECT_HOME=~/dev
 source /usr/local/bin/virtualenvwrapper.sh
+
+
+#### pyenv
+if command -v pyenv 1>/dev/null 2>&1; then
+  eval "$(pyenv init -)"
+fi
 
 
 #### Java
