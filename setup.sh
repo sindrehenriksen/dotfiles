@@ -4,6 +4,12 @@
 
 # install gruvbox colorscheme
 
+# install fira code
+brew tap homebrew/cask-fonts
+brew cask install font-fira-code
+# chose fira code in preferences
+# enable ligatures
+
 #### Install packages
 # if mac
 # Install homebrew
