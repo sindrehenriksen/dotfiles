@@ -73,6 +73,11 @@ alias mv="mv -i"
 #    fi
 #fi
 
+
+#### dart pub installations
+export PATH="$PATH":"$HOME/.pub-cache/bin"
+
+
 #### Visma
 source ~/dotfiles/.shellrc-visma
 
