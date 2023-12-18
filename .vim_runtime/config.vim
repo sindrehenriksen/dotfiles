@@ -45,6 +45,9 @@ let g:tex_flavor = "latex"
 " Hide buffers when abandoned - also important (?) for coc.nvim
 set hidden
 
+" enable ctrl-space autocompletion in vim terminal
+:tnoremap <NUL> <C-Space>
+
 
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 " => VIM user interface
