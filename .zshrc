@@ -18,6 +18,7 @@ bindkey -v
 bindkey '^P' up-history
 bindkey '^N' down-history
 bindkey '^ ' autosuggest-accept
+bindkey '^w' forward-word
 bindkey '^?' backward-delete-char
 #bindkey '^h' backward-delete-char
 #bindkey '^w' backward-kill-word
