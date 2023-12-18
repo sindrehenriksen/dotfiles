@@ -18,7 +18,11 @@ eval "$(rtx activate -s zsh)"
 
 
 #### Java
-export JAVA_HOME=$(/usr/libexec/java_home -v 1.8.0_202)
+#export JAVA_HOME=$(/usr/libexec/java_home -v 1.8.0_202)
+
+# jenv
+export PATH="$HOME/.jenv/bin:$PATH"
+eval "$(jenv init -)"
 
 
 #### Helper functions
