@@ -66,3 +66,6 @@ alias del="mv -t ~/.Trash/"
 #### Visma
 source ~/dotfiles/.shellrc-visma
 
+
+#### rustup shell setup
+. "$HOME/.cargo/env"
