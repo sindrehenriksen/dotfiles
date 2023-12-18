@@ -2,6 +2,7 @@
 export VISUAL=vim
 export EDITOR="$VISUAL"
 export DISPLAY=localhost:0
+export LANG=en_US.UTF-8  # added to fix zplug command output
 
 
 #### Virtualenv
