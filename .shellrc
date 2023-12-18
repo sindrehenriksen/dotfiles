@@ -7,8 +7,7 @@ export PATH="/Users/sindre.henriksen/.local/bin:$PATH"
 
 
 #### Virtualenv
-export VIRTUALENV_PYTHON=/usr/local/bin/python3.9
-export VIRTUALENVWRAPPER_PYTHON=/usr/local/bin/python3.9
+export VIRTUALENVWRAPPER_PYTHON=/usr/local/bin/python3.10
 export WORKON_HOME=~/.virtualenvs
 export PROJECT_HOME=~/dev
 source /usr/local/bin/virtualenvwrapper.sh
