@@ -42,9 +42,11 @@ zplug "zsh-users/zsh-syntax-highlighting"
 # For faster, history based cd'ing using "z" instead
 zplug "plugins/z", from:oh-my-zsh
 
+# zsh-async
+
 # Load theme file
-zplug "mafredri/zsh-async", from:github
-zplug "sindresorhus/pure", use:pure.zsh, from:github, as:theme
+zplug "mafredri/zsh-async", from:github, at:main
+zplug sindresorhus/pure, use:pure.zsh, from:github, at:main, as:theme
 
 # Fuzzy searchable cd command
 zplug "b4b4r07/enhancd", use:init.sh
