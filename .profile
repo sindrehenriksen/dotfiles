@@ -35,11 +35,6 @@ if [ -d "$HOME/.cargo/bin" ] ; then
 fi
 
 
-# Setting PATH for Python 3.8
-# The original version is saved in .profile.pysave
-PATH="/Library/Frameworks/Python.framework/Versions/3.8/bin:${PATH}"
-export PATH
-
 # Added by serverless binary installer
 export PATH="$HOME/.serverless/bin:$PATH"
 
