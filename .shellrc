@@ -53,6 +53,7 @@ alias wo="workon"
 alias wc="watch --color "
 alias del="mv -t ~/.Trash/"
 alias gbcp="git branch | grep '^\*' | cut -d ' ' -f 2 | tr -d '\n' | pbcopy"
+alias mv="mv -i"
 
 # Use exa as replacement for ls if available
 #if command_exists exa; then
