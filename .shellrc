@@ -13,10 +13,8 @@ export PROJECT_HOME=~/dev
 source /usr/local/bin/virtualenvwrapper.sh
 
 
-#### pyenv
-if command -v pyenv 1>/dev/null 2>&1; then
-  eval "$(pyenv init -)"
-fi
+#### rtx
+eval "$(rtx activate -s zsh)"
 
 
 #### Java
