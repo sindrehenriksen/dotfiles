@@ -19,4 +19,7 @@ Plug 'dense-analysis/ale'
 " coc.nvim - autocompletion
 Plug 'neoclide/coc.nvim', {'branch': 'release'}
 
+" vim-slime - code execution
+Plug 'jpalardy/vim-slime', {'branch': 'main'}
+
 call plug#end()
