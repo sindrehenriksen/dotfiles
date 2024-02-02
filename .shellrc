@@ -18,14 +18,6 @@ source /Users/sindrehenriksen/.local/share/mise/installs/python/latest/bin/virtu
 eval "$(mise activate -s zsh)"
 
 
-#### Java
-#export JAVA_HOME=$(/usr/libexec/java_home -v 1.8.0_202)
-
-# jenv
-export PATH="$HOME/.jenv/bin:$PATH"
-eval "$(jenv init -)"
-
-
 #### Helper functions
 # Check if the given command is available for gradual degradation purposes
 function command_exists() {
