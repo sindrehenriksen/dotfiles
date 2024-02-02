@@ -4,55 +4,34 @@
 
 # install gruvbox colorscheme
 
+# if mac; install homebrew
+
 # install fira code
 brew tap homebrew/cask-fonts
-brew cask install font-fira-code
+brew install --cask font-fira-code
 # chose fira code in preferences
 # enable ligatures
 
 #### Install packages
 # if mac
-# Install homebrew
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/master/install.sh)"
-
-brew install git
-brew install exa
+brew install eza
 brew install ripgrep
 brew install fzf
-brew install tmux
 brew install tldr
 # end if
 
-# if linux
-# Setup zsh
-sudo apt install git
-sudo apt install exa
-sudo apt install ripgrep
-sudo apt install fzf
-sudo apt install tmux
-sudo apt install tldr
-# end if
-
-# install pip if not installed
-sudo pip3 install -U pip
-
-sudo pip3 install virtualenvwrapper
-
 # zplug
-curl -sL --proto-redir -all,https https://raw.githubusercontent.com/zplug/installer/master/installer.zsh | zsh
+brew install zplug
 
 # nodejs
-curl -sL install-node.now.sh/lts | bash
+brew install node
 
-#### Download dotfiles repo
-# Generate SSH-key:
-# https://docs.github.com/en/github/authenticating-to-github/generating-a-new-ssh-key-and-adding-it-to-the-ssh-agent
+brew install mise
+mise use --global python@3.11
 
-# if mac (or linux but not wsl?)
-pbcopy < ~.ssh/id_rsa_git.pub
-# end if
-
-# Prompt to add public key to github
+# TODO pipx
+# TODO: hatch
+# TODO pip install virtualenvwrapper
 
 #### Install symlinks
 ~/dotfiles/install_symlinks.sh
