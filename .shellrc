@@ -14,8 +14,8 @@ export PROJECT_HOME=~/dev
 source /Users/sindrehenriksen/.local/share/mise/installs/python/latest/bin/virtualenvwrapper.sh
 
 
-#### rtx
-eval "$(rtx activate -s zsh)"
+#### mise
+eval "$(mise activate -s zsh)"
 
 
 #### Java
