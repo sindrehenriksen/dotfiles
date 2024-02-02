@@ -7,11 +7,11 @@ export PATH="/Users/sindre.henriksen/.local/bin:$PATH"
 
 
 #### Virtualenv
-export VIRTUALENV_PYTHON=/Users/sindre.henriksen/.local/share/rtx/installs/python/3.11.7/bin/python3.11
-export VIRTUALENVWRAPPER_PYTHON=/Users/sindre.henriksen/.local/share/rtx/installs/python/3.11.7/bin/python3.11
+export VIRTUALENV_PYTHON=/Users/sindrehenriksen/.local/share/mise/installs/python/latest/bin/python
+export VIRTUALENVWRAPPER_PYTHON=/Users/sindrehenriksen/.local/share/mise/installs/python/latest/bin/python
 export WORKON_HOME=~/.virtualenvs
 export PROJECT_HOME=~/dev
-source /usr/local/bin/virtualenvwrapper.sh
+source /Users/sindrehenriksen/.local/share/mise/installs/python/latest/bin/virtualenvwrapper.sh
 
 
 #### rtx
