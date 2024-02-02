@@ -71,9 +71,5 @@ alias mv="mv -i"
 export PATH="$PATH":"$HOME/.pub-cache/bin"
 
 
-#### Visma
-source ~/dotfiles/.shellrc-visma
-
-
 #### rustup shell setup
 . "$HOME/.cargo/env"
