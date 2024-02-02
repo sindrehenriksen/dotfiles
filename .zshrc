@@ -1,6 +1,9 @@
 #### Init
 source ~/.zprofile
 
+#### zplug
+export ZPLUG_HOME=/usr/local/opt/zplug
+source $ZPLUG_HOME/init.zsh
 # Cache zplug plugins in order to improve zsh startup time
 export ZPLUG_USE_CACHE=true
 
@@ -31,7 +34,6 @@ source /usr/local/opt/fzf/shell/completion.zsh
 
 
 #### Plugins
-source ~/.zplug/init.zsh
 
 # Fish like autocompletions
 zplug "zsh-users/zsh-autosuggestions"
