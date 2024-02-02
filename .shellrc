@@ -48,11 +48,11 @@ alias del="mv -t ~/.Trash/"
 alias gbcp="git branch | grep '^\*' | cut -d ' ' -f 2 | tr -d '\n' | pbcopy"
 alias mv="mv -i"
 
-# Use exa as replacement for ls if available
-#if command_exists exa; then
-    alias ls='exa -F --group-directories-first'
-    alias ll='exa -lF --group-directories-first'
-    alias la='exa -alF --group-directories-first'
+# Use eza as replacement for ls if available
+#if command_exists eza; then
+    alias ls='eza -F --group-directories-first'
+    alias ll='eza -lF --group-directories-first'
+    alias la='eza -alF --group-directories-first'
 #else
 #    if [ -x /usr/bin/dircolors ]; then
 #	test -r ~/.dircolors && eval "$(dircolors -b ~/.dircolors)" || eval "$(dircolors -b)"
