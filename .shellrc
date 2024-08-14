@@ -73,3 +73,7 @@ export PATH="$PATH":"$HOME/.pub-cache/bin"
 
 #### rustup shell setup
 . "$HOME/.cargo/env"
+
+
+#### Visma
+source ~/dotfiles/.shellrc-visma
