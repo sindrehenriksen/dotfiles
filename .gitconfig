@@ -7,6 +7,7 @@
     ca = commit --amend
     cf = commit --fixup
     s = status
+    sw = switch
     b = branch
     co = checkout
     l = log
