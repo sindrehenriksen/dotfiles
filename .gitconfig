@@ -27,6 +27,7 @@
     lom = log --oneline master..
     fd = diff-tree --no-commit-id --name-only -r
     cp = cherry-pick
+    track-main = b --set-upstream-to origin/main
 
 [rebase]
     autosquash = true
