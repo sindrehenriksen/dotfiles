@@ -63,9 +63,9 @@ alias gcs="gh copilot suggest"
 
 # Use eza as replacement for ls if available
 #if command_exists eza; then
-    alias ls='eza -F --group-directories-first'
-    alias ll='eza -lF --group-directories-first'
-    alias la='eza -alF --group-directories-first'
+    alias ls='eza --classify=auto --group-directories-first'
+    alias ll='eza -l --classify=auto --group-directories-first'
+    alias la='eza -al --classify=auto --group-directories-first'
 #else
 #    if [ -x /usr/bin/dircolors ]; then
 #	test -r ~/.dircolors && eval "$(dircolors -b ~/.dircolors)" || eval "$(dircolors -b)"
