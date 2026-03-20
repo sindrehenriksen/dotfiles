@@ -10,3 +10,4 @@ mkdir -p ~/.jupyter
 ln -is ~/dotfiles/.jupyter_notebook_config.py ~/.jupyter/jupyter_notebook_config.py
 mkdir -p ~/.agents/skills
 ln -is ~/dotfiles/.agents/skills/pr-review ~/.agents/skills/pr-review
+ln -is ~/dotfiles/.agents/skills/pr-description ~/.agents/skills/pr-description
