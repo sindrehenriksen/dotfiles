@@ -49,7 +49,7 @@ alias master-tex="cd /mnt/c/Users/sindr/Google\ Drive/NTNU/Master/tex_files && w
 alias g="git"
 alias c="clear"
 alias wo="workon"
-alias wc="watch --color "
+#alias wc="watch --color "
 alias del="mv -t ~/.Trash/"
 alias gbcp="git branch | grep '^\*' | cut -d ' ' -f 2 | tr -d '\n' | pbcopy"
 # Rebase onto updated main (taking into account that main upstream may be "main")
