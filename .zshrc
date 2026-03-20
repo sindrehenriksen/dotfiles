@@ -2,7 +2,7 @@
 source ~/.zprofile
 
 #### zplug
-export ZPLUG_HOME=/usr/local/opt/zplug
+export ZPLUG_HOME=/opt/homebrew/opt/zplug
 source $ZPLUG_HOME/init.zsh
 # Cache zplug plugins in order to improve zsh startup time
 export ZPLUG_USE_CACHE=true
@@ -30,7 +30,7 @@ bindkey '^?' backward-delete-char
 #### fzf init
 #[ -f ~/.fzf.zsh ] && source ~/.fzf.zsh && source ~/dotfiles/.fzf_config
 source ~/dotfiles/.fzf_config
-source /usr/local/opt/fzf/shell/completion.zsh
+source /opt/homebrew/opt/fzf/shell/completion.zsh
 
 
 #### Plugins

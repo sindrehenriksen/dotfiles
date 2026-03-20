@@ -6,8 +6,11 @@
 
 # if mac; install homebrew
 
+# install symlinks now, to add brew to path
+~/dotfiles/install_symlinks.sh
+zsh
+
 # install fira code
-brew tap homebrew/cask-fonts
 brew install --cask font-fira-code
 # chose fira code in preferences
 # enable ligatures
@@ -33,8 +36,6 @@ mise use --global python@3.11
 # TODO: hatch
 # TODO pip install virtualenvwrapper
 
-#### Install symlinks
-~/dotfiles/install_symlinks.sh
 
 #### Run zsh
 zsh
