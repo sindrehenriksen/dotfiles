@@ -4,7 +4,7 @@ call plug#begin('~/.vim/plugged')
 Plug 'morhetz/gruvbox'
 
 " vim-gitgutter - for git diff in sign column and hunk staging/undo
-Plug 'airblade/vim-gitgutter'
+Plug 'airblade/vim-gitgutter', {'branch': 'main'}
 
 " fzf.vim - vim fuzzy searching
 Plug 'junegunn/fzf', { 'do': './install --bin' }
