@@ -56,6 +56,10 @@ alias gbcp="git branch | grep '^\*' | cut -d ' ' -f 2 | tr -d '\n' | pbcopy"
 alias grbm='gbcp ; git checkout main ; git pull ; git checkout $(pbpaste) ; git rebase main'
 alias grbmi='gbcp ; git checkout main ; git pull ; git checkout $(pbpaste) ; git rebase -i main'
 alias mv="mv -i"
+# Github copilot
+alias gc="gh copilot"
+alias gce="gh copilot explain"
+alias gcs="gh copilot suggest"
 
 # Use eza as replacement for ls if available
 #if command_exists eza; then
