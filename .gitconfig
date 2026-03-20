@@ -27,8 +27,12 @@
     loga = log --oneline --decorate --graph --all --color
     lom = log --oneline main..
     fd = diff-tree --no-commit-id --name-only -r
+    fdpc = log --pretty=format:'%h %s%n' --name-only
     cp = cherry-pick
     track-master = b --set-upstream-to origin/master
+    hide = update-index --skip-worktree
+    unhide = update-index --no-skip-worktree
+    unhide-all = !git ls-files -v | grep '^S' | cut -c 3- | xargs -r git update-index --no-skip-worktree
 
 [rebase]
     autosquash = true
