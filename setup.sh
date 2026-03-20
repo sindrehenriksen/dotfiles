@@ -39,6 +39,7 @@ pipx install hatch
 
 pip install virtualenv virtualenvwrapper
 
+brew install 1password-cli
 
 #### Run zsh
 zsh
