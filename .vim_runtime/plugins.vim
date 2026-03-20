@@ -22,4 +22,6 @@ Plug 'neoclide/coc.nvim', {'branch': 'release'}
 " vim-slime - code execution
 Plug 'jpalardy/vim-slime', {'branch': 'main'}
 
+Plug 'github/copilot.vim', {'branch': 'release'}
+
 call plug#end()
