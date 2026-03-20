@@ -41,6 +41,9 @@ pip install virtualenv virtualenvwrapper
 
 brew install 1password-cli
 
+#### Visma-specific setup (MCP servers, etc.)
+# ~/dotfiles/setup-visma.sh
+
 #### Run zsh
 zsh
 
