@@ -52,9 +52,9 @@ alias wo="workon"
 alias wc="watch --color "
 alias del="mv -t ~/.Trash/"
 alias gbcp="git branch | grep '^\*' | cut -d ' ' -f 2 | tr -d '\n' | pbcopy"
-# Rebase onto updated master (taking into account that master upstream may be "main")
-alias grbm='gbcp ; git checkout master ; git pull ; git checkout $(pbpaste) ; git rebase master'
-alias grbmi='gbcp ; git checkout master ; git pull ; git checkout $(pbpaste) ; git rebase -i master'
+# Rebase onto updated main (taking into account that main upstream may be "main")
+alias grbm='gbcp ; git checkout main ; git pull ; git checkout $(pbpaste) ; git rebase main'
+alias grbmi='gbcp ; git checkout main ; git pull ; git checkout $(pbpaste) ; git rebase -i main'
 alias mv="mv -i"
 
 # Use eza as replacement for ls if available

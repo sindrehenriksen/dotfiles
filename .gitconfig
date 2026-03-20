@@ -24,10 +24,10 @@
     r = reset
     rb = rebase
     loga = log --oneline --decorate --graph --all --color
-    lom = log --oneline master..
+    lom = log --oneline main..
     fd = diff-tree --no-commit-id --name-only -r
     cp = cherry-pick
-    track-main = b --set-upstream-to origin/main
+    track-master = b --set-upstream-to origin/master
 
 [rebase]
     autosquash = true
