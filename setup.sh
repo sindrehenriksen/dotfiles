@@ -30,11 +30,14 @@ brew install zplug
 brew install node
 
 brew install mise
-mise use --global python@3.11
+mise use --global python@3.13
+zsh
 
-# TODO pipx
-# TODO: hatch
-# TODO pip install virtualenvwrapper
+brew install pipx
+
+pipx install hatch
+
+pip install virtualenv virtualenvwrapper
 
 
 #### Run zsh
