@@ -4,11 +4,6 @@ case $- in
       *) return;;
 esac
 
-# Zsh
-if [ -t 1 ]; then
-    exec zsh
-fi
-
 
 # Aliases
 alias sbash="source ~/.bashrc"

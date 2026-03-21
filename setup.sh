@@ -2,9 +2,11 @@
 # if mac: install iterm2
 # if linux: install ghostty (https://ghostty.org/docs/install)
 
+# Set zsh as default shell
+sudo chsh -s $(which zsh) $USER
+
 # install symlinks now, to set up configs early
 ~/dotfiles/install_symlinks.sh
-zsh
 
 #### Install font
 # if mac
