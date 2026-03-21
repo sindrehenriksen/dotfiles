@@ -1,0 +1,28 @@
+# Font
+font-family = Fira Code
+font-size = 13
+font-feature = liga
+font-feature = calt
+
+# Theme (gruvbox dark)
+theme = Gruvbox Dark Hard
+
+# Window / tabs
+gtk-titlebar = true
+window-padding-x = 4
+window-padding-y = 4
+
+# OLED: use true black background
+background = #000000
+
+# Cursor
+cursor-style = block
+cursor-style-blink = false
+
+# Shell
+command = /usr/bin/zsh
+
+# Misc
+copy-on-select = clipboard
+mouse-hide-while-typing = true
+scrollback-limit = 100000

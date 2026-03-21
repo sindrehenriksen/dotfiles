@@ -2,7 +2,11 @@
 source ~/.zprofile
 
 #### zplug
-export ZPLUG_HOME=/opt/homebrew/opt/zplug
+if [[ "$(uname)" == "Darwin" ]]; then
+    export ZPLUG_HOME=/opt/homebrew/opt/zplug
+else
+    export ZPLUG_HOME="$HOME/.zplug"
+fi
 source $ZPLUG_HOME/init.zsh
 # Cache zplug plugins in order to improve zsh startup time
 export ZPLUG_USE_CACHE=true
@@ -30,7 +34,13 @@ bindkey '^?' backward-delete-char
 #### fzf init
 #[ -f ~/.fzf.zsh ] && source ~/.fzf.zsh && source ~/dotfiles/.fzf_config
 source ~/dotfiles/.fzf_config
-source /opt/homebrew/opt/fzf/shell/completion.zsh
+if [[ "$(uname)" == "Darwin" ]]; then
+    source /opt/homebrew/opt/fzf/shell/completion.zsh
+else
+    # fzf keybindings and completion on Linux (apt install)
+    [ -f /usr/share/doc/fzf/examples/key-bindings.zsh ] && source /usr/share/doc/fzf/examples/key-bindings.zsh
+    [ -f /usr/share/doc/fzf/examples/completion.zsh ] && source /usr/share/doc/fzf/examples/completion.zsh
+fi
 
 
 #### Plugins
