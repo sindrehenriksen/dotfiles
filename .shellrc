@@ -1,7 +1,6 @@
 #### General
 export VISUAL=vim
 export EDITOR="$VISUAL"
-export DISPLAY=localhost:0
 export LANG=en_US.UTF-8  # added to fix zplug command output
 export PATH="/Users/sindre.henriksen/.local/bin:$PATH"
 
@@ -42,10 +41,6 @@ rgr() {
 
 #### Aliases
 alias v="vim"
-alias scourse="cd /mnt/c/Users/sindr/Google\ Drive/NTNU/Emner/SpecCourse"
-alias downloads="cd /mnt/c/Users/sindr/Downloads"
-alias master="cd /mnt/c/Users/sindr/Google\ Drive/NTNU/Master/mamosa && workon master"
-alias master-tex="cd /mnt/c/Users/sindr/Google\ Drive/NTNU/Master/tex_files && workon master-tex"
 alias g="git"
 alias c="clear"
 alias wo="workon"
