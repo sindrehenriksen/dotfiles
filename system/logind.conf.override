@@ -5,7 +5,7 @@
 #
 # Why: without this, both logind AND firmware react to the power button,
 # causing double-suspend or other quirks. Setting HandlePowerKey=ignore
-# lets the firmware handle it cleanly (single press suspends).
+# lets the firmware handle it cleanly (~1 sec hold to suspend).
 
 [Login]
 HandlePowerKey=ignore

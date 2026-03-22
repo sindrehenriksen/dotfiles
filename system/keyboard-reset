@@ -1,0 +1,19 @@
+#!/bin/sh
+# Lenovo keyboard resume fix — re-binds internal keyboard after suspend
+# Install: sudo cp ~/dotfiles/system/keyboard-reset /usr/lib/systemd/system-sleep/
+#          sudo chmod +x /usr/lib/systemd/system-sleep/keyboard-reset
+#
+# Lenovo-specific: some models lose keyboard after s2idle resume.
+# TODO: test disabling this script to see if a kernel update has fixed the issue.
+# If keyboard works after resume without it, remove from system-sleep.
+#
+# Manual keyboard rewake (if keyboard dies without this script):
+#   sudo sh -c 'echo -n "rescan" > /sys/devices/platform/i8042/serio0/drvctl'
+
+case "$1" in
+  post)
+    echo -n "rescan" > /sys/devices/platform/i8042/serio0/drvctl 2>/dev/null
+    echo -n "1" > /sys/bus/pci/rescan 2>/dev/null
+    echo -n "serio0" > /sys/bus/serio/drivers/atkbd/bind 2>/dev/null
+    ;;
+esac

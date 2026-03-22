@@ -24,8 +24,8 @@ lines for your keyboard layout. The keybindings are layout-independent.
 
 ### Power button (`logind.conf.override`)
 
-Lets logind ignore the power button so firmware handles suspend cleanly
-on a single press (without this, both logind and firmware react, causing quirks).
+Hold power button ~1 second to suspend. `HandlePowerKey=ignore` in logind
+lets firmware handle it directly (avoids double-suspend quirks).
 
 ```bash
 sudo mkdir -p /etc/systemd/logind.conf.d
@@ -43,6 +43,12 @@ sudo systemctl enable --now tlp
 ```
 
 Verify: `sudo tlp-stat -s` (enabled), `sudo tlp-stat -r` (wifi power saving on).
+
+### Note: avoid Toshy
+
+[Toshy](https://github.com/RedBearAK/toshy) (Mac-style keybindings for Linux) conflicts
+badly with Programmer Dvorak and custom keybindings — it remaps at a layer that
+fights both the layout engine and personal shortcuts.
 
 ## Lenovo-specific
 
@@ -62,6 +68,10 @@ For non-Lenovo laptops, use TLP thresholds instead:
 ### Keyboard resume fix (`keyboard-reset`)
 
 Some Lenovo models lose the internal keyboard after s2idle resume.
+[This Reddit thread](https://www.reddit.com/r/Lenovo/comments/1q02pr7/solved_keyboard_not_working_after_suspendsleep_on/)
+suggests disabling battery optimization via a udev rule as a fix, but that trades
+battery life for reliability. Our approach keeps battery optimization and re-scans
+the keyboard controller on resume instead.
 
 ```bash
 sudo cp ~/dotfiles/system/keyboard-reset /usr/lib/systemd/system-sleep/
