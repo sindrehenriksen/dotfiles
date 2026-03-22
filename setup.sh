@@ -68,3 +68,9 @@ zsh
 
 #### Install vim plugins
 # Open vim and run :PlugInstall
+
+#### Linux system setup (if linux)
+# See system/ for configs and scripts. General steps:
+~/dotfiles/system/gnome-keybindings.sh
+# Lenovo-specific (battery conservation, keyboard resume fix, power button):
+# See system/README.md for install instructions
