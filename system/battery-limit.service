@@ -1,0 +1,21 @@
+# Lenovo battery conservation mode — caps charge at ~80%
+# Install: sudo cp ~/dotfiles/system/battery-limit.service /etc/systemd/system/
+#          sudo systemctl enable --now battery-limit.service
+# Verify:  systemctl status battery-limit.service
+# Toggle:  sudo systemctl restart battery-limit.service
+#
+# Lenovo-specific: uses ideapad_acpi driver.
+# For other laptops, check vendor-specific sysfs paths or use TLP's
+# START_CHARGE_THRESH_BAT0 / STOP_CHARGE_THRESH_BAT0 if supported.
+
+[Unit]
+Description=Set Lenovo Battery Conservation Mode
+After=multi-user.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c "echo 1 > /sys/bus/platform/drivers/ideapad_acpi/VPC2004:00/conservation_mode"
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

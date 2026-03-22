@@ -89,6 +89,8 @@ if $IS_MAC; then
     alias del="mv -t ~/.Trash/"
 else
     alias del="gio trash"
+    # Rewake internal keyboard if it dies after resume (Lenovo)
+    alias kbr='sudo sh -c "echo -n rescan > /sys/devices/platform/i8042/serio0/drvctl"'
 fi
 
 alias gbcp="git branch | grep '^\*' | cut -d ' ' -f 2 | tr -d '\n' | pbcopy"
