@@ -1,0 +1,11 @@
+# Power button: let logind ignore it, firmware handles suspend on press
+# Install: sudo mkdir -p /etc/systemd/logind.conf.d
+#          sudo cp ~/dotfiles/system/logind.conf.override /etc/systemd/logind.conf.d/override.conf
+#          sudo systemctl restart systemd-logind
+#
+# Why: without this, both logind AND firmware react to the power button,
+# causing double-suspend or other quirks. Setting HandlePowerKey=ignore
+# lets the firmware handle it cleanly (single press suspends).
+
+[Login]
+HandlePowerKey=ignore
