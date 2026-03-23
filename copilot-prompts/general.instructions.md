@@ -1,6 +1,7 @@
 ---
 applyTo: '**'
 ---
+<!-- Claude Code counterpart: .claude/CLAUDE.md — keep in sync -->
 # General Instructions
 
 ## Problem-Solving Style
