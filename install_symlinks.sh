@@ -12,6 +12,11 @@ mkdir -p ~/.agents/skills
 ln -is ~/dotfiles/.agents/skills/pr-review ~/.agents/skills/pr-review
 ln -is ~/dotfiles/.agents/skills/pr-description ~/.agents/skills/pr-description
 ln -is ~/dotfiles/.agents/skills/adding-skills ~/.agents/skills/adding-skills
+# Claude Code
+ln -is ~/dotfiles/.claude/CLAUDE.md ~/.claude/CLAUDE.md
+mkdir -p ~/.claude/agents
+ln -is ~/dotfiles/.claude/agents/pr-review.md ~/.claude/agents/pr-review.md
+ln -is ~/dotfiles/.claude/agents/pr-description.md ~/.claude/agents/pr-description.md
 
 if [[ "$(uname)" == "Darwin" ]]; then
     # macOS: VS Code prompts

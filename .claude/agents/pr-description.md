@@ -1,8 +1,11 @@
 ---
 name: pr-description
-description: 'Write PR descriptions. USE FOR: PR description, write PR body, suggest PR description, draft PR summary. DO NOT USE FOR: PR review (use pr-review), writing code, fixing bugs.'
+description: "Write PR descriptions. Use for: PR description, write PR body, draft PR summary."
+tools: Read, Grep, Glob, Bash
 ---
-<!-- Claude Code counterpart: .claude/agents/pr-description.md — keep in sync -->
+
+<!-- Claude Code adaptation of .agents/skills/pr-description/SKILL.md -->
+<!-- Keep in sync: changes here may need mirroring to the Copilot version and vice versa -->
 
 # PR Description
 
@@ -17,7 +20,7 @@ description: 'Write PR descriptions. USE FOR: PR description, write PR body, sug
 - Keep it concise — match depth to the scope of the change
 - Adapt or omit template sections to fit the PR; don't fill in sections that add no value
 - Don't repeat what's already obvious from commit messages — reference them instead
-- Use backticks for file and symbol references (not VS Code markdown links)
+- Use backticks for file and symbol references
 - No subjective claims about quality or efficiency
 - No line-wrapping / hard-wrapping — let text flow naturally
 

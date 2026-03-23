@@ -14,7 +14,7 @@ cd ~/dev/tools/aikido-mcp && npm install && npm run build && cd -
 # Get a personal access token from your Jira profile
 
 #### MCP config locations
-# Both Claude Desktop and VS Code need MCP server entries with credentials.
+# Claude Desktop, VS Code, and Claude Code each need MCP server entries with credentials.
 #
 # Claude Desktop: ~/Library/Application Support/Claude/claude_desktop_config.json
 #   "mcpServers": {
@@ -40,6 +40,20 @@ cd ~/dev/tools/aikido-mcp && npm install && npm run build && cd -
 #     },
 #     "jira": {
 #       "type": "stdio",
+#       "command": "uvx",
+#       "args": ["mcp-atlassian"],
+#       "env": { "JIRA_URL": "https://jira.visma.com", "JIRA_PERSONAL_TOKEN": "..." }
+#     }
+#   }
+#
+# Claude Code (user-level): ~/.claude/.mcp.json
+#   "mcpServers": {
+#     "aikido": {
+#       "command": "node",
+#       "args": ["~/dev/tools/aikido-mcp/dist/index.js"],
+#       "env": { "AIKIDO_CLIENT_ID": "...", "AIKIDO_API_KEY": "..." }
+#     },
+#     "jira": {
 #       "command": "uvx",
 #       "args": ["mcp-atlassian"],
 #       "env": { "JIRA_URL": "https://jira.visma.com", "JIRA_PERSONAL_TOKEN": "..." }

@@ -1,6 +1,7 @@
 ---
 applyTo: '**'
 ---
+<!-- Claude Code counterpart: .claude/CLAUDE.md (Git Conventions section) — keep in sync -->
 # Git Conventions
 
 ## Commit Messages
