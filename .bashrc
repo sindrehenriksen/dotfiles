@@ -13,7 +13,7 @@ alias vbash="vim ~/.bashrc"
 [ -f ~/.fzf.bash ] && source ~/.fzf.bash && source ~/dotfiles/.fzf_config
 
 # Source commons shell config
-source .shellrc
+source ~/dotfiles/.shellrc
 
 # don't put duplicate lines or lines starting with space in the history.
 # See bash(1) for more options
