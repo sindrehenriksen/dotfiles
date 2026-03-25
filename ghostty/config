@@ -19,9 +19,6 @@ background = #000000
 cursor-style = block
 cursor-style-blink = false
 
-# Shell
-command = /usr/bin/zsh
-
 # Misc
 copy-on-select = clipboard
 mouse-hide-while-typing = true

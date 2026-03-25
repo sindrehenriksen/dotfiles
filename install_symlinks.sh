@@ -23,6 +23,10 @@ if [[ "$(uname)" == "Darwin" ]]; then
     mkdir -p ~/Library/Application\ Support/Code/User/prompts
     ln -sfn ~/dotfiles/copilot-prompts/general.instructions.md ~/Library/Application\ Support/Code/User/prompts/general.instructions.md
     ln -sfn ~/dotfiles/copilot-prompts/git.instructions.md ~/Library/Application\ Support/Code/User/prompts/git.instructions.md
+
+    # macOS: Ghostty config
+    mkdir -p ~/Library/Application\ Support/com.mitchellh.ghostty
+    ln -sfn ~/dotfiles/ghostty/config ~/Library/Application\ Support/com.mitchellh.ghostty/config
 else
     # Linux: VS Code prompts
     mkdir -p ~/.config/Code/User/prompts
