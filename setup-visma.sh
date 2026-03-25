@@ -11,6 +11,8 @@ cd ~/dev/tools/aikido-mcp && npm install && npm run build && cd -
 #   https://app.aikido.dev/settings/integrations/api/aikido/rest
 
 # Jira & Confluence MCP (mcp-atlassian, via uvx — no install needed)
+# NOTE: The MCP works for Jira but NOT reliably for Confluence (auth/VPN issues).
+# For Confluence, use the curl-based skill/agent instead (see .agents/skills/confluence/).
 # Get personal access tokens from your Jira and Confluence profiles.
 # Jira and Confluence may require separate PATs (and separate IP whitelisting).
 

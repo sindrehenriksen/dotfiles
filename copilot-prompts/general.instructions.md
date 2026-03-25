@@ -47,6 +47,11 @@ Tips for fetching PR data:
 - Review summaries (e.g. Copilot's overall review): `gh api repos/{owner}/{repo}/pulls/{number}/reviews`
 - Inline review comments (e.g. code suggestions): `gh api repos/{owner}/{repo}/pulls/{number}/comments`
 
+## Atlassian MCP
+
+- The Atlassian MCP works for Jira but NOT for Confluence (auth/VPN issues)
+- For Confluence, use the curl-based confluence skill/agent instead
+
 ## CI/CD Debugging
 
 - Use `gh` CLI to fetch CI logs, not `fetch_webpage` (GitHub Actions URLs return 404 for API fetches)

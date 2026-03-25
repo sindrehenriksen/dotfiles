@@ -33,6 +33,11 @@ When an `az` command fails with an authentication/token error, re-authenticate b
 
 - Do NOT pipe or redirect the output — the device code must be visible to the user immediately.
 
+## Atlassian MCP
+
+- The Atlassian MCP works for Jira but NOT for Confluence (auth/VPN issues)
+- For Confluence, use the curl-based confluence skill/agent instead
+
 ## CI/CD Debugging
 
 - Use `gh` CLI to fetch CI logs — GitHub Actions URLs return 404 for direct fetches
