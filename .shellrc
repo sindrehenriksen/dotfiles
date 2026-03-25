@@ -122,14 +122,6 @@ else
 fi
 
 
-#### dart pub installations
-export PATH="$PATH":"$HOME/.pub-cache/bin"
-
-
-#### rustup shell setup
-#. "$HOME/.cargo/env"
-
-
 #### Secrets (not tracked in dotfiles)
 [ -f ~/.secrets.env ] && source ~/.secrets.env
 

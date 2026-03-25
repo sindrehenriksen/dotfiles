@@ -26,15 +26,7 @@ if [ -d "$HOME/.local/bin" ] ; then
     PATH="$HOME/.local/bin:$PATH"
 fi
 
-# turn of LESS beep
+# turn off LESS beep
 export LESS="$LESS -R -Q"
 
-# Add cargo to path
-if [ -d "$HOME/.cargo/bin" ] ; then
-    PATH="$HOME/.cargo/bin:$PATH"
-fi
-
-
-# Added by serverless binary installer
-export PATH="$HOME/.serverless/bin:$PATH"
 
