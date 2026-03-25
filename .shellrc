@@ -130,5 +130,9 @@ export PATH="$PATH":"$HOME/.pub-cache/bin"
 #. "$HOME/.cargo/env"
 
 
+#### Secrets (not tracked in dotfiles)
+[ -f ~/.secrets.env ] && source ~/.secrets.env
+
+
 #### Visma
 [ -f ~/dotfiles/.shellrc-visma ] && source ~/dotfiles/.shellrc-visma

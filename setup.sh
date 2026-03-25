@@ -56,6 +56,13 @@ pip install virtualenv virtualenvwrapper
 brew install 1password-cli
 # if linux: see https://developer.1password.com/docs/cli/get-started/
 
+#### Secrets
+# Personal secrets (currently empty template):
+cp ~/dotfiles/secrets/secrets.env.example ~/.secrets.env
+chmod 600 ~/.secrets.env
+# edit ~/.secrets.env
+# For Visma setup, see setup-visma.sh
+
 #### Visma-specific setup (MCP servers, etc.)
 # ~/dotfiles/setup-visma.sh
 
