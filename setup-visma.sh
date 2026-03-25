@@ -10,11 +10,13 @@ cd ~/dev/tools/aikido-mcp && npm install && npm run build && cd -
 # Get API credentials (Private App, scopes: basics:read, issues:read, repositories:read):
 #   https://app.aikido.dev/settings/integrations/api/aikido/rest
 
-# Jira/Atlassian MCP (mcp-atlassian, via uvx — no install needed)
-# Get a personal access token from your Jira profile
+# Jira & Confluence MCP (mcp-atlassian, via uvx — no install needed)
+# Get personal access tokens from your Jira and Confluence profiles.
+# Jira and Confluence may require separate PATs (and separate IP whitelisting).
 
 #### MCP config locations
-# Claude Desktop, VS Code, and Claude Code each need MCP server entries with credentials.
+# Three clients need MCP servers configured. Claude Desktop and VS Code use JSON
+# config files; Claude Code CLI uses `claude mcp add` (writes to ~/.claude.json).
 #
 # Claude Desktop: ~/Library/Application Support/Claude/claude_desktop_config.json
 #   "mcpServers": {
@@ -23,10 +25,15 @@ cd ~/dev/tools/aikido-mcp && npm install && npm run build && cd -
 #       "args": ["~/dev/tools/aikido-mcp/dist/index.js"],
 #       "env": { "AIKIDO_CLIENT_ID": "...", "AIKIDO_API_KEY": "..." }
 #     },
-#     "jira": {
+#     "atlassian": {
 #       "command": "uvx",
 #       "args": ["mcp-atlassian"],
-#       "env": { "JIRA_URL": "https://jira.visma.com", "JIRA_PERSONAL_TOKEN": "..." }
+#       "env": {
+#         "JIRA_URL": "https://jira.visma.com",
+#         "JIRA_PERSONAL_TOKEN": "...",
+#         "CONFLUENCE_URL": "https://confluence.visma.com",
+#         "CONFLUENCE_PERSONAL_TOKEN": "..."
+#       }
 #     }
 #   }
 #
@@ -38,24 +45,31 @@ cd ~/dev/tools/aikido-mcp && npm install && npm run build && cd -
 #       "args": ["~/dev/tools/aikido-mcp/dist/index.js"],
 #       "env": { "AIKIDO_CLIENT_ID": "...", "AIKIDO_API_KEY": "..." }
 #     },
-#     "jira": {
+#     "atlassian": {
 #       "type": "stdio",
 #       "command": "uvx",
 #       "args": ["mcp-atlassian"],
-#       "env": { "JIRA_URL": "https://jira.visma.com", "JIRA_PERSONAL_TOKEN": "..." }
+#       "env": {
+#         "JIRA_URL": "https://jira.visma.com",
+#         "JIRA_PERSONAL_TOKEN": "...",
+#         "CONFLUENCE_URL": "https://confluence.visma.com",
+#         "CONFLUENCE_PERSONAL_TOKEN": "..."
+#       }
 #     }
 #   }
 #
-# Claude Code (user-level): ~/.claude/.mcp.json
-#   "mcpServers": {
-#     "aikido": {
-#       "command": "node",
-#       "args": ["~/dev/tools/aikido-mcp/dist/index.js"],
-#       "env": { "AIKIDO_CLIENT_ID": "...", "AIKIDO_API_KEY": "..." }
-#     },
-#     "jira": {
-#       "command": "uvx",
-#       "args": ["mcp-atlassian"],
-#       "env": { "JIRA_URL": "https://jira.visma.com", "JIRA_PERSONAL_TOKEN": "..." }
-#     }
-#   }
+# Claude Code CLI (user-level): registered via `claude mcp add`, stored in ~/.claude.json
+# NOTE: ~/.claude/.mcp.json is for Claude Desktop, NOT Claude Code CLI.
+#
+#   claude mcp add -s user \
+#     -e "AIKIDO_CLIENT_ID=..." -e "AIKIDO_API_KEY=..." \
+#     -- aikido node ~/dev/tools/aikido-mcp/dist/index.js
+#
+#   claude mcp add -s user \
+#     -e "JIRA_URL=https://jira.visma.com" \
+#     -e "JIRA_PERSONAL_TOKEN=..." \
+#     -e "CONFLUENCE_URL=https://confluence.visma.com" \
+#     -e "CONFLUENCE_PERSONAL_TOKEN=..." \
+#     -- atlassian uvx mcp-atlassian
+#
+# Verify with: claude mcp list
