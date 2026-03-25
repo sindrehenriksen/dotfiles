@@ -92,7 +92,3 @@ export HISTSIZE=1000000
 # Don't record commands starting with a space
 setopt HIST_IGNORE_SPACE
 
-
-#THIS MUST BE AT THE END OF THE FILE FOR SDKMAN TO WORK!!!
-export SDKMAN_DIR="$HOME/.sdkman"
-[[ -s "$HOME/.sdkman/bin/sdkman-init.sh" ]] && source "$HOME/.sdkman/bin/sdkman-init.sh"
