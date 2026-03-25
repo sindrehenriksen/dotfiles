@@ -63,15 +63,15 @@ if $IS_MAC; then
     # pbcopy/pbpaste are native on macOS
     :
 else
-    if command_exists xclip; then
+    if command_exists wl-copy; then
+        alias pbcopy='wl-copy'
+        alias pbpaste='wl-paste'
+    elif command_exists xclip; then
         alias pbcopy='xclip -selection clipboard'
         alias pbpaste='xclip -selection clipboard -o'
     elif command_exists xsel; then
         alias pbcopy='xsel --clipboard --input'
         alias pbpaste='xsel --clipboard --output'
-    elif command_exists wl-copy; then
-        alias pbcopy='wl-copy'
-        alias pbpaste='wl-paste'
     fi
 fi
 
