@@ -57,8 +57,8 @@ zplug "plugins/z", from:oh-my-zsh
 # zsh-async
 
 # Load theme file
-zplug "mafredri/zsh-async", from:github, at:main
-zplug sindresorhus/pure, use:pure.zsh, from:github, at:main, as:theme
+zplug "mafredri/zsh-async", from:github, use:async.zsh
+zplug sindresorhus/pure, use:pure.zsh, from:github, as:theme
 
 # Install plugins if there are plugins that have not been installed
 if ! zplug check --verbose; then
