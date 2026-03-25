@@ -12,9 +12,6 @@ gtk-titlebar = true
 window-padding-x = 4
 window-padding-y = 4
 
-# OLED: use true black background
-background = #000000
-
 # Cursor
 cursor-style = block
 cursor-style-blink = false
