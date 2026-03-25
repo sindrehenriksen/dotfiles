@@ -16,17 +16,6 @@ if [ -d "$HOME/.local/bin" ]; then
 fi
 
 
-#### Virtualenv
-export WORKON_HOME=~/.virtualenvs
-export PROJECT_HOME=~/dev
-MISE_PYTHON="$HOME/.local/share/mise/installs/python/latest/bin/python"
-if [ -f "$MISE_PYTHON" ]; then
-    export VIRTUALENV_PYTHON="$MISE_PYTHON"
-    export VIRTUALENVWRAPPER_PYTHON="$MISE_PYTHON"
-    VENVWRAPPER="$HOME/.local/share/mise/installs/python/latest/bin/virtualenvwrapper.sh"
-    [ -f "$VENVWRAPPER" ] && source "$VENVWRAPPER"
-fi
-
 
 #### brew (macOS only)
 if $IS_MAC; then
@@ -80,7 +69,6 @@ fi
 alias v="vim"
 alias g="git"
 alias c="clear"
-alias wo="workon"
 #alias wc="watch --color "
 alias mv="mv -i"
 
