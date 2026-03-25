@@ -32,7 +32,7 @@ fi
 if $IS_MAC; then
     alias new-brew='eval "$(/opt/homebrew/bin/brew shellenv)"'
     alias old-brew='eval "$(/usr/local/bin/brew shellenv)"'
-    new-brew
+    eval "$(/opt/homebrew/bin/brew shellenv)"
 fi
 
 
