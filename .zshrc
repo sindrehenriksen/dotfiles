@@ -2,6 +2,8 @@
 source ~/.zprofile
 
 #### zplug
+# Note: ZPLUG_HOME determines where repos are stored. On macOS (Homebrew),
+# repos live under /opt/homebrew/opt/zplug/repos/, NOT ~/.zplug/repos/.
 if [[ "$(uname)" == "Darwin" ]]; then
     export ZPLUG_HOME=/opt/homebrew/opt/zplug
 else
