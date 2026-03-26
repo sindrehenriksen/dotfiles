@@ -1,0 +1,4 @@
+#### Visma secrets (not tracked in dotfiles)
+if [ -f ~/.secrets-visma.env ]; then set -a; source ~/.secrets-visma.env; set +a; fi
+
+#### Work-specific aliases and config below (edit locally)
