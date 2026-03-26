@@ -91,4 +91,5 @@ export HISTSIZE=1000000
 
 # Don't record commands starting with a space
 setopt HIST_IGNORE_SPACE
+setopt SHARE_HISTORY
 
