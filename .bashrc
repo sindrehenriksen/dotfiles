@@ -7,7 +7,7 @@ esac
 
 # Aliases
 alias sbash="source ~/.bashrc"
-alias vbash="vim ~/.bashrc"
+alias vbash="nvim ~/.bashrc"
 
 # fzf init
 [ -f ~/.fzf.bash ] && source ~/.fzf.bash && source ~/dotfiles/.fzf_config

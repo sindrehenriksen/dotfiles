@@ -16,7 +16,7 @@ export ZPLUG_USE_CACHE=true
 
 #### Aliases
 alias szsh="source ~/.zshrc"
-alias vzsh="vim ~/.zshrc"
+alias vzsh="nvim ~/.zshrc"
 
 
 #### vim keybindings

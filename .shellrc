@@ -1,5 +1,5 @@
 #### General
-export VISUAL=vim
+export VISUAL=nvim
 export EDITOR="$VISUAL"
 export LANG=en_US.UTF-8  # added to fix zplug command output
 
@@ -66,7 +66,8 @@ fi
 
 
 #### Aliases
-alias v="vim"
+alias v="nvim"
+alias vim="nvim"
 alias g="git"
 alias c="clear"
 #alias wc="watch --color "
