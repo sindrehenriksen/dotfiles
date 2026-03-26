@@ -2,6 +2,17 @@
 applyTo: '**'
 ---
 <!-- Claude Code counterpart: .claude/CLAUDE.md — keep in sync -->
+# Dotfiles Repo
+
+This repo manages shell configs, tool settings, and setup scripts. Key entry points:
+
+- `setup.sh` / `setup-visma.sh` — general and Visma-specific setup (MCP servers, credentials, etc.)
+- `install_symlinks.sh` — symlinks managed configs into place
+- `~/.secrets.env` / `~/.secrets-visma.env` — untracked secrets (chmod 600, `export KEY=VALUE` format); sourced by shell configs and MCP servers via `--env-file`
+- Skills/agents are dual-maintained in `.agents/skills/` (Copilot) and `.claude/agents/` (Claude Code) — keep in sync
+
+Don't search `~` broadly for settings — check this repo and the paths above.
+
 # General Instructions
 
 ## Problem-Solving Style
