@@ -55,10 +55,13 @@ set hidden
 set number relativenumber
 
 " Cursor shape: block in normal mode, beam in insert mode
-let &t_ti.="\e[1 q"
-let &t_SI.="\e[5 q"
-let &t_EI.="\e[1 q"
-let &t_te.="\e[0 q"
+" Neovim handles this natively via 'guicursor'; these escapes are Vim-only.
+if !has('nvim')
+    let &t_ti.="\e[1 q"
+    let &t_SI.="\e[5 q"
+    let &t_EI.="\e[1 q"
+    let &t_te.="\e[0 q"
+endif
 
 " Set 7 lines to the cursor - when moving vertically using j/k
 set so=7
