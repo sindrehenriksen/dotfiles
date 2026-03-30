@@ -1,6 +1,9 @@
 #!/bin/bash
-# GNOME keybinding and input method configuration
+# GNOME settings: keybindings, input methods, touchpad
 # Idempotent — safe to re-run
+
+#### Touchpad: two-finger tap/click = right-click
+gsettings set org.gnome.desktop.peripherals.touchpad click-method 'fingers'
 
 #### Lock screen: Super+Q (frees Super+L for dock)
 gsettings set org.gnome.settings-daemon.plugins.media-keys screensaver "['<Super>q']"
