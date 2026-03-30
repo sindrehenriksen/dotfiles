@@ -29,7 +29,7 @@ opt.termguicolors = true
 opt.backup = false
 opt.writebackup = false
 opt.swapfile = true
-opt.directory = vim.fn.expand("~/.vim/tmp//")
+opt.directory = vim.fn.stdpath("state") .. "/swap//"
 
 -- Text, tab and indent
 opt.expandtab = false
@@ -42,7 +42,7 @@ opt.smartindent = true
 opt.wrap = true
 
 -- Undo
-opt.undodir = vim.fn.expand("~/.vim/temp_dirs/undodir")
+opt.undodir = vim.fn.stdpath("state") .. "/undo//"
 opt.undofile = true
 
 -- Buffers

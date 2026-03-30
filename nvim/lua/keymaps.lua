@@ -46,16 +46,3 @@ map("n", "<leader>e", "<cmd>e ~/dotfiles/nvim/init.lua<cr>")
 -- Sudo save
 vim.api.nvim_create_user_command("W", "w !sudo tee % > /dev/null | edit!", {})
 
--- Remove Windows ^M
-map("n", "<leader>m", "mmHmt:%s/<C-V><cr>//ge<cr>'tzt'm")
-
--- F10: identify syntax highlight group at cursor
-map("n", "<F10>", function()
-	local s = vim.fn.synID(vim.fn.line("."), vim.fn.col("."), 1)
-	local st = vim.fn.synID(vim.fn.line("."), vim.fn.col("."), 0)
-	print(
-		"hi<" .. vim.fn.synIDattr(s, "name") .. "> "
-		.. "trans<" .. vim.fn.synIDattr(st, "name") .. "> "
-		.. "lo<" .. vim.fn.synIDattr(vim.fn.synIDtrans(s), "name") .. ">"
-	)
-end)
