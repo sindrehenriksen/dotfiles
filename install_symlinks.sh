@@ -11,7 +11,6 @@ link ~/dotfiles/.gitconfig ~/.gitconfig
 link ~/dotfiles/.profile ~/.profile
 link ~/dotfiles/.shellrc ~/.shellrc
 link ~/dotfiles/.tmux.conf ~/.tmux.conf
-link ~/dotfiles/.vimrc ~/.vimrc
 mkdir -p ~/.config
 link ~/dotfiles/nvim ~/.config/nvim
 link ~/dotfiles/.zprofile ~/.zprofile
