@@ -1,7 +1,10 @@
 ---
 name: adding-skills
-description: 'Create or update user-level skills. USE FOR: new skill, add skill, create skill, update skill setup. DO NOT USE FOR: repo-specific instructions (.github/instructions/), VS Code agent modes.'
+description: "Create or update user-level skills. USE FOR: new skill, add skill, create skill, update skill setup. DO NOT USE FOR: repo-specific instructions, project-level rules."
 ---
+<!-- Copilot counterpart: .agents/skills/adding-skills/SKILL.md — keep in sync.
+     Separate files because Copilot uses directory/SKILL.md convention and
+     Claude uses flat .md files with different frontmatter fields. -->
 
 # Adding Skills
 
@@ -19,7 +22,21 @@ Separate files because Copilot uses `directory/SKILL.md` convention and Claude u
 3. Add symlink lines to `~/dotfiles/install_symlinks.sh` for both
 4. Run `install_symlinks.sh`
 
-## SKILL.md Format
+## Claude Code Skill Format
+
+```markdown
+---
+name: <name>
+description: '<Brief description>. USE FOR: <trigger phrases>. DO NOT USE FOR: <exclusions>.'
+allowed-tools: Read, Grep, Glob, Bash
+---
+
+# <Title>
+
+<Content — keep focused and actionable>
+```
+
+## Copilot Skill Format
 
 ```markdown
 ---
@@ -35,5 +52,5 @@ description: '<Brief description>. USE FOR: <trigger phrases>. DO NOT USE FOR: <
 ## Guidelines
 
 - Keep skills concise — they load into context on every match
-- Avoid duplicating content already in root instructions (`.instructions.md` files) — reference them instead or move content out and reference the skill
+- Avoid duplicating content already in root instructions — reference them instead
 - Use `USE FOR` / `DO NOT USE FOR` in the description to control when the skill triggers
