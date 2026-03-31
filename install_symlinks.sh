@@ -26,6 +26,7 @@ link ~/dotfiles/.claude/CLAUDE.md ~/.claude/CLAUDE.md
 mkdir -p ~/.claude/skills
 link ~/dotfiles/.claude/skills/pr-review.md ~/.claude/skills/pr-review.md
 link ~/dotfiles/.claude/skills/pr-description.md ~/.claude/skills/pr-description.md
+link ~/dotfiles/.claude/skills/adding-skills.md ~/.claude/skills/adding-skills.md
 
 if [[ "$(uname)" == "Darwin" ]]; then
     # macOS: VS Code prompts
