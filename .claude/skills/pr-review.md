@@ -62,6 +62,35 @@ All comments should be in fenced code blocks for easy copy-paste.
 12. Only after discussion, draft postable comments (inline + overall) based on what survived the discussion
 13. Present suggested comments and ask user which to post (or whether to adjust)
 
+## Posting Reviews via GitHub API
+
+`gh pr review` only supports `--body` (overall comment) with `--approve`/`--request-changes`/`--comment`. It **cannot** post inline comments. To post an approval (or request-changes) with inline comments, use the REST API directly:
+
+```bash
+gh api repos/{owner}/{repo}/pulls/{number}/reviews \
+  --method POST --input - <<'JSON'
+{
+  "commit_id": "<head SHA>",
+  "event": "APPROVE",
+  "body": "Overall comment here",
+  "comments": [
+    {
+      "path": "src/foo.py",
+      "line": 42,
+      "side": "RIGHT",
+      "body": "Inline comment here"
+    }
+  ]
+}
+JSON
+```
+
+Key gotchas:
+- **Get the head SHA first**: `gh api repos/{owner}/{repo}/pulls/{number} --jq '.head.sha'`
+- **Use `--input` with raw JSON**, not `--field` — the `--field` flag can't encode the `comments` array correctly
+- **Inline comments can only target lines present in the diff**. If the concern is on an unchanged line, attach the comment to the nearest changed line and reference the actual line number in the body
+- **`event`** is one of: `APPROVE`, `REQUEST_CHANGES`, `COMMENT`
+
 ## What to Look For
 
 - Does the code match what the PR description claims?
