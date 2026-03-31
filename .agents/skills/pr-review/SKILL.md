@@ -2,7 +2,9 @@
 name: pr-review
 description: 'Review pull requests. USE FOR: PR review, code review, review comments, pull request feedback, suggest PR comments. DO NOT USE FOR: writing code, fixing bugs, implementing features.'
 ---
-<!-- Claude Code counterpart: .claude/agents/pr-review.md — keep in sync -->
+<!-- Claude Code counterpart: .claude/skills/pr-review.md — keep in sync.
+     Separate files because Copilot uses directory/SKILL.md convention and
+     Claude uses flat .md files with different frontmatter fields. -->
 
 # PR Review
 
@@ -22,7 +24,7 @@ All comments should be in fenced code blocks for easy copy-paste.
 - Place on specific lines/files (GitHub review comments)
 - State **where**: file path + line number + brief description of the code at that line
 - Keep focused — one concern per comment
-- Use backticks for symbol references (`_session_cache`, `asyncio.to_thread`, etc.)
+- Use backticks for symbol references — no file hyperlinks (e.g. VS Code markdown links)
 - When reinforcing an automated reviewer's comment (e.g. Copilot), say "+1" and add your reasoning — don't repeat what it already said
 
 ### Overall PR comment
