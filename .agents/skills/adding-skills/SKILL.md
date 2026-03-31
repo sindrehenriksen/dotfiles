@@ -5,16 +5,19 @@ description: 'Create or update user-level Copilot skills. USE FOR: new skill, ad
 
 # Adding Skills
 
-User-level skills live in `~/dotfiles/.agents/skills/` and are symlinked to `~/.agents/skills/`.
+User-level skills are dual-maintained for Copilot and Claude Code:
+
+- **Copilot**: `~/dotfiles/.agents/skills/<name>/SKILL.md` → symlinked to `~/.agents/skills/`
+- **Claude Code**: `~/dotfiles/.claude/skills/<name>.md` → symlinked to `~/.claude/skills/`
+
+Separate files because Copilot uses `directory/SKILL.md` convention and Claude uses flat `.md` files with different frontmatter fields (`allowed-tools` etc.).
 
 ## Creating a New Skill
 
-1. Create `~/dotfiles/.agents/skills/<name>/SKILL.md`
-2. Add a symlink line to `~/dotfiles/install_symlinks.sh`:
-   ```sh
-   ln -is ~/dotfiles/.agents/skills/<name> ~/.agents/skills/<name>
-   ```
-3. Run the symlink: `ln -is ~/dotfiles/.agents/skills/<name> ~/.agents/skills/<name>`
+1. Create **Copilot** version: `~/dotfiles/.agents/skills/<name>/SKILL.md`
+2. Create **Claude Code** version: `~/dotfiles/.claude/skills/<name>.md`
+3. Add symlink lines to `~/dotfiles/install_symlinks.sh` for both
+4. Run `install_symlinks.sh`
 
 ## SKILL.md Format
 

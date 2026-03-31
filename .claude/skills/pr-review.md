@@ -1,18 +1,18 @@
 ---
 name: pr-review
-description: "Review pull requests. Use for: PR review, code review, review comments, pull request feedback."
-tools: Read, Grep, Glob, Bash, Agent, WebFetch
+description: "Review pull requests. USE FOR: PR review, code review, review comments, pull request feedback, suggest PR comments. DO NOT USE FOR: writing code, fixing bugs, implementing features."
+allowed-tools: Read, Grep, Glob, Bash, Agent, WebFetch
 ---
-
-<!-- Claude Code adaptation of .agents/skills/pr-review/SKILL.md -->
-<!-- Keep in sync: changes here may need mirroring to the Copilot version and vice versa -->
+<!-- Copilot counterpart: .agents/skills/pr-review/SKILL.md — keep in sync.
+     Separate files because Copilot uses directory/SKILL.md convention and
+     Claude uses flat .md files with different frontmatter fields. -->
 
 # PR Review
 
 ## Tone & Audience
 
 - Assume the author is senior unless told otherwise
-- Suggest/ask rather than tell — "worth considering...", "should this...?", "have you thought about...?"
+- Suggest/ask rather than tell — "worth considering…", "should this…?", "have you thought about…?"
 - Don't explain generic concepts — point to the specific code/behavior that's the concern
 - Be direct, not formal — skip preamble and filler
 
@@ -24,7 +24,7 @@ All comments should be in fenced code blocks for easy copy-paste.
 
 - State **where**: file path + line number + brief description of the code at that line
 - Keep focused — one concern per comment
-- Use backticks for symbol references
+- Use backticks for symbol references — no file hyperlinks (e.g. VS Code markdown links)
 - When reinforcing an automated reviewer's comment (e.g. Copilot), say "+1" and add your reasoning — don't repeat what it already said
 
 ### Overall PR comment
