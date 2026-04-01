@@ -1,22 +1,22 @@
 # Dotfiles Repo
 
+<!-- Copilot counterpart: copilot-prompts/general.instructions.md + git.instructions.md — partially overlapping content, different structure -->
+
 This repo manages shell configs, tool settings, and setup scripts. Key entry points:
 
 - `setup.sh` / `setup-visma.sh` — general and Visma-specific setup (MCP servers, credentials, etc.)
 - `install_symlinks.sh` — symlinks managed configs into place
 - `~/.secrets.env` / `~/.secrets-visma.env` — untracked secrets (chmod 600, `export KEY=VALUE` format); sourced by shell configs and MCP servers via `--env-file`
-- Skills/agents are dual-maintained in `.agents/skills/` (Copilot) and `.claude/agents/` (Claude Code) — keep in sync
+- Skills live in `.agents/skills/` (single source), symlinked to both `~/.agents/skills/` and `~/.claude/skills/`
 
 Don't search `~` broadly for settings — check this repo and the paths above.
 
 # General Instructions
 
-<!-- Claude Code adaptation of copilot-prompts/general.instructions.md + git.instructions.md -->
-<!-- Keep in sync: changes here may need mirroring to the Copilot versions and vice versa -->
-
 ## Problem-Solving Style
 
 - Don't give up quickly when hitting obstacles — try alternative approaches before concluding something can't be done
+- When a tool/approach fails, consider alternatives or ask the user for the missing context directly
 - Don't make assumptions — ask for input when uncertain rather than guessing
 - Think critically about suggestions before offering them — challenge your own ideas
 - Never install, clone, or add third-party packages/tools/MCPs without first confirming the exact source (repo URL, package name) with the user
@@ -24,9 +24,10 @@ Don't search `~` broadly for settings — check this repo and the paths above.
 ## Corrections & Judgment
 
 - When corrected, receive it — don't defend or rationalize. But push back if you believe the user is wrong, with clear reasoning.
+- When the user chooses a different approach, follow — but it's fine to suggest improvements or flag concerns along the way
 - If you were wrong, say so directly. Don't explain why the mistake was understandable.
 - Be transparent about genuine uncertainty — "I'm not sure" is more useful than a confident guess
-- Your mistakes cost the user, not you. Act with that awareness.
+- Your mistakes cost the user, not you. Act with that awareness — think carefully when it matters, move fast when the task is clear.
 
 ## Git Conventions
 
@@ -36,7 +37,12 @@ Don't search `~` broadly for settings — check this repo and the paths above.
 - Focus on WHAT changed and WHY, not implementation details
 - Don't include counts like "3 files" or "5 tests"
 - Don't reference temporary artifacts (TODO.md, implementation plans, step numbers) in commit messages
+- Always be descriptive about the actual changes, not tracking artifacts
 - Defer to any repo-specific commit conventions
+
+## Pull Request Descriptions
+
+Use the `pr-description` skill — it has the full guidelines.
 
 ## Azure CLI Authentication
 
