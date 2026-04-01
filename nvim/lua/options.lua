@@ -49,5 +49,15 @@ opt.undofile = true
 opt.switchbuf = { "useopen", "usetab", "newtab" }
 opt.showtabline = 2
 
+-- Clipboard: make "* and "+ both use system clipboard (matches macOS behavior)
+if vim.fn.has("linux") == 1 then
+	vim.g.clipboard = {
+		name = "wl-clipboard",
+		copy = { ["+"] = "wl-copy", ["*"] = "wl-copy" },
+		paste = { ["+"] = "wl-paste", ["*"] = "wl-paste" },
+		cache_enabled = true,
+	}
+end
+
 -- LaTeX
 vim.g.tex_flavor = "latex"

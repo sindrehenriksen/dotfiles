@@ -24,5 +24,12 @@ gsettings set org.gnome.desktop.wm.keybindings switch-input-source "['<Alt>Shift
 # Enables AltGr (Level 3) layer; also swaps Caps Lock and Escape
 gsettings set org.gnome.desktop.input-sources xkb-options "['lv3:ralt_switch', 'caps:swapescape']"
 
+#### Disable middle-click paste (GTK apps including Ghostty)
+# Must be set manually in both files:
+#   ~/.config/gtk-3.0/settings.ini
+#   ~/.config/gtk-4.0/settings.ini
+# Add under [Settings]:
+#   gtk-enable-primary-paste = false
+
 #### Power button: handled by logind, not GNOME
 # See system/logind.conf.override
