@@ -1,9 +1,8 @@
 ---
 name: pr-description
 description: 'Write PR descriptions. USE FOR: PR description, write PR body, suggest PR description, draft PR summary. DO NOT USE FOR: PR review (use pr-review), writing code, fixing bugs.'
+allowed-tools: Read, Grep, Glob, Bash
 ---
-<!-- Claude Code counterpart: .claude/skills/pr-description/SKILL.md — keep in sync.
-     Only difference: Claude version has `allowed-tools` frontmatter. -->
 
 # PR Description
 

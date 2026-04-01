@@ -17,16 +17,15 @@ link ~/dotfiles/.zprofile ~/.zprofile
 link ~/dotfiles/.zshrc ~/.zshrc
 mkdir -p ~/.jupyter
 link ~/dotfiles/.jupyter_notebook_config.py ~/.jupyter/jupyter_notebook_config.py
-mkdir -p ~/.agents/skills
+mkdir -p ~/.agents/skills ~/.claude/skills
 link ~/dotfiles/.agents/skills/pr-review ~/.agents/skills/pr-review
 link ~/dotfiles/.agents/skills/pr-description ~/.agents/skills/pr-description
 link ~/dotfiles/.agents/skills/adding-skills ~/.agents/skills/adding-skills
+link ~/dotfiles/.agents/skills/pr-review ~/.claude/skills/pr-review
+link ~/dotfiles/.agents/skills/pr-description ~/.claude/skills/pr-description
+link ~/dotfiles/.agents/skills/adding-skills ~/.claude/skills/adding-skills
 # Claude Code
 link ~/dotfiles/.claude/CLAUDE.md ~/.claude/CLAUDE.md
-mkdir -p ~/.claude/skills
-link ~/dotfiles/.claude/skills/pr-review ~/.claude/skills/pr-review
-link ~/dotfiles/.claude/skills/pr-description ~/.claude/skills/pr-description
-link ~/dotfiles/.claude/skills/adding-skills ~/.claude/skills/adding-skills
 
 if [[ "$(uname)" == "Darwin" ]]; then
     # macOS: VS Code prompts
