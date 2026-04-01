@@ -1,9 +1,8 @@
 ---
 name: pr-review
 description: 'Review pull requests. USE FOR: PR review, code review, review comments, pull request feedback, suggest PR comments. DO NOT USE FOR: writing code, fixing bugs, implementing features.'
+allowed-tools: Read, Grep, Glob, Bash, Agent, WebFetch
 ---
-<!-- Claude Code counterpart: .claude/skills/pr-review/SKILL.md — keep in sync.
-     Only difference: Claude version has `allowed-tools` frontmatter. -->
 
 # PR Review
 

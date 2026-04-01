@@ -1,9 +1,8 @@
 ---
 name: confluence
 description: 'Fetch and summarize Confluence pages via REST API. USE FOR: confluence page, confluence URL, read confluence, summarize confluence, confluence search. DO NOT USE FOR: editing confluence pages, Jira queries.'
+allowed-tools: Bash, Read, Grep
 ---
-
-<!-- Claude Code counterpart: .claude/agents/confluence.md — keep in sync -->
 
 # Confluence Query
 
