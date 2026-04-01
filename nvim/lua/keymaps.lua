@@ -43,6 +43,10 @@ map("n", "<leader>x", "<cmd>e ~/buffer.md<cr>")
 -- Edit config
 map("n", "<leader>e", "<cmd>e ~/dotfiles/nvim/init.lua<cr>")
 
+-- Clipboard shortcuts
+map({ "n", "v" }, "<leader>y", '"+y', { desc = "Copy to clipboard" })
+map("n", "<leader>p", '"+p', { desc = "Paste from clipboard" })
+
 -- Sudo save
 vim.api.nvim_create_user_command("W", "w !sudo tee % > /dev/null | edit!", {})
 
