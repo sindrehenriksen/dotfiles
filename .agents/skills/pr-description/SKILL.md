@@ -2,9 +2,8 @@
 name: pr-description
 description: 'Write PR descriptions. USE FOR: PR description, write PR body, suggest PR description, draft PR summary. DO NOT USE FOR: PR review (use pr-review), writing code, fixing bugs.'
 ---
-<!-- Claude Code counterpart: .claude/skills/pr-description.md — keep in sync.
-     Separate files because Copilot uses directory/SKILL.md convention and
-     Claude uses flat .md files with different frontmatter fields. -->
+<!-- Claude Code counterpart: .claude/skills/pr-description/SKILL.md — keep in sync.
+     Only difference: Claude version has `allowed-tools` frontmatter. -->
 
 # PR Description
 

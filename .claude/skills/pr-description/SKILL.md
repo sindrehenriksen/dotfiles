@@ -1,11 +1,10 @@
 ---
 name: pr-description
-description: "Write PR descriptions. USE FOR: PR description, write PR body, suggest PR description, draft PR summary. DO NOT USE FOR: PR review (use pr-review), writing code, fixing bugs."
+description: 'Write PR descriptions. USE FOR: PR description, write PR body, suggest PR description, draft PR summary. DO NOT USE FOR: PR review (use pr-review), writing code, fixing bugs.'
 allowed-tools: Read, Grep, Glob, Bash
 ---
-<!-- Copilot counterpart: .agents/skills/pr-description/SKILL.md — keep in sync.
-     Separate files because Copilot uses directory/SKILL.md convention and
-     Claude uses flat .md files with different frontmatter fields. -->
+<!-- Agents counterpart: .agents/skills/pr-description/SKILL.md — keep in sync.
+     Only difference: this file has `allowed-tools` frontmatter. -->
 
 # PR Description
 

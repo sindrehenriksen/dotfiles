@@ -1,11 +1,10 @@
 ---
 name: pr-review
-description: "Review pull requests. USE FOR: PR review, code review, review comments, pull request feedback, suggest PR comments. DO NOT USE FOR: writing code, fixing bugs, implementing features."
+description: 'Review pull requests. USE FOR: PR review, code review, review comments, pull request feedback, suggest PR comments. DO NOT USE FOR: writing code, fixing bugs, implementing features.'
 allowed-tools: Read, Grep, Glob, Bash, Agent, WebFetch
 ---
-<!-- Copilot counterpart: .agents/skills/pr-review/SKILL.md — keep in sync.
-     Separate files because Copilot uses directory/SKILL.md convention and
-     Claude uses flat .md files with different frontmatter fields. -->
+<!-- Agents counterpart: .agents/skills/pr-review/SKILL.md — keep in sync.
+     Only difference: this file has `allowed-tools` frontmatter. -->
 
 # PR Review
 
@@ -13,7 +12,7 @@ allowed-tools: Read, Grep, Glob, Bash, Agent, WebFetch
 
 - Assume the author is senior unless told otherwise
 - Suggest/ask rather than tell — "worth considering…", "should this…?", "have you thought about…?"
-- Don't explain generic concepts — point to the specific code/behavior that's the concern
+- Don't explain generic concepts they already know — point to the specific code/behavior that's the concern
 - Be direct, not formal — skip preamble and filler
 
 ## Comment Format
@@ -22,6 +21,7 @@ All comments should be in fenced code blocks for easy copy-paste.
 
 ### Inline comments
 
+- Place on specific lines/files (GitHub review comments)
 - State **where**: file path + line number + brief description of the code at that line
 - Keep focused — one concern per comment
 - Use backticks for symbol references — no file hyperlinks (e.g. VS Code markdown links)
@@ -42,9 +42,9 @@ All comments should be in fenced code blocks for easy copy-paste.
 2. Fetch diffs: `gh pr diff <number>`
 3. Fetch inline review comments: `gh api repos/{owner}/{repo}/pulls/{number}/comments`
 4. Fetch review summaries: `gh api repos/{owner}/{repo}/pulls/{number}/reviews`
-5. If the PR branch isn't checked out locally, check it out — or ask the user if there are uncommitted changes. Reading actual files is much better than reviewing from diffs alone.
+5. If the PR branch isn't checked out locally, check it out — or ask the user to do so if there are uncommitted changes. Reading actual files is much better than reviewing from diffs alone.
 6. Read the actual changed files on the branch
-7. Check for existing review comments — reinforce good ones, skip resolved ones, don't duplicate
+7. Check for existing review comments (Copilot, other reviewers) — reinforce good ones, skip resolved ones, don't duplicate
 
 ### Phase 2: Discussion round
 
@@ -54,8 +54,8 @@ All comments should be in fenced code blocks for easy copy-paste.
    - **Should fix**: design issues, missing error handling, doc/code mismatches
    - **Nits**: style, naming, import ordering
    - **Follow-ups**: things worth doing but not blocking this PR
-10. Incorporate the user's initial impressions if they shared any
-11. Wait for user reaction — iterate until alignment
+10. Incorporate the user's initial impressions if they shared any when requesting the review
+11. Wait for user reaction — they may ask questions, add context, disagree, or confirm concerns. Iterate until alignment.
 
 ### Phase 3: Comment drafting
 
