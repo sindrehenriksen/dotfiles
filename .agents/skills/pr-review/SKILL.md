@@ -63,6 +63,10 @@ All comments should be in fenced code blocks for easy copy-paste.
 12. Only after discussion, draft postable comments (inline + overall) based on what survived the discussion
 13. Present suggested comments and ask user which to post (or whether to adjust)
 
+### Cleanup
+
+14. After the review is complete (comments posted or user is done), switch back to main and delete any local branches that were checked out for the review.
+
 ## Posting Reviews via GitHub API
 
 `gh pr review` only supports `--body` (overall comment) with `--approve`/`--request-changes`/`--comment`. It **cannot** post inline comments. To post an approval (or request-changes) with inline comments, use the REST API directly:
