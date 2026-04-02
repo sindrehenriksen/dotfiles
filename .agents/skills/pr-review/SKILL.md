@@ -13,7 +13,9 @@ allowed-tools: Read, Grep, Glob, Bash, Agent, WebFetch
 - Don't explain generic concepts they already know — point to the specific code/behavior that's the concern
 - Be direct, not formal — skip preamble and filler
 
-## Comment Format
+## Comment Structure
+
+**Default structure: one overall summary comment + individual findings as inline comments on specific lines/files.** Specific findings always go inline — don't put detailed findings in the overall comment. Use this structure in both the discussion phase (Phase 2) and the drafting phase (Phase 3): present each finding anchored to a file and line, with severity, so the user can see what will become inline comments.
 
 All comments should be in fenced code blocks for easy copy-paste.
 
@@ -30,6 +32,7 @@ All comments should be in fenced code blocks for easy copy-paste.
 - Brief positive note if warranted (one line, not gushing)
 - Lead with the most important design-level question or concern
 - Reference inline comments ("a few things inline") rather than duplicating them
+- Don't duplicate or summarize inline findings — the overall comment is a wrapper, not a recap
 - Keep it short — 3-6 sentences typical
 
 ## Process
