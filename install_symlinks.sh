@@ -21,9 +21,11 @@ mkdir -p ~/.agents/skills ~/.claude/skills
 link ~/dotfiles/.agents/skills/pr-review ~/.agents/skills/pr-review
 link ~/dotfiles/.agents/skills/pr-description ~/.agents/skills/pr-description
 link ~/dotfiles/.agents/skills/adding-skills ~/.agents/skills/adding-skills
+link ~/dotfiles/.agents/skills/sync ~/.agents/skills/sync
 link ~/dotfiles/.agents/skills/pr-review ~/.claude/skills/pr-review
 link ~/dotfiles/.agents/skills/pr-description ~/.claude/skills/pr-description
 link ~/dotfiles/.agents/skills/adding-skills ~/.claude/skills/adding-skills
+link ~/dotfiles/.agents/skills/sync ~/.claude/skills/sync
 # Claude Code
 link ~/dotfiles/.claude/CLAUDE.md ~/.claude/CLAUDE.md
 link ~/dotfiles/.claude/settings.json ~/.claude/settings.json
