@@ -26,6 +26,7 @@ link ~/dotfiles/.agents/skills/pr-description ~/.claude/skills/pr-description
 link ~/dotfiles/.agents/skills/adding-skills ~/.claude/skills/adding-skills
 # Claude Code
 link ~/dotfiles/.claude/CLAUDE.md ~/.claude/CLAUDE.md
+link ~/dotfiles/.claude/settings.json ~/.claude/settings.json
 
 if [[ "$(uname)" == "Darwin" ]]; then
     # macOS: VS Code prompts
