@@ -1,3 +1,17 @@
+-- Leader must be set before lazy
+vim.g.mapleader = " "
+vim.g.maplocalleader = " "
+
+require("options")
+require("keymaps")
+
+if vim.g.vscode then
+	-- VS Code handles UI, LSP, git, etc. — only load keymaps/options above.
+	return
+end
+
+require("autocmds")
+
 -- Bootstrap lazy.nvim
 local lazypath = vim.fn.stdpath("data") .. "/lazy/lazy.nvim"
 if not vim.uv.fs_stat(lazypath) then
@@ -11,14 +25,6 @@ if not vim.uv.fs_stat(lazypath) then
 	})
 end
 vim.opt.rtp:prepend(lazypath)
-
--- Leader must be set before lazy
-vim.g.mapleader = " "
-vim.g.maplocalleader = " "
-
-require("options")
-require("keymaps")
-require("autocmds")
 
 require("lazy").setup("plugins", {
 	rocks = { enabled = false },
