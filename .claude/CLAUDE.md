@@ -43,6 +43,7 @@ Don't search `~` broadly for settings — check this repo and the paths above.
 - Don't reference temporary artifacts (TODO.md, implementation plans, step numbers) in commit messages
 - Always be descriptive about the actual changes, not tracking artifacts
 - Defer to any repo-specific commit conventions
+- Sign with `Co-Authored-By: Claude <model> <version>` (e.g. `Co-Authored-By: Claude Opus 4.6`). No email, no angle brackets.
 
 ## Pull Request Descriptions
 

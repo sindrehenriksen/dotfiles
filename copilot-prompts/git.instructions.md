@@ -17,6 +17,7 @@ When generating commit messages:
 - Don't reference temporary artifacts (TODO.md, implementation plans, step numbers) in commit messages
 - Always be descriptive about the actual changes, not tracking artifacts
 - Defer to any repo-specific commit conventions
+- Sign with `Co-Authored-By: <agent> <model> <version>` (e.g. `Co-Authored-By: Copilot GPT-4o`). No email, no angle brackets.
 
 ## Pull Request Descriptions
 
