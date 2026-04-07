@@ -26,6 +26,8 @@ link ~/dotfiles/.agents/skills/pr-review ~/.claude/skills/pr-review
 link ~/dotfiles/.agents/skills/pr-description ~/.claude/skills/pr-description
 link ~/dotfiles/.agents/skills/adding-skills ~/.claude/skills/adding-skills
 link ~/dotfiles/.agents/skills/sync ~/.claude/skills/sync
+# Git hooks (repo-local)
+git -C ~/dotfiles config core.hooksPath git-hooks
 # Claude Code
 link ~/dotfiles/.claude/CLAUDE.md ~/.claude/CLAUDE.md
 link ~/dotfiles/.claude/settings.json ~/.claude/settings.json

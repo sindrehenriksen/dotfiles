@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# Enforce commit message conventions:
+# - Title line max 50 chars
+# - Body lines wrapped at 72 chars
+
+msg_file="$1"
+title=$(head -1 "$msg_file")
+errors=()
+
+if [ ${#title} -gt 50 ]; then
+    errors+=("Title is ${#title} chars (max 50): $title")
+fi
+
+line_num=0
+while IFS= read -r line || [ -n "$line" ]; do
+    line_num=$((line_num + 1))
+    # Skip title (line 1) and blank separator (line 2)
+    if [ "$line_num" -le 2 ]; then
+        continue
+    fi
+    if [ ${#line} -gt 72 ]; then
+        errors+=("Line $line_num is ${#line} chars (max 72): $line")
+    fi
+done < "$msg_file"
+
+if [ ${#errors[@]} -gt 0 ]; then
+    echo "Commit message lint failed:"
+    for err in "${errors[@]}"; do
+        echo "  - $err"
+    done
+    exit 1
+fi
