@@ -14,4 +14,4 @@ link ~/dotfiles/.shellrc-visma ~/.shellrc-visma
 
 # Confluence skill (Copilot agents + Claude Code)
 link ~/dotfiles/.agents/skills/confluence ~/.agents/skills/confluence
-link ~/dotfiles/.claude/agents/confluence.md ~/.claude/agents/confluence.md
+link ~/dotfiles/.agents/skills/confluence ~/.claude/skills/confluence
