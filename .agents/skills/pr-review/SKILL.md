@@ -34,6 +34,7 @@ All comments should be in fenced code blocks for easy copy-paste.
 - Reference inline comments ("a few things inline") rather than duplicating them
 - Don't duplicate or summarize inline findings — the overall comment is a wrapper, not a recap
 - Keep it short — 3-6 sentences typical
+- End with an attribution line: `_Review co-authored with <agent> <model> <version>._` (e.g. `_Review co-authored with Claude Code Opus 4.6._`)
 
 ## Process
 
