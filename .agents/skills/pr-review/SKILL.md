@@ -62,7 +62,11 @@ All comments should be in fenced code blocks for easy copy-paste.
 ### Phase 3: Comment drafting
 
 12. Only after discussion, draft postable comments (inline + overall) based on what survived the discussion
-13. Present suggested comments and ask user which to post (or whether to adjust)
+13. Suggest a review type alongside the drafted comments:
+    - **APPROVE** — default. Use liberally so the author can merge when ready. Approving with comments is fine and expected.
+    - **REQUEST_CHANGES** — only for fundamental design issues or critical blockers (security, data loss, broken contracts). If unsure whether something rises to this level, ask.
+    - **COMMENT** — when there's no clear approval or block (e.g. need more context, partially reviewed)
+14. Present suggested comments + review type and ask user which to post (or whether to adjust)
 
 ### Cleanup
 
