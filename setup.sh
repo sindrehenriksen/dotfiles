@@ -63,6 +63,22 @@ chmod 600 ~/.secrets.env
 # edit ~/.secrets.env
 # For Visma setup, see setup-visma.sh
 
+#### MCP servers (shared / non-org-specific)
+# Playwright (browser automation)
+
+# Claude Code (user-scoped — available in all projects)
+claude mcp add -s user playwright -- npx @playwright/mcp@latest
+
+# VS Code / GitHub Copilot: add to mcp.json (settings gear > MCP Servers, or directly):
+#   macOS: ~/Library/Application Support/Code/User/mcp.json
+#   Linux: ~/.config/Code/User/mcp.json
+#   Add: "playwright": { "type": "stdio", "command": "npx", "args": ["@playwright/mcp@latest"] }
+
+# GitHub Copilot CLI: add to ~/.copilot/mcp-config.json (or /mcp add interactively)
+
+# OpenAI Codex CLI:
+#   codex mcp add playwright -- npx @playwright/mcp@latest
+
 #### Visma-specific setup (MCP servers, etc.)
 # ~/dotfiles/setup-visma.sh
 
