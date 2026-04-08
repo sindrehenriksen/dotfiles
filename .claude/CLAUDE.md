@@ -57,7 +57,7 @@ When an `az` command fails with an authentication/token error, re-authenticate b
 
 ## Atlassian MCP
 
-- The Atlassian MCP works for Jira but NOT for Confluence (auth/VPN issues)
+- The Atlassian MCP is configured for Jira only (Confluence tools are disabled — auth/VPN issues)
 - For Confluence, use the curl-based confluence skill/agent instead
 
 ## CI/CD Debugging

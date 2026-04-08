@@ -10,11 +10,10 @@ cd ~/dev/tools/aikido-mcp && npm install && npm run build && cd -
 # Get API credentials (Private App, scopes: basics:read, issues:read, repositories:read):
 #   https://app.aikido.dev/settings/integrations/api/aikido/rest
 
-# Jira & Confluence MCP (mcp-atlassian, via uvx — no install needed)
-# NOTE: The MCP works for Jira but NOT reliably for Confluence (auth/VPN issues).
-# For Confluence, use the curl-based skill/agent instead (see .agents/skills/confluence/).
-# Get personal access tokens from your Jira and Confluence profiles.
-# Jira and Confluence may require separate PATs (and separate IP whitelisting).
+# Jira MCP (mcp-atlassian, via uvx — no install needed)
+# Confluence tools are disabled — the MCP doesn't work reliably for Confluence
+# (auth/VPN issues). Use the curl-based skill/agent instead (.agents/skills/confluence/).
+# Get a personal access token from your Jira profile.
 
 #### MCP config locations
 # Three clients need MCP servers configured. Claude Desktop and VS Code use JSON
@@ -32,9 +31,7 @@ cd ~/dev/tools/aikido-mcp && npm install && npm run build && cd -
 #       "args": ["mcp-atlassian"],
 #       "env": {
 #         "JIRA_URL": "https://jira.visma.com",
-#         "JIRA_PERSONAL_TOKEN": "...",
-#         "CONFLUENCE_URL": "https://confluence.visma.com",
-#         "CONFLUENCE_PERSONAL_TOKEN": "..."
+#         "JIRA_PERSONAL_TOKEN": "..."
 #       }
 #     }
 #   }
@@ -53,9 +50,7 @@ cd ~/dev/tools/aikido-mcp && npm install && npm run build && cd -
 #       "args": ["mcp-atlassian"],
 #       "env": {
 #         "JIRA_URL": "https://jira.visma.com",
-#         "JIRA_PERSONAL_TOKEN": "...",
-#         "CONFLUENCE_URL": "https://confluence.visma.com",
-#         "CONFLUENCE_PERSONAL_TOKEN": "..."
+#         "JIRA_PERSONAL_TOKEN": "..."
 #       }
 #     }
 #   }
@@ -70,8 +65,6 @@ cd ~/dev/tools/aikido-mcp && npm install && npm run build && cd -
 #   claude mcp add -s user \
 #     -e "JIRA_URL=https://jira.visma.com" \
 #     -e "JIRA_PERSONAL_TOKEN=..." \
-#     -e "CONFLUENCE_URL=https://confluence.visma.com" \
-#     -e "CONFLUENCE_PERSONAL_TOKEN=..." \
 #     -- atlassian uvx mcp-atlassian
 #
 # Verify with: claude mcp list
