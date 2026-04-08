@@ -4,6 +4,8 @@ description: 'Create or update user-level skills. USE FOR: new skill, add skill,
 allowed-tools: Read, Grep, Glob, Bash
 ---
 
+<!-- Repo-specific skill — not symlinked globally. Available via .claude/skills/ in the dotfiles repo. -->
+
 # Adding Skills
 
 Single source of truth in `~/dotfiles/.agents/skills/`. Symlinked to both `~/.agents/skills/` and `~/.claude/skills/`.

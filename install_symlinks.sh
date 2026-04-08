@@ -20,12 +20,12 @@ link ~/dotfiles/.jupyter_notebook_config.py ~/.jupyter/jupyter_notebook_config.p
 mkdir -p ~/.agents/skills ~/.claude/skills
 link ~/dotfiles/.agents/skills/pr-review ~/.agents/skills/pr-review
 link ~/dotfiles/.agents/skills/pr-description ~/.agents/skills/pr-description
-link ~/dotfiles/.agents/skills/adding-skills ~/.agents/skills/adding-skills
-link ~/dotfiles/.agents/skills/sync ~/.agents/skills/sync
 link ~/dotfiles/.agents/skills/pr-review ~/.claude/skills/pr-review
 link ~/dotfiles/.agents/skills/pr-description ~/.claude/skills/pr-description
-link ~/dotfiles/.agents/skills/adding-skills ~/.claude/skills/adding-skills
-link ~/dotfiles/.agents/skills/sync ~/.claude/skills/sync
+# Repo-specific skills (not global)
+mkdir -p ~/dotfiles/.claude/skills
+link ~/dotfiles/.agents/skills/sync ~/dotfiles/.claude/skills/sync
+link ~/dotfiles/.agents/skills/adding-skills ~/dotfiles/.claude/skills/adding-skills
 # Git hooks (repo-local)
 git -C ~/dotfiles config core.hooksPath git-hooks
 # Claude Code

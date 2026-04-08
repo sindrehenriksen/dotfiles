@@ -4,6 +4,8 @@ description: 'Sync dotfiles repo from origin and apply changes locally. USE FOR:
 allowed-tools: Read, Grep, Glob, Bash
 ---
 
+<!-- Repo-specific skill — not symlinked globally. Available via .claude/skills/ in the dotfiles repo. -->
+
 # Sync Dotfiles
 
 Pull latest from origin and apply locally.
