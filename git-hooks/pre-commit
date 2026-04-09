@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Delegate to pre-commit framework if installed and repo has config
+if [ -f .pre-commit-config.yaml ] && command -v pre-commit &>/dev/null; then
+    pre-commit run --hook-stage pre-commit "$@"
+fi
