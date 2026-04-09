@@ -1,32 +1,25 @@
 #!/usr/bin/env bash
 # Enforce commit message conventions:
-# - Title line max 50 chars
-# - Body lines wrapped at 72 chars
+# - Title line: warn at 50, error at 72 chars
+# - Body: reflow paragraphs at 72 chars (like vim gqip)
 
 msg_file="$1"
+
+# Reflow body paragraphs at 72 chars
+# Preserves title (line 1), blank separator (line 2),
+# and git comment lines (starting with #).
+{
+    head -2 "$msg_file"
+    tail -n +3 "$msg_file" | grep -v '^#' | fmt -w 72
+    tail -n +3 "$msg_file" | grep '^#' || true
+} > "${msg_file}.tmp" && mv "${msg_file}.tmp" "$msg_file"
+
+# Validate title length
 title=$(head -1 "$msg_file")
-errors=()
-
-if [ ${#title} -gt 50 ]; then
-    errors+=("Title is ${#title} chars (max 50): $title")
-fi
-
-line_num=0
-while IFS= read -r line || [ -n "$line" ]; do
-    line_num=$((line_num + 1))
-    # Skip title (line 1) and blank separator (line 2)
-    if [ "$line_num" -le 2 ]; then
-        continue
-    fi
-    if [ ${#line} -gt 72 ]; then
-        errors+=("Line $line_num is ${#line} chars (max 72): $line")
-    fi
-done < "$msg_file"
-
-if [ ${#errors[@]} -gt 0 ]; then
+if [ ${#title} -gt 72 ]; then
     echo "Commit message lint failed:"
-    for err in "${errors[@]}"; do
-        echo "  - $err"
-    done
+    echo "  - Title is ${#title} chars (max 72): $title"
     exit 1
+elif [ ${#title} -gt 50 ]; then
+    echo "Commit message warning: title is ${#title} chars (aim for 50)"
 fi

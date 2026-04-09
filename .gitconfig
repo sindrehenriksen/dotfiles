@@ -45,3 +45,5 @@
     prune = true
 [push]
 	autoSetupRemote = true
+[core]
+	hooksPath = /home/sihen/dotfiles/git-hooks
