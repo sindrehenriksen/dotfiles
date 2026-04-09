@@ -63,8 +63,16 @@ chmod 600 ~/.secrets.env
 # edit ~/.secrets.env
 # For Visma setup, see setup-visma.sh
 
+#### Browser automation (agent-browser)
+# if mac
+brew install agent-browser
+# if linux
+npm install -g agent-browser
+# both: install browser binary
+agent-browser install
+
 #### MCP servers (shared / non-org-specific)
-# Playwright (browser automation)
+# Playwright (browser automation) — kept alongside agent-browser for now
 
 # Claude Code (user-scoped — available in all projects)
 claude mcp add -s user playwright -- npx @playwright/mcp@latest
