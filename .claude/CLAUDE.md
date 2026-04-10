@@ -59,6 +59,8 @@ When an `az` command fails with an authentication/token error, re-authenticate b
 
 - The Atlassian MCP is configured for Jira only (Confluence tools are disabled — auth/VPN issues)
 - For Confluence, use the curl-based confluence skill instead
+- Default issue type is **Task** (not Story) unless explicitly requested otherwise
+- The MCP converts description input from markdown to Jira wiki markup before posting. This means `*text*` becomes italic (not bold). Use markdown-style `**text**` for bold headers when creating issues through the MCP.
 
 ## CI/CD Debugging
 
