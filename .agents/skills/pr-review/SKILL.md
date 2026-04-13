@@ -41,36 +41,40 @@ All comments should be in fenced code blocks for easy copy-paste.
 ### Phase 1: Gather context
 
 1. Fetch PR metadata: `gh pr view <number> --json title,body,comments,reviews`
-2. Fetch diffs: `gh pr diff <number>`
-3. Fetch inline review comments: `gh api repos/{owner}/{repo}/pulls/{number}/comments`
-4. Fetch review summaries: `gh api repos/{owner}/{repo}/pulls/{number}/reviews`
-5. If the PR branch isn't checked out locally, check it out — or ask the user to do so if there are uncommitted changes. Reading actual files is much better than reviewing from diffs alone.
-6. Read the actual changed files on the branch
-7. Check for existing review comments (Copilot, other reviewers) — reinforce good ones, skip resolved ones, don't duplicate
+2. If the PR description (or branch name) references a ticket, fetch it for the original problem statement:
+   - Jira (e.g. `PROJ-123`): use the Atlassian MCP `jira_get_issue`
+   - GitHub issue (e.g. `#42` or `owner/repo#42`): `gh issue view <number>`
+   - If no ticket is linked, skip — don't ask the user to find one
+3. Fetch diffs: `gh pr diff <number>`
+4. Fetch inline review comments: `gh api repos/{owner}/{repo}/pulls/{number}/comments`
+5. Fetch review summaries: `gh api repos/{owner}/{repo}/pulls/{number}/reviews`
+6. If the PR branch isn't checked out locally, check it out — or ask the user to do so if there are uncommitted changes. Reading actual files is much better than reviewing from diffs alone.
+7. Read the actual changed files on the branch
+8. Check for existing review comments (Copilot, other reviewers) — reinforce good ones, skip resolved ones, don't duplicate
 
 ### Phase 2: Discussion round
 
-8. Present findings as a conversation — explain concerns, ask questions, flag tradeoffs
-9. Classify by severity but don't format as postable comments yet:
+1. Present findings as a conversation — explain concerns, ask questions, flag tradeoffs
+2. Classify by severity but don't format as postable comments yet:
    - **Blockers**: bugs, security issues, data loss risks, broken contracts
    - **Should fix**: design issues, missing error handling, doc/code mismatches
    - **Nits**: style, naming, import ordering
    - **Follow-ups**: things worth doing but not blocking this PR
-10. Incorporate the user's initial impressions if they shared any when requesting the review
-11. Wait for user reaction — they may ask questions, add context, disagree, or confirm concerns. Iterate until alignment.
+3. Incorporate the user's initial impressions if they shared any when requesting the review
+4. Wait for user reaction — they may ask questions, add context, disagree, or confirm concerns. Iterate until alignment.
 
 ### Phase 3: Comment drafting
 
-12. Only after discussion, draft postable comments (inline + overall) based on what survived the discussion
-13. Suggest a review type alongside the drafted comments:
-    - **APPROVE** — default. Use liberally so the author can merge when ready. Approving with comments is fine and expected.
-    - **REQUEST_CHANGES** — only for fundamental design issues or critical blockers (security, data loss, broken contracts). If unsure whether something rises to this level, ask.
-    - **COMMENT** — when there's no clear approval or block (e.g. need more context, partially reviewed)
-14. Present suggested comments + review type and ask user which to post (or whether to adjust)
+1. Only after discussion, draft postable comments (inline + overall) based on what survived the discussion
+2. Suggest a review type alongside the drafted comments:
+   - **APPROVE** — default. Use liberally so the author can merge when ready. Approving with comments is fine and expected.
+   - **REQUEST_CHANGES** — only for fundamental design issues or critical blockers (security, data loss, broken contracts). If unsure whether something rises to this level, ask.
+   - **COMMENT** — when there's no clear approval or block (e.g. need more context, partially reviewed)
+3. Present suggested comments + review type and ask user which to post (or whether to adjust)
 
 ### Cleanup
 
-14. After the review is complete (comments posted or user is done), switch back to main and delete any local branches that were checked out for the review.
+1. After the review is complete (comments posted or user is done), switch back to main and delete any local branches that were checked out for the review.
 
 ## Posting Reviews via GitHub API
 
@@ -104,6 +108,7 @@ Key gotchas:
 ## What to Look For
 
 - Does the code match what the PR description claims?
+- If a ticket is linked (Jira, GitHub issue, etc.), does the change actually address the problem described there — not just the narrower interpretation in the PR description? Flag scope mismatches.
 - Are there code paths that contradict documentation?
 - Are there concurrency, caching, or state-sharing issues?
 - Is error handling appropriate at system boundaries?
