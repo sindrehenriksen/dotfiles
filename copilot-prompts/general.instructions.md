@@ -64,7 +64,7 @@ Tips for fetching PR data:
 
 ## Atlassian MCP
 
-- The Atlassian MCP works for Jira but NOT for Confluence (auth/VPN issues)
+- The Atlassian MCP is configured for Jira only (Confluence tools are disabled — auth/VPN issues)
 - For Confluence, use the curl-based confluence skill/agent instead
 - Default issue type is **Task** (not Story) unless explicitly requested otherwise
 - The MCP converts description input from markdown to Jira wiki markup before posting. This means `*text*` becomes italic (not bold). Use markdown-style `**text**` for bold headers when creating issues through the MCP.

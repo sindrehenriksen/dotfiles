@@ -11,9 +11,12 @@ cd ~/dev/tools/aikido-mcp && npm install && npm run build && cd -
 #   https://app.aikido.dev/settings/integrations/api/aikido/rest
 
 # Jira MCP (mcp-atlassian, via uvx — no install needed)
-# Confluence tools are disabled — the MCP doesn't work reliably for Confluence
-# (auth/VPN issues). Use the curl-based skill/agent instead (.agents/skills/confluence/).
-# Get a personal access token from your Jira profile.
+# Confluence MCP tools are intentionally disabled by omitting CONFLUENCE_URL
+# and CONFLUENCE_PERSONAL_TOKEN from the MCP env below — the MCP doesn't work
+# reliably for Confluence (auth/VPN issues). Use the curl-based skill instead
+# (.agents/skills/confluence/), which reads CONFLUENCE_URL and
+# CONFLUENCE_PERSONAL_TOKEN from ~/.secrets-visma.env.
+# Jira and Confluence need separate PATs — generate each from its own profile.
 
 #### MCP config locations
 # Three clients need MCP servers configured. Claude Desktop and VS Code use JSON
