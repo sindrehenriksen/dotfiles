@@ -59,7 +59,7 @@ All comments should be in fenced code blocks for easy copy-paste.
    - **Blockers**: bugs, security issues, data loss risks, broken contracts
    - **Should fix**: design issues, missing error handling, doc/code mismatches
    - **Nits**: style, naming, import ordering
-   - **Follow-ups**: things worth doing but not blocking this PR
+   - **Follow-ups**: reserve for things that are genuinely out of scope (separate system, needs design discussion, depends on other work). Default is to suggest fixing now — with AI assistance most fixes are cheap, and deferring fragments the work. Don't reach for "follow-up" just because a finding is minor; nits and should-fixes can be handled in this PR.
 3. Incorporate the user's initial impressions if they shared any when requesting the review
 4. Wait for user reaction — they may ask questions, add context, disagree, or confirm concerns. Iterate until alignment.
 
@@ -67,7 +67,7 @@ All comments should be in fenced code blocks for easy copy-paste.
 
 1. Only after discussion, draft postable comments (inline + overall) based on what survived the discussion
 2. Suggest a review type alongside the drafted comments:
-   - **APPROVE** — default. Use liberally so the author can merge when ready. Approving with comments is fine and expected.
+   - **APPROVE** — default. Use liberally so the author can merge when ready. Approving with should-fix comments is fine — trust the author to address them before merging. Call that expectation out in the overall comment (e.g. "approving — please take a look at the inline should-fixes before merging") so it's explicit rather than implied.
    - **REQUEST_CHANGES** — only for fundamental design issues or critical blockers (security, data loss, broken contracts). If unsure whether something rises to this level, ask.
    - **COMMENT** — when there's no clear approval or block (e.g. need more context, partially reviewed)
 3. Present suggested comments + review type and ask user which to post (or whether to adjust)
