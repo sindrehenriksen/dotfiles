@@ -74,3 +74,14 @@ Tips for fetching PR data:
 - Use `gh` CLI to fetch CI logs, not `fetch_webpage` (GitHub Actions URLs return 404 for API fetches)
 - Preferred log-fetching: `gh api repos/{owner}/{repo}/actions/jobs/{job-id}/logs`
 - `gh run view --log` often reports runs as "still in progress" even when complete — use the API endpoint instead
+
+## Browser Automation
+
+- **Default tool: Playwright MCP** — use for all interactive browser testing, UI verification, and form filling
+- Playwright opens a real Chrome window visible to the user — no need for VS Code Simple Browser alongside it
+- `agent-browser` CLI exists as a fallback for subagents/skills that only have terminal access, but Playwright MCP is preferred:
+  - More reliable click targeting (handles overlapping elements and scroll containers better)
+  - JS evaluation is cleaner (no shell quoting friction)
+  - Screenshots return inline as images (no save-to-file + view_image round-trip)
+  - Fewer tool calls per flow (~30% fewer round-trips)
+- Always close the browser when done (`browser_close` / `agent-browser close`)
