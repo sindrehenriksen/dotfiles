@@ -38,6 +38,18 @@ All comments should be in fenced code blocks for easy copy-paste.
 
 ## Process
 
+### Setup: review worktree
+
+Reviews happen in a dedicated git worktree per repo — **never in the user's active working dir** (branch-switching would disrupt in-progress work). Convention: `<repo>-review` as a sibling of the active repo (e.g. `~/dev/flyt/flytai-api-review` for `~/dev/flyt/flytai-api`).
+
+1. `cd` into `<repo>-review`. If it doesn't exist, create it from the active repo:
+   ```bash
+   git -C <active-repo-path> worktree add ../<repo>-review origin/main
+   ```
+   One-time on first use: copy `.env` from the sibling and install deps (`node_modules`, venv, etc. are gitignored and not shared across worktrees).
+2. Always start with up-to-date main: `git fetch origin && git switch main && git pull --ff-only`.
+3. Check out the PR branch (strongly preferred — reading actual files beats diffs alone): `gh pr checkout <number>`. Skip only for trivial PRs where diff view is obviously sufficient.
+
 ### Phase 1: Gather context
 
 1. Fetch PR metadata: `gh pr view <number> --json title,body,comments,reviews`
@@ -48,9 +60,8 @@ All comments should be in fenced code blocks for easy copy-paste.
 3. Fetch diffs: `gh pr diff <number>`
 4. Fetch inline review comments: `gh api repos/{owner}/{repo}/pulls/{number}/comments`
 5. Fetch review summaries: `gh api repos/{owner}/{repo}/pulls/{number}/reviews`
-6. If the PR branch isn't checked out locally, check it out — or ask the user to do so if there are uncommitted changes. Reading actual files is much better than reviewing from diffs alone.
-7. Read the actual changed files on the branch
-8. Check for existing review comments (Copilot, other reviewers) — reinforce good ones, skip resolved ones, don't duplicate
+6. Read the actual changed files on the branch (checked out in Setup)
+7. Check for existing review comments (Copilot, other reviewers) — reinforce good ones, skip resolved ones, don't duplicate
 
 ### Phase 2: Discussion round
 
