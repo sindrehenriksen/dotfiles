@@ -50,12 +50,12 @@ All comments should be in fenced code blocks for easy copy-paste.
 
 Reviews happen in a dedicated git worktree per repo — **never in the user's active working dir** (branch-switching would disrupt in-progress work). Convention: `<repo>-review` as a sibling of the active repo (e.g. `~/dev/flyt/flytai-api-review` for `~/dev/flyt/flytai-api`).
 
-1. `cd` into `<repo>-review`. If it doesn't exist, create it from the active repo:
+1. `cd` into `<repo>-review`. If it doesn't exist, create it detached at `origin/main` from the active repo:
    ```bash
-   git -C <active-repo-path> worktree add ../<repo>-review origin/main
+   git -C <active-repo-path> worktree add --detach ../<repo>-review origin/main
    ```
    One-time on first use: copy `.env` from the sibling and install deps (`node_modules`, venv, etc. are gitignored and not shared across worktrees).
-2. Always start with up-to-date main: `git fetch origin && git switch main && git pull --ff-only`.
+2. Fetch and park on detached `origin/main`: `git fetch origin && git switch --detach origin/main`. **Don't** check out local `main` here — git would lock it out of the active working dir (same branch can't be checked out in two worktrees). Use `origin/main` refs for any main-comparisons during review.
 3. Check out the PR branch (strongly preferred — reading actual files beats diffs alone): `gh pr checkout <number>`. Skip only for trivial PRs where diff view is obviously sufficient.
 
 Each agent's trust model for paths outside the invocation cwd is independent — configure per-agent to avoid mid-session approval prompts on file ops in the review worktree. For Claude Code: `permissions.additionalDirectories` in `~/.claude/settings.local.json` (see `.claude/CLAUDE.md`).
@@ -109,7 +109,7 @@ Always run first. Shared picture of what the PR *means* before any findings.
 
 ### Cleanup
 
-1. After the review is complete (comments posted or user is done), switch back to main and delete any local branches that were checked out for the review.
+1. After the review is complete (comments posted or user is done), park the worktree back on detached `origin/main` (`git switch --detach origin/main`) and delete the local PR branch (`git branch -D <pr-branch>`). Don't switch to local `main` here — it would lock `main` out of the active working dir.
 
 ## Posting Reviews via GitHub API
 
