@@ -13,6 +13,14 @@ allowed-tools: Read, Grep, Glob, Bash, Agent, WebFetch
 - Don't explain generic concepts they already know — point to the specific code/behavior that's the concern
 - Be direct, not formal — skip preamble and filler
 
+## Orientation
+
+The human reviewer's job is **strategic judgment**. Automated layers — code reviewers (Copilot et al.), security scanners, eval suites, linters, CI — already cover style, tactical bugs, known vulnerabilities, and regressions caught by tests. Don't duplicate them. Spend attention on what only a human (or human+AI pair with full repo context) can weigh: product meaning, architectural direction, security *posture* (not tactical vulns), repo ergonomics for humans and agents, whether strategic test coverage exists where correctness is hard to eyeball.
+
+When in doubt: *could a scanner, linter, or automated reviewer have caught this?* If yes, deprioritize it. If no, that's where your review is valuable.
+
+**Conversation discipline.** Keep discussion with the user on top-tier findings. Nits and any other tactical concerns that slipped through: compress to a one-line count ("3 nits inline"), don't walk through each. Post them inline if useful to the author — just don't burn the conversation on them.
+
 ## Comment Structure
 
 **Default structure: one overall summary comment + individual findings as inline comments on specific lines/files.** Specific findings always go inline — don't put detailed findings in the overall comment. Use this structure in both the discussion phase (Phase 2) and the drafting phase (Phase 3): present each finding anchored to a file and line, with severity, so the user can see what will become inline comments.
@@ -52,6 +60,20 @@ Reviews happen in a dedicated git worktree per repo — **never in the user's ac
 
 Each agent's trust model for paths outside the invocation cwd is independent — configure per-agent to avoid mid-session approval prompts on file ops in the review worktree. For Claude Code: `permissions.additionalDirectories` in `~/.claude/settings.local.json` (see `.claude/CLAUDE.md`).
 
+### Phase 0: Frame the change
+
+Always run first. Shared picture of what the PR *means* before any findings.
+
+**Pre-Phase-0 fetches.** `gh pr view` (PR metadata) is always required. Also pre-fetch the linked ticket if the PR body is thin, references the ticket for details, or ticket-vs-code alignment would meaningfully affect Phase 0 framing. Skip for clearly self-describing PRs (dep bumps, tooling, trivial chores); Phase 1 still handles those if we proceed deeper.
+
+1. **Plain-language, outcome-focused summary.** 3–5 sentences — what changes for users / consumers / the system / the team. Skip implementation; don't restate the PR description.
+2. **Classification** — *purely technical* (refactor, NFR, perf, tooling, security hardening with no posture change) or *has implications* (flag which: product / UX, architectural, security posture, repo ergonomics, stakeholder / contract, compliance, strategic test coverage).
+3. **Context only the human can supply** — where your judgment benefits from things the AI can't see (cross-team impact, external consumer assumptions, in-flight initiatives, product direction).
+
+**Triage mode.** If the user's ask signals they just want a quick read — *"anything I need to understand"*, *"is this purely technical"*, *"just a quick look"* — stop after Phase 0 and ask how to proceed. Offer two paths: full review (Phases 1–3 with discussion), or post approval after a light pass (run Phases 1–3 independently, post anything worth posting inline, approve). Don't hunt for findings until asked.
+
+**Autonomous mode.** If the user says *"proceed to approve"*, *"go ahead and approve"*, *"review + approve"*, or similar — run Phases 1–3 independently and post without pausing for confirmation (i.e. skip Phase 3 step 3). Only come back to the user if a blocker surfaces, a REQUEST_CHANGES decision is in play, the "context only the human can supply" points from Phase 0 genuinely affect whether to approve, or something mechanical about posting is unclear. Otherwise post, report the review URL, and clean up.
+
 ### Phase 1: Gather context
 
 1. Fetch PR metadata: `gh pr view <number> --json title,body,comments,reviews`
@@ -67,10 +89,10 @@ Each agent's trust model for paths outside the invocation cwd is independent —
 
 ### Phase 2: Discussion round
 
-1. Present findings as a conversation — explain concerns, ask questions, flag tradeoffs
+1. Present findings as a conversation — explain concerns, ask questions, flag tradeoffs. Lead with top-tier (strategic) findings; compress bottom-tier (nits/style) into a one-line count.
 2. Classify by severity but don't format as postable comments yet:
    - **Blockers**: bugs, security issues, data loss risks, broken contracts
-   - **Should fix**: design issues, missing error handling, doc/code mismatches
+   - **Should fix**: design issues, missing error handling, doc/code mismatches, missing strategic test coverage, missing repo-ergonomics updates that the change requires
    - **Nits**: style, naming, import ordering
    - **Follow-ups**: reserve for things that are genuinely out of scope (separate system, needs design discussion, depends on other work). Default is to suggest fixing now — with AI assistance most fixes are cheap, and deferring fragments the work. Don't reach for "follow-up" just because a finding is minor; nits and should-fixes can be handled in this PR.
 3. Incorporate the user's initial impressions if they shared any when requesting the review
@@ -80,7 +102,7 @@ Each agent's trust model for paths outside the invocation cwd is independent —
 
 1. Only after discussion, draft postable comments (inline + overall) based on what survived the discussion
 2. Suggest a review type alongside the drafted comments:
-   - **APPROVE** — default. Use liberally so the author can merge when ready. Approving with should-fix comments is fine — trust the author to address them before merging. Call that expectation out in the overall comment (e.g. "approving — please take a look at the inline should-fixes before merging") so it's explicit rather than implied.
+   - **APPROVE** — default. Use liberally. The goal is to unblock strategic judgment, not gatekeep correctness — AI reviewers handle correctness gatekeeping. If you have no strategic concern, approve, even if the PR has nits. Approving with should-fix comments is fine — trust the author to address them before merging. Call that expectation out in the overall comment (e.g. "approving — please take a look at the inline should-fixes before merging") so it's explicit rather than implied.
    - **REQUEST_CHANGES** — only for fundamental design issues or critical blockers (security, data loss, broken contracts). If unsure whether something rises to this level, ask.
    - **COMMENT** — when there's no clear approval or block (e.g. need more context, partially reviewed)
 3. Present suggested comments + review type and ask user which to post (or whether to adjust)
@@ -120,12 +142,27 @@ Key gotchas:
 
 ## What to Look For
 
+Grouped by impact tier. Spend reviewing effort proportional to tier — top tier is where human judgment adds value that automated reviewers can't.
+
+### Top tier — human-reviewer-only judgment
+
+- **Product / consumer impact.** What changes for the people or systems using this? Does the observable contract change (API shapes, UI flows, CLI behavior, agent responses, AI outputs)? Breaking vs additive?
+- **Architectural direction.** Does this shift how the system is structured, who owns what, or which patterns will scale? Would repeating this approach in five future PRs be good or bad?
+- **Security posture** (not tactical vulnerabilities — AI security reviews and scanners cover those). Strategic shifts: new attack surface, changed trust model, compliance implications, secrets / identity boundary shifts, cases where static scanning would classify the code differently than the runtime behaves.
+- **Repo ergonomics — including *missing* changes.** Strategic question: does this leave the repo harder or easier to work in — for humans *and* AI agents? Whether instructions, conventions, and guardrails (e.g. `CLAUDE.md`, `AGENTS.md`, rule files, skills, import-linter contracts, pre-commit hooks) stay coherent with the code after this PR. Call out *omissions* as much as additions — a renamed concept whose old name lingers in instructions, a new module without doc/rule updates, or a silently removed guardrail all compound over time. Don't chase every minor inconsistency; flag things that will materially slow future work.
+- **Strategic test coverage.** For changes where correctness is hard to eyeball — AI pipelines (evals, deepeval-style regression suites, prompt / model changes), public API contracts (E2E tests), UI flows (integration tests), infra (smoke tests against real resources) — is coverage present and meaningful? Missing or weakened coverage here is a top-tier concern, not a nit: fast-paced iteration on models, prompts, contracts, or shared components *requires* suites that prove improvements don't hide regressions. Also flag the inverse: tests that look thorough but don't actually exercise the changed behavior.
+- **Stakeholder / scope.** Does the PR cross team boundaries, touch shared infra, or change contracts with external consumers in ways that need alignment outside this review?
+- **Ticket ↔ PR alignment.** If a ticket is linked, does the change address the actual problem described there — or just the narrower interpretation in the PR description? Flag scope mismatches in either direction (PR does less than the ticket asks; PR does more and quietly expands scope).
+
+### Middle tier — worth a quick pass, often already handled
+
 - Does the code match what the PR description claims?
-- If a ticket is linked (Jira, GitHub issue, etc.), does the change actually address the problem described there — not just the narrower interpretation in the PR description? Flag scope mismatches.
-- Are there code paths that contradict documentation?
-- Are there concurrency, caching, or state-sharing issues?
-- Is error handling appropriate at system boundaries?
-- Do tests cover the new behavior (not just the happy path)?
-- Are there unnecessary dual code paths or dead code?
-- Infra changes: parameterization, secrets handling, consistency with existing modules
-- Frontend: contract changes visible to external consumers
+- Contradictions between code and existing documentation.
+- Error handling at system boundaries (external APIs, user input, untrusted data).
+- Concurrency, caching, or state-sharing issues.
+- Unnecessary dual code paths, dead code, incomplete refactors.
+
+### Bottom tier — AI reviewers cover this; minimize effort
+
+- Style, naming, import ordering, docstring nits, micro-optimizations.
+- Policy: **+1 automated reviewer findings when right** (add brief reasoning so the note isn't just noise). Don't independently hunt for this tier. If you happen to notice something, post it inline; don't lead discussion with it.
