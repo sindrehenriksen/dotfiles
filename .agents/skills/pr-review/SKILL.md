@@ -50,6 +50,8 @@ Reviews happen in a dedicated git worktree per repo — **never in the user's ac
 2. Always start with up-to-date main: `git fetch origin && git switch main && git pull --ff-only`.
 3. Check out the PR branch (strongly preferred — reading actual files beats diffs alone): `gh pr checkout <number>`. Skip only for trivial PRs where diff view is obviously sufficient.
 
+Each agent's trust model for paths outside the invocation cwd is independent — configure per-agent to avoid mid-session approval prompts on file ops in the review worktree. For Claude Code: `permissions.additionalDirectories` in `~/.claude/settings.local.json` (see `.claude/CLAUDE.md`).
+
 ### Phase 1: Gather context
 
 1. Fetch PR metadata: `gh pr view <number> --json title,body,comments,reviews`
