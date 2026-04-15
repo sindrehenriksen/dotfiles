@@ -28,6 +28,20 @@ autocmd("BufWritePre", {
 	end,
 })
 
+-- Warn when opening a file type with no Tree-sitter grammar installed
+autocmd("FileType", {
+	callback = function()
+		local ft = vim.bo.filetype
+		if ft == "" or vim.bo.buftype ~= "" then return end
+		vim.schedule(function()
+			local ok = pcall(vim.treesitter.get_parser, 0, ft)
+			if not ok then
+				vim.notify("No Tree-sitter grammar for: " .. ft, vim.log.levels.WARN)
+			end
+		end)
+	end,
+})
+
 -- Last accessed tab tracking
 vim.g.lasttab = 1
 autocmd("TabLeave", {
