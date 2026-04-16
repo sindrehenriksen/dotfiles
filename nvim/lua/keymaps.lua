@@ -4,12 +4,6 @@ local map = vim.keymap.set
 map("n", "<leader><cr>", "<cmd>noh<cr>", { silent = true })
 
 if not vim.g.vscode then
-	-- Window navigation
-	map("n", "<C-j>", "<C-W>j")
-	map("n", "<C-k>", "<C-W>k")
-	map("n", "<C-h>", "<C-W>h")
-	map("n", "<C-l>", "<C-W>l")
-
 	-- Buffer navigation
 	map("n", "<leader>j", "<cmd>bnext<cr>")
 	map("n", "<leader>k", "<cmd>bprevious<cr>")
