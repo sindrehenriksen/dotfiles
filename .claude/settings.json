@@ -86,7 +86,21 @@
       "Bash(pnpm install)",
       "Bash(pnpm i)"
     ],
+    "deny": [
+      "Bash(git push --force)",
+      "Bash(git push --force *)",
+      "Bash(git push * --force)",
+      "Bash(git push * --force *)",
+      "Bash(git push -f)",
+      "Bash(git push -f *)",
+      "Bash(git push * -f)",
+      "Bash(git push * -f *)"
+    ],
     "ask": [
+      "Bash(git commit --amend)",
+      "Bash(git commit --amend *)",
+      "Bash(git commit * --amend)",
+      "Bash(git commit * --amend *)",
       "Bash(find * -delete *)",
       "Bash(find * -exec *)",
       "Bash(find * -execdir *)",
