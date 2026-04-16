@@ -44,6 +44,12 @@ else
     [ -f /usr/share/doc/fzf/examples/completion.zsh ] && source /usr/share/doc/fzf/examples/completion.zsh
 fi
 
+# Move fzf widgets off Ctrl+T / Ctrl+R so Ghostty can use Ctrl+{h,t,n,s} for split nav
+bindkey -r '^T'
+bindkey -r '^R'
+bindkey '\et' fzf-file-widget
+bindkey '\er' fzf-history-widget
+
 
 #### Plugins
 
