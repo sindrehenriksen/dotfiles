@@ -9,6 +9,8 @@ theme = Gruvbox Dark Hard
 
 # Window / tabs
 gtk-titlebar = true
+gtk-titlebar-style = tabs
+gtk-toolbar-style = flat
 window-padding-x = 4
 window-padding-y = 4
 
