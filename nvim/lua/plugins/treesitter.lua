@@ -8,6 +8,7 @@ return {
 			ensure_installed = {
 				"python", "bash", "json", "yaml", "toml",
 				"lua", "typescript", "javascript",
+				"markdown", "gitcommit", "diff",
 			},
 		},
 	},

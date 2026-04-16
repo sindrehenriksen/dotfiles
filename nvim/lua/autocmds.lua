@@ -28,16 +28,18 @@ autocmd("BufWritePre", {
 	end,
 })
 
--- Warn when opening a file type with no Tree-sitter grammar installed
+-- Warn when opening a file type whose Tree-sitter parser exists but isn't installed
 autocmd("FileType", {
 	callback = function()
 		local ft = vim.bo.filetype
 		if ft == "" or vim.bo.buftype ~= "" then return end
 		vim.schedule(function()
-			local ok = pcall(vim.treesitter.get_parser, 0, ft)
-			if not ok then
-				vim.notify("No Tree-sitter grammar for: " .. ft, vim.log.levels.WARN)
-			end
+			local ok, parsers = pcall(require, "nvim-treesitter.parsers")
+			if not ok then return end
+			local lang = parsers.ft_to_lang(ft)
+			if not lang or lang == "text" then return end
+			if parsers.has_parser(lang) then return end -- already installed
+			vim.notify("No Tree-sitter grammar for: " .. ft .. " (parser: " .. lang .. ")", vim.log.levels.WARN)
 		end)
 	end,
 })
