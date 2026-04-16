@@ -18,6 +18,8 @@ When generating commit messages:
 - Always be descriptive about the actual changes, not tracking artifacts
 - Defer to any repo-specific commit conventions
 - Sign with `Co-Authored-By: <agent> <model> <version>` (e.g. `Co-Authored-By: Copilot GPT-4o`). No email, no angle brackets.
+- Never force push (`--force`, `-f`). Never amend commits without explicit approval.
+- Never push to a remote unless explicitly asked. The user handles pushes themselves.
 
 ## Pull Request Descriptions
 

@@ -48,6 +48,7 @@ Don't search `~` broadly for settings — check this repo and the paths above.
 - Always be descriptive about the actual changes, not tracking artifacts
 - Defer to any repo-specific commit conventions
 - Sign with `Co-Authored-By: Claude <model> <version>` (e.g. `Co-Authored-By: Claude Opus 4.6`). No email, no angle brackets.
+- Never push to a remote unless explicitly asked. The user handles pushes themselves.
 
 ## Pull Request Descriptions
 
