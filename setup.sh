@@ -77,6 +77,10 @@ agent-browser install
 # Claude Code (user-scoped — available in all projects)
 claude mcp add -s user playwright -- npx @playwright/mcp@latest
 
+#### Claude Code preferences (per-machine, stored in ~/.claude.json)
+# Enable vim keybindings in the input prompt: run /config in a Claude Code
+# session and set "Editor mode" to Vim. Not persistable via settings.json.
+
 # VS Code / GitHub Copilot: add to mcp.json (settings gear > MCP Servers, or directly):
 #   macOS: ~/Library/Application Support/Code/User/mcp.json
 #   Linux: ~/.config/Code/User/mcp.json
