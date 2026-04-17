@@ -51,6 +51,14 @@ sudo apt install pipx
 pipx install hatch
 pip install virtualenv virtualenvwrapper
 
+#### Hammerspoon (macOS window manager — replaces Divvy)
+# if mac
+brew install --cask hammerspoon
+# After install: launch Hammerspoon.app, grant accessibility access
+# (System Settings > Privacy & Security > Accessibility), and in Hammerspoon
+# preferences enable "Launch at login" + "Automatically reload config when
+# any files change". Config is symlinked via install_symlinks.sh.
+
 #### 1password-cli (optional)
 # if mac
 brew install 1password-cli

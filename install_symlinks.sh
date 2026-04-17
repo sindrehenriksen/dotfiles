@@ -43,6 +43,10 @@ if [[ "$(uname)" == "Darwin" ]]; then
     # macOS: Ghostty config
     mkdir -p ~/Library/Application\ Support/com.mitchellh.ghostty
     link ~/dotfiles/ghostty/config ~/Library/Application\ Support/com.mitchellh.ghostty/config
+
+    # macOS: Hammerspoon config
+    mkdir -p ~/.hammerspoon
+    link ~/dotfiles/hammerspoon/init.lua ~/.hammerspoon/init.lua
 else
     # Linux: VS Code prompts
     mkdir -p ~/.config/Code/User/prompts
