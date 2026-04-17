@@ -4,6 +4,12 @@ local map = vim.keymap.set
 map("n", "<leader><cr>", "<cmd>noh<cr>", { silent = true })
 
 if not vim.g.vscode then
+	-- Window navigation (Dvorak home row: h=left, t=up, n=down, s=right)
+	map("n", "<C-h>", "<C-W>h")
+	map("n", "<C-t>", "<C-W>k")
+	map("n", "<C-n>", "<C-W>j")
+	map("n", "<C-s>", "<C-W>l")
+
 	-- Buffer navigation
 	map("n", "<leader>j", "<cmd>bnext<cr>")
 	map("n", "<leader>k", "<cmd>bprevious<cr>")
