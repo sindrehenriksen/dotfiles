@@ -51,10 +51,22 @@ Same binding on both OSes for muscle-memory transfer. Same cluster as Ghostty sp
 
 ### macOS — Hammerspoon
 
-- Three-column layout via grid/layout definitions.
-- Divvy-equivalent shortcuts in the same config for one-off window placement.
-- Single config file (`~/.hammerspoon/init.lua`) — goes in this repo, symlinked.
-- Master-stack middle column: custom Lua function that sizes stacked windows.
+Single config file (`hammerspoon/init.lua`), symlinked to `~/.hammerspoon/init.lua`. Replaces Divvy.
+
+**Picker:** `Opt+Cmd+T` enters a modal layout mode (alert shows "Layout"); press one key to place the focused window. Escape exits. Key scheme is Dvorak home row.
+
+| Key | Action |
+|---|---|
+| `h` / `t` / `n` | left / center / right **third** (full height) |
+| `g` / `c` / `r` | upper half of that column |
+| `m` / `v` | lower half of left / right column |
+| `c` / `w` / `Opt+w` | center column: master (top 50%) / stack middle-quarter ↔ bottom-quarter (toggles) / full lower half |
+| `Shift+h` / `t` / `n` | left / center / right **half** (wider than third) |
+| `s` | full screen |
+
+**Display cycling:** pressing the same key again when the window is already at that target cycles it to the next screen. Works for all single-shot placements (not `w`, which keeps middle ↔ bottom toggle on the current screen). Cross-screen moves apply `setFrame` twice (second via a 0.05s timer) to correct a mixed-DPI sizing glitch.
+
+**Gaps:** `GAP` constant at the top of `init.lua` (default 8px) — air around every window including screen edges. Tune to taste.
 
 ### Linux/Ubuntu — GNOME Shell extension
 
