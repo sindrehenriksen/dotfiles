@@ -7,18 +7,32 @@
 -- "Automatically reload config when any files change" in Hammerspoon prefs
 -- if you want edits to this file to pick up without manual reload.
 
-local GAP = 8
-local TOL = 4  -- frame-match tolerance in pixels for slot detection
+local GAP = 10     -- gap between windows and between window and screen edge
+local TOP_GAP = 0  -- top edge: 0 keeps windows flush to the menu bar
+local TOL = 4      -- frame-match tolerance in pixels for slot detection
 
 hs.window.animationDuration = 0
 
+-- Compute the target frame for a slot with fractional coords. Windows
+-- touching a screen boundary get the full GAP; interior edges get GAP/2,
+-- so adjacent windows sum to exactly GAP between them. Top edge uses
+-- TOP_GAP (0 by default — the menu bar provides visual separation).
 local function target_frame(screen, xf, yf, wf, hf)
   local s = screen:frame()
+  local half = GAP / 2
+  local at_left   = xf <= 0.001
+  local at_right  = xf + wf >= 0.999
+  local at_top    = yf <= 0.001
+  local at_bottom = yf + hf >= 0.999
+  local left   = at_left   and GAP     or half
+  local right  = at_right  and GAP     or half
+  local top    = at_top    and TOP_GAP or half
+  local bottom = at_bottom and GAP     or half
   return {
-    x = s.x + xf * s.w + GAP,
-    y = s.y + yf * s.h + GAP,
-    w = wf * s.w - 2 * GAP,
-    h = hf * s.h - 2 * GAP,
+    x = s.x + xf * s.w + left,
+    y = s.y + yf * s.h + top,
+    w = wf * s.w - left - right,
+    h = hf * s.h - top - bottom,
   }
 end
 
