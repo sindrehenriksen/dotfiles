@@ -31,14 +31,18 @@ A predictable, static three-column layout on widescreen: browser on the left, pr
 - **Code:** `Ctrl+Tab` / `Alt+N` in the right Ghostty window to switch nvim tab (= switch project).
 - **Terminal:** click or keybind to the matching project terminal in the middle column. Reorder manually to put the active one in the top (50%) slot if wanted. No automatic swap on focus.
 
-## Directional window focus (across columns)
+## Directional window focus and swap
 
-Alt-tabbing between columns is painful. Use `Super+h/t/n/s` (Dvorak home row) for focus left/up/down/right across OS windows.
+Alt-tabbing between columns is painful. Dvorak home row `h/t/n/s` = west/north/south/east, matching Ghostty's split nav cluster (`Ctrl+h/t/n/s`), but with different modifiers to avoid conflicts.
 
-- **macOS (Hammerspoon):** `hs.window.focusWindowEast/West/North/South()`
-- **Linux:** built into Tiling Shell, Forge, and PaperWM. Configure in the extension's settings.
+- **Focus**: `Ctrl+Alt+h/t/n/s` — move focus to the window in that direction (crosses screens).
+- **Swap**: `Cmd+Ctrl+h/t/n/s` — exchange frames with the window in that direction (useful for reordering middle-column terminals).
 
-Same binding on both OSes for muscle-memory transfer. Same cluster as Ghostty split nav (`Ctrl+h/t/n/s`), different modifier. Avoid `Ctrl+h/j/k/l` (former Neovim window nav) and `Ctrl+h/t/n/s` (Ghostty splits).
+**macOS (Hammerspoon):** implemented via `hs.window.focusWindow{East,West,North,South}()` for focus and `windowsTo{...}` + frame-exchange for swap.
+
+**Linux:** directional focus is built into Tiling Shell, Forge, and PaperWM (configure in the extension's settings). Swap semantics vary by extension.
+
+Same chords on both OSes for muscle-memory transfer. `Cmd+Ctrl` was chosen over `Ctrl+Alt+Shift` (too heavy) and `Cmd` alone (breaks hide/new/save).
 
 ## Why this shape
 

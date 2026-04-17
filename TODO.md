@@ -8,7 +8,7 @@ Three-column layout (browser | terminals | nvim tabs) — design in `docs/window
 
 - [x] macOS: Hammerspoon config (`~/.hammerspoon/init.lua`, goes in this repo, symlinked) — replaces Divvy
 - [ ] Linux: Tiling Shell GNOME extension (try first); Forge as fallback
-- [ ] Cross-window directional focus: `Super+h/t/n/s` for focus left/up/down/right across OS windows. Same cluster as Ghostty splits, different modifier
+- [x] Cross-window directional focus and swap on Dvorak home row (macOS: Hammerspoon; Linux: TBD in the GNOME extension)
 
 ## Cleanup
 
