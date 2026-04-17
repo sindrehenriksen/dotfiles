@@ -41,6 +41,18 @@ local function frames_equal(a, b)
      and math.abs(a.w - b.w) < TOL and math.abs(a.h - b.h) < TOL
 end
 
+-- Looser "already at target" check for cycle detection: treats a window
+-- with matching x/y as "placed" even if it's larger than the target (e.g.
+-- Chrome's min width prevents shrinking on smaller screens). Without this,
+-- apps that refuse to shrink get stuck on a screen since repeat-presses
+-- would only re-apply the same (ineffective) target.
+local function at_target(frame, target)
+  return math.abs(frame.x - target.x) < TOL
+     and math.abs(frame.y - target.y) < TOL
+     and frame.w >= target.w - TOL
+     and frame.h >= target.h - TOL
+end
+
 local THIRD = 1 / 3
 
 -- Named grid slots. Any window whose frame matches one of these (on its
@@ -174,7 +186,7 @@ local function place_slot(name)
   local screen = win:screen()
   local target = slot_frame(screen, name)
   local crossing = false
-  if frames_equal(win:frame(), target) then
+  if at_target(win:frame(), target) then
     local next_screen = screen:next()
     if next_screen and next_screen:getUUID() ~= screen:getUUID() then
       screen = next_screen
@@ -197,7 +209,7 @@ local function place_raw(xf, yf, wf, hf)
   local screen = win:screen()
   local target = target_frame(screen, xf, yf, wf, hf)
   local crossing = false
-  if frames_equal(win:frame(), target) then
+  if at_target(win:frame(), target) then
     local next_screen = screen:next()
     if next_screen and next_screen:getUUID() ~= screen:getUUID() then
       screen = next_screen
