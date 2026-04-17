@@ -48,7 +48,12 @@ return {
 		opts = {},
 	},
 
-	-- Side-by-side diffs
+	-- Git diffs. `diff2_vertical` stacks old/new top-over-bottom, which fits
+	-- a narrow window better than the default side-by-side. Cycle layouts
+	-- inside Diffview with `g<C-x>`.
+	-- TODO: diffview.nvim only supports `diff2_vertical` / `diff2_horizontal`
+	-- for regular diffs (`diff1_plain` is merge-tool-only). If it ever adds a
+	-- single-pane or VS Code-style inline-overlay layout, switch to that.
 	{
 		"sindrets/diffview.nvim",
 		cmd = { "DiffviewOpen", "DiffviewClose", "DiffviewFileHistory" },
@@ -57,6 +62,11 @@ return {
 			{ "<leader>dc", "<cmd>DiffviewClose<cr>", desc = "Diffview close" },
 			{ "<leader>dh", "<cmd>DiffviewFileHistory %<cr>", desc = "File history" },
 		},
-		opts = {},
+		opts = {
+			view = {
+				default = { layout = "diff2_vertical" },
+				file_history = { layout = "diff2_vertical" },
+			},
+		},
 	},
 }
