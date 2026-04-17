@@ -23,9 +23,3 @@ cursor-style-blink = false
 copy-on-select = clipboard
 mouse-hide-while-typing = true
 scrollback-limit = 100000
-
-# Split navigation (Dvorak home row: h=left, t=up, n=down, s=right)
-keybind = ctrl+h=goto_split:left
-keybind = ctrl+t=goto_split:up
-keybind = ctrl+n=goto_split:down
-keybind = ctrl+s=goto_split:right

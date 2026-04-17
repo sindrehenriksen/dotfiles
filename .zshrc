@@ -37,18 +37,13 @@ bindkey '^?' backward-delete-char
 #[ -f ~/.fzf.zsh ] && source ~/.fzf.zsh && source ~/dotfiles/.fzf_config
 source ~/dotfiles/.fzf_config
 if [[ "$(uname)" == "Darwin" ]]; then
+    source /opt/homebrew/opt/fzf/shell/key-bindings.zsh
     source /opt/homebrew/opt/fzf/shell/completion.zsh
 else
     # fzf keybindings and completion on Linux (apt install)
     [ -f /usr/share/doc/fzf/examples/key-bindings.zsh ] && source /usr/share/doc/fzf/examples/key-bindings.zsh
     [ -f /usr/share/doc/fzf/examples/completion.zsh ] && source /usr/share/doc/fzf/examples/completion.zsh
 fi
-
-# Move fzf widgets off Ctrl+T / Ctrl+R so Ghostty can use Ctrl+{h,t,n,s} for split nav
-bindkey -r '^T'
-bindkey -r '^R'
-bindkey '\et' fzf-file-widget
-bindkey '\er' fzf-history-widget
 
 
 #### Plugins
