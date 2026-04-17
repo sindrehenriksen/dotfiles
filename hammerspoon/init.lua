@@ -264,4 +264,36 @@ bind(nil, "s", function() place_raw(0, 0, 1, 1) end)
 
 picker:bind({}, "escape", function() picker:exit() end)
 
+-- Cross-window directional focus (Ctrl+Alt) and swap (Cmd+Ctrl) on the
+-- Dvorak home row h/t/n/s = west/north/south/east. Works across screens.
+local directions = { h = "West", t = "North", n = "South", s = "East" }
+
+local function focus(dir)
+  local win = hs.window.focusedWindow()
+  if win then win["focusWindow" .. dir](win) end
+end
+
+local function swap(dir)
+  local win = hs.window.focusedWindow()
+  if not win then return end
+  local others = win["windowsTo" .. dir](win)
+  local other = others and others[1]
+  if not other then return end
+  local a, b = win:frame(), other:frame()
+  local cross = win:screen():getUUID() ~= other:screen():getUUID()
+  win:setFrame(b)
+  other:setFrame(a)
+  if cross then
+    hs.timer.doAfter(0.05, function()
+      win:setFrame(b)
+      other:setFrame(a)
+    end)
+  end
+end
+
+for key, dir in pairs(directions) do
+  hs.hotkey.bind({ "ctrl", "alt" }, key, function() focus(dir) end)
+  hs.hotkey.bind({ "cmd",  "ctrl" }, key, function() swap(dir)  end)
+end
+
 hs.alert.show("Hammerspoon loaded")
