@@ -111,6 +111,25 @@ else
 fi
 
 
+#### Claude Code account switcher
+# Default account is personal; override with CLAUDE_DEFAULT_ACCOUNT=work.
+# Explicit: claude-personal, claude-work. Each account uses its own config dir.
+_claude-run() {
+    local account=$1; shift
+    local dir=~/.claude
+    [ "$account" = work ] && dir=~/.claude-work
+    echo "[claude] using ${account} account" >&2
+    CLAUDE_CONFIG_DIR="$dir" command claude "$@"
+}
+claude()          { _claude-run "${CLAUDE_DEFAULT_ACCOUNT:-personal}" "$@"; }
+claude-personal() { _claude-run personal "$@"; }
+claude-work()     { _claude-run work "$@"; }
+
+
+#### Local overrides (not tracked in dotfiles)
+[ -f ~/.shellrc.local ] && source ~/.shellrc.local
+
+
 #### Secrets (not tracked in dotfiles)
 [ -f ~/.secrets.env ] && source ~/.secrets.env
 
