@@ -32,6 +32,13 @@ git -C ~/dotfiles config core.hooksPath git-hooks
 # Claude Code
 link ~/dotfiles/.claude/CLAUDE.md ~/.claude/CLAUDE.md
 link ~/dotfiles/.claude/settings.json ~/.claude/settings.json
+# Claude Code work-account config dir (shared config symlinked from personal)
+mkdir -p ~/.claude-work
+link ~/dotfiles/.claude/CLAUDE.md ~/.claude-work/CLAUDE.md
+link ~/dotfiles/.claude/settings.json ~/.claude-work/settings.json
+link ~/.claude/keybindings.json ~/.claude-work/keybindings.json
+link ~/.claude/skills ~/.claude-work/skills
+link ~/.claude/plugins ~/.claude-work/plugins
 
 if [[ "$(uname)" == "Darwin" ]]; then
     # macOS: VS Code prompts
