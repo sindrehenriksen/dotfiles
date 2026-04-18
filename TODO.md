@@ -12,7 +12,6 @@ Three-column layout (browser | terminals | nvim tabs) — design in `docs/window
 
 ## Cleanup
 
-- [ ] Remove `.tmux.conf` from the repo and `install_symlinks.sh`
 - [ ] Decide whether to drop `vim-slime` (installed but unused)
 
 ## Agent CLIs

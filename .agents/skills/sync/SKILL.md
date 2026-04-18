@@ -24,7 +24,7 @@ Review the pulled diff and apply what's needed:
 - **Symlinks**: `source ~/dotfiles/install_symlinks.sh`. If a target exists as a regular file, compare — back up and replace if repo version is a superset, otherwise report.
 - **Setup scripts** (`setup.sh`, `setup-visma.sh`): identify and run only affected sections, or flag for the user. Don't re-run blindly.
 - **Shell configs**: nudge user to reload shell or source the changed file.
-- **Tool configs** (nvim plugins, tmux, ghostty, etc.): note if restart/reload/install is needed.
+- **Tool configs** (nvim plugins, ghostty, etc.): note if restart/reload/install is needed.
 - **Quick wins**: if something is easy to verify (alias, keybinding, setting), test it or prompt the user to.
 
 ## Finish
