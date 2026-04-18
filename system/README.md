@@ -88,3 +88,27 @@ or directly: `sudo sh -c 'echo -n "rescan" > /sys/devices/platform/i8042/serio0/
 
 Lid-close suspend is inconsistent due to Modern Standby (s2idle) firmware
 on some Lenovo Ryzen models. Use the power button to suspend instead.
+
+### Fn media keys stop working after long suspend
+
+After s2idle resumes past roughly 15 minutes, all Fn media keys
+(brightness, volume, mic-mute, airplane) stop emitting events. The EC
+forwards raw scancodes to i8042 instead of translating them to media
+keycodes, so `KEY_F1..F12` appear on the AT keyboard where
+`KEY_VOLUMEUP` etc. should. `/dev/input/event6` ("Ideapad extra
+buttons") goes silent.
+
+**Only reboot resolves it.** Not fixed by: `fn_lock` sysfs toggle,
+reloading `ideapad_laptop` / `lenovo_wmi_hotkey_utilities`, kernel
+params (`i8042.reset=1`, `i8042.nopnp`, `acpi.prefer_microsoft_guid=1`),
+or latest BIOS (QBCN29WW as of 2026-01-15). Same symptom reported by
+others on the IdeaPad Slim 3 Ryzen family.
+
+Upstream bug: https://bugzilla.kernel.org/show_bug.cgi?id=221383
+(diagnostic artifacts collected on this system at
+`~/kernel-bug-221383/` for future maintainer requests)
+
+If the bug sits silent for a long time, a nudge option is to email
+`platform-driver-x86@vger.kernel.org` (plain text, Gmail works with
+compose → Plain text mode) with a short summary pointing to the
+bugzilla URL, so it shows up on lore.kernel.org.
