@@ -76,8 +76,10 @@ chmod 600 ~/.secrets.env
 brew install agent-browser
 # if linux
 npm install -g agent-browser
+npm install -g playwright
 # both: install browser binary
 agent-browser install
+npx playwright install chromium
 
 #### MCP servers (shared / non-org-specific)
 # Playwright (browser automation) — kept alongside agent-browser for now
