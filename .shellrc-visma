@@ -1,8 +1,5 @@
 #### Visma secrets (not tracked in dotfiles)
 if [ -f ~/.secrets-visma.env ]; then set -a; source ~/.secrets-visma.env; set +a; fi
 
-#### Default Claude Code account (uncomment on work machines)
-# export CLAUDE_DEFAULT_ACCOUNT=work
-
 
 #### Work-specific aliases and config below (edit locally)
