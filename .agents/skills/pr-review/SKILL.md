@@ -94,7 +94,7 @@ Always run first. Shared picture of what the PR *means* before any findings.
    - **Blockers**: bugs, security issues, data loss risks, broken contracts
    - **Should fix**: design issues, missing error handling, doc/code mismatches, missing strategic test coverage, missing repo-ergonomics updates that the change requires
    - **Nits**: style, naming, import ordering
-   - **Follow-ups**: reserve for things that are genuinely out of scope (separate system, needs design discussion, depends on other work). Default is to suggest fixing now — with AI assistance most fixes are cheap, and deferring fragments the work. Don't reach for "follow-up" just because a finding is minor; nits and should-fixes can be handled in this PR.
+   - **Follow-ups**: reserve for things that are genuinely out of scope (separate system, needs design discussion, depends on other work). Default is to suggest fixing now — with AI assistance most fixes are cheap, and deferring fragments the work. Don't reach for "follow-up" just because a finding is minor; nits and should-fixes can be handled in this PR. Ticket and PR scope aren't contracts either — if review surfaces related gaps beyond the stated scope, raise them and leave the in-PR-vs-follow-up call to the author, neutrally framed ("up to you"). Don't prescribe a follow-up just because something wasn't in the original description.
 3. Incorporate the user's initial impressions if they shared any when requesting the review
 4. Wait for user reaction — they may ask questions, add context, disagree, or confirm concerns. Iterate until alignment.
 
