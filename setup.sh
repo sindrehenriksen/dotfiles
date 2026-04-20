@@ -89,6 +89,13 @@ claude mcp add -s user playwright -- npx @playwright/mcp@latest
 # Enable vim keybindings in the input prompt: run /config in a Claude Code
 # session and set "Editor mode" to Vim. Not persistable via settings.json.
 
+#### Claude Code per-machine settings (~/.claude/settings.local.json, gitignored)
+# Add this machine's resolved $TMPDIR to permissions.additionalDirectories so
+# coding agents can read/write there without prompts (pairs with shared /tmp
+# and /private/tmp entries in the tracked settings.json). Example:
+#   echo "$TMPDIR" | sed 's:/$::'
+# then add the result to the additionalDirectories array.
+
 # VS Code / GitHub Copilot: add to mcp.json (settings gear > MCP Servers, or directly):
 #   macOS: ~/Library/Application Support/Code/User/mcp.json
 #   Linux: ~/.config/Code/User/mcp.json
