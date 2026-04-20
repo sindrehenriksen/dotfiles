@@ -8,9 +8,11 @@ msg_file="$1"
 # Reflow body paragraphs at 72 chars
 # Preserves title (line 1), blank separator (line 2),
 # and git comment lines (starting with #).
+# The sed filter collapses the double-space that BSD fmt (macOS)
+# inserts after sentence-ending punctuation when joining lines.
 {
     head -2 "$msg_file"
-    tail -n +3 "$msg_file" | grep -v '^#' | fmt -w 72
+    tail -n +3 "$msg_file" | grep -v '^#' | fmt -w 72 | sed -E 's/([.!?]) {2,}/\1 /g'
     tail -n +3 "$msg_file" | grep '^#' || true
 } > "${msg_file}.tmp" && mv "${msg_file}.tmp" "$msg_file"
 
