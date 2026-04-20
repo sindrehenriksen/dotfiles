@@ -108,6 +108,16 @@ Upstream bug: https://bugzilla.kernel.org/show_bug.cgi?id=221383
 (diagnostic artifacts collected on this system at
 `~/kernel-bug-221383/` for future maintainer requests)
 
+Status (2026-04-20): comment #5 asked whether the breakage persists
+with `ideapad_laptop`, `lenovo_wmi_*`, `sparse_keymap`, and
+`platform_profile` all blacklisted — tested, it does. Confirms the EC
+stops translating Fx→media scancodes regardless of which Linux drivers
+are loaded, so none of those is in the broken path. Candidate
+workarounds to try next if upstream goes quiet: `echo reconnect >
+/sys/devices/platform/i8042/serio0/drvctl` on resume (more aggressive
+than the `kbr` rescan), or reading the DSDT from `acpidump.bin` for a
+Lenovo hotkey-mode ACPI method callable via `acpi_call`.
+
 If the bug sits silent for a long time, a nudge option is to email
 `platform-driver-x86@vger.kernel.org` (plain text, Gmail works with
 compose → Plain text mode) with a short summary pointing to the
