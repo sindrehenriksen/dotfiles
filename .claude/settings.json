@@ -1,5 +1,4 @@
 {
-  "_sync_note": "Keep in sync with VS Code chat.tools.terminal.autoApprove in ~/Library/Application Support/Code/User/settings.json (macOS) or ~/.config/Code/User/settings.json (Linux)",
   "permissions": {
     "allow": [
       "Bash(ls *)",
@@ -142,5 +141,6 @@
       "/tmp",
       "/private/tmp"
     ]
-  }
+  },
+  "_sync_note": "Keep in sync with VS Code chat.tools.terminal.autoApprove in ~/Library/Application Support/Code/User/settings.json (macOS) or ~/.config/Code/User/settings.json (Linux)"
 }
