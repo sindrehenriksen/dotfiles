@@ -137,6 +137,10 @@
       "Bash(gh api * --method PUT *)",
       "Bash(gh api * --method DELETE *)",
       "Bash(gh api * --method PATCH *)"
+    ],
+    "additionalDirectories": [
+      "/tmp",
+      "/private/tmp"
     ]
   }
 }
