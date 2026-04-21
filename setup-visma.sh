@@ -58,16 +58,19 @@ cd ~/dev/tools/aikido-mcp && npm install && npm run build && cd -
 #     }
 #   }
 #
-# Claude Code CLI (user-level): registered via `claude mcp add`, stored in ~/.claude.json
+# Claude Code CLI (user-level): registered via `claude-work mcp add`, stored in
+# ~/.claude-work/.claude.json. Use `claude-work` (NOT bare `claude`) — the shell
+# wrapper in .shellrc routes bare `claude` to the personal account config dir, and
+# MCP servers are registered per-account. Visma work uses the work account.
 # NOTE: ~/.claude/.mcp.json is for Claude Desktop, NOT Claude Code CLI.
 #
-#   claude mcp add -s user \
+#   claude-work mcp add -s user \
 #     -e "AIKIDO_CLIENT_ID=..." -e "AIKIDO_API_KEY=..." \
 #     -- aikido node ~/dev/tools/aikido-mcp/dist/index.js
 #
-#   claude mcp add -s user \
+#   claude-work mcp add -s user \
 #     -e "JIRA_URL=https://jira.visma.com" \
 #     -e "JIRA_PERSONAL_TOKEN=..." \
 #     -- atlassian uvx mcp-atlassian
 #
-# Verify with: claude mcp list
+# Verify with: claude-work mcp list
