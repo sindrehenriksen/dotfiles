@@ -109,19 +109,12 @@
       "Bash(find * -ok *)",
       "Bash(find * -okdir *)",
       "Bash(sed * -i *)",
-      "Bash(sed * -e *)",
-      "Bash(sed * -f *)",
       "Bash(sed * --in-place *)",
-      "Bash(sed * --expression *)",
-      "Bash(sed * --file *)",
       "Bash(sort * -o *)",
-      "Bash(sort * -S *)",
       "Bash(rg * --pre *)",
       "Bash(rg * --hostname-bin *)",
-      "Bash(column * -c *)",
       "Bash(date * --set *)",
       "Bash(date * -s *)",
-      "Bash(tree * -o *)",
       "Bash(git branch * -d *)",
       "Bash(git branch * -D *)",
       "Bash(git branch * -m *)",
@@ -137,10 +130,12 @@
       "Bash(gh api * --method DELETE *)",
       "Bash(gh api * --method PATCH *)"
     ],
+    "defaultMode": "auto",
     "additionalDirectories": [
       "/tmp",
       "/private/tmp"
     ]
   },
-  "_sync_note": "Keep in sync with VS Code chat.tools.terminal.autoApprove in ~/Library/Application Support/Code/User/settings.json (macOS) or ~/.config/Code/User/settings.json (Linux)"
+  "_sync_note": "The allow/deny/ask pattern lists can be kept in sync with VS Code chat.tools.terminal.autoApprove (~/Library/Application Support/Code/User/settings.json on macOS, ~/.config/Code/User/settings.json on Linux). defaultMode: auto has no VS Code equivalent — VS Code is pattern-matching only, so its list may need broader allow entries to compensate.",
+  "skipAutoPermissionPrompt": true
 }
