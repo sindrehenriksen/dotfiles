@@ -140,5 +140,9 @@
     ]
   },
   "_sync_note": "The allow/deny/ask pattern lists can be kept in sync with VS Code chat.tools.terminal.autoApprove (~/Library/Application Support/Code/User/settings.json on macOS, ~/.config/Code/User/settings.json on Linux). defaultMode: auto has no VS Code equivalent — VS Code is pattern-matching only, so its list may need broader allow entries to compensate.",
-  "skipAutoPermissionPrompt": true
+  "skipAutoPermissionPrompt": true,
+  "statusLine": {
+    "type": "command",
+    "command": "input=$(cat); tokens=$(echo \"$input\" | jq -r '(.context_window.total_input_tokens + .context_window.total_output_tokens) // 0'); used=$(echo \"$input\" | jq -r '.context_window.used_percentage // empty'); five_rem=$(echo \"$input\" | jq -r 'if .rate_limits.five_hour.used_percentage != null then (100 - .rate_limits.five_hour.used_percentage | round | tostring) else empty end'); week_rem=$(echo \"$input\" | jq -r 'if .rate_limits.seven_day.used_percentage != null then (100 - .rate_limits.seven_day.used_percentage | round | tostring) else empty end'); out=\"tokens:${tokens}\"; [ -n \"$used\" ] && out=\"$out ($(printf '%.0f' \"$used\")%)\"; [ -n \"$five_rem\" ] && out=\"$out | 5h:${five_rem}%\"; [ -n \"$week_rem\" ] && out=\"$out  week:${week_rem}%\"; echo \"$out\""
+  }
 }
