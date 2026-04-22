@@ -32,6 +32,7 @@ git -C ~/dotfiles config core.hooksPath git-hooks
 # Claude Code
 link ~/dotfiles/.claude/CLAUDE.md ~/.claude/CLAUDE.md
 link ~/dotfiles/.claude/settings.json ~/.claude/settings.json
+link ~/dotfiles/.claude/statusline.sh ~/.claude/statusline.sh
 # Claude Code work-account config dir (shared config symlinked from personal)
 mkdir -p ~/.claude-work
 link ~/dotfiles/.claude/CLAUDE.md ~/.claude-work/CLAUDE.md
