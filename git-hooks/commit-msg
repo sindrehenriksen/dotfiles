@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Enforce commit message conventions:
-# - Title line: warn at 50, error at 72 chars
+# - Title line: error at 50 chars (override: ALLOW_LONG_COMMIT_TITLE=1), hard error at 72
 # - Body: reflow paragraphs at 72 chars (like vim gqip)
 
 msg_file="$1"
@@ -22,6 +22,9 @@ if [ ${#title} -gt 72 ]; then
     echo "Commit message lint failed:"
     echo "  - Title is ${#title} chars (max 72): $title"
     exit 1
-elif [ ${#title} -gt 50 ]; then
-    echo "Commit message warning: title is ${#title} chars (aim for 50)"
+elif [ ${#title} -gt 50 ] && [ "${ALLOW_LONG_COMMIT_TITLE:-0}" != "1" ]; then
+    echo "Commit message lint failed:"
+    echo "  - Title is ${#title} chars (aim for 50): $title"
+    echo "  - Override with ALLOW_LONG_COMMIT_TITLE=1 (hard cap at 72 still applies)"
+    exit 1
 fi
