@@ -30,3 +30,4 @@ Three-column layout (browser | terminals | nvim tabs) — design in `docs/window
 ## Low priority
 
 - [ ] Consider replacing zplug with sheldon or zinit (only if startup latency becomes an issue)
+- [ ] Drop `CLAUDE_CODE_NO_FLICKER=1` from `_claude-run` once anthropics/claude-code#13591 ships a proper sticky-input fix (currently relying on fullscreen rendering mode as a workaround)
