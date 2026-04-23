@@ -18,10 +18,12 @@ fi
 
 
 #### brew (macOS only)
+# shellenv is already evaluated in .zprofile for zsh; this covers bash and any
+# case where HOMEBREW_PREFIX isn't set yet.
 if $IS_MAC; then
     alias new-brew='eval "$(/opt/homebrew/bin/brew shellenv)"'
     alias old-brew='eval "$(/usr/local/bin/brew shellenv)"'
-    eval "$(/opt/homebrew/bin/brew shellenv)"
+    [ -z "$HOMEBREW_PREFIX" ] && eval "$(/opt/homebrew/bin/brew shellenv)"
 fi
 
 
