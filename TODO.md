@@ -32,4 +32,4 @@ Three-column layout (browser | terminals | nvim tabs) — design in `docs/window
 - [ ] Consider replacing zplug with sheldon or zinit (only if startup latency becomes an issue)
 - [ ] Drop `CLAUDE_CODE_NO_FLICKER=1` from `_claude-run` once anthropics/claude-code#13591 ships a proper sticky-input fix (currently relying on fullscreen rendering mode as a workaround)
 - [ ] Set `hideVimModeIndicator: true` in `.claude/settings.json` once anthropics/claude-code#53556 ships, to remove the duplicate `-- INSERT --` line below the prompt (statusline.sh already renders `[N]`/`[I]`/`[V]` from `.vim.mode`)
-- [ ] Add a permission/auto-mode segment to `.claude/statusline.sh` once anthropics/claude-code#52510 exposes `permission_mode` in the statusLine JSON (currently no way to surface auto/plan/bypass state)
+- [ ] Add a permission/auto-mode segment to `.claude/statusline.sh` once anthropics/claude-code#54032 exposes `permission_mode` in the statusLine JSON (currently no way to surface auto/plan/bypass state)
