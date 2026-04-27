@@ -17,6 +17,7 @@ return {
 		"echasnovski/mini.bufremove",
 		keys = {
 			{ "<leader>bd", function() require("mini.bufremove").delete(0) end, desc = "Delete buffer" },
+			{ "<leader>bw", function() vim.cmd("write") require("mini.bufremove").delete(0) end, desc = "Write and delete buffer" },
 		},
 	},
 
