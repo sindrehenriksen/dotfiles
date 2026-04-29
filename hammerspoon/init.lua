@@ -290,8 +290,10 @@ bind(nil, "s", function() place_raw(0, 0, 1, 1) end)
 
 picker:bind({}, "escape", function() picker:exit() end)
 
--- Cross-window directional focus (Ctrl+Alt) and swap (Cmd+Ctrl) on the
--- Dvorak home row h/t/n/s = west/north/south/east. Works across screens.
+-- Cross-window directional focus and swap on the Dvorak home row
+-- h/t/n/s = west/north/south/east. Works across screens.
+-- Focus uses Caps Lock as a hold-modifier (see dual-function block below).
+-- Swap uses Cmd+Ctrl.
 local directions = { h = "West", t = "North", n = "South", s = "East" }
 
 local function focus(dir)
@@ -318,8 +320,119 @@ local function swap(dir)
 end
 
 for key, dir in pairs(directions) do
-  hs.hotkey.bind({ "ctrl", "alt" }, key, function() focus(dir) end)
-  hs.hotkey.bind({ "cmd",  "ctrl" }, key, function() swap(dir)  end)
+  hs.hotkey.bind({ "cmd", "ctrl" }, key, function() swap(dir) end)
 end
+
+-- Dual-function Caps Lock (remapped to F18 at the HID level via
+-- ~/Library/LaunchAgents/remap_application_key.plist):
+--   Tap               → Escape
+--   Hold + h/t/n/s    → focus window west/north/south/east (instant)
+--   Hold + other key  → passes through as normal (after TAP_MS commit)
+-- During the tap-decision window non-bound keys are buffered and replayed
+-- after the tap/hold decision, so fast rolls like caps→b correctly produce
+-- Escape followed by b instead of dropping Escape.
+local TAP_MS = 150
+local f18_kc = hs.keycodes.map.f18
+local dir_kcs = {}
+for k, v in pairs(directions) do dir_kcs[hs.keycodes.map[k]] = v end
+
+local f18_down = false
+local decision_pending = false   -- buffering, waiting on tap/hold decision
+local committed_to_hold = false  -- decided hold (timer fired or bound key)
+local pending = {}
+local decision_timer = nil
+
+local function flags_to_mods(flags)
+  local mods = {}
+  for k, v in pairs(flags) do
+    if v and k ~= "capslock" then table.insert(mods, k) end
+  end
+  return mods
+end
+
+local function replay_pending()
+  for _, d in ipairs(pending) do
+    hs.eventtap.event.newKeyEvent(d.mods, d.kc, d.is_down):post()
+  end
+  pending = {}
+end
+
+local function cancel_timer()
+  if decision_timer then decision_timer:stop(); decision_timer = nil end
+end
+
+local function commit_hold()
+  decision_pending = false
+  committed_to_hold = true
+  cancel_timer()
+  replay_pending()
+end
+
+local function commit_tap()
+  decision_pending = false
+  cancel_timer()
+  hs.eventtap.keyStroke({}, "escape", 0)
+  replay_pending()
+end
+
+caps_tap = hs.eventtap.new({
+  hs.eventtap.event.types.keyDown,
+  hs.eventtap.event.types.keyUp,
+}, function(e)
+  local kc = e:getKeyCode()
+  local is_down = (e:getType() == hs.eventtap.event.types.keyDown)
+
+  if kc == f18_kc then
+    if is_down then
+      if not f18_down then
+        f18_down = true
+        decision_pending = false
+        committed_to_hold = false
+        pending = {}
+      end
+    else
+      if decision_pending then
+        commit_tap()
+      elseif not committed_to_hold then
+        -- Lone caps press (no other key): always treat as tap, regardless
+        -- of how long it was held.
+        hs.eventtap.keyStroke({}, "escape", 0)
+      end
+      f18_down = false
+    end
+    return true
+  end
+
+  if f18_down then
+    -- Bound directional key → immediate focus
+    if is_down and dir_kcs[kc] then
+      if decision_pending then commit_hold() end
+      committed_to_hold = true
+      focus(dir_kcs[kc])
+      return true
+    end
+    if not is_down and dir_kcs[kc] then
+      return true  -- swallow keyUp to match swallowed keyDown
+    end
+    -- Non-bound key: open the decision window on first occurrence,
+    -- then buffer until tap or hold is committed.
+    if not committed_to_hold then
+      if not decision_pending then
+        decision_pending = true
+        decision_timer = hs.timer.doAfter(TAP_MS / 1000, commit_hold)
+      end
+      table.insert(pending, {
+        kc = kc,
+        mods = flags_to_mods(e:getFlags()),
+        is_down = is_down,
+      })
+      return true
+    end
+    -- Past decision in hold mode: pass through
+  end
+
+  return false
+end)
+caps_tap:start()
 
 hs.alert.show("Hammerspoon loaded")
