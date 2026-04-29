@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Claude Code status line. Reads JSON on stdin and prints a single line:
-#   [<vim>] t:<tokens> (<ctx%>) | 5h:<rem%> w:<rem%> | <branch> | <model>[ th:<state>]
+#   [<vim>] t:<tokens> (<ctx%>) | 5h:<rem%> w:<rem%> | <model>[ th:<state>] | <branch>
 # th:<state> is the effort level when thinking is on, "on" when thinking is on but the
 # model has no effort parameter, or "off" when thinking is disabled.
 # Segments are omitted when their source fields are absent.
@@ -45,6 +45,6 @@ esac
 
 out="$left"
 [ -n "$middle" ] && out="$out | $middle"
-[ -n "$branch" ] && out="$out | $branch"
 [ -n "$right" ] && out="$out | $right"
+[ -n "$branch" ] && out="$out | $branch"
 echo "$out"
