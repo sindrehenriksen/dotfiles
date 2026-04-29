@@ -65,7 +65,8 @@ When an `az` command fails with an authentication/token error, re-authenticate b
 - The Atlassian MCP is configured for Jira only (Confluence tools are disabled — auth/VPN issues)
 - For Confluence, use the curl-based confluence skill instead
 - Default issue type is **Task** (not Story) unless explicitly requested otherwise
-- The MCP converts description input from markdown to Jira wiki markup before posting. This means `*text*` becomes italic (not bold). Use markdown-style `**text**` for bold headers when creating issues through the MCP.
+- The MCP converts **description** input from markdown to Jira wiki markup before posting. This means `*text*` becomes italic (not bold). Use markdown-style `**text**` for bold headers when creating issues through the MCP.
+- **Comments do NOT get the same conversion** — the body is stored as-is and rendered by Jira as wiki markup. Use wiki markup directly in comments: `*bold*`, `_italic_`. Sending `**bold**` posts the asterisks literally.
 - `jira_link_to_epic` returns success but does not actually update the epic link on this Jira instance. To move an issue to a different epic, use `jira_update_issue` with the Epic Link custom field directly: `{"customfield_13061": "VFAI-485"}`. Verify with a follow-up search on `"Epic Link" = <key>`.
 
 ## CI/CD Debugging
