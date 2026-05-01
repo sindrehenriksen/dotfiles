@@ -8,7 +8,8 @@ allowed-tools: Read, Grep, Glob, Bash, Agent, WebFetch
 
 ## Tone & Audience
 
-- Assume the author is senior unless told otherwise
+- Throughout this skill, "author" = the PR author. The user requesting the review is "the reviewer" / "the user". Don't conflate them in summaries or comments.
+- Assume the PR author is senior unless told otherwise
 - Suggest/ask rather than tell — "worth considering…", "should this…?", "have you thought about…?"
 - Don't explain generic concepts they already know — point to the specific code/behavior that's the concern
 - Be direct, not formal — skip preamble and filler
@@ -19,7 +20,13 @@ The human reviewer's job is **strategic judgment**. Automated layers — code re
 
 When in doubt: *could a scanner, linter, or automated reviewer have caught this?* If yes, deprioritize it. If no, that's where your review is valuable.
 
-**Conversation discipline.** Keep discussion with the user on top-tier findings. Nits and any other tactical concerns that slipped through: compress to a one-line count ("3 nits inline"), don't walk through each. Post them inline if useful to the author — just don't burn the conversation on them.
+**Conversation discipline — separate, don't merge.** Structure the user-facing summary into two distinct sections, never intermixed:
+
+1. **Decisions for the user.** Strategic calls only the reviewer can make — the things they should actually spend thought on. Bar is *"does the user have a real decision that isn't already covered by (a) PR-author seniority, (b) existing repo safeguards (infra what-ifs, dev-first deploys, eval gates, AI reviewers, scanners), or (c) graceful failure modes?"* If no, it doesn't go here. A calibrated section (1) is often 0–2 items.
+
+2. **Inline-comment candidates.** Minor things worth nudging the PR author on but not worth the reviewer's strategic attention. Frame as "happy to comment on these inline too — but the focus is above." Items that typically belong here: predictable error-code or status-code mappings that fall out of the feature shape, infra changes covered by what-ifs and staged rollouts, edge-case data loss with graceful degradation (e.g. integrator just sees a missing field), mechanical consequences of an otherwise-correct implementation, small inconsistencies, "probably already aware but worth a double-check" nudges.
+
+The failure mode this prevents: a single bucketed list ("here are the side effects") that puts strategic and minor items at the same visual weight, forcing the reviewer to re-filter. Keep the line between (1) and (2) clean — don't sprinkle minor items into (1) "for completeness." This applies to triage reads (*"looks good?"*, *"any side effects?"*) just as much as to formal Phase 2.
 
 ## Comment Structure
 
@@ -89,12 +96,14 @@ Always run first. Shared picture of what the PR *means* before any findings.
 
 ### Phase 2: Discussion round
 
-1. Present findings as a conversation — explain concerns, ask questions, flag tradeoffs. Lead with top-tier (strategic) findings; compress bottom-tier (nits/style) into a one-line count.
+1. Present findings as a conversation — explain concerns, ask questions, flag tradeoffs. Use the two-section structure from Conversation discipline (decisions for the user, then inline-comment candidates). Severity below is an orthogonal axis.
 2. Classify by severity but don't format as postable comments yet:
    - **Blockers**: bugs, security issues, data loss risks, broken contracts
    - **Should fix**: design issues, missing error handling, doc/code mismatches, missing strategic test coverage, missing repo-ergonomics updates that the change requires
    - **Nits**: style, naming, import ordering
    - **Follow-ups**: reserve for things that are genuinely out of scope (separate system, needs design discussion, depends on other work). Default is to suggest fixing now — with AI assistance most fixes are cheap, and deferring fragments the work. Don't reach for "follow-up" just because a finding is minor; nits and should-fixes can be handled in this PR. Ticket and PR scope aren't contracts either — if review surfaces related gaps beyond the stated scope, raise them and leave the in-PR-vs-follow-up call to the author, neutrally framed ("up to you"). Don't prescribe a follow-up just because something wasn't in the original description.
+
+   *Severity ≠ chat placement.* "Nit" here is narrow (style/naming/imports). Chat section (2) is broader and may also include Should-fix-severity items that don't need reviewer judgment (e.g. a missing-test concern already covered by an existing eval gate, a predictable error-code mapping). Severity tells the PR author urgency once posted; chat-section split decides whether a finding reaches the reviewer's attention.
 3. Incorporate the user's initial impressions if they shared any when requesting the review
 4. Wait for user reaction — they may ask questions, add context, disagree, or confirm concerns. Iterate until alignment.
 
