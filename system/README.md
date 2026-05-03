@@ -69,8 +69,8 @@ For non-Lenovo laptops, use TLP thresholds instead:
 
 Some Lenovo models lose the internal keyboard entirely after s2idle resume.
 Same root cause as the Fn media keys bug below (EC timing race on resume from
-deep sleep). Both are fixed by the upstream `amd_pmc` patch — remove this
-script once that lands in a kernel update.
+deep sleep). Both are fixed by the DKMS module below — script is currently
+**disabled** (`chmod -x`) and kept as a fallback only.
 
 [This Reddit thread](https://www.reddit.com/r/Lenovo/comments/1q02pr7/solved_keyboard_not_working_after_suspendsleep_on/)
 suggests disabling battery optimization via a udev rule as a fix, but that trades
@@ -105,8 +105,23 @@ Upstream bug: https://bugzilla.kernel.org/show_bug.cgi?id=221383
 
 Status (2026-04-28): root cause identified (EC firmware timing race on
 deep sleep entry), fix patch reviewed by Mario Limonciello (AMD) and
-being submitted to `platform-driver-x86@vger.kernel.org`. Remove this
-section once it lands in an Ubuntu kernel update.
+submitted to `platform-driver-x86@vger.kernel.org`.
+
+**Workaround (active):** DKMS module from https://github.com/DanielGibson/amd_pmc-ideapad
+installed at `~/src/amd_pmc-ideapad/`. Replaces the in-kernel `amd_pmc` module
+with a patched version that adds a 2.5s delay before deep sleep. Auto-rebuilds
+on kernel updates. Verify with:
+```bash
+ls /sys/module/amd_pmc/parameters/delay_suspend   # file exists = patched module loaded
+journalctl -b | grep "platform bug"               # appears after first suspend
+```
+
+**When the upstream fix lands in an Ubuntu kernel update, clean up:**
+- `sudo dkms remove amd_pmc/0.0.1 --all` and `rm -rf ~/src/amd_pmc-ideapad`
+- Re-enable or remove the keyboard-reset script
+- Remove `~/mok.key`, `~/mok.crt`, `~/mok.der` and `/var/lib/dkms/mok.*`
+- Remove `~/kernel-bug-221383/` (diagnostic artifacts, no longer needed)
+- Remove this section and the keyboard-reset section from this README
 
 ### MOK signing key
 
