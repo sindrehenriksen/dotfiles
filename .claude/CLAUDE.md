@@ -50,6 +50,10 @@ Don't search `~` broadly for settings — check this repo and the paths above.
 - Sign with `Co-Authored-By: Claude <model> <version>` (e.g. `Co-Authored-By: Claude Opus 4.6`). No email, no angle brackets.
 - Never push to a remote unless explicitly asked. The user handles pushes themselves.
 
+## Output Formatting
+
+- Don't hard-wrap markdown destined for renderers that wrap natively (GitHub PRs / issues / comments, Slack, Jira, Confluence) — let the UI render at the reader's chosen width. Hard-wrap only for plain-text contexts like commit message bodies.
+
 ## Pull Request Descriptions
 
 Use the `pr-description` skill — it has the full guidelines.
