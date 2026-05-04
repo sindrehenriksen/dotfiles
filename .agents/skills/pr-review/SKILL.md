@@ -34,6 +34,19 @@ The failure mode this prevents: a single bucketed list ("here are the side effec
 
 All comments should be in fenced code blocks for easy copy-paste.
 
+### Source attribution
+
+Always make the source of the review clear so the author can weigh findings by how vetted they are. Three categories of source:
+
+- **User-raised** — concerns the user explicitly flagged before or during the review. Carry the user's full weight; lead with these in the overall comment.
+- **Jointly discussed** — findings that surfaced in conversation and were refined together. Have both the user's and the agent's weight behind them.
+- **Agent-driven** — findings the agent raised that the user only briefly reviewed (or didn't review). Don't carry the user's settled position; frame explicitly so the author knows.
+
+How to surface attribution:
+
+- **Multi-voice review**: tag each finding to a category. Either group findings by source in the overall comment (three short blocks), or prefix inline bodies (e.g. `[agent pass]`).
+- **Single-voice review** (purely user-driven or purely agent-driven): say so explicitly at the top of the overall comment — e.g. "this is a careful read by me" or "this is a quick agent pass — push back on anything that doesn't land". Don't omit attribution just because there's only one voice; the author still needs to know what level of vetting applies.
+
 ### Inline comments
 
 - Place on specific lines/files (GitHub review comments)
@@ -109,7 +122,7 @@ Always run first. Shared picture of what the PR *means* before any findings.
 
 ### Phase 3: Comment drafting
 
-1. Only after discussion, draft postable comments (inline + overall) based on what survived the discussion
+1. Only after discussion, draft postable comments (inline + overall) based on what survived the discussion. Apply source attribution (see Comment Structure → Source attribution) so user-raised, jointly discussed, and agent-driven findings are visibly distinct.
 2. Suggest a review type alongside the drafted comments:
    - **APPROVE** — default. Use liberally. The goal is to unblock strategic judgment, not gatekeep correctness — AI reviewers handle correctness gatekeeping. If you have no strategic concern, approve, even if the PR has nits. Approving with should-fix comments is fine — trust the author to address them before merging. Call that expectation out in the overall comment (e.g. "approving — please take a look at the inline should-fixes before merging") so it's explicit rather than implied.
    - **REQUEST_CHANGES** — only for fundamental design issues or critical blockers (security, data loss, broken contracts). If unsure whether something rises to this level, ask.
