@@ -53,7 +53,7 @@ Lua config under `nvim/lua/`: `options.lua`, `keymaps.lua`, `autocmds.lua`, `plu
 
 ## AI agents
 
-- **Claude Code** is the primary agent. Global instructions in `.claude/CLAUDE.md`, settings in `.claude/settings.json` (both symlinked to `~/.claude/`).
+- **Claude Code** is the primary agent. Global instructions in `.claude/CLAUDE.md`, settings in `.claude/settings.json` (both symlinked to `~/.claude/`). Two accounts are isolated via `CLAUDE_CONFIG_DIR`: `~/.claude/` (personal, default) and `~/.claude-work/` (work). Shell functions `claude-personal` / `claude-work` in `.shellrc` set the config dir before launching; `claude` uses `$CLAUDE_DEFAULT_ACCOUNT` (default `personal`). Override per machine by setting `CLAUDE_DEFAULT_ACCOUNT=work` in `.shellrc-visma`. Shared config (CLAUDE.md, settings, skills) is symlinked from `~/.claude/` into `~/.claude-work/` via `install_symlinks.sh` — credentials in each dir's `.credentials.json` are not shared.
 - **Copilot CLI** and **Codex CLI** have MCP setup in `setup.sh` but haven't been validated in a real workflow yet — see `TODO.md`.
 - **Skills** in `.agents/skills/` cover: `pr-review`, `pr-description`, `browser`, `sync`, `confluence` (work-only), `adding-skills`. Symlinked into both Codex and Claude locations via `install_symlinks.sh`.
 - VS Code Copilot prompts in `copilot-prompts/` (`general.instructions.md`, `git.instructions.md`).
