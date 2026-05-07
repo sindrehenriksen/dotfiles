@@ -109,16 +109,22 @@ Always run first. Shared picture of what the PR *means* before any findings.
 
 ### Phase 2: Discussion round
 
-1. Present findings as a conversation — explain concerns, ask questions, flag tradeoffs. Use the two-section structure from Conversation discipline (decisions for the user, then inline-comment candidates). Severity below is an orthogonal axis.
-2. Classify by severity but don't format as postable comments yet:
+1. **Filter candidates against the PR description and ticket** before presenting. Walk each draft finding against what the author already wrote. Three outcomes:
+   - **Fully covered** and you agree with the reasoning → drop. Don't make the author repeat themselves.
+   - **Partially covered** (author addressed the area but not your specific angle) → keep, but lead the comment by acknowledging what's covered before stating what's still open. Example: a duration-metric concern where the author explained one aspect (sub-minute clamping) but not your aspect (where the timer is captured).
+   - **Not mentioned** → raise normally.
+
+   Same rule for chat-section (1), chat-section (2), and inline-only items. Err on the side of dropping over re-raising — a thoughtfully-written description is a signal the author has thought about the area, and re-raising covered points erodes trust in the rest of the review.
+2. Present findings as a conversation — explain concerns, ask questions, flag tradeoffs. Use the two-section structure from Conversation discipline (decisions for the user, then inline-comment candidates). Severity below is an orthogonal axis.
+3. Classify by severity but don't format as postable comments yet:
    - **Blockers**: bugs, security issues, data loss risks, broken contracts
    - **Should fix**: design issues, missing error handling, doc/code mismatches, missing strategic test coverage, missing repo-ergonomics updates that the change requires
    - **Nits**: style, naming, import ordering
    - **Follow-ups**: reserve for things that are genuinely out of scope (separate system, needs design discussion, depends on other work). Default is to suggest fixing now — with AI assistance most fixes are cheap, and deferring fragments the work. Don't reach for "follow-up" just because a finding is minor; nits and should-fixes can be handled in this PR. Ticket and PR scope aren't contracts either — if review surfaces related gaps beyond the stated scope, raise them and leave the in-PR-vs-follow-up call to the author, neutrally framed ("up to you"). Don't prescribe a follow-up just because something wasn't in the original description.
 
    *Severity ≠ chat placement.* "Nit" here is narrow (style/naming/imports). Chat section (2) is broader and may also include Should-fix-severity items that don't need reviewer judgment (e.g. a missing-test concern already covered by an existing eval gate, a predictable error-code mapping). Severity tells the PR author urgency once posted; chat-section split decides whether a finding reaches the reviewer's attention.
-3. Incorporate the user's initial impressions if they shared any when requesting the review
-4. Wait for user reaction — they may ask questions, add context, disagree, or confirm concerns. Iterate until alignment.
+4. Incorporate the user's initial impressions if they shared any when requesting the review
+5. Wait for user reaction — they may ask questions, add context, disagree, or confirm concerns. Iterate until alignment.
 
 ### Phase 3: Comment drafting
 
