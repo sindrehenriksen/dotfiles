@@ -115,6 +115,8 @@ Always run first. Shared picture of what the PR *means* before any findings.
    - **Not mentioned** → raise normally.
 
    Same rule for chat-section (1), chat-section (2), and inline-only items. Err on the side of dropping over re-raising — a thoughtfully-written description is a signal the author has thought about the area, and re-raising covered points erodes trust in the rest of the review.
+
+   Make the filtering visible. Before step 2, output one line per draft finding: `<finding> → drop | partial | raise — "<quote from description>"` (or `not mentioned`). An invisible walk is too easy to skip under load; on-page verdicts aren't. Drops surface here only; partial/raise flow into step 2.
 2. Present findings as a conversation — explain concerns, ask questions, flag tradeoffs. Use the two-section structure from Conversation discipline (decisions for the user, then inline-comment candidates). Severity below is an orthogonal axis.
 3. Classify by severity but don't format as postable comments yet:
    - **Blockers**: bugs, security issues, data loss risks, broken contracts
