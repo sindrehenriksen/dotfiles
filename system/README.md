@@ -103,9 +103,9 @@ Until fixed upstream, only reboot resolves a broken state.
 
 Upstream bug: https://bugzilla.kernel.org/show_bug.cgi?id=221383
 
-Status (2026-04-28): root cause identified (EC firmware timing race on
-deep sleep entry), fix patch reviewed by Mario Limonciello (AMD) and
-submitted to `platform-driver-x86@vger.kernel.org`.
+Status (2026-05-07): patch v1 submitted to `platform-driver-x86@vger.kernel.org`
+on 2026-05-01 by Daniel Gibson (tested and reviewed by Mario Limonciello, AMD).
+Minor style/code-org feedback from Ilpo Järvinen (Intel) — v2 expected soon.
 
 **Workaround (active):** DKMS module from https://github.com/DanielGibson/amd_pmc-ideapad
 installed at `~/src/amd_pmc-ideapad/`. Replaces the in-kernel `amd_pmc` module
