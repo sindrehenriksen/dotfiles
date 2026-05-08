@@ -29,6 +29,7 @@ Three-column layout (browser | terminals | nvim tabs) — design in `docs/window
 
 ## Low priority
 
+- [ ] Investigate user-authored skills in Claude Desktop. Live experiment (2026-05-08) confirmed local-bundle edits at `~/Library/Application Support/Claude/local-agent-mode-sessions/skills-plugin/<workspace>/<plugin>/` are wiped on app launch — Desktop syncs from a remote marketplace (`creatorType: "anthropic"` only; flags `remote_marketplace_migration_done_v1`, `dxt:allowlistCache`). Revisit if Anthropic ships a documented user-skill mechanism (DXT sideload, marketplace upload, `skill-creator`-driven registration that actually persists, etc.). Goal: get our `confluence` skill (and others) usable in Desktop instead of only Code.
 - [ ] Consider replacing zplug with sheldon or zinit (only if startup latency becomes an issue)
 - [ ] Drop `CLAUDE_CODE_NO_FLICKER=1` from `_claude-run` once anthropics/claude-code#13591 ships a proper sticky-input fix (currently relying on fullscreen rendering mode as a workaround)
 - [ ] Set `hideVimModeIndicator: true` in `.claude/settings.json` once anthropics/claude-code#53556 ships, to remove the duplicate `-- INSERT --` line below the prompt (statusline.sh already renders `[N]`/`[I]`/`[V]` from `.vim.mode`)
