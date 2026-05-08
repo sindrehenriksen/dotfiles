@@ -41,11 +41,11 @@ local function frames_equal(a, b)
      and math.abs(a.w - b.w) < TOL and math.abs(a.h - b.h) < TOL
 end
 
--- Looser "already at target" check for cycle detection: treats a window
--- with matching x/y as "placed" even if it's larger than the target (e.g.
--- Chrome's min width prevents shrinking on smaller screens). Without this,
--- apps that refuse to shrink get stuck on a screen since repeat-presses
--- would only re-apply the same (ineffective) target.
+-- Looser "already at target" check: treats a window with matching x/y as
+-- "placed" even if it's larger than the target (e.g. Chrome's min width
+-- prevents shrinking on smaller screens). Without this, apps that refuse
+-- to shrink get stuck on a screen since repeat-presses would only re-apply
+-- the same (ineffective) target.
 local function at_target(frame, target)
   return math.abs(frame.x - target.x) < TOL
      and math.abs(frame.y - target.y) < TOL
@@ -74,6 +74,44 @@ local slots = {
 local function slot_frame(screen, name)
   local s = slots[name]
   return target_frame(screen, s.xf, s.yf, s.wf, s.hf)
+end
+
+-- Raw fractional layouts used by place_raw (half-width columns, full
+-- screen). Listed here so the cycle check can recognize them as known
+-- placements alongside the named slots.
+local raw_layouts = {
+  { 0,    0, 0.5, 1 },
+  { 0.25, 0, 0.5, 1 },
+  { 0.5,  0, 0.5, 1 },
+  { 0,    0, 1,   1 },
+}
+
+-- True if `frame` matches any known placement on `screen` other than
+-- `target`. Used to distinguish "stuck oversized at target" (where we
+-- want to cycle screens) from "currently at a different known slot, just
+-- larger" (where we want to place at the new target instead).
+local function matches_other_known(frame, target, screen)
+  for name, _ in pairs(slots) do
+    local f = slot_frame(screen, name)
+    if not frames_equal(f, target) and frames_equal(frame, f) then
+      return true
+    end
+  end
+  for _, l in ipairs(raw_layouts) do
+    local f = target_frame(screen, l[1], l[2], l[3], l[4])
+    if not frames_equal(f, target) and frames_equal(frame, f) then
+      return true
+    end
+  end
+  return false
+end
+
+-- Should pressing the same target again cycle to the next screen? Yes if
+-- the window is precisely at target, or oversized-at-target (x/y match,
+-- larger than target) AND not at any other known placement.
+local function should_cycle(frame, target, screen)
+  return at_target(frame, target)
+     and not matches_other_known(frame, target, screen)
 end
 
 -- Return the slot name matching win's current frame on its screen, or nil.
@@ -186,7 +224,7 @@ local function place_slot(name)
   local screen = win:screen()
   local target = slot_frame(screen, name)
   local crossing = false
-  if at_target(win:frame(), target) then
+  if should_cycle(win:frame(), target, screen) then
     local next_screen = screen:next()
     if next_screen and next_screen:getUUID() ~= screen:getUUID() then
       screen = next_screen
@@ -209,7 +247,7 @@ local function place_raw(xf, yf, wf, hf)
   local screen = win:screen()
   local target = target_frame(screen, xf, yf, wf, hf)
   local crossing = false
-  if at_target(win:frame(), target) then
+  if should_cycle(win:frame(), target, screen) then
     local next_screen = screen:next()
     if next_screen and next_screen:getUUID() ~= screen:getUUID() then
       screen = next_screen
