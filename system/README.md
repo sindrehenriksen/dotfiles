@@ -103,9 +103,15 @@ Until fixed upstream, only reboot resolves a broken state.
 
 Upstream bug: https://bugzilla.kernel.org/show_bug.cgi?id=221383
 
-Status (2026-05-07): patch v1 submitted to `platform-driver-x86@vger.kernel.org`
-on 2026-05-01 by Daniel Gibson (tested and reviewed by Mario Limonciello, AMD).
-Minor style/code-org feedback from Ilpo Järvinen (Intel) — v2 expected soon.
+Status (2026-05-11): patch v2 submitted 2026-05-09, Reviewed-by from both Ilpo
+Järvinen (Intel) and Mario Limonciello (AMD) — likely close to being picked up.
+Sindre credited with Reported-by and Tested-by. The 83K prefix match covers this
+device; 83MM (IdeaPad Slim 3 15ARP10) confirmed affected by another user, to be
+added in a follow-up patch.
+
+Timer/wakealarm caveat: Daniel's 82XR (Zen3) still breaks with timer-based wakeups
+even with the fix. Tested on this device (83K6, Zen3+) with the DKMS workaround —
+timer case works fine here.
 
 **Workaround (active):** DKMS module from https://github.com/DanielGibson/amd_pmc-ideapad
 installed at `~/src/amd_pmc-ideapad/`. Replaces the in-kernel `amd_pmc` module
