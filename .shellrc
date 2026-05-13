@@ -123,9 +123,9 @@ _claude-run() {
     local dir=~/.claude
     [ "$account" = work ] && dir=~/.claude-work
     echo "[claude] using ${account} account" >&2
-    # CLAUDE_CODE_NO_FLICKER=1 enables fullscreen rendering mode (alt screen
-    # buffer) so the input stays pinned and scrolling up doesn't snap to bottom.
-    # Revisit once anthropics/claude-code#13591 ships a proper sticky-input fix.
+    # CLAUDE_CODE_NO_FLICKER=1 enables alt-screen rendering so the input stays
+    # pinned and scrolling doesn't snap to bottom. Upstream's accepted answer
+    # for anthropics/claude-code#13591 — also reachable via `/tui fullscreen`.
     CLAUDE_CODE_NO_FLICKER=1 CLAUDE_CONFIG_DIR="$dir" command claude "$@"
 }
 claude()          { _claude-run "${CLAUDE_DEFAULT_ACCOUNT:-personal}" "$@"; }
