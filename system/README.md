@@ -103,15 +103,18 @@ Until fixed upstream, only reboot resolves a broken state.
 
 Upstream bug: https://bugzilla.kernel.org/show_bug.cgi?id=221383
 
-Status (2026-05-11): patch v2 submitted 2026-05-09, Reviewed-by from both Ilpo
-Järvinen (Intel) and Mario Limonciello (AMD) — likely close to being picked up.
-Sindre credited with Reported-by and Tested-by. The 83K prefix match covers this
-device; 83MM (IdeaPad Slim 3 15ARP10) confirmed affected by another user, to be
-added in a follow-up patch.
+Status (2026-05-13): patch v3 submitted 2026-05-12, now `Cc: stable@vger.kernel.org`
+so it'll be backported once merged. Reviewed-by from both Ilpo Järvinen (Intel) and
+Mario Limonciello (AMD). Sindre credited with Reported-by and Tested-by. The 83K
+prefix match covers this device; 83MM (IdeaPad Slim 3 15ARP10) added as a third
+explicit DMI entry in v3.
 
 Timer/wakealarm caveat: Daniel's 82XR (Zen3) still breaks with timer-based wakeups
 even with the fix. Tested on this device (83K6, Zen3+) with the DKMS workaround —
-timer case works fine here.
+timer case works fine here, and another user reported the same on 14ARP10 (also
+83K). For affected Zen3 devices, `i8042.nopnp` on the kernel cmdline restores
+most of the keyboard after a wakealarm-triggered suspend without impairing
+regular suspend/resume.
 
 **Workaround (active):** DKMS module from https://github.com/DanielGibson/amd_pmc-ideapad
 installed at `~/src/amd_pmc-ideapad/`. Replaces the in-kernel `amd_pmc` module
