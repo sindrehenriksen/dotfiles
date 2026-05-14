@@ -13,7 +13,7 @@ if not vim.g.vscode then
 	-- Buffer navigation
 	map("n", "<leader>j", "<cmd>bnext<cr>")
 	map("n", "<leader>k", "<cmd>bprevious<cr>")
-	map("n", "<leader>ba", "<cmd>bufdo bd<cr>")
+	map("n", "<leader>ba", "<cmd>bufdo bd<cr>", { desc = "Delete all buffers" })
 
 	-- Tab management
 	map("n", "<leader>wo", "<cmd>only<cr>")

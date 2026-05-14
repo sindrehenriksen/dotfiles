@@ -15,7 +15,7 @@ return {
 				end,
 				desc = "Find files (all)",
 			},
-			{ "<leader>b", "<cmd>Telescope buffers<cr>", desc = "Buffers" },
+			{ "<leader>bb", "<cmd>Telescope buffers<cr>", desc = "Buffers" },
 			{ "<leader>l", "<cmd>Telescope current_buffer_fuzzy_find<cr>", desc = "Buffer lines" },
 			{ "<leader>fg", "<cmd>Telescope live_grep<cr>", desc = "Live grep" },
 		},
