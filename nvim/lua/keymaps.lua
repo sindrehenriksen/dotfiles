@@ -1,7 +1,7 @@
 local map = vim.keymap.set
 
 -- Clear search highlight
-map("n", "<leader><cr>", "<cmd>noh<cr>", { silent = true })
+map("n", "<leader><cr>", "<cmd>noh<cr>", { silent = true, desc = "Clear search highlight" })
 
 if not vim.g.vscode then
 	-- Window navigation (Dvorak home row: h=left, t=up, n=down, s=right)
@@ -11,15 +11,15 @@ if not vim.g.vscode then
 	map("n", "<C-s>", "<C-W>l")
 
 	-- Buffer navigation
-	map("n", "<leader>j", "<cmd>bnext<cr>")
-	map("n", "<leader>k", "<cmd>bprevious<cr>")
+	map("n", "<leader>j", "<cmd>bnext<cr>", { desc = "Next buffer" })
+	map("n", "<leader>k", "<cmd>bprevious<cr>", { desc = "Previous buffer" })
 	map("n", "<leader>ba", "<cmd>bufdo bd<cr>", { desc = "Delete all buffers" })
 
 	-- Tab management
-	map("n", "<leader>wo", "<cmd>only<cr>")
-	map("n", "<leader>to", "<cmd>tabonly<cr>")
-	map("n", "<leader>tn", "<cmd>tabnew<cr>")
-	map("n", "<leader>tc", "<cmd>tabclose<cr>")
+	map("n", "<leader>wo", "<cmd>only<cr>", { desc = "Close other windows" })
+	map("n", "<leader>to", "<cmd>tabonly<cr>", { desc = "Close other tabs" })
+	map("n", "<leader>tn", "<cmd>tabnew<cr>", { desc = "New tab" })
+	map("n", "<leader>tc", "<cmd>tabclose<cr>", { desc = "Close tab" })
 end
 
 -- Remap 0 to first non-blank character
@@ -41,14 +41,14 @@ map("n", "<leader>p", '"+p', { desc = "Paste from clipboard" })
 
 if not vim.g.vscode then
 	-- Switch CWD to the directory of the open buffer
-	map("n", "<leader>cd", "<cmd>cd %:p:h<cr><cmd>pwd<cr>")
+	map("n", "<leader>cd", "<cmd>cd %:p:h<cr><cmd>pwd<cr>", { desc = "CWD to buffer dir" })
 
 	-- Scratch buffers
-	map("n", "<leader>q", "<cmd>e ~/buffer<cr>")
-	map("n", "<leader>x", "<cmd>e ~/buffer.md<cr>")
+	map("n", "<leader>q", "<cmd>e ~/buffer<cr>", { desc = "Open ~/buffer" })
+	map("n", "<leader>x", "<cmd>e ~/buffer.md<cr>", { desc = "Open ~/buffer.md" })
 
 	-- Edit config
-	map("n", "<leader>e", "<cmd>e ~/dotfiles/nvim/init.lua<cr>")
+	map("n", "<leader>e", "<cmd>e ~/dotfiles/nvim/init.lua<cr>", { desc = "Edit init.lua" })
 
 	-- Sudo save
 	vim.api.nvim_create_user_command("W", "w !sudo tee % > /dev/null | edit!", {})
