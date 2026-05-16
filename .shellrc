@@ -118,6 +118,9 @@ fi
 # Explicit: claude-personal, claude-work. Each account uses its own config dir,
 # which means MCP servers registered via `claude mcp add` are per-account —
 # register Visma MCPs with `claude-work mcp add`, personal ones with `claude`.
+# Also exports GH_CONFIG_DIR so `gh` inside the Claude session targets the
+# matching account (Claude's Bash tool runs non-interactively and doesn't load
+# the gh-* shell functions below).
 _claude-run() {
     local account=$1; shift
     local dir=~/.claude
@@ -126,11 +129,37 @@ _claude-run() {
     # CLAUDE_CODE_NO_FLICKER=1 enables alt-screen rendering so the input stays
     # pinned and scrolling doesn't snap to bottom. Upstream's accepted answer
     # for anthropics/claude-code#13591 — also reachable via `/tui fullscreen`.
-    CLAUDE_CODE_NO_FLICKER=1 CLAUDE_CONFIG_DIR="$dir" command claude "$@"
+    CLAUDE_CODE_NO_FLICKER=1 \
+        CLAUDE_CONFIG_DIR="$dir" \
+        GH_CONFIG_DIR=~/.config/gh-"$account" \
+        command claude "$@"
 }
 claude()          { _claude-run "${CLAUDE_DEFAULT_ACCOUNT:-personal}" "$@"; }
 claude-personal() { _claude-run personal "$@"; }
 claude-work()     { _claude-run work "$@"; }
+
+
+#### gh CLI account switcher
+# Mirrors the claude switcher: per-process GH_CONFIG_DIR keeps concurrent
+# sessions isolated. One-time setup per account:
+#   GH_CONFIG_DIR=~/.config/gh-personal gh auth login
+#   GH_CONFIG_DIR=~/.config/gh-work     gh auth login
+_gh-run() {
+    local account=$1; shift
+    GH_CONFIG_DIR=~/.config/gh-"$account" command gh "$@"
+}
+# Bare `gh`: honor an explicitly-set GH_CONFIG_DIR (so claude-* exports and
+# `GH_CONFIG_DIR=... gh ...` command-line prefixes win), otherwise pick by
+# $GH_DEFAULT_ACCOUNT. The explicit forms below always force their account.
+gh() {
+    if [ -n "$GH_CONFIG_DIR" ]; then
+        command gh "$@"
+    else
+        _gh-run "${GH_DEFAULT_ACCOUNT:-personal}" "$@"
+    fi
+}
+gh-personal() { _gh-run personal "$@"; }
+gh-work()     { _gh-run work "$@"; }
 
 
 #### Local overrides (not tracked in dotfiles)
