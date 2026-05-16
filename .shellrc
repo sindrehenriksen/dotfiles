@@ -142,18 +142,32 @@ claude-work()     { _claude-run work "$@"; }
 #### gh CLI account switcher
 # Mirrors the claude switcher: per-process GH_CONFIG_DIR keeps concurrent
 # sessions isolated. One-time setup per account:
-#   GH_CONFIG_DIR=~/.config/gh-personal gh auth login
-#   GH_CONFIG_DIR=~/.config/gh-work     gh auth login
+#   gh-personal auth login
+#   gh-work auth login
+# Auto-injects --insecure-storage on `auth login`/`auth refresh` so tokens
+# land in each dir's hosts.yml. The system keyring is keyed by host only, so
+# without per-dir file storage two accounts collide on one keyring entry and
+# the last write wins (silent breakage — gh auth status reads the user label
+# from hosts.yml, not the actual token). Use `command gh ...` to bypass.
+_gh-exec() {
+    if [ "$1" = auth ] && { [ "$2" = login ] || [ "$2" = refresh ]; }; then
+        case " $* " in
+            *' --insecure-storage '*) ;;
+            *) set -- "$@" --insecure-storage ;;
+        esac
+    fi
+    command gh "$@"
+}
 _gh-run() {
     local account=$1; shift
-    GH_CONFIG_DIR=~/.config/gh-"$account" command gh "$@"
+    GH_CONFIG_DIR=~/.config/gh-"$account" _gh-exec "$@"
 }
 # Bare `gh`: honor an explicitly-set GH_CONFIG_DIR (so claude-* exports and
 # `GH_CONFIG_DIR=... gh ...` command-line prefixes win), otherwise pick by
 # $GH_DEFAULT_ACCOUNT. The explicit forms below always force their account.
 gh() {
     if [ -n "$GH_CONFIG_DIR" ]; then
-        command gh "$@"
+        _gh-exec "$@"
     else
         _gh-run "${GH_DEFAULT_ACCOUNT:-personal}" "$@"
     fi
