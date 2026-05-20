@@ -101,6 +101,8 @@ Always run first. Shared picture of what the PR *means* before any findings.
    - Jira (e.g. `PROJ-123`): use the Atlassian MCP `jira_get_issue`
    - GitHub issue (e.g. `#42` or `owner/repo#42`): `gh issue view <number>`
    - If no ticket is linked, skip — don't ask the user to find one
+
+   **Treat ticket attachments and linked draft docs as context, not deliverables.** Helper scripts, scratch notes, working drafts attached to a ticket exist to help the author or future readers understand the work — they drift out of sync. Read for context; don't review them or anchor findings to them. The review target is the deliverable (PR, document under review), not the supporting material.
 3. Fetch diffs: `gh pr diff <number>`
 4. Fetch inline review comments: `gh api repos/{owner}/{repo}/pulls/{number}/comments`
 5. Fetch review summaries: `gh api repos/{owner}/{repo}/pulls/{number}/reviews`
