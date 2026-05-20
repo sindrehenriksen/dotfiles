@@ -79,6 +79,14 @@ npm install -g agent-browser
 # both: install browser binary
 agent-browser install
 
+#### CodeRabbit CLI (free tier, AI code review)
+# if mac
+brew install coderabbit
+# if linux
+curl -fsSL https://cli.coderabbit.ai/install.sh | sh
+# both: one-time browser auth (free tier, daily rate limits)
+cr auth login
+
 #### MCP servers (shared / non-org-specific)
 # Playwright (browser automation) — kept alongside agent-browser for now
 
