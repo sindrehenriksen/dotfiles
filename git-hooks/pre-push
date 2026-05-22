@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Delegate to pre-commit framework if installed and repo has config.
+# Drop git's positional args (remote name + URL) — pre-commit doesn't
+# accept them and would error. Hooks needing ref context are uncommon;
+# use always_run: true on pre-push hooks that should fire regardless.
+if [ -f .pre-commit-config.yaml ] && command -v pre-commit &>/dev/null; then
+    pre-commit run --hook-stage pre-push
+fi

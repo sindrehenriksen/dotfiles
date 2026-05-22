@@ -2,6 +2,7 @@
 # Enforce commit message conventions:
 # - Title line: error at 50 chars (override: ALLOW_LONG_COMMIT_TITLE=1), hard error at 72
 # - Body: reflow paragraphs at 72 chars (like vim gqip)
+# - Then delegate to the repo's pre-commit framework commit-msg hooks if present
 
 msg_file="$1"
 
@@ -27,4 +28,9 @@ elif [ ${#title} -gt 50 ] && [ "${ALLOW_LONG_COMMIT_TITLE:-0}" != "1" ]; then
     echo "  - Title is ${#title} chars (aim for 50): $title"
     echo "  - Override with ALLOW_LONG_COMMIT_TITLE=1 (hard cap at 72 still applies)"
     exit 1
+fi
+
+# Delegate to repo pre-commit framework for any commit-msg hooks
+if [ -f .pre-commit-config.yaml ] && command -v pre-commit &>/dev/null; then
+    pre-commit run --hook-stage commit-msg --commit-msg-filename "$msg_file"
 fi
