@@ -1,21 +1,8 @@
 ---
 applyTo: '**'
 ---
-<!-- Claude Code counterpart: .claude/CLAUDE.md — partially overlapping content, different structure -->
-# Dotfiles Repo
-
-This repo manages shell configs, tool settings, and setup scripts. Key entry points:
-
-- `setup.sh` / `setup-visma.sh` — general and Visma-specific setup (MCP servers, credentials, etc.)
-- `install_symlinks.sh` — symlinks managed configs into place
-- `~/.secrets.env` / `~/.secrets-visma.env` — untracked secrets (chmod 600, `export KEY=VALUE` format); sourced by shell configs and MCP servers via `--env-file`
-- Skills live in `.agents/skills/` (single source), symlinked to both `~/.agents/skills/` and `~/.claude/skills/`
-
-Don't search `~` broadly for settings — check this repo and the paths above.
-
-## Auto-Approved Commands
-
-VS Code `chat.tools.terminal.autoApprove` (in User settings) defines which terminal commands are auto-approved vs prompted. Only genuinely safe (read-only, test, build) commands belong in the allow list. If the user asks to add a command, verify it's safe before adding — discuss with the user if there's any risk of destructive side effects or system modification. Keep in sync with the Claude Code `~/.claude/settings.json` permissions list.
+<!-- User-level Copilot instructions. Symlinked from ~/dotfiles/copilot-prompts/general.instructions.md to the VS Code prompts directory. -->
+<!-- Claude Code counterpart: ../.claude/CLAUDE.md — partially overlapping content, different structure -->
 
 # General Instructions
 
