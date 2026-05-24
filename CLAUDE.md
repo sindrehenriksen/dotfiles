@@ -9,6 +9,8 @@ This repo manages shell configs, tool settings, and setup scripts. Key entry poi
 
 Don't search `~` broadly for settings — check this repo and the paths above.
 
+For ephemeral additions (one-off diagnostic scripts, throwaway repros, in-flight experiments): add only the script/config — don't update README or other repo docs until the addition clearly sticks (gained a second caller, survived a few weeks, or asked for explicitly).
+
 ## Auto-Approved Commands
 
 `~/.claude/settings.json` (symlinked from this repo) defines which Bash commands are auto-approved vs prompted. Only genuinely safe (read-only, test, build) commands belong in the allow list. If the user asks to add a command, verify it's safe before adding — discuss with the user if there's any risk of destructive side effects or system modification. Keep in sync with the VS Code `chat.tools.terminal.autoApprove` list.
