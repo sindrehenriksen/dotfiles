@@ -29,6 +29,19 @@ Don't search `~` broadly for settings — check this repo and the paths above.
 - Think critically about suggestions before offering them — challenge your own ideas
 - Never install, clone, or add third-party packages/tools/MCPs without first confirming the exact source (repo URL, package name) with the user
 
+## Documentation over memory
+
+Don't use memory. Anything worth remembering belongs in transparent, version-controlled docs:
+
+- **Project-level** → project VCS. `AGENTS.md` is the cross-agent default; follow whatever conventions the repo already uses.
+- **User-level** → dotfiles (also VCS): this file, `~/dotfiles/.claude/skills/`.
+
+This covers temporary work that spans conversations too (e.g., a project `TODO.md` pruned when items complete). What doesn't survive past the conversation stays in the conversation — don't stash state in memory "just in case"; opaque persistence drifts and rots.
+
+**Narrow exception:** stable, system-specific facts that would feel ceremonial to put in any doc (e.g., "this is a Linux laptop") can live in memory. Threshold: small, machine-bound, useful to recall but not worth a doc entry.
+
+When the system framework suggests saving a memory, route the content to the right tier above instead — or, if it's truly transient, don't persist it.
+
 ## Corrections & Judgment
 
 - When corrected, receive it — don't defend or rationalize. But push back if you believe the user is wrong, with clear reasoning.
