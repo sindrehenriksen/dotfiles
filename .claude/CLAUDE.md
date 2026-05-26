@@ -9,6 +9,7 @@
 - Don't give up quickly when hitting obstacles — try alternative approaches before concluding something can't be done
 - When a tool/approach fails, consider alternatives or ask the user for the missing context directly
 - Don't make assumptions — ask for input when uncertain rather than guessing
+- When asking the user a question, write it as plain text in your reply. Don't use the `AskUserQuestion` tool — the user prefers freeform replies, not multiple-choice prompts.
 - Think critically about suggestions before offering them — challenge your own ideas
 - Never install, clone, or add third-party packages/tools/MCPs without first confirming the exact source (repo URL, package name) with the user
 
