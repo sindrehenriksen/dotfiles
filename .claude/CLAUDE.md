@@ -41,6 +41,7 @@ When the system framework suggests saving a memory, route the content to the rig
 ## Git Conventions
 
 - Prefer staging specific files over `git add -A` or `git add .` — review `git status` first to avoid adding unintended changes
+- When asked to fold changes into an earlier commit, default to `git commit --fixup=<sha>` and let the user rebase — don't rewrite history yourself unless asked. Before any destructive git op (`reset --hard`, force-push, rebase), capture uncommitted work first (stash or `git diff > patch`).
 - Check `git diff` (and `git diff --staged` if applicable) before writing the commit message
 - Commit message titles: concise, under 50 chars when possible. Body lines: wrap at 72 chars.
 - Focus on WHAT changed and WHY, not implementation details
