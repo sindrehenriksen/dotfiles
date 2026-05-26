@@ -27,7 +27,7 @@ Most of `~` (shell configs, tool settings, Claude config, skills) is symlinked f
 Don't use memory. Anything worth remembering belongs in transparent, version-controlled docs:
 
 - **Project-level** → project VCS. `AGENTS.md` is the cross-agent default; follow whatever conventions the repo already uses.
-- **User-level** → dotfiles (also VCS): this file, `~/dotfiles/.claude/skills/`.
+- **User-level** → dotfiles (also VCS): this file, `~/dotfiles/.agents/skills/`.
 
 This covers temporary work that spans conversations too (e.g., a project `TODO.md` pruned when items complete). What doesn't survive past the conversation stays in the conversation — don't stash state in memory "just in case"; opaque persistence drifts and rots.
 
