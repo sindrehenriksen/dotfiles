@@ -109,6 +109,17 @@ Mario Limonciello (AMD). Sindre credited with Reported-by and Tested-by. The 83K
 prefix match covers this device; 83MM (IdeaPad Slim 3 15ARP10) added as a third
 explicit DMI entry in v3.
 
+Update (2026-05-26): still ASSIGNED upstream, not yet merged as of comment #69
+(2026-05-22). No further patch revisions since v3.
+
+Charging caveat: while plugged in and actively charging, s2idle never reaches the
+deepest state and the `Delaying suspend by 2.5s` line spams the log (hundreds of
+times per suspend, EC battery chatter keeps waking it). This is charging-only and
+self-clearing: normal cycles log a single delay and reach deepest state, and the
+next suspend after a charging one is back to normal, so no action needed. A 15ARP10
+(83K7) user reported worse symptoms on charge (userland crashes + ACPI storm,
+github issue #3), but that does not reproduce on this 83K6.
+
 Timer/wakealarm caveat: Daniel's 82XR (Zen3) still breaks with timer-based wakeups
 even with the fix. Tested on this device (83K6, Zen3+) with the DKMS workaround —
 timer case works fine here, and another user reported the same on 14ARP10 (also
