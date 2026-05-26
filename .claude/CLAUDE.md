@@ -26,7 +26,7 @@ Don't use memory. Anything worth remembering belongs in transparent, version-con
 
 This covers temporary work that spans conversations too (e.g., a project `TODO.md` pruned when items complete). What doesn't survive past the conversation stays in the conversation — don't stash state in memory "just in case"; opaque persistence drifts and rots.
 
-**Narrow exception:** stable, system-specific facts that would feel ceremonial to put in any doc (e.g., "this is a Linux laptop") can live in memory. Threshold: small, machine-bound, useful to recall but not worth a doc entry.
+**Narrow exception:** facts that are machine-*divergent* — true on this machine but false on another (e.g. package manager, machine-specific hardware quirks) — can't live in dotfiles, since that one repo is shared across machines; these may live in memory. But the bar is high: the session's environment block already states platform/shell/OS (so "this is a Linux laptop" is not exception material — it's already given), and memory loads per-project by cwd, so it rarely earns its keep. Don't rebuild a machine/user profile.
 
 When the system framework suggests saving a memory, route the content to the right tier above instead — or, if it's truly transient, don't persist it.
 
