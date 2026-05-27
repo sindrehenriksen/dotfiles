@@ -99,10 +99,6 @@
       "Bash(git push * -f *)"
     ],
     "ask": [
-      "Bash(git commit --amend)",
-      "Bash(git commit --amend *)",
-      "Bash(git commit * --amend)",
-      "Bash(git commit * --amend *)",
       "Bash(find * -delete *)",
       "Bash(find * -exec *)",
       "Bash(find * -execdir *)",
