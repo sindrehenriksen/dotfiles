@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Claude Code status line. Reads JSON on stdin and prints a single line:
-#   [<vim>] t:<tokens> (<ctx%>) | 5h:<rem%> w:<rem%> | <model>[ th:<state>] | <branch>
+#   [<vim>] t:<tokens> (<ctx%>) | 5h:<rem%> w:<rem%> | <model>[ th:<state>] | <dir>[ <branch>]
 # th:<state> is the effort level when thinking is on, "on" when thinking is on but the
 # model has no effort parameter, or "off" when thinking is disabled.
 # Segments are omitted when their source fields are absent.
@@ -20,6 +20,7 @@ week_rem=$(jq -r 'if .rate_limits.seven_day.used_percentage != null then (100 - 
 
 cwd=$(jq -r '.cwd // "."' <<<"$input")
 branch=$(git -C "$cwd" branch --show-current 2>/dev/null || true)
+dir=${cwd/#$HOME/\~}
 
 # Strip optional "Claude " prefix, lowercase family, keep family + version (e.g. "opus 4.7").
 model=$(jq -r '.model.display_name // empty' <<<"$input" | sed -E 's/^Claude //' | awk 'NF>0 {n = tolower($1); if (NF >= 2) n = n " " $2; print n}')
@@ -46,5 +47,7 @@ esac
 out="$left"
 [ -n "$middle" ] && out="$out | $middle"
 [ -n "$right" ] && out="$out | $right"
-[ -n "$branch" ] && out="$out | $branch"
+prompt="$dir"
+[ -n "$branch" ] && prompt="$prompt $branch"
+out="$out | $prompt"
 echo "$out"
