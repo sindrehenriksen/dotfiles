@@ -17,15 +17,22 @@ msg_file="$1"
     tail -n +3 "$msg_file" | grep '^#' || true
 } > "${msg_file}.tmp" && mv "${msg_file}.tmp" "$msg_file"
 
-# Validate title length
+# Validate title length. Strip autosquash prefixes (fixup!/squash!/amend!,
+# which can stack) before measuring — git generates them, they're discarded on
+# rebase --autosquash, and the underlying subject was already linted on its
+# original commit.
 title=$(head -1 "$msg_file")
-if [ ${#title} -gt 72 ]; then
+subject="$title"
+while [[ "$subject" =~ ^(fixup|squash|amend)!\  ]]; do
+    subject="${subject#*! }"
+done
+if [ ${#subject} -gt 72 ]; then
     echo "Commit message lint failed:"
-    echo "  - Title is ${#title} chars (max 72): $title"
+    echo "  - Title is ${#subject} chars (max 72): $subject"
     exit 1
-elif [ ${#title} -gt 50 ] && [ "${ALLOW_LONG_COMMIT_TITLE:-0}" != "1" ]; then
+elif [ ${#subject} -gt 50 ] && [ "${ALLOW_LONG_COMMIT_TITLE:-0}" != "1" ]; then
     echo "Commit message lint failed:"
-    echo "  - Title is ${#title} chars (aim for 50): $title"
+    echo "  - Title is ${#subject} chars (aim for 50): $subject"
     echo "  - Override with ALLOW_LONG_COMMIT_TITLE=1 (hard cap at 72 still applies)"
     exit 1
 fi
