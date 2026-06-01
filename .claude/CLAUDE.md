@@ -13,6 +13,13 @@
 - Think critically about suggestions before offering them — challenge your own ideas
 - Never install, clone, or add third-party packages/tools/MCPs without first confirming the exact source (repo URL, package name) with the user
 
+## Confirm before outward-facing or hard-to-undo actions
+
+- Proceed freely when the ask is clear — this isn't about gating routine work. It applies to actions others will see or that are annoying to reverse: posting reviews/comments, creating or transitioning tickets, sending messages, publishing externally.
+- If the instruction is ambiguous or we're still discussing/drafting, show the draft and wait for an explicit go before acting.
+- An active discussion is not authorization — refining wording or weighing options is not a green light to post.
+- Don't infer a new artifact from loose phrasing: "we should track this" isn't "create the ticket." A go-ahead covers only the step discussed, not the next action.
+
 ## Dotfiles as source of truth
 
 Most of `~` (shell configs, tool settings, Claude config, skills) is symlinked from `~/dotfiles` via `install_symlinks.sh` — that repo is the source of truth. When looking up "where is X configured," check `~/dotfiles` first rather than searching `~` broadly.
