@@ -56,12 +56,12 @@ Lua config under `nvim/lua/`: `options.lua`, `keymaps.lua`, `autocmds.lua`, `plu
 - **Claude Code** is the primary agent. Global instructions in `.claude/CLAUDE.md`, settings in `.claude/settings.json` (both symlinked to `~/.claude/`). Two accounts are isolated via `CLAUDE_CONFIG_DIR`: `~/.claude/` (personal, default) and `~/.claude-work/` (work). Shell functions `claude-personal` / `claude-work` in `.shellrc` set the config dir before launching; `claude` uses `$CLAUDE_DEFAULT_ACCOUNT` (default `personal`). Override per machine by setting `CLAUDE_DEFAULT_ACCOUNT=work` in `.shellrc-visma`. Shared config (CLAUDE.md, settings, skills) is symlinked from `~/.claude/` into `~/.claude-work/` via `install_symlinks.sh` — credentials in each dir's `.credentials.json` are not shared. `claude-*` also exports `GH_CONFIG_DIR` so the bundled `gh` CLI targets the matching account.
 - **gh CLI** uses the same pattern: `gh-personal` / `gh-work` shell functions point at `~/.config/gh-personal` / `~/.config/gh-work`; bare `gh` follows `$GH_DEFAULT_ACCOUNT` (default `personal`). Per-process env vars mean concurrent sessions don't stomp each other. The wrapper auto-injects `--insecure-storage` on `auth login` / `auth refresh` so tokens land in each dir's `hosts.yml` (chmod 600) instead of the system keyring — the keyring is keyed by host only, so two accounts would otherwise collide on one entry and the last write would silently win for both (`gh auth status` reads the user label from `hosts.yml`, not the actual token, so the breakage isn't obvious). Use `command gh ...` to bypass the wrapper.
 - **Copilot CLI** and **Codex CLI** have MCP setup in `setup.sh` but haven't been validated in a real workflow yet — see `TODO.md`.
-- **Skills** in `.agents/skills/` cover: `pr-review`, `pr-description`, `browser`, `sync`, `confluence` (work-only), `adding-skills`. Symlinked into both Codex and Claude locations via `install_symlinks.sh`.
+- **Skills** in `.agents/skills/` cover: `pr-review`, `pr-description`, `browser`, `sync`, `adding-skills`. Symlinked into both Codex and Claude locations via `install_symlinks.sh`. (A work-only `confluence` skill lives in a separate private repo.)
 - VS Code Copilot prompts in `copilot-prompts/` (`general.instructions.md`, `git.instructions.md`).
 
 ## Work-specific setup
 
-`setup-visma.sh` handles Atlassian MCP, Azure, and other work-only tooling. `install_symlinks_visma.sh` adds the Confluence skill and `.shellrc-visma`. Work secrets live in `~/.secrets-visma.env`.
+Work-machine tooling setup (MCP servers, work-only skills, work secrets template) lives in a **separate private repo**, not here. `install_symlinks_visma.sh` wires the local symlinks — `.shellrc-visma`, plus the Confluence skill sourced from that private repo. Work secrets live in `~/.secrets-visma.env` (untracked).
 
 ## Outstanding work
 

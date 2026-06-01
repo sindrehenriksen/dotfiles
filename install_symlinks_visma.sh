@@ -12,6 +12,12 @@ link() {
 # Shell config
 link ~/dotfiles/.shellrc-visma ~/.shellrc-visma
 
-# Confluence skill (Copilot agents + Claude Code)
-link ~/dotfiles/.agents/skills/confluence ~/.agents/skills/confluence
-link ~/dotfiles/.agents/skills/confluence ~/.claude/skills/confluence
+# Confluence skill (Copilot agents + Claude Code).
+# Source lives in the private work repo (~/dev/flyt) — clone it first.
+CONFLUENCE_SKILL=~/dev/flyt/dev-setup/skills/confluence
+if [ -d "$CONFLUENCE_SKILL" ]; then
+    link "$CONFLUENCE_SKILL" ~/.agents/skills/confluence
+    link "$CONFLUENCE_SKILL" ~/.claude/skills/confluence
+else
+    echo "NOTE: $CONFLUENCE_SKILL not found — clone the work repo, then re-run"
+fi

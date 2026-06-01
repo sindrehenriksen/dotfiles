@@ -69,7 +69,7 @@ brew install 1password-cli
 cp ~/dotfiles/secrets/secrets.env.example ~/.secrets.env
 chmod 600 ~/.secrets.env
 # edit ~/.secrets.env
-# For Visma setup, see setup-visma.sh
+# For work-machine setup, see the private work repo (dev-setup/)
 
 #### Browser automation (agent-browser)
 # if mac
@@ -114,8 +114,8 @@ claude mcp add -s user playwright -- npx @playwright/mcp@latest
 # OpenAI Codex CLI:
 #   codex mcp add playwright -- npx @playwright/mcp@latest
 
-#### Visma-specific setup (MCP servers, etc.)
-# ~/dotfiles/setup-visma.sh
+#### Work-specific setup (MCP servers, etc.)
+# Lives in the private work repo: ~/dev/flyt/dev-setup/
 
 #### Install vim-plug (if not already installed)
 curl -fLo ~/.vim/autoload/plug.vim --create-dirs \
