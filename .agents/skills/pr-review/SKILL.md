@@ -68,7 +68,7 @@ How to surface attribution:
 
 ### Setup: review worktree
 
-Reviews happen in a dedicated git worktree per repo — **never in the user's active working dir** (branch-switching would disrupt in-progress work). Convention: `<repo>-review` as a sibling of the active repo (e.g. `~/dev/flyt/flytai-api-review` for `~/dev/flyt/flytai-api`).
+Reviews happen in a dedicated git worktree per repo — **never in the user's active working dir** (branch-switching would disrupt in-progress work). Convention: `<repo>-review` as a sibling of the active repo (e.g. `~/dev/myproject-review` for `~/dev/myproject`).
 
 1. `cd` into `<repo>-review`. If it doesn't exist, create it detached at `origin/main` from the active repo:
    ```bash
