@@ -171,6 +171,7 @@ Key gotchas:
 - **Use `--input` with raw JSON**, not `--field` — the `--field` flag can't encode the `comments` array correctly
 - **Inline comments can only target lines present in the diff**. If the concern is on an unchanged line, attach the comment to the nearest changed line and reference the actual line number in the body
 - **`event`** is one of: `APPROVE`, `REQUEST_CHANGES`, `COMMENT`
+- **Always return the posted review's link**: `gh api repos/{owner}/{repo}/pulls/{number}/reviews --jq '.[-1].html_url'`
 
 ## What to Look For
 
