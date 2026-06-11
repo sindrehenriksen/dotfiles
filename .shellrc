@@ -114,7 +114,9 @@ fi
 
 
 #### Claude Code account switcher
-# Default account is personal; override with CLAUDE_DEFAULT_ACCOUNT=work.
+# Default account is personal. Override per machine with DEFAULT_ACCOUNT=work
+# in ~/.shellrc.local (untracked) to flip every account-aware tool at once, or
+# CLAUDE_DEFAULT_ACCOUNT=work for just this one.
 # Explicit: claude-personal, claude-work. Each account uses its own config dir,
 # which means MCP servers registered via `claude mcp add` are per-account —
 # register Visma MCPs with `claude-work mcp add`, personal ones with `claude`.
@@ -134,7 +136,7 @@ _claude-run() {
         GH_CONFIG_DIR=~/.config/gh-"$account" \
         command claude "$@"
 }
-claude()          { _claude-run "${CLAUDE_DEFAULT_ACCOUNT:-personal}" "$@"; }
+claude()          { _claude-run "${CLAUDE_DEFAULT_ACCOUNT:-${DEFAULT_ACCOUNT:-personal}}" "$@"; }
 claude-personal() { _claude-run personal "$@"; }
 claude-work()     { _claude-run work "$@"; }
 
@@ -149,7 +151,12 @@ claude-work()     { _claude-run work "$@"; }
 # without per-dir file storage two accounts collide on one keyring entry and
 # the last write wins (silent breakage — gh auth status reads the user label
 # from hosts.yml, not the actual token). Use `command gh ...` to bypass.
-_gh-exec() {
+# Helpers use a double-underscore prefix, not single: Claude Code's shell
+# snapshot strips every single-`_` function (the zsh completion convention,
+# ~1100 of them) but keeps `__`-prefixed ones, so single-`_` helpers would be
+# missing inside Claude's non-interactive shell and the `gh` wrapper below
+# would fail with "command not found: _gh-exec".
+__gh-exec() {
     if [ "$1" = auth ] && { [ "$2" = login ] || [ "$2" = refresh ]; }; then
         case " $* " in
             *' --insecure-storage '*) ;;
@@ -158,22 +165,23 @@ _gh-exec() {
     fi
     command gh "$@"
 }
-_gh-run() {
+__gh-run() {
     local account=$1; shift
-    GH_CONFIG_DIR=~/.config/gh-"$account" _gh-exec "$@"
+    GH_CONFIG_DIR=~/.config/gh-"$account" __gh-exec "$@"
 }
 # Bare `gh`: honor an explicitly-set GH_CONFIG_DIR (so claude-* exports and
 # `GH_CONFIG_DIR=... gh ...` command-line prefixes win), otherwise pick by
-# $GH_DEFAULT_ACCOUNT. The explicit forms below always force their account.
+# $GH_DEFAULT_ACCOUNT, then the shared $DEFAULT_ACCOUNT. The explicit forms
+# below always force their account.
 gh() {
     if [ -n "$GH_CONFIG_DIR" ]; then
-        _gh-exec "$@"
+        __gh-exec "$@"
     else
-        _gh-run "${GH_DEFAULT_ACCOUNT:-personal}" "$@"
+        __gh-run "${GH_DEFAULT_ACCOUNT:-${DEFAULT_ACCOUNT:-personal}}" "$@"
     fi
 }
-gh-personal() { _gh-run personal "$@"; }
-gh-work()     { _gh-run work "$@"; }
+gh-personal() { __gh-run personal "$@"; }
+gh-work()     { __gh-run work "$@"; }
 
 
 #### Local overrides (not tracked in dotfiles)
