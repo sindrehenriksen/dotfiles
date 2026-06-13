@@ -19,11 +19,18 @@ fi
 
 #### brew (macOS only)
 # shellenv is already evaluated in .zprofile for zsh; this covers bash and any
-# case where HOMEBREW_PREFIX isn't set yet.
+# case where HOMEBREW_PREFIX isn't set yet. Apple Silicon path first, Intel
+# fallback.
 if $IS_MAC; then
     alias new-brew='eval "$(/opt/homebrew/bin/brew shellenv)"'
     alias old-brew='eval "$(/usr/local/bin/brew shellenv)"'
-    [ -z "$HOMEBREW_PREFIX" ] && eval "$(/opt/homebrew/bin/brew shellenv)"
+    if [ -z "$HOMEBREW_PREFIX" ]; then
+        if [ -x /opt/homebrew/bin/brew ]; then
+            eval "$(/opt/homebrew/bin/brew shellenv)"
+        elif [ -x /usr/local/bin/brew ]; then
+            eval "$(/usr/local/bin/brew shellenv)"
+        fi
+    fi
 fi
 
 

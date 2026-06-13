@@ -3,9 +3,9 @@ source ~/.zprofile
 
 #### zplug
 # Note: ZPLUG_HOME determines where repos are stored. On macOS (Homebrew),
-# repos live under /opt/homebrew/opt/zplug/repos/, NOT ~/.zplug/repos/.
+# repos live under $HOMEBREW_PREFIX/opt/zplug/repos/, NOT ~/.zplug/repos/.
 if [[ "$(uname)" == "Darwin" ]]; then
-    export ZPLUG_HOME=/opt/homebrew/opt/zplug
+    export ZPLUG_HOME="${HOMEBREW_PREFIX:-/opt/homebrew}/opt/zplug"
 else
     export ZPLUG_HOME="$HOME/.zplug"
 fi
@@ -37,8 +37,8 @@ bindkey '^?' backward-delete-char
 #[ -f ~/.fzf.zsh ] && source ~/.fzf.zsh && source ~/dotfiles/.fzf_config
 source ~/dotfiles/.fzf_config
 if [[ "$(uname)" == "Darwin" ]]; then
-    source /opt/homebrew/opt/fzf/shell/key-bindings.zsh
-    source /opt/homebrew/opt/fzf/shell/completion.zsh
+    source "${HOMEBREW_PREFIX:-/opt/homebrew}/opt/fzf/shell/key-bindings.zsh"
+    source "${HOMEBREW_PREFIX:-/opt/homebrew}/opt/fzf/shell/completion.zsh"
 else
     # fzf keybindings and completion on Linux (apt install)
     [ -f /usr/share/doc/fzf/examples/key-bindings.zsh ] && source /usr/share/doc/fzf/examples/key-bindings.zsh
