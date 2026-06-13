@@ -112,6 +112,12 @@ curl -fsSL https://cli.coderabbit.ai/install.sh | sh
 # both: one-time browser auth (free tier, daily rate limits)
 cr auth login
 
+#### Claude Code
+# Use the official installer, not `brew install --cask claude-code`: the cask
+# lags and may NOT carry the latest, which gates access to newer models. The
+# official installer auto-updates and tracks latest.
+command -v claude >/dev/null || curl -fsSL https://claude.ai/install.sh | bash
+
 #### MCP servers (shared / non-org-specific)
 # Playwright (browser automation) — kept alongside agent-browser for now
 
