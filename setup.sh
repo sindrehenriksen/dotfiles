@@ -1,6 +1,7 @@
-#### Install terminal
-# if mac: install iterm2
-# if linux: install ghostty (https://ghostty.org/docs/install)
+#### Install terminal (Ghostty on both platforms)
+# if mac
+brew install --cask ghostty
+# if linux: https://ghostty.org/docs/install
 
 # Set zsh as default shell
 sudo chsh -s $(which zsh) $USER
@@ -59,6 +60,30 @@ brew install --cask hammerspoon
 # preferences enable "Launch at login" + "Automatically reload config when
 # any files change". Config is symlinked via install_symlinks.sh.
 
+#### macOS keyboard tweaks
+# Caps Lock <-> Escape swap (built-in, persistent, per-keyboard):
+# System Settings > Keyboard > Keyboard Shortcuts... > Modifier Keys.
+# Pick the keyboard from the dropdown, then set Caps Lock Key -> Escape
+# and Escape Key -> Caps Lock. Repeat for each connected keyboard.
+#
+# Free up Ctrl+Space (used by other tools — e.g. autosuggest-accept in zsh):
+# System Settings > Keyboard > Keyboard Shortcuts... > Input Sources.
+# Uncheck "Select the previous input source". Ctrl+Option+Space still
+# cycles via "Select next source in Input menu".
+#
+# Programmer Dvorak (Roland Kaufmann's layout — not built into macOS):
+#   cd /tmp
+#   curl -fsSLO https://www.kaufmann.no/downloads/macos/ProgrammerDvorak-1_2_13.pkg.zip
+#   unzip ProgrammerDvorak-1_2_13.pkg.zip
+#   mkdir -p ~/payload && cd ~/payload
+#   pax -rz -f "/tmp/Programmer Dvorak v1.2.pkg/Contents/Archive.pax.gz"
+#   mkdir -p ~/Library/Keyboard\ Layouts
+#   cp -R "Library/Keyboard Layouts/Programmer Dvorak.bundle" ~/Library/Keyboard\ Layouts/
+#   cd ~ && rm -rf ~/payload /tmp/Programmer\ Dvorak* /tmp/ProgrammerDvorak*
+# Then enable: System Settings > Keyboard > Text Input > Input Sources >
+# Edit... > + > Others > Programmer Dvorak. Log out + log in if the layout
+# doesn't show up immediately.
+
 #### 1password-cli (optional)
 # if mac
 brew install 1password-cli
@@ -80,8 +105,8 @@ npm install -g agent-browser
 agent-browser install
 
 #### CodeRabbit CLI (free tier, AI code review)
-# if mac
-brew install coderabbit
+# if mac (it's a cask — auto-resolves but --cask is explicit)
+brew install --cask coderabbit
 # if linux
 curl -fsSL https://cli.coderabbit.ai/install.sh | sh
 # both: one-time browser auth (free tier, daily rate limits)
@@ -92,10 +117,6 @@ cr auth login
 
 # Claude Code (user-scoped — available in all projects)
 claude mcp add -s user playwright -- npx @playwright/mcp@latest
-
-#### Claude Code preferences (per-machine, stored in ~/.claude.json)
-# Enable vim keybindings in the input prompt: run /config in a Claude Code
-# session and set "Editor mode" to Vim. Not persistable via settings.json.
 
 #### Claude Code per-machine settings (~/.claude/settings.local.json, gitignored)
 # Add this machine's resolved $TMPDIR to permissions.additionalDirectories so

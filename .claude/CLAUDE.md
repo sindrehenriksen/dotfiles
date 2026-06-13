@@ -24,6 +24,10 @@
 
 Most of `~` (shell configs, tool settings, Claude config, skills) is symlinked from `~/dotfiles` via `install_symlinks.sh` — that repo is the source of truth. When looking up "where is X configured," check `~/dotfiles` first rather than searching `~` broadly.
 
+## Check the environment before assuming
+
+Before claiming a tool isn't installed or recommending an install step, check the environment — `$TERM_PROGRAM` (`ghostty`, `iTerm.app`, `Apple_Terminal`, `vscode`), `$SHELL`, `$HOMEBREW_PREFIX`, `uname -m` (`arm64` vs `x86_64`), `which <cmd>`. The session env block is brief; one quick probe beats a guess.
+
 ## Secrets & sensitive files
 
 - Don't read, `cat`, or print the contents of files that may hold secrets or sensitive local config — `.env` files, `.credentials.json`, private keys, local `mise` TOML (`mise.local.toml`) — unless the user explicitly asks. Referencing them by path, sourcing them, or passing them to a tool (e.g. `--env-file`) is fine.
