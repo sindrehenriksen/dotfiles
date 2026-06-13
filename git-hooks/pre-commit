@@ -1,4 +1,22 @@
 #!/usr/bin/env bash
+# Run any test-*.sh adjacent to this hook when its hooks dir is touched.
+# Cheap regression guard for the other hooks; skipped on unrelated commits.
+hook_dir="$(cd "$(dirname "$0")" && pwd)"
+repo_root="$(git rev-parse --show-toplevel 2>/dev/null)" || repo_root=""
+if [ -n "$repo_root" ]; then
+    hook_dir_rel="${hook_dir#$repo_root/}"
+    if git diff --cached --name-only | grep -q "^${hook_dir_rel}/"; then
+        for test in "$hook_dir"/test-*.sh; do
+            [ -f "$test" ] || continue
+            if ! output=$(bash "$test" 2>&1); then
+                echo "$(basename "$test") failed:"
+                echo "$output"
+                exit 1
+            fi
+        done
+    fi
+fi
+
 # Delegate to pre-commit framework if installed and repo has config
 if [ -f .pre-commit-config.yaml ] && command -v pre-commit &>/dev/null; then
     pre-commit run --hook-stage pre-commit "$@"
