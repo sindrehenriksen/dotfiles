@@ -72,6 +72,7 @@ When the system framework suggests saving a memory, route the content to the rig
 ## Output Formatting
 
 - Don't hard-wrap markdown destined for renderers that wrap natively (GitHub PRs / issues / comments, Slack, Jira, Confluence) — let the UI render at the reader's chosen width. Hard-wrap only for plain-text contexts like commit message bodies.
+- Don't overuse em dashes. They're fine for the occasional genuine parenthetical aside or dramatic break, but reach for a colon, comma, parentheses, or a new sentence where one reads as well or better — especially in list lead-ins (use a colon). The complaint is overuse, not any use.
 
 ## Pull Request Descriptions
 
