@@ -1,5 +1,5 @@
-#### Visma secrets (not tracked in dotfiles)
-if [ -f ~/.secrets-visma.env ]; then set -a; source ~/.secrets-visma.env; set +a; fi
+#### Visma secrets (real values gitignored in the work repo ~/dev/flyt, not in dotfiles)
+if [ -f ~/dev/flyt/dev-setup/secrets-visma.env ]; then set -a; source ~/dev/flyt/dev-setup/secrets-visma.env; set +a; fi
 
 
 #### Work-specific aliases and config below (edit locally)

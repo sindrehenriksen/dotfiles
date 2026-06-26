@@ -13,7 +13,7 @@ Work-specific machine setup and agent config live in a **separate private repo**
 
 - `setup.sh` — general machine setup (work-machine tooling lives in the private work repo)
 - `install_symlinks.sh` — symlinks managed configs into place
-- `~/.secrets.env` / `~/.secrets-visma.env` — untracked secrets (chmod 600, `export KEY=VALUE` format); sourced by shell configs and MCP servers via `--env-file`
+- `~/.secrets.env` — untracked personal secrets (chmod 600, `export KEY=VALUE` format); sourced by shell configs. Work/Visma secrets live in the private work repo (gitignored), not under `~` — see that repo's setup.
 - Skills live in `.agents/skills/` (single source), symlinked to both `~/.agents/skills/` and `~/.claude/skills/`
 
 Don't search `~` broadly for settings — check this repo and the paths above.

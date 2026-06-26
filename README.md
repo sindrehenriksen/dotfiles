@@ -61,7 +61,7 @@ Lua config under `nvim/lua/`: `options.lua`, `keymaps.lua`, `autocmds.lua`, `plu
 
 ## Work-specific setup
 
-Work-machine tooling setup (MCP servers, work-only skills, work secrets template) lives in a **separate private repo**, not here. `install_symlinks_visma.sh` wires the local symlinks — `.shellrc-visma`, plus the Confluence skill sourced from that private repo. Work secrets live in `~/.secrets-visma.env` (untracked).
+Work-machine tooling setup (MCP servers, work-only skills, work secrets template) lives in a **separate private repo**, not here. `install_symlinks_visma.sh` wires the local symlinks — `.shellrc-visma`, plus the Confluence skill sourced from that private repo. Work secrets live in that private repo (gitignored), sourced by `.shellrc-visma`.
 
 ## Outstanding work
 
