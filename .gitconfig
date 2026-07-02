@@ -2,6 +2,10 @@
 	name = sindrehenriksen
 	email = sindrehenriksen93@gmail.com
 
+# Work identity for repos under ~/dev/flyt/ (personal projects keep the default above).
+[includeIf "gitdir:~/dev/flyt/"]
+	path = ~/dev/flyt/dev-setup/gitconfig-visma
+
 [alias]
     c = commit
     ca = commit --amend
