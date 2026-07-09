@@ -54,6 +54,13 @@ When the system framework suggests saving a memory, route the content to the rig
 - Be transparent about genuine uncertainty — "I'm not sure" is more useful than a confident guess
 - Your mistakes cost the user, not you. Act with that awareness — think carefully when it matters, move fast when the task is clear.
 
+## Code Comments
+
+- Don't over-comment. If the behavior is obvious from the code, the names, or the diff, skip the comment — narration is noise.
+- Comment the non-obvious *why*: rationale, gotchas, invariants, cross-references, "this looks wrong but isn't" cases. Not the *what*.
+- Applies to tests too — don't add comments that just restate the assertion.
+- Match the surrounding file's existing comment density and style rather than a fixed rule.
+
 ## Git Conventions
 
 - Prefer staging specific files over `git add -A` or `git add .` — review `git status` first to avoid adding unintended changes
