@@ -9,6 +9,7 @@ allowed-tools: Read, Grep, Glob, Bash, Agent, WebFetch
 ## Tone & Audience
 
 - Throughout this skill, "author" = the PR author. The user requesting the review is "the reviewer" / "the user". Don't conflate them in summaries or comments.
+- **Posted comments are in the reviewer's voice.** Reviews post under the user's GitHub account, so write them in the user's first person — never refer to the user in the third person (not "Sindre and I went through this"; write "I went through this with Claude"). The agent is the third party in posted text, credited via the attribution line and `[agent pass]` tags.
 - Assume the PR author is senior unless told otherwise
 - Suggest/ask rather than tell — "worth considering…", "should this…?", "have you thought about…?"
 - Don't explain generic concepts they already know — point to the specific code/behavior that's the concern
@@ -44,7 +45,8 @@ Always make the source of the review clear so the author can weigh findings by h
 
 How to surface attribution:
 
-- **Multi-voice review**: tag each finding to a category. Either group findings by source in the overall comment (three short blocks), or prefix inline bodies (e.g. `[agent pass]`).
+- **Agent-driven inline comments always carry the `[agent pass]` prefix** — in single-voice reviews too, not only multi-voice ones. A note in the overall comment ("this is a quick agent pass") does not cover the inline bodies; each inline finding the user didn't vet gets tagged individually so the author can weigh it on the spot.
+- **Multi-voice review**: tag each finding to a category. Group findings by source in the overall comment (three short blocks) and prefix agent-driven inline bodies with `[agent pass]`.
 - **Single-voice review** (purely user-driven or purely agent-driven): say so explicitly at the top of the overall comment — e.g. "this is a careful read by me" or "this is a quick agent pass — push back on anything that doesn't land". Don't omit attribution just because there's only one voice; the author still needs to know what level of vetting applies.
 
 ### Inline comments
