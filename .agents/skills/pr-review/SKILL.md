@@ -85,7 +85,7 @@ Reviews happen in a dedicated git worktree **per review** — **never check out 
 2. Copy `.env` from the active repo if the review needs it; install deps (`node_modules`, venv — gitignored, not shared across worktrees) only if you'll actually run code/tests.
 3. For main-comparisons during review, use `origin/main` refs — **don't** check out local `main` in the worktree (git would lock it out of the active working dir; same branch can't be checked out in two worktrees).
 
-The worktree lives as long as the PR does — keep it across re-review rounds; delete it when the PR merges or closes (see Cleanup).
+The worktree lives until the user says the review conversation is done — keep it across re-review rounds; deletion is on the user's go (see Cleanup).
 
 Each agent's trust model for paths outside the invocation cwd is independent — configure per-agent to avoid mid-session approval prompts on file ops in the review worktree. For Claude Code: `permissions.additionalDirectories` in `~/.claude/settings.local.json` (see `.claude/CLAUDE.md`).
 
@@ -154,7 +154,7 @@ Always run first. Shared picture of what the PR *means* before any findings.
 
 ### Cleanup
 
-1. Review worktrees are deleted when their PR merges or closes — not necessarily when the review session ends (keep it if re-review rounds are likely). To remove: `git -C <active-repo-path> worktree remove ../<repo>-review-<id>`, then delete the local PR branch (`git -C <active-repo-path> branch -D <pr-branch>`).
+1. The worktree is deleted when the user says the review conversation is done — not automatically after posting. After posting the review, ask: "let me know when you're ready to delete the review worktree." On the user's go: `git -C <active-repo-path> worktree remove ../<repo>-review-<id>`, then delete the local PR branch (`git -C <active-repo-path> branch -D <pr-branch>`).
 2. When touching a repo's worktrees, glance at `git worktree list` — any `-review-<id>` sibling whose PR is merged/closed is stale; remove it (checking `git status` for stray uncommitted notes first).
 
 ## Posting Reviews via GitHub API
