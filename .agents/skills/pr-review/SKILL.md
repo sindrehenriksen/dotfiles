@@ -9,10 +9,12 @@ allowed-tools: Read, Grep, Glob, Bash, Agent, WebFetch
 ## Tone & Audience
 
 - Throughout this skill, "author" = the PR author. The user requesting the review is "the reviewer" / "the user". Don't conflate them in summaries or comments.
-- **Posted comments are in the reviewer's voice.** Reviews post under the user's GitHub account, so write them in the user's first person — never refer to the user in the third person (not "Sindre and I went through this"; write "I went through this with Claude"). The agent is the third party in posted text, credited via the attribution line and `[agent pass]` tags.
+- **Posted comments are in the reviewer's voice.** Reviews post under the user's GitHub account, so write them in the user's first person — never refer to the user in the third person (not "Sindre and I went through this"; write "I went through this with Claude"). The agent is the third party in posted text, credited via the attribution line and `[agent pass]` tags. Same rule for where the discussion happened: it happened here, in the review session — don't attribute it to another channel ("recording our Slack discussion") that the author could go looking for.
+- Never @-mention the PR author — they're notified of review comments automatically, and tagging them on their own PR reads oddly.
 - Assume the PR author is senior unless told otherwise
 - Suggest/ask rather than tell — "worth considering…", "should this…?", "have you thought about…?"
-- Don't explain generic concepts they already know — point to the specific code/behavior that's the concern
+- When a finding rests on something you couldn't verify exists (a measurement, a comparison run, an agreement), ask whether it exists rather than asserting it doesn't — "has this been compared against X?", not "this is not measured". Your visibility is incomplete; the author may have done it without documenting it.
+- Don't explain generic concepts they already know — point to the specific code/behavior that's the concern. Same for repo/process facts every contributor knows (the deploy chain, branch conventions): state the ask without re-explaining the machinery behind it.
 - Be direct, not formal — skip preamble and filler
 
 ## Orientation
@@ -23,7 +25,7 @@ When in doubt: *could a scanner, linter, or automated reviewer have caught this?
 
 **Conversation discipline — separate, don't merge.** Structure the user-facing summary into two distinct sections, never intermixed:
 
-1. **Decisions for the user.** Strategic calls only the reviewer can make — the things they should actually spend thought on. Bar is *"does the user have a real decision that isn't already covered by (a) PR-author seniority, (b) existing repo safeguards (infra what-ifs, dev-first deploys, eval gates, AI reviewers, scanners), or (c) graceful failure modes?"* If no, it doesn't go here. A calibrated section (1) is often 0–2 items.
+1. **Decisions for the user.** Strategic calls only the reviewer can make — the things they should actually spend thought on. Bar is *"does the user have a real decision that isn't already covered by (a) PR-author seniority, (b) existing repo safeguards (infra what-ifs, dev-first deploys, eval gates, AI reviewers, scanners), or (c) graceful failure modes?"* If no, it doesn't go here. A calibrated section (1) is often 0–2 items. A decision here resolves one of three ways: the user settles it in chat (it drops or becomes a settled point), the user owns it outside the review, or — the most common outcome — it goes on the PR as a neutral question to the author, leaving the call to them. Frame each decision so the ask-the-author path is ready to post.
 
 2. **Inline-comment candidates.** Minor things worth nudging the PR author on but not worth the reviewer's strategic attention. Frame as "happy to comment on these inline too — but the focus is above." Items that typically belong here: predictable error-code or status-code mappings that fall out of the feature shape, infra changes covered by what-ifs and staged rollouts, edge-case data loss with graceful degradation (e.g. integrator just sees a missing field), mechanical consequences of an otherwise-correct implementation, small inconsistencies, "probably already aware but worth a double-check" nudges.
 
@@ -70,7 +72,7 @@ How to surface attribution:
 
 ### Setup: review worktree
 
-Reviews happen in a dedicated git worktree per repo — **never in the user's active working dir** (branch-switching would disrupt in-progress work). Convention: `<repo>-review` as a sibling of the active repo (e.g. `~/dev/myproject-review` for `~/dev/myproject`).
+Reviews happen in a dedicated git worktree per repo — **never check out branches in the user's active working dir** (it would disrupt in-progress work). Read-only inspection there (greps, `gh` API calls) is fine, and a small PR reviewable from `gh pr diff` plus targeted greps may not need the worktree at all. Convention: `<repo>-review` as a sibling of the active repo (e.g. `~/dev/myproject-review` for `~/dev/myproject`).
 
 1. `cd` into `<repo>-review`. If it doesn't exist, create it detached at `origin/main` from the active repo:
    ```bash
@@ -89,10 +91,14 @@ Always run first. Shared picture of what the PR *means* before any findings.
 **Pre-Phase-0 fetches.** `gh pr view` (PR metadata) is always required. Also pre-fetch the linked ticket if the PR body is thin, references the ticket for details, or ticket-vs-code alignment would meaningfully affect Phase 0 framing. Skip for clearly self-describing PRs (dep bumps, tooling, trivial chores); Phase 1 still handles those if we proceed deeper.
 
 1. **Plain-language, outcome-focused summary.** 3–5 sentences — what changes for users / consumers / the system / the team. Skip implementation; don't restate the PR description.
-2. **Classification** — *purely technical* (refactor, NFR, perf, tooling, security hardening with no posture change) or *has implications* (flag which: product / UX, architectural, security posture, repo ergonomics, stakeholder / contract, compliance, strategic test coverage).
+2. **Classification** — *purely technical* (refactor, NFR, perf, tooling, pipeline hygiene, security hardening with no posture change) or *has implications* (flag which: product / UX, architectural, security posture, operational / alerting posture, repo ergonomics, stakeholder / contract, compliance, strategic test coverage).
+
+   Classification is the review's load-bearing prediction, not a label — it forecasts whether the reviewer has real decisions to make and how much verification the change needs:
+   - *Purely technical* is a **no-behavior-change claim, and must be earned by verifying it**, because silent behavior changes hide exactly here — a dependency-pin jump that flips a default, a docs-only path change that triggers a deploy. Verified clean, these PRs need no reviewer judgment; at most a process gate (e.g. "not yet run on dev"), which resolves as an ask to the author.
+   - *Has implications* predicts a non-empty decisions section: each flagged dimension should name the question only the reviewer (or someone they'd consult) can settle — product direction, what wakes a human, what data may be logged, what a contract promises. If a dimension is flagged but no such question exists, the flag is probably wrong.
 3. **Context only the human can supply** — where your judgment benefits from things the AI can't see (cross-team impact, external consumer assumptions, in-flight initiatives, product direction).
 
-**Triage mode.** If the user's ask signals they just want a quick read — *"anything I need to understand"*, *"is this purely technical"*, *"just a quick look"* — stop after Phase 0 and ask how to proceed. Offer two paths: full review (Phases 1–3 with discussion), or post approval after a light pass (run Phases 1–3 independently, post anything worth posting inline, approve). Don't hunt for findings until asked.
+**Triage mode.** If the user asks a *question about* the PR — *"anything I need to understand?"*, *"is this purely technical?"* — stop after Phase 0, answer it, and ask how to proceed. Offer two paths: full review (Phases 1–3 with discussion), or post approval after a light pass (run Phases 1–3 independently, post anything worth posting inline, approve). Don't hunt for findings until asked. A **"quick review"** request is not triage: it's a full review — every phase, including the finding filter — with compact output. Don't stop after Phase 0 for it.
 
 **Autonomous mode.** If the user says *"proceed to approve"*, *"go ahead and approve"*, *"review + approve"*, or similar — run Phases 1–3 independently and post without pausing for confirmation (i.e. skip Phase 3 step 3). Only come back to the user if a blocker surfaces, a REQUEST_CHANGES decision is in play, the "context only the human can supply" points from Phase 0 genuinely affect whether to approve, or something mechanical about posting is unclear. Otherwise post, report the review URL, and clean up.
 
