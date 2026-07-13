@@ -72,15 +72,20 @@ How to surface attribution:
 
 ### Setup: review worktree
 
-Reviews happen in a dedicated git worktree per repo — **never check out branches in the user's active working dir** (it would disrupt in-progress work). Read-only inspection there (greps, `gh` API calls) is fine, and a small PR reviewable from `gh pr diff` plus targeted greps may not need the worktree at all. Convention: `<repo>-review` as a sibling of the active repo (e.g. `~/dev/myproject-review` for `~/dev/myproject`).
+Reviews happen in a dedicated git worktree **per review** — **never check out branches in the user's active working dir** (it would disrupt in-progress work). Read-only inspection there (greps, `gh` API calls) is fine, and a small PR reviewable from `gh pr diff` plus targeted greps may not need a worktree at all.
 
-1. `cd` into `<repo>-review`. If it doesn't exist, create it detached at `origin/main` from the active repo:
+**Naming convention — say what it reviews**, so anyone can tell at a glance what a worktree is for and whether it can be deleted: `<repo>-review-<id>` as a sibling of the active repo, where `<id>` is the ticket id if the branch carries one (e.g. `~/dev/myproject-review-PROJ-123`), else the PR number plus a short slug (`~/dev/myproject-review-pr42-auth-retry`). One worktree per review; concurrent reviews each get their own.
+
+1. Create it detached at `origin/main` from the active repo, then check out the PR branch (strongly preferred — reading actual files beats diffs alone; skip only for trivial PRs where diff view is obviously sufficient):
    ```bash
-   git -C <active-repo-path> worktree add --detach ../<repo>-review origin/main
+   git -C <active-repo-path> fetch origin
+   git -C <active-repo-path> worktree add --detach ../<repo>-review-<id> origin/main
+   cd ../<repo>-review-<id> && gh pr checkout <number>
    ```
-   One-time on first use: copy `.env` from the sibling and install deps (`node_modules`, venv, etc. are gitignored and not shared across worktrees).
-2. Fetch and park on detached `origin/main`: `git fetch origin && git switch --detach origin/main`. **Don't** check out local `main` here — git would lock it out of the active working dir (same branch can't be checked out in two worktrees). Use `origin/main` refs for any main-comparisons during review.
-3. Check out the PR branch (strongly preferred — reading actual files beats diffs alone): `gh pr checkout <number>`. Skip only for trivial PRs where diff view is obviously sufficient.
+2. Copy `.env` from the active repo if the review needs it; install deps (`node_modules`, venv — gitignored, not shared across worktrees) only if you'll actually run code/tests.
+3. For main-comparisons during review, use `origin/main` refs — **don't** check out local `main` in the worktree (git would lock it out of the active working dir; same branch can't be checked out in two worktrees).
+
+The worktree lives as long as the PR does — keep it across re-review rounds; delete it when the PR merges or closes (see Cleanup).
 
 Each agent's trust model for paths outside the invocation cwd is independent — configure per-agent to avoid mid-session approval prompts on file ops in the review worktree. For Claude Code: `permissions.additionalDirectories` in `~/.claude/settings.local.json` (see `.claude/CLAUDE.md`).
 
@@ -149,7 +154,8 @@ Always run first. Shared picture of what the PR *means* before any findings.
 
 ### Cleanup
 
-1. After the review is complete (comments posted or user is done), park the worktree back on detached `origin/main` (`git switch --detach origin/main`) and delete the local PR branch (`git branch -D <pr-branch>`). Don't switch to local `main` here — it would lock `main` out of the active working dir.
+1. Review worktrees are deleted when their PR merges or closes — not necessarily when the review session ends (keep it if re-review rounds are likely). To remove: `git -C <active-repo-path> worktree remove ../<repo>-review-<id>`, then delete the local PR branch (`git -C <active-repo-path> branch -D <pr-branch>`).
+2. When touching a repo's worktrees, glance at `git worktree list` — any `-review-<id>` sibling whose PR is merged/closed is stale; remove it (checking `git status` for stray uncommitted notes first).
 
 ## Posting Reviews via GitHub API
 
