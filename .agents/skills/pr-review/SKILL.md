@@ -87,7 +87,7 @@ Reviews happen in a dedicated git worktree **per review** — **never check out 
 
 The worktree lives until the user says the review conversation is done — keep it across re-review rounds; deletion is on the user's go (see Cleanup).
 
-Each agent's trust model for paths outside the invocation cwd is independent — configure per-agent to avoid mid-session approval prompts on file ops in the review worktree. For Claude Code: `permissions.additionalDirectories` in `~/.claude/settings.local.json` (see `.claude/CLAUDE.md`).
+Each agent's trust model for paths outside the invocation cwd is independent. Worktree paths now vary per review, and Claude Code's `permissions.additionalDirectories` takes literal paths only (no globs) — so either trust the worktrees' **common parent directory** once (a trusted dir covers subdirectories created later, so future worktrees are included; e.g. the workspace dir in the repo's `.claude/settings.local.json`), or grant per session with `/add-dir ../<repo>-review-<id>` right after creating the worktree. No grant is needed when the session's cwd is already the worktrees' parent.
 
 ### Phase 0: Frame the change
 
