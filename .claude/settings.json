@@ -139,6 +139,7 @@
     "type": "command",
     "command": "~/.claude/statusline.sh"
   },
+  "cleanupPeriodDays": 60,
   "theme": "dark",
   "editorMode": "vim",
   "skipAutoPermissionPrompt": true,
