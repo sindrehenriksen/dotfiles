@@ -101,11 +101,11 @@ When an `az` command fails with an authentication/token error, re-authenticate b
 
 ## Browser Automation
 
-- **Default tool: Playwright MCP** — use for all interactive browser testing, UI verification, and form filling
-- Playwright opens a real Chrome window visible to the user — no need for a separate viewer
-- `agent-browser` CLI exists as a fallback for skills that only have terminal access, but Playwright MCP is preferred:
-  - More reliable click targeting (handles overlapping elements and scroll containers better)
-  - JS evaluation is cleaner (no shell quoting friction)
-  - Screenshots return inline (no save-to-file round-trip)
-  - Fewer tool calls per flow (~30% fewer round-trips)
-- Always close the browser when done
+- **Default tool: Playwright MCP** — preferred over the `agent-browser` CLI fallback (more reliable click targeting, cleaner JS evaluation, inline screenshots, ~30% fewer round-trips). `agent-browser` remains for skills that only have terminal access.
+- Playwright opens a real Chrome window visible to the user. Always close the browser when done.
+
+### When to drive a browser
+
+- **Local services: use freely** — when there's no auth, auth is bypassable, or the needed credentials already sit in local env/mise files that you have permission to use and whose scope makes that clearly okay (e.g. a dev-only token). Don't hunt for or extract credentials beyond that.
+- **Deployed services: backend/API first.** Prefer verifying through APIs, CLIs, and telemetry/log queries — or reproduce the frontend locally. Only drive a deployed frontend when browser-level behavior is genuinely the question and nothing else answers it efficiently.
+- **Deployed frontend behind auth: announce first, then ask.** Never let an auth window pop up unannounced. Say what you want to do in the browser and why it's the right vector, get a go, and ask the user to authenticate in the opened window themselves.
