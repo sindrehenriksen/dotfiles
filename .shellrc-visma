@@ -2,4 +2,5 @@
 if [ -f ~/dev/flyt/dev-setup/secrets-visma.env ]; then set -a; source ~/dev/flyt/dev-setup/secrets-visma.env; set +a; fi
 
 
-#### Work-specific aliases and config below (edit locally)
+#### Work-specific aliases and config (kept in the work repo, not in public dotfiles)
+if [ -f ~/dev/flyt/dev-setup/shellrc-visma.sh ]; then source ~/dev/flyt/dev-setup/shellrc-visma.sh; fi

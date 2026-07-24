@@ -87,9 +87,9 @@ Use the `pr-description` skill — it has the full guidelines.
 
 ## Azure CLI Authentication
 
-When an `az` command fails with an authentication/token error, re-authenticate by running `az login --use-device-code` in the terminal and wait for the user to complete the login flow.
+When an `az` command fails with an authentication/token error, re-authenticate by running `az login` in the terminal and wait for the user to complete the browser login flow.
 
-- Do NOT pipe or redirect the output — the device code must be visible to the user immediately.
+- Do NOT use `--use-device-code` — use the browser flow; a work-machine shell wrapper routes it to the right browser.
 
 ## CI/CD Debugging
 

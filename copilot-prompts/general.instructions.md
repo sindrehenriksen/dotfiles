@@ -37,9 +37,9 @@ When the user asks for output in a single copyable block (e.g. a summary, invest
 
 ## Azure CLI Authentication
 
-When an `az` command fails with an authentication/token error, re-authenticate by running `az login --use-device-code` in the terminal and wait for the user to complete the device code login flow before retrying the command.
+When an `az` command fails with an authentication/token error, re-authenticate by running `az login` in the terminal and wait for the user to complete the browser login flow before retrying the command.
 
-- Do NOT pipe or redirect the output (no `| tail`, `| head`, `2>&1 |`, etc.) — the device code must be visible to the user immediately in the terminal so they can complete the login flow.
+- Do NOT use `--use-device-code` — use the browser flow; a work-machine shell wrapper routes it to the right browser.
 
 ## Reviewing Pull Requests
 
