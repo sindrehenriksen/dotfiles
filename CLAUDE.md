@@ -26,4 +26,4 @@ For ephemeral additions (one-off diagnostic scripts, throwaway repros, in-flight
 
 ## Local-Only Settings
 
-`~/.claude/settings.local.json` holds machine-specific Claude Code config (gitignored via `~/.config/git/ignore`). Current use: `permissions.additionalDirectories` trusts per-machine review-worktree paths (sibling `<repo>-review` dirs) so the pr-review skill can `cd` into them without approval prompts. Paths must be literal and absolute — no globs.
+`~/.claude/settings.local.json` holds machine-specific Claude Code config (gitignored via `~/.config/git/ignore`). Current use: `permissions.additionalDirectories` trusts per-machine review-worktree paths (sibling `<repo>-review` dirs) so PR-review sessions can `cd` into review worktrees without approval prompts. Paths must be literal and absolute — no globs.

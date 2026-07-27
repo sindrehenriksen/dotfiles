@@ -20,12 +20,10 @@ mkdir -p ~/.agents/skills ~/.claude/skills
 link ~/dotfiles/.agents/skills/orchestration ~/.agents/skills/orchestration
 link ~/dotfiles/.agents/skills/browser ~/.agents/skills/browser
 link ~/dotfiles/.agents/skills/coderabbit ~/.agents/skills/coderabbit
-link ~/dotfiles/.agents/skills/pr-review ~/.agents/skills/pr-review
 link ~/dotfiles/.agents/skills/pr-description ~/.agents/skills/pr-description
 link ~/dotfiles/.agents/skills/orchestration ~/.claude/skills/orchestration
 link ~/dotfiles/.agents/skills/browser ~/.claude/skills/browser
 link ~/dotfiles/.agents/skills/coderabbit ~/.claude/skills/coderabbit
-link ~/dotfiles/.agents/skills/pr-review ~/.claude/skills/pr-review
 link ~/dotfiles/.agents/skills/pr-description ~/.claude/skills/pr-description
 # Repo-specific skills (not global)
 mkdir -p ~/dotfiles/.claude/skills

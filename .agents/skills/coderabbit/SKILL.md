@@ -1,6 +1,6 @@
 ---
 name: coderabbit
-description: 'Run CodeRabbit CLI for AI code review of local changes. USE ONLY when the user explicitly mentions "coderabbit", "cr review", or "run coderabbit". DO NOT USE FOR: generic PR review or code review (use pr-review instead), reviews of GitHub PRs unless coderabbit is explicitly mentioned.'
+description: 'Run CodeRabbit CLI for AI code review of local changes. USE ONLY when the user explicitly mentions "coderabbit", "cr review", or "run coderabbit". DO NOT USE FOR: generic PR review or code review, reviews of GitHub PRs unless coderabbit is explicitly mentioned.'
 allowed-tools: Bash, Read
 ---
 
@@ -64,6 +64,6 @@ If unsure about other flags, check `cr --help` once at the start of a session.
 ## Don't
 
 - Don't invoke this skill unless the user explicitly named coderabbit / cr.
-- Don't blend with the `pr-review` skill — they answer different questions. If the user wants a strategic human-style review on top, they'll ask separately.
+- Don't blend with a general PR-review flow — they answer different questions. If the user wants a strategic human-style review on top, they'll ask separately.
 - Don't post findings to GitHub. This is local-first by design.
 - Don't retry on rate-limit failures — surface the message and let the user decide.

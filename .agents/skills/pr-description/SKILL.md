@@ -1,6 +1,6 @@
 ---
 name: pr-description
-description: 'Write PR descriptions. USE FOR: PR description, write PR body, suggest PR description, draft PR summary. DO NOT USE FOR: PR review (use pr-review), writing code, fixing bugs.'
+description: 'Write PR descriptions. USE FOR: PR description, write PR body, suggest PR description, draft PR summary. DO NOT USE FOR: PR review, writing code, fixing bugs.'
 allowed-tools: Read, Grep, Glob, Bash
 ---
 
