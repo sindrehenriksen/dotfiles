@@ -113,6 +113,18 @@ Update (2026-05-29): still ASSIGNED upstream, not yet merged. Local DKMS module
 bumped to 0.0.3 (the v2 patch series + 83MM quirk + crash fix for undetected
 devices).
 
+Update (2026-07-25): **merged upstream and backported to stable.** Patch went
+v3→v6 (v4/v5 fixed series-assembly and log-spam nits), landed with Reviewed-by
+from Mario Limonciello (AMD), Ilpo Järvinen (Intel) and Hans de Goede (pdx86
+maintainer), then Greg KH queued it into the 6.6 / 6.12 / 6.18 / 7.1-stable
+trees. Note our Ubuntu HWE base is 7.0, which is *not* a longterm branch and
+isn't among those trees — so the fix won't arrive via a 7.0.y stable import.
+Expect it via a Canonical cherry-pick into a later 7.0.0-NN update, or when the
+24.04 HWE stack rebases onto a ≥7.1 base. DKMS workaround stays active until
+then; confirm the stock kernel has the fix after any kernel update with:
+`strings $(find /lib/modules/$(uname -r)/kernel -name 'amd-pmc.ko*') | grep -c 'Delaying suspend'`
+(≥1 = in-tree, safe to run the teardown below).
+
 Charging caveat: while actively charging, s2idle never reaches the deepest state
 and the `Delaying suspend by 2.5s` line spams the log (~1 every 2.6s). The
 `.check` callback fires once per intermediate s2idle wakeup, and the EC's charge
@@ -139,9 +151,13 @@ on kernel updates. Verify with:
 ls /sys/module/amd_pmc/parameters/delay_suspend   # file exists = patched module loaded
 journalctl -b | grep "platform bug"               # appears after first suspend
 ```
+Prefer retiring this before any release upgrade (24.04 → 26.04): an out-of-tree
+module has to rebuild against the new release's kernel, and a major-version jump
+is where that's most likely to break. If it's still installed, re-verify the
+keyboard after upgrading.
 
 **When the upstream fix lands in an Ubuntu kernel update, clean up:**
-- `sudo dkms remove amd_pmc/0.0.1 --all` and `rm -rf ~/src/amd_pmc-ideapad`
+- `sudo dkms remove amd_pmc/0.0.3 --all` and `rm -rf ~/src/amd_pmc-ideapad`
 - Re-enable or remove the keyboard-reset script
 - Remove `~/mok.key`, `~/mok.crt`, `~/mok.der` and `/var/lib/dkms/mok.*`
 - Remove `~/kernel-bug-221383/` (diagnostic artifacts, no longer needed)
