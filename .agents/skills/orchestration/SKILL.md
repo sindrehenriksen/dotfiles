@@ -38,6 +38,8 @@ Close each meaningful unit of work — an iteration, a phase, a coherent set of 
 
 Never review work from the conversation that produced it — that context is biased toward approving its own build. Spawn a neutral agent whose entire input is the artifact reference (PR, diff, doc) plus the review instructions; no framing, focus hints, or expected verdict.
 
+The neutral agent judges the artifact; the conversation knows what it can't see — where the design felt fragile, which constraints were negotiated, what almost went wrong. Use that context for the complementary pass: decide what else to exercise (targeted tests, evals, checks), run it now, and promote what has lasting value into the suite or CI rather than leaving it one-off.
+
 ## Model and effort choice
 
 - **Suggest escalation (or de-escalation) to the user when the session warrants it.** If the work turns out judgment-heavy or long-horizon — deep architectural planning, gnarly debugging, adversarial review, autonomous overnight runs — recommend raising effort above the default or moving the main loop to the frontier tier (currently Fable-class). Likewise suggest stepping down for routine sessions; don't just silently run at whatever the session started on.
