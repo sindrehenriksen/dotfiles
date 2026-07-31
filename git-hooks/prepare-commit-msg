@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# Delegate to the repo's pre-commit framework prepare-commit-msg hooks.
+#
+# core.hooksPath points here globally, which shadows .git/hooks entirely — so
+# without this shim a repo that installs prepare-commit-msg hooks (e.g. one
+# that auto-prefixes a ticket key from the branch name) silently never runs
+# them, while its commit-msg hooks still fire via the commit-msg shim. That
+# asymmetry hides bugs in the prepare stage from anyone using these dotfiles.
+
+msg_file="$1"
+msg_source="$2"
+commit_sha="$3"
+
+if [ -f .pre-commit-config.yaml ] && command -v pre-commit &>/dev/null; then
+    args=(run --hook-stage prepare-commit-msg --commit-msg-filename "$msg_file")
+    [ -n "$msg_source" ] && args+=(--prepare-commit-message-source "$msg_source")
+    [ -n "$commit_sha" ] && args+=(--commit-object-name "$commit_sha")
+    pre-commit "${args[@]}"
+fi
