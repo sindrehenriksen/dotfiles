@@ -11,7 +11,7 @@ For heavier, long-running conversations where the main loop plans, delegates, an
 
 Spend main-loop context on decisions: scoping, design, integration, judging results. Push bulk work — broad searches, large reads, sizable implementation — into subagents so their output doesn't flood the conversation that has to stay coherent for hours.
 
-Main-loop context is the scarce resource, and it is spent reading, not deciding. Investigation and implementation both belong in an agent; what comes back into the main thread is decisions, findings and open questions. The detail behind them — files read, paths ruled out, the reasoning that got there — stays in the agent's thread.
+Main-loop context is the scarce resource, and reading is what spends it. Keeping it free is not housekeeping — it is what leaves room for the high-level decisions, which get made here, in the main thread, with the user. Investigation and implementation both belong in an agent; what comes back is conclusions, findings and open questions. The detail behind them — files read, paths ruled out, the reasoning that got there — stays in the agent's thread.
 
 ## When to delegate
 
@@ -28,7 +28,7 @@ Agents see nothing of the conversation. Every delegation prompt includes:
 
 - The full agreed design and decisions already made — the agent must not re-derive or re-litigate them.
 - Pointers to the repo's instruction files (`AGENTS.md`/`CLAUDE.md`) and applicable conventions (commits, style).
-- What to run (tests, linters) and hard boundaries (e.g. commit locally only — no push, no PR, nothing outward-facing; flag new dependencies in the report for sign-off rather than treating them as pre-approved).
+- What to run (tests, linters) and hard boundaries: the agent commits locally, while pushing, merging and anything else outward-facing stay the main loop's. The standing exception is an agent that has to push in order to deploy or test its change — common enough to grant deliberately rather than treat as a breach. Flag new dependencies in the report for sign-off rather than treating them as pre-approved.
 - The report format, and keep it terse: files changed, decisions it made itself, test results, identifiers (SHAs, paths). Ask for a short factual report — default reports run long.
 - **Ask what the brief got wrong.** Briefs carry errors — a stale path, a wrong name, an assumption that doesn't hold. Agents that say so plainly are far more useful than ones that quietly work around it, so make it a named line in the report format rather than hoping it surfaces.
 
