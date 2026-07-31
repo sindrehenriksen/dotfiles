@@ -64,7 +64,7 @@ When the system framework suggests saving a memory, route the content to the rig
 ## Git Conventions
 
 - Prefer staging specific files over `git add -A` or `git add .` — review `git status` first to avoid adding unintended changes
-- When asked to fold changes into an earlier commit, default to `git commit --fixup=<sha>` and let the user rebase — don't rewrite history yourself unless asked. Before any destructive git op (`reset --hard`, force-push, rebase), capture uncommitted work first (stash or `git diff > patch`).
+- When asked to fold changes into an earlier commit, default to `git commit --fixup=<sha>`. Rewriting history is in bounds on an unmerged branch you own — autosquash the fixups and fold commits with no standalone value before anyone else reads the branch. Never rewrite shared or merged history (`main`, or a branch someone else has based work on) without asking. Before any destructive git op (`reset --hard`, force-push, rebase), capture uncommitted work first (stash or `git diff > patch`).
 - Check `git diff` (and `git diff --staged` if applicable) before writing the commit message
 - Commit message titles: concise, under 50 chars when possible. Body lines: wrap at 72 chars.
 - Focus on WHAT changed and WHY, not implementation details
@@ -74,7 +74,7 @@ When the system framework suggests saving a memory, route the content to the rig
 - Always be descriptive about the actual changes, not tracking artifacts
 - Defer to any repo-specific commit conventions
 - Sign with `Co-Authored-By: Claude <model> <version>` (e.g. `Co-Authored-By: Claude Opus 4.6`). No email, no angle brackets.
-- Never push to a remote unless explicitly asked. The user handles pushes themselves.
+- Pushing your own unmerged ticket/feature branch is fine — including `--force-with-lease` after a rebase or autosquash — when the workflow you're following calls for it. Everything else needs an explicit ask: pushing to `main` or any protected or shared branch, force-pushing a branch someone else may have based work on, pushing tags, and pushing in a repo you weren't asked to touch.
 
 ## Output Formatting
 
