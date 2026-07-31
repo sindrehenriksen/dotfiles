@@ -11,11 +11,14 @@ For heavier, long-running conversations where the main loop plans, delegates, an
 
 Spend main-loop context on decisions: scoping, design, integration, judging results. Push bulk work — broad searches, large reads, sizable implementation — into subagents so their output doesn't flood the conversation that has to stay coherent for hours.
 
+Main-loop context is the scarce resource, and it is spent reading, not deciding. Investigation and implementation both belong in an agent; what comes back into the main thread is decisions, findings and open questions. The detail behind them — files read, paths ruled out, the reasoning that got there — stays in the agent's thread.
+
 ## When to delegate
 
 - **Delegate**: sizable well-specified implementation; independent parallel workstreams; broad exploration/searches where only the conclusion matters.
 - **Do directly**: single-file reads, small sequential edits, anything needing judgment that depends on the conversation's accumulated context.
 - **Cap fan-out** to what you can meaningfully review — parallel agents you skim-approve are worse than fewer you actually check.
+- **Prefer one agent doing several related things** to several agents doing one thing each. Every spawn costs a full brief in and a full report out; batching related work pays that once and lets the agent reuse what it has already loaded.
 - Parallel subagents only when their work is file-disjoint (or isolated, e.g. separate worktrees).
 - Prefer continuing an existing agent (follow-up message) over spawning fresh when its built-up context is the valuable part.
 
@@ -27,10 +30,25 @@ Agents see nothing of the conversation. Every delegation prompt includes:
 - Pointers to the repo's instruction files (`AGENTS.md`/`CLAUDE.md`) and applicable conventions (commits, style).
 - What to run (tests, linters) and hard boundaries (e.g. commit locally only — no push, no PR, nothing outward-facing; flag new dependencies in the report for sign-off rather than treating them as pre-approved).
 - The report format, and keep it terse: files changed, decisions it made itself, test results, identifiers (SHAs, paths). Ask for a short factual report — default reports run long.
+- **Ask what the brief got wrong.** Briefs carry errors — a stale path, a wrong name, an assumption that doesn't hold. Agents that say so plainly are far more useful than ones that quietly work around it, so make it a named line in the report format rather than hoping it surfaces.
 
 ## Trust boundaries
 
-Verify *delegated* work before building on it: read the diff yourself, re-run the tests. Don't take the report's word for outcomes. When a result fails your gate, take that piece back inline rather than iterating blind through re-briefs. But don't stack blanket "double-check everything" instructions on your own work — the model already self-verifies, and redundant instructions cause over-verification.
+Verify *delegated* work before building on it: read the diff yourself, re-run the tests. Don't take the report's word for outcomes. When a result fails your gate, take that piece back inline rather than iterating blind through re-briefs.
+
+Verify cheaply, though. For a *claim* rather than a diff, spot-check the load-bearing number or the one file that would falsify it; re-deriving the agent's whole analysis in the main loop spends exactly the context the delegation was meant to save. But don't stack blanket "double-check everything" instructions on your own work — the model already self-verifies, and redundant instructions cause over-verification.
+
+## What reaches the user
+
+- **Never relay a subagent's report verbatim.** Give the conclusion, what it changes, and what needs their input. A report long enough that pasting it feels easier is the signal to summarise harder, not to forward.
+- **Say what the user needs in order to decide or to know** — a correction to something you told them earlier, a finding that changes the plan, a choice that is genuinely theirs. Progress narration is none of those. (Interrupt triggers for an autonomous stretch are under Living sessions.)
+
+## Commits across a long session
+
+- **Tell agents to commit after each coherent step**, not at the end. Long runs get interrupted, and uncommitted work is lost work — say it in the brief, because saving it all for the end is the default.
+- **Commit freely while working, tidy before review.** The two only conflict if the tidying never happens: `git commit --fixup=<sha>` as you go, autosquash before the branch is reviewed, `--force-with-lease` to push the rewritten branch.
+- **Keep the commits that earn a place in history** — one coherent change, reasoning in the body, the kind someone later runs `git log` to understand. A review finding fixed as its own commit usually qualifies; reviewers read the branch in that order. Fold the artefacts of how the work happened: a format-only commit a hook produced, a typo fix to its own predecessor, a comment corrected two commits later on the same branch.
+- **Rewrite only unmerged branches you own.** Never anything already merged, never a branch someone else may have pulled, and `--force-with-lease` over `--force` so a concurrent push fails loudly instead of being clobbered.
 
 ## Reviews
 
