@@ -12,12 +12,19 @@ link() {
 # Shell config
 link ~/dotfiles/.shellrc-visma ~/.shellrc-visma
 
-# Confluence skill (Copilot agents + Claude Code).
-# Source lives in the private work repo (~/dev/flyt) — clone it first.
-CONFLUENCE_SKILL=~/dev/flyt/dev-setup/skills/confluence
-if [ -d "$CONFLUENCE_SKILL" ]; then
-    link "$CONFLUENCE_SKILL" ~/.agents/skills/confluence
-    link "$CONFLUENCE_SKILL" ~/.claude/skills/confluence
-else
-    echo "NOTE: $CONFLUENCE_SKILL not found — clone the work repo, then re-run"
-fi
+# Work skills (Copilot agents + Claude Code). Sources live in the private work
+# repo (~/dev/flyt) — clone it first. Linked to user level because skills are
+# discovered from cwd only, so workspace-level ones are invisible to sessions
+# started inside a repo.
+link_work_skill() {
+    if [ -d "$1" ]; then
+        link "$1" ~/.agents/skills/"$2"
+        link "$1" ~/.claude/skills/"$2"
+    else
+        echo "NOTE: $1 not found — clone the work repo, then re-run"
+    fi
+}
+
+link_work_skill ~/dev/flyt/dev-setup/skills/confluence confluence
+link_work_skill ~/dev/flyt/.claude/skills/ticket-workflow ticket-workflow
+link_work_skill ~/dev/flyt/.claude/skills/pr-review pr-review
