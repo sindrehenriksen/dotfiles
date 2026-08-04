@@ -20,6 +20,7 @@ Main-loop context is the scarce resource, and reading is what spends it. Keeping
 - **Cap fan-out** to what you can meaningfully review — parallel agents you skim-approve are worse than fewer you actually check.
 - **Prefer one agent doing several related things** to several agents doing one thing each. Every spawn costs a full brief in and a full report out; batching related work pays that once and lets the agent reuse what it has already loaded.
 - Parallel subagents only when their work is file-disjoint (or isolated, e.g. separate worktrees).
+- **Never edit files in a checkout an agent is working in** — not even a doc it isn't touching. Its `git add` sweeps up whatever is dirty, so your write lands inside its commit under its message, and you find out from the log afterwards. Wait for it to finish, or edit somewhere else.
 - Prefer continuing an existing agent (follow-up message) over spawning fresh when its built-up context is the valuable part.
 
 ## Delegation prompts
@@ -35,6 +36,8 @@ Agents see nothing of the conversation. Every delegation prompt includes:
 ## Trust boundaries
 
 Verify *delegated* work before building on it: read the diff yourself, re-run the tests. Don't take the report's word for outcomes. When a result fails your gate, take that piece back inline rather than iterating blind through re-briefs.
+
+A green test is not evidence that the test exercised anything. When an agent reports a suite passing, check that the assertion *could* have failed — one that mocks away the thing it names, or returns before reaching it, reports success while doing nothing. It's the failure mode delegation is most prone to, because the report is honest and the number is real.
 
 Verify cheaply, though. For a *claim* rather than a diff, spot-check the load-bearing number or the one file that would falsify it; re-deriving the agent's whole analysis in the main loop spends exactly the context the delegation was meant to save. But don't stack blanket "double-check everything" instructions on your own work — the model already self-verifies, and redundant instructions cause over-verification.
 
