@@ -15,7 +15,6 @@ Personal dev environment: zsh, Neovim, Ghostty, Git, AI agent configs. Cross-pla
 | `hammerspoon/init.lua` | macOS window layout (picker on `Opt+Cmd+T`, three-column + one-off placement) — see `docs/window-layout.md` |
 | `.claude/` | Claude Code global config (`CLAUDE.md`, `settings.json`) |
 | `.agents/skills/` | Agent skills — single source, symlinked to `~/.agents/skills/` and `~/.claude/skills/` (global) plus `~/dotfiles/.claude/skills/` for repo-only skills |
-| `copilot-prompts/` | VS Code Copilot instructions (symlinked into VS Code user prompts dir) |
 | `secrets/` | Example secrets templates (real secrets live in `~/.secrets.env`, untracked) |
 | `system/` | Linux-only: GNOME keybinds, logind, battery conservation — see `system/README.md` |
 | `git-hooks/` | Repo-local git hooks (`core.hooksPath`): `commit-msg` enforces 50/72 title + reflows body at 72, `pre-commit` delegates to the `pre-commit` framework if installed |
@@ -57,7 +56,6 @@ Lua config under `nvim/lua/`: `options.lua`, `keymaps.lua`, `autocmds.lua`, `plu
 - **gh CLI** uses the same pattern: `gh-personal` / `gh-work` shell functions point at `~/.config/gh-personal` / `~/.config/gh-work`; bare `gh` honors an explicit `$GH_CONFIG_DIR` first (so `claude-*` sessions inherit their account), then `$GH_DEFAULT_ACCOUNT`, then the shared `$DEFAULT_ACCOUNT`, defaulting to `personal`. Per-process env vars mean concurrent sessions don't stomp each other. The wrapper auto-injects `--insecure-storage` on `auth login` / `auth refresh` so tokens land in each dir's `hosts.yml` (chmod 600) instead of the system keyring — the keyring is keyed by host only, so two accounts would otherwise collide on one entry and the last write would silently win for both (`gh auth status` reads the user label from `hosts.yml`, not the actual token, so the breakage isn't obvious). Use `command gh ...` to bypass the wrapper.
 - **Copilot CLI** and **Codex CLI** have MCP setup in `setup.sh` but haven't been validated in a real workflow yet — see `TODO.md`.
 - **Skills** in `.agents/skills/` cover: `pr-description`, `browser`, `sync`, `adding-skills`. Symlinked into both Codex and Claude locations via `install_symlinks.sh`. (A work-only `confluence` skill lives in a separate private repo.)
-- VS Code Copilot prompts in `copilot-prompts/` (`general.instructions.md`, `git.instructions.md`).
 
 ## Work-specific setup
 

@@ -17,7 +17,7 @@ allowed-tools: Read, Grep, Glob, Bash
 - Keep it concise — match depth to the scope of the change
 - Adapt or omit template sections to fit the PR; don't fill in sections that add no value
 - Don't repeat what's already obvious from commit messages — reference them instead
-- Use backticks for file and symbol references — no file hyperlinks (e.g. VS Code markdown links)
+- Use backticks for file and symbol references — no file hyperlinks (editor-generated markdown file links don't render on GitHub)
 - No subjective claims about quality or efficiency
 - No line-wrapping / hard-wrapping — let text flow naturally
 

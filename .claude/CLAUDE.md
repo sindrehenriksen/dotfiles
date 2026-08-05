@@ -1,5 +1,4 @@
 <!-- User-level Claude Code instructions. Symlinked from ~/dotfiles/.claude/CLAUDE.md to ~/.claude/CLAUDE.md and ~/.claude-work/CLAUDE.md. -->
-<!-- Copilot counterpart: copilot-prompts/general.instructions.md + git.instructions.md — partially overlapping content, different structure -->
 <!-- Dotfiles-repo-specific rules live in ~/dotfiles/CLAUDE.md (auto-loaded when working in the dotfiles repo). -->
 
 # General Instructions
@@ -26,7 +25,7 @@ Most of `~` (shell configs, tool settings, Claude config, skills) is symlinked f
 
 ## Check the environment before assuming
 
-Before claiming a tool isn't installed or recommending an install step, check the environment — `$TERM_PROGRAM` (`ghostty`, `iTerm.app`, `Apple_Terminal`, `vscode`), `$SHELL`, `$HOMEBREW_PREFIX`, `uname -m` (`arm64` vs `x86_64`), `which <cmd>`. The session env block is brief; one quick probe beats a guess.
+Before claiming a tool isn't installed or recommending an install step, check the environment — `$TERM_PROGRAM` (`ghostty`, `iTerm.app`, `Apple_Terminal`), `$SHELL`, `$HOMEBREW_PREFIX`, `uname -m` (`arm64` vs `x86_64`), `which <cmd>`. The session env block is brief; one quick probe beats a guess.
 
 ## Secrets & sensitive files
 

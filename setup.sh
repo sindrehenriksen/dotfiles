@@ -137,11 +137,6 @@ claude mcp add -s user playwright -- npx @playwright/mcp@latest
 #   echo "$TMPDIR" | sed 's:/$::'
 # then add the result to the additionalDirectories array.
 
-# VS Code / GitHub Copilot: add to mcp.json (settings gear > MCP Servers, or directly):
-#   macOS: ~/Library/Application Support/Code/User/mcp.json
-#   Linux: ~/.config/Code/User/mcp.json
-#   Add: "playwright": { "type": "stdio", "command": "npx", "args": ["@playwright/mcp@latest"] }
-
 # GitHub Copilot CLI: add to ~/.copilot/mcp-config.json (or /mcp add interactively)
 
 # OpenAI Codex CLI:

@@ -44,11 +44,6 @@ link ~/.claude/skills ~/.claude-work/skills
 link ~/.claude/plugins ~/.claude-work/plugins
 
 if [[ "$(uname)" == "Darwin" ]]; then
-    # macOS: VS Code prompts
-    mkdir -p ~/Library/Application\ Support/Code/User/prompts
-    link ~/dotfiles/copilot-prompts/general.instructions.md ~/Library/Application\ Support/Code/User/prompts/general.instructions.md
-    link ~/dotfiles/copilot-prompts/git.instructions.md ~/Library/Application\ Support/Code/User/prompts/git.instructions.md
-
     # macOS: Ghostty config
     mkdir -p ~/Library/Application\ Support/com.mitchellh.ghostty
     link ~/dotfiles/ghostty/config ~/Library/Application\ Support/com.mitchellh.ghostty/config
@@ -57,11 +52,6 @@ if [[ "$(uname)" == "Darwin" ]]; then
     mkdir -p ~/.hammerspoon
     link ~/dotfiles/hammerspoon/init.lua ~/.hammerspoon/init.lua
 else
-    # Linux: VS Code prompts
-    mkdir -p ~/.config/Code/User/prompts
-    link ~/dotfiles/copilot-prompts/general.instructions.md ~/.config/Code/User/prompts/general.instructions.md
-    link ~/dotfiles/copilot-prompts/git.instructions.md ~/.config/Code/User/prompts/git.instructions.md
-
     # Linux: Ghostty config
     mkdir -p ~/.config/ghostty
     link ~/dotfiles/ghostty/config ~/.config/ghostty/config

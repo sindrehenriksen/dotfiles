@@ -22,7 +22,7 @@ For ephemeral additions (one-off diagnostic scripts, throwaway repros, in-flight
 
 ## Auto-Approved Commands
 
-`~/.claude/settings.json` (symlinked from this repo) defines which Bash commands are auto-approved vs prompted. Only genuinely safe (read-only, test, build) commands belong in the allow list. If the user asks to add a command, verify it's safe before adding — discuss with the user if there's any risk of destructive side effects or system modification. Keep in sync with the VS Code `chat.tools.terminal.autoApprove` list.
+`~/.claude/settings.json` (symlinked from this repo) defines which Bash commands are auto-approved vs prompted. Only genuinely safe (read-only, test, build) commands belong in the allow list. If the user asks to add a command, verify it's safe before adding — discuss with the user if there's any risk of destructive side effects or system modification.
 
 ## Local-Only Settings
 
