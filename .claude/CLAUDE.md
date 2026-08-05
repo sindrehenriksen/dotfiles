@@ -100,8 +100,8 @@ Use the `ci-debugging` skill — fetching CI logs, flaky-job reruns, and stale-P
 
 ## Browser Automation
 
-- **Default tool: Playwright MCP** — preferred over the `agent-browser` CLI fallback (more reliable click targeting, cleaner JS evaluation, inline screenshots, ~30% fewer round-trips). `agent-browser` remains for skills that only have terminal access.
-- Playwright opens a real Chrome window visible to the user. Always close the browser when done.
+- **Playwright MCP is the default for attended work** — more reliable click targeting, cleaner JS evaluation, inline screenshots, ~30% fewer round-trips than the `agent-browser` CLI. It opens a real Chrome window visible to the user; always close the browser when done.
+- **Reach for the `agent-browser` CLI when Playwright's session model doesn't fit**: parallel subagents (a single MCP browser session can't serve several at once), or unattended runs — scheduled agents, `claude -p` — where MCP servers may be unavailable and a Chrome window popping up would be disruptive.
 
 ### When to drive a browser
 
