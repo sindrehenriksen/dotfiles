@@ -1,7 +1,8 @@
 emulate sh -c '. ~/.profile'
 
-# Run brew shellenv early so fpath is set before compinit (triggered by zplug
-# load in .zshrc). Keeping it here also means bash picks it up via .shellrc.
+# Run brew shellenv early so fpath includes Homebrew's site-functions (where
+# pure and async live) before .zshrc runs compinit and promptinit. Keeping it
+# here also means bash picks it up via .shellrc.
 # Try Apple Silicon path first, fall back to Intel.
 if [[ "$(uname)" == "Darwin" && -z "$HOMEBREW_PREFIX" ]]; then
     if [[ -x /opt/homebrew/bin/brew ]]; then

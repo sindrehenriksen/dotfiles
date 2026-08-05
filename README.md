@@ -32,8 +32,8 @@ On a fresh machine:
 
 ## Platform notes
 
-- **macOS:** Homebrew for packages, zplug under `$HOMEBREW_PREFIX/opt/zplug` (`/opt/homebrew` on Apple Silicon, `/usr/local` on Intel — shell config resolves either). Ghostty config at `~/Library/Application Support/com.mitchellh.ghostty/config`.
-- **Linux (Ubuntu):** `apt` for base packages, zplug cloned to `~/.zplug`. Ghostty config at `~/.config/ghostty/config`. See `system/` for GNOME settings, power management, keyboard fixes.
+- **macOS:** Homebrew for packages, including all zsh plugins (`$HOMEBREW_PREFIX` is `/opt/homebrew` on Apple Silicon, `/usr/local` on Intel — shell config resolves either). Ghostty config at `~/Library/Application Support/com.mitchellh.ghostty/config`.
+- **Linux (Ubuntu):** `apt` for base packages and most zsh plugins; pure isn't packaged, so it's cloned to `~/.local/share/zsh/plugins/pure`. Ghostty config at `~/.config/ghostty/config`. See `system/` for GNOME settings, power management, keyboard fixes.
 
 Conditional logic in `.zshrc` and `install_symlinks.sh` handles the divergence. Detection uses `uname` / `IS_MAC` in shell, `vim.fn.has('macunix')` in Lua.
 

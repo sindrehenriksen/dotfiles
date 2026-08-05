@@ -23,11 +23,17 @@ brew install eza ripgrep fzf tldr
 # if linux (ubuntu)
 sudo apt install eza ripgrep fzf tldr xclip
 
-#### zplug
+#### zsh plugins
+# No plugin manager — .zshrc sources these directly. pure pulls in zsh-async.
 # if mac
-brew install zplug
-# if linux
-git clone https://github.com/zplug/zplug ~/.zplug
+brew install pure zsh-autosuggestions zsh-syntax-highlighting zoxide
+# if linux (ubuntu): all in universe, except pure — clone it where .zshrc
+# looks. Its repo vendors async, so no separate zsh-async clone is needed.
+sudo apt install zsh-autosuggestions zsh-syntax-highlighting zoxide
+git clone https://github.com/sindresorhus/pure ~/.local/share/zsh/plugins/pure
+# both: one-time import of the old oh-my-zsh `z` history into zoxide.
+# 22.04 ships zoxide 0.4.3, which wants `zoxide import --from=z ~/.z` instead.
+zoxide import z < ~/.z
 
 #### mise
 # if mac

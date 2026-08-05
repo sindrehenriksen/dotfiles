@@ -25,4 +25,4 @@ If switching, change both Ghostty theme and Neovim colorscheme together.
 
 ## Shell
 
-- Replace `zplug` with `sheldon` (Rust, fast, TOML config) or `zinit` (feature-rich, active fork) — only worth doing if startup latency becomes annoying. The current plugin list is small.
+- Reintroduce a plugin manager (`antidote` — pure zsh, static-file generation; or `sheldon` — Rust, TOML, but no apt package) if the plugin list outgrows the direct-sourcing setup in `.zshrc`. At four plugins the manager was pure overhead.

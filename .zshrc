@@ -1,18 +1,6 @@
 #### Init
 source ~/.zprofile
 
-#### zplug
-# Note: ZPLUG_HOME determines where repos are stored. On macOS (Homebrew),
-# repos live under $HOMEBREW_PREFIX/opt/zplug/repos/, NOT ~/.zplug/repos/.
-if [[ "$(uname)" == "Darwin" ]]; then
-    export ZPLUG_HOME="${HOMEBREW_PREFIX:-/opt/homebrew}/opt/zplug"
-else
-    export ZPLUG_HOME="$HOME/.zplug"
-fi
-source $ZPLUG_HOME/init.zsh
-# Cache zplug plugins in order to improve zsh startup time
-export ZPLUG_USE_CACHE=true
-
 
 #### Aliases
 alias szsh="source ~/.zshrc"
@@ -47,32 +35,74 @@ fi
 
 
 #### Plugins
+# No plugin manager. Plugins come from the system package manager (brew on
+# macOS, apt on Ubuntu) or, where they aren't packaged, from git clones in
+# $ZSH_PLUGIN_DIR. See the plugin section of setup.sh for install commands.
+export ZSH_PLUGIN_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/zsh/plugins"
 
-# Fish like autocompletions
-zplug "zsh-users/zsh-autosuggestions"
+# Source the first candidate that exists, so a machine missing a plugin gets a
+# working shell instead of an error on every prompt.
+__source_first() {
+    local candidate
+    for candidate in "$@"; do
+        [[ -r $candidate ]] || continue
+        source "$candidate"
+        return 0
+    done
+    return 1
+}
 
-# Highlighting in terminal
-zplug "zsh-users/zsh-syntax-highlighting"
+# pure and its zsh-async dependency are autoloaded off fpath. Homebrew's
+# site-functions dir is already there via brew shellenv (.zprofile); the clone
+# path covers Linux, where pure isn't packaged (its repo vendors async too).
+fpath=("$ZSH_PLUGIN_DIR"/pure $fpath)
 
-# For faster, history based cd'ing using "z" instead
-zplug "plugins/z", from:oh-my-zsh
+autoload -Uz compinit
+mkdir -p "${XDG_CACHE_HOME:-$HOME/.cache}/zsh"
+compinit -d "${XDG_CACHE_HOME:-$HOME/.cache}/zsh/zcompdump"
 
-# zsh-async
+autoload -Uz promptinit && promptinit
+prompt pure
 
-# Load theme file
-zplug "mafredri/zsh-async", from:github, use:async.zsh
-zplug sindresorhus/pure, use:pure.zsh, from:github, as:theme
+# Fish-like autosuggestions
+__source_first \
+    "${HOMEBREW_PREFIX:-/opt/homebrew}/share/zsh-autosuggestions/zsh-autosuggestions.zsh" \
+    /usr/share/zsh-autosuggestions/zsh-autosuggestions.zsh
 
-# Install plugins if there are plugins that have not been installed
-if ! zplug check --verbose; then
-    printf "Install? [y/N]: "
-    if read -q; then
-        echo; zplug install
-    fi
-fi
+# History-based cd'ing with `z` (replaces oh-my-zsh's z plugin)
+command -v zoxide >/dev/null && eval "$(zoxide init zsh)"
 
-# Load
-zplug load
+# Must come last: syntax highlighting wraps every ZLE widget defined before it.
+__source_first \
+    "${HOMEBREW_PREFIX:-/opt/homebrew}/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh" \
+    /usr/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
+
+unset -f __source_first
+
+
+#### Plugin updates
+# Packaged plugins update with `brew upgrade` / `apt upgrade`. Only the clones
+# need pulling, so this is a no-op on macOS.
+zsh-plugins-update() {
+    local repo
+    for repo in "$ZSH_PLUGIN_DIR"/*(N/); do
+        [[ -d $repo/.git ]] || continue
+        printf '%-16s' "${repo:t}"
+        if git -C "$repo" pull --ff-only --quiet; then print ok; else print FAILED; fi
+    done
+    [[ -d $ZSH_PLUGIN_DIR ]] && touch "$ZSH_PLUGIN_DIR/.last-update"
+}
+
+# Weekly, detached, silent — a pull only takes effect in the next shell anyway.
+# Set ZSH_PLUGINS_NO_AUTOUPDATE=1 to opt out.
+__zsh_plugins_autoupdate() {
+    [[ -n $ZSH_PLUGINS_NO_AUTOUPDATE || ! -d $ZSH_PLUGIN_DIR ]] && return
+    local -a fresh=("$ZSH_PLUGIN_DIR"/.last-update(Nm-7))
+    (( $#fresh )) && return
+    ( zsh-plugins-update >| "$ZSH_PLUGIN_DIR/.update.log" 2>&1 ) &!
+}
+__zsh_plugins_autoupdate
+unset -f __zsh_plugins_autoupdate
 
 #### Load common shell settings
 source ~/.shellrc
