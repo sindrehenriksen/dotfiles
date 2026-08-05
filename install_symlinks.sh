@@ -21,14 +21,15 @@ link ~/dotfiles/.agents/skills/orchestration ~/.agents/skills/orchestration
 link ~/dotfiles/.agents/skills/browser ~/.agents/skills/browser
 link ~/dotfiles/.agents/skills/coderabbit ~/.agents/skills/coderabbit
 link ~/dotfiles/.agents/skills/pr-description ~/.agents/skills/pr-description
+link ~/dotfiles/.agents/skills/ci-debugging ~/.agents/skills/ci-debugging
 link ~/dotfiles/.agents/skills/orchestration ~/.claude/skills/orchestration
 link ~/dotfiles/.agents/skills/browser ~/.claude/skills/browser
 link ~/dotfiles/.agents/skills/coderabbit ~/.claude/skills/coderabbit
 link ~/dotfiles/.agents/skills/pr-description ~/.claude/skills/pr-description
+link ~/dotfiles/.agents/skills/ci-debugging ~/.claude/skills/ci-debugging
 # Repo-specific skills (not global)
 mkdir -p ~/dotfiles/.claude/skills
 link ~/dotfiles/.agents/skills/sync ~/dotfiles/.claude/skills/sync
-link ~/dotfiles/.agents/skills/adding-skills ~/dotfiles/.claude/skills/adding-skills
 # Git hooks (repo-local)
 git -C ~/dotfiles config core.hooksPath git-hooks
 # Claude Code
