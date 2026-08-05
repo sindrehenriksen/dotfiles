@@ -84,6 +84,10 @@ When the system framework suggests saving a memory, route the content to the rig
 
 Use the `pr-description` skill — it has the full guidelines.
 
+## Code Review
+
+CodeRabbit CLI (the `coderabbit` skill) is **on trial** as a second, independent pass over a local diff — an extra reviewer, never a replacement for a real review. Reach for it when a change is worth a second opinion, and say afterwards whether its findings added anything the primary review missed, so we can decide whether it earns a permanent place.
+
 ## Azure CLI Authentication
 
 When an `az` command fails with an authentication/token error, re-authenticate by running `az login` in the terminal and wait for the user to complete the browser login flow.

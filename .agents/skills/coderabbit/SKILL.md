@@ -1,12 +1,14 @@
 ---
 name: coderabbit
-description: 'Run CodeRabbit CLI for AI code review of local changes. USE ONLY when the user explicitly mentions "coderabbit", "cr review", or "run coderabbit". DO NOT USE FOR: generic PR review or code review, reviews of GitHub PRs unless coderabbit is explicitly mentioned.'
+description: 'Run CodeRabbit CLI for AI code review of local changes. USE FOR: "coderabbit", "cr review", or a second independent opinion on a local diff alongside a primary review. DO NOT USE FOR: reviews of GitHub PRs (the review happens on the local working diff), or as a substitute for a real review pass.'
 allowed-tools: Bash, Read
 ---
 
 # CodeRabbit CLI
 
 Thin wrapper around the CodeRabbit CLI (`cr`). Free tier with daily rate limits — one-time signup at https://app.coderabbit.ai.
+
+**On trial.** This is a supplementary reviewer, run *after* the primary review pass, never instead of it. Report its findings separately from your own and say whether they added anything — the point of the trial is deciding whether the extra pass is worth keeping.
 
 ## Bootstrap
 
