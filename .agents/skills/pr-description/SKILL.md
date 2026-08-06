@@ -17,6 +17,7 @@ allowed-tools: Read, Grep, Glob, Bash
 - Keep it concise — match depth to the scope of the change
 - Adapt or omit template sections to fit the PR; don't fill in sections that add no value
 - Don't repeat what's already obvious from commit messages — reference them instead
+- Describe the end state, not how it was reached. "Originally X, then Y, now Z" is a log; a reviewer needs what it is plus short why / why-not. One exception: a rejected alternative is worth a sentence when it pre-empts an obvious question. Re-derive numbers against the current diff before each review round and before merge — test counts, "not yet deployed", and figures a later commit superseded are the usual stale ones
 - Use backticks for file and symbol references — no file hyperlinks (editor-generated markdown file links don't render on GitHub)
 - No subjective claims about quality or efficiency
 - No line-wrapping / hard-wrapping — let text flow naturally

@@ -45,6 +45,7 @@ Verify cheaply, though. For a *claim* rather than a diff, spot-check the load-be
 
 - **Never relay a subagent's report verbatim.** Give the conclusion, what it changes, and what needs their input. A report long enough that pasting it feels easier is the signal to summarise harder, not to forward.
 - **Say what the user needs in order to decide or to know** — a correction to something you told them earlier, a finding that changes the plan, a choice that is genuinely theirs. Progress narration is none of those. (Interrupt triggers for an autonomous stretch are under Living sessions.)
+- **The same applies to anything an agent writes for a third party** — PR descriptions and comments, ticket bodies, Slack drafts. An agent narrates the work it just did, so each one posts a progress log that was individually reasonable; several of them turn a PR into a changelog of the session, and the later ones contradict the earlier ones as the branch moves. Don't have agents post their own summaries; have them report to you, and own the end-state framing yourself. If you do delegate the writing, brief the end state rather than the story.
 
 ## Commits across a long session
 
