@@ -7,6 +7,11 @@
 -- "Automatically reload config when any files change" in Hammerspoon prefs
 -- if you want edits to this file to pick up without manual reload.
 
+-- Message port for the `hs` CLI, so live state can be inspected from a shell
+-- (`hs -c 'print(caps_tap:isEnabled())'`). Diagnosing key handling without it
+-- means guessing from symptoms.
+require("hs.ipc")
+
 local GAP = 10     -- gap between windows and between window and screen edge
 local TOP_GAP = 0  -- top edge: 0 keeps windows flush to the menu bar
 local TOL = 4      -- frame-match tolerance in pixels for slot detection
@@ -369,6 +374,16 @@ end
 -- During the tap-decision window non-bound keys are buffered and replayed
 -- after the tap/hold decision, so fast rolls like caps→b correctly produce
 -- Escape followed by b instead of dropping Escape.
+--
+-- Troubleshooting: caps→Escape and the picker's bare keys both dead while
+-- Cmd+Opt+T still works means macOS Secure Input is on — it suppresses
+-- eventtaps and unmodified hotkeys, but not modifier hotkeys. Confirm and
+-- find the holder:
+--   hs -c 'print(hs.eventtap.isSecureInputEnabled())'
+--   hs -c 'for _,w in ipairs(hs.window.allWindows()) do print(w:application():name(), w:title()) end'
+-- Usual culprits: a locked 1Password window, a terminal with Secure Keyboard
+-- Entry on, a hidden auth prompt. Don't trust kCGSSessionSecureInputPID from
+-- ioreg — it names loginwindow, not the app actually holding it.
 local TAP_MS = 150
 local f18_kc = hs.keycodes.map.f18
 local dir_kcs = {}
