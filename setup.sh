@@ -32,8 +32,8 @@ brew install pure zsh-autosuggestions zsh-syntax-highlighting zoxide
 sudo apt install zsh-autosuggestions zsh-syntax-highlighting zoxide
 git clone https://github.com/sindresorhus/pure ~/.local/share/zsh/plugins/pure
 # both: one-time import of the old oh-my-zsh `z` history into zoxide.
-# 22.04 ships zoxide 0.4.3, which wants `zoxide import --from=z ~/.z` instead.
-zoxide import z < ~/.z
+# 22.04's zoxide 0.4.3 predates `--from` and wants `zoxide import z < ~/.z`.
+zoxide import --from=z ~/.z
 
 #### mise
 # if mac
