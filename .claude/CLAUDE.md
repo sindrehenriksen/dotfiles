@@ -31,6 +31,7 @@ Before claiming a tool isn't installed or recommending an install step, check th
 
 - Don't read, `cat`, or print the contents of files that may hold secrets or sensitive local config — `.env` files, `.credentials.json`, private keys, local `mise` TOML (`mise.local.toml`) — unless the user explicitly asks. Referencing them by path, sourcing them, or passing them to a tool (e.g. `--env-file`) is fine.
 - If you need a value from one, ask the user rather than reading the file.
+- **mise is where env and secrets live** — the repo's `.mise.toml` for shared values, git-ignored `.mise.local.toml` for secrets, reached with `mise exec --`. Prefer it over introducing a `.env` file: two places holding the same configuration is the duplication problem in config form, and the one that silently wins is rarely the one being edited. Watch the inline-assignment trap — `mise exec -- FOO= cmd` re-injects `FOO` after the assignment, so clearing a variable needs `mise exec -- env FOO= cmd`.
 
 ## Documentation over memory
 
@@ -102,6 +103,7 @@ Use the `ci-debugging` skill — fetching CI logs, flaky-job reruns, and stale-P
 
 - **Playwright MCP is the default for attended work** — more reliable click targeting, cleaner JS evaluation, inline screenshots, ~30% fewer round-trips than the `agent-browser` CLI. It opens a real Chrome window visible to the user; always close the browser when done.
 - **Reach for the `agent-browser` CLI when Playwright's session model doesn't fit**: parallel subagents (a single MCP browser session can't serve several at once), or unattended runs — scheduled agents, `claude -p` — where MCP servers may be unavailable and a Chrome window popping up would be disruptive.
+- **Pick the engine and viewport for the target, not by default.** Desktop Chromium at desktop size is a claim about what the check is evidence for; mobile-first work wants a phone viewport, and an iOS target wants WebKit (every iOS browser, installed PWAs included, runs it). A project can pin this in its own `.mcp.json`. Say what the chosen engine still can't show, so a green run isn't read as more than it is.
 
 ### When to drive a browser
 
