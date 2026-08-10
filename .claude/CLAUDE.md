@@ -1,5 +1,5 @@
 <!-- User-level Claude Code instructions. Symlinked from ~/dotfiles/.claude/CLAUDE.md to ~/.claude/CLAUDE.md and ~/.claude-work/CLAUDE.md. -->
-<!-- Dotfiles-repo-specific rules live in ~/dotfiles/CLAUDE.md (auto-loaded when working in the dotfiles repo). -->
+<!-- Dotfiles-repo-specific rules live in ~/dotfiles/AGENTS.md (auto-loaded when working in the dotfiles repo). -->
 
 # General Instructions
 
