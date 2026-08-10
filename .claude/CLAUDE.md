@@ -88,7 +88,7 @@ Use the `pr-description` skill — it has the full guidelines.
 
 ## Code Review
 
-CodeRabbit CLI (the `coderabbit` skill) is **on trial** as a second, independent pass over a local diff — an extra reviewer, never a replacement for a real review. Reach for it when a change is worth a second opinion, and say afterwards whether its findings added anything the primary review missed, so we can decide whether it earns a permanent place.
+The `coderabbit` skill is on trial: a supplementary pass over a local diff, run after your own review, never instead of it. Say whether it added anything — that decides whether it stays.
 
 ## Azure CLI Authentication
 
