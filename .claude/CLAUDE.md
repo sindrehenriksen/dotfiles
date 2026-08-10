@@ -102,9 +102,7 @@ Use the `ci-debugging` skill — fetching CI logs, flaky-job reruns, and stale-P
 
 ## Browser Automation
 
-- **Playwright MCP is the default for attended work** — more reliable click targeting, cleaner JS evaluation, inline screenshots, ~30% fewer round-trips than the `agent-browser` CLI. It opens a real Chrome window visible to the user; always close the browser when done.
-- **Reach for the `agent-browser` CLI when Playwright's session model doesn't fit**: parallel subagents (a single MCP browser session can't serve several at once), or unattended runs — scheduled agents, `claude -p` — where MCP servers may be unavailable and a Chrome window popping up would be disruptive.
-- **Pick the engine and viewport for the target, not by default.** Desktop Chromium at desktop size is a claim about what the check is evidence for; mobile-first work wants a phone viewport, and an iOS target wants WebKit (every iOS browser, installed PWAs included, runs it). A project can pin this in its own `.mcp.json`. Say what the chosen engine still can't show, so a green run isn't read as more than it is.
+Read the `browser` skill before the first browser action — tool choice, engine and viewport, command reference. Whether to drive a browser at all is gated here:
 
 ### When to drive a browser
 

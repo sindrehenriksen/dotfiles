@@ -1,13 +1,22 @@
 ---
 name: browser
-description: 'Automate browser interactions using agent-browser CLI. USE FOR: web scraping, form filling, UI testing, screenshots, browser automation. DO NOT USE FOR: API calls, curl requests, non-browser tasks.'
+description: 'Driving a browser: which tool (Playwright MCP vs agent-browser CLI), which engine and viewport, and the agent-browser command reference. Read BEFORE the first browser action. USE FOR: web scraping, form filling, UI testing, screenshots, any browser automation. DO NOT USE FOR: API calls, curl requests, non-browser tasks; whether to drive a browser at all (the global instructions gate that).'
 argument-hint: 'what to do in the browser (e.g. "go to example.com and take a screenshot")'
 allowed-tools: Bash, Read
 ---
 
-# Browser Automation — agent-browser
+# Browser Automation
 
-Use the `agent-browser` CLI to automate browser interactions.
+Covers *how* to drive a browser. Whether to drive one at all — local vs deployed, backend-first, and the rule against unannounced auth windows — is gated by the global instructions.
+
+## Choosing a tool
+
+- **Playwright MCP is the default for attended work.** More reliable click targeting, cleaner JS evaluation, inline screenshots, ~30% fewer round-trips. It opens a real Chrome window visible to the user; always close the browser when done.
+- **Use the `agent-browser` CLI where Playwright's session model doesn't fit**: parallel subagents (one MCP browser session can't serve several), or unattended runs — scheduled agents, `claude -p` — where MCP may be unavailable and a window popping up is disruptive.
+
+## Choosing engine and viewport
+
+Pick for the target, not by default. Desktop Chromium at desktop size is a claim about what the check is evidence for; mobile-first work wants a phone viewport, and an iOS target wants WebKit (every iOS browser, installed PWAs included, runs it). A project can pin this in its own `.mcp.json`. Say what the chosen engine still can't show, so a green run isn't read as more than it is.
 
 ## When to Use
 
@@ -16,6 +25,8 @@ Use the `agent-browser` CLI to automate browser interactions.
 - Automate multi-step browser workflows
 - Test a web UI or verify page content
 - Scrape or extract data from a website
+
+Everything below is the `agent-browser` CLI reference — with Playwright MCP, use its own tools instead.
 
 ## Core Workflow
 
