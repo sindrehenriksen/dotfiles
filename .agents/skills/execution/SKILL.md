@@ -16,6 +16,7 @@ Two reasons, and the order matters. **Legibility first:** the main loop should c
 - **Prefer one agent doing several related things** to several doing one thing each. Every spawn costs a full brief in and a full report out; batching pays that once and lets the agent reuse what it has already loaded.
 - **Sequential by default; parallel only when file-disjoint** (or isolated, e.g. separate worktrees), with explicit write territory per agent. Files are not the only shared resource: parallel lanes contend for the machine, and a wall-clock-sensitive gate is what notices — run those while the other lanes are idle, and suspect the machine before the code when a slow test fails alone.
 - **Never edit files in a checkout an agent is working in** — not even a doc it isn't touching. Its `git add` sweeps up whatever is dirty, so your write lands inside its commit under its message, and you find out from the log afterwards. Wait for it to finish, or edit somewhere else.
+- **A fresh worktree has none of the repo's gitignored local config**, so it usually isn't runnable until that is set up — copy it across (without reading secrets) rather than reading absence as a defect. An agent that finds a file missing there has found what "untracked" means, not a deletion.
 - Prefer continuing an existing agent over spawning fresh when its built-up context is the valuable part. Spawn fresh when inherited assumptions are the risk instead — critique, second opinions, anything where the first answer may have been wrong — and say so in the brief ("don't inherit my framing; concluding *keep it as it is* is legitimate"), or it will just agree with you. Between phases the question is sharper than it looks: **a written artifact that a human has reviewed has already externalised the context worth keeping**, so hand it to a fresh agent — continuing mostly preserves the first one's investment in its own output, and a plan only its author can execute isn't a plan. Continue when no artifact and no gate sit between the two pieces of work, or when the exploration itself was the expensive part; continue too when a review finding sends the *same* artifact back for tightening, where re-briefing costs more than it buys.
 
 ## Phases
@@ -57,6 +58,8 @@ Verify *delegated* work before building on it: read the diff yourself, re-run th
 
 A green test is not evidence that the test exercised anything. When an agent reports a suite passing, check that the assertion *could* have failed — one that mocks away the thing it names, or returns before reaching it, reports success while doing nothing. It's the failure mode delegation is most prone to, because the report is honest and the number is real.
 
+An empty result is not evidence of absence either. A query against logs or telemetry returns nothing when the event never happened, but equally when it fell outside a silent retention window, or a filter was wrong, or the context pointed at the wrong account — none of which raise an error. Before concluding something never ran, establish that the query would have found it.
+
 Verify cheaply, though. For a *claim* rather than a diff, spot-check the load-bearing number or the one file that would falsify it; re-deriving the agent's whole analysis in the main loop spends exactly the context the delegation was meant to save. But don't stack blanket "double-check everything" instructions on your own work — the model already self-verifies, and redundant instructions cause over-verification.
 
 ## What reaches the user
@@ -70,7 +73,7 @@ Verify cheaply, though. For a *claim* rather than a diff, spot-check the load-be
 - **Tell agents to commit after each coherent step**, not at the end. Long runs get interrupted, and uncommitted work is lost work — say it in the brief, because saving it all for the end is the default.
 - **Commit only your own changes.** Stage explicit paths, and while agents are live run `git status` + `git diff --staged` before every commit; after any conflicted stash apply, `git reset` before adding anything. Shared files — lockfiles, generated artifacts, anything under evaluation — are the classic traps.
 - **Commit freely while working, tidy before review.** The two only conflict if the tidying never happens: `git commit --fixup=<sha>` as you go, autosquash before the branch is reviewed, `--force-with-lease` to push the rewritten branch.
-- **Keep the commits that earn a place in history** — one coherent change, reasoning in the body, the kind someone later runs `git log` to understand. A review finding fixed as its own commit usually qualifies; reviewers read the branch in that order. Fold the artefacts of how the work happened: a format-only commit a hook produced, a typo fix to its own predecessor, a comment corrected two commits later on the same branch.
+- **Keep the commits that earn a place in history** — one coherent change, reasoning in the body, the kind someone later runs `git log` to understand. A review finding fixed as its own commit usually qualifies; reviewers read the branch in that order. Fold the artefacts of how the work happened: a format-only commit a hook produced, a typo fix to its own predecessor, a comment corrected two commits later on the same branch. After folding, confirm it changed no content: `git rev-parse HEAD^{tree}` before and after should match.
 - **Rewrite only unmerged branches you own.** Never anything already merged, never a branch someone else may have pulled, and `--force-with-lease` over `--force` so a concurrent push fails loudly instead of being clobbered.
 
 ## Reviews
@@ -79,7 +82,7 @@ Close each meaningful unit of work — an iteration, a phase, a coherent set of 
 
 Never review work from the conversation that produced it — that context is biased toward approving its own build. Spawn a neutral agent whose entire input is the artifact reference (PR, diff, doc) plus the review instructions; no framing, focus hints, or expected verdict.
 
-On a code diff, the `coderabbit` skill can run as an independent second pass beside the neutral agent — an extra reviewer, never a substitute for one.
+On a local working diff, before there is a PR, the `coderabbit` skill can run as an independent second pass beside the neutral agent — an extra reviewer, never a substitute for one.
 
 The neutral agent judges the artifact; the conversation knows what it can't see — where the design felt fragile, which constraints were negotiated, what almost went wrong. Use that context for the complementary pass: decide what else to exercise (targeted tests, evals, checks), run it now, and promote what has lasting value into the suite or CI rather than leaving it one-off.
 

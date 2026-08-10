@@ -14,8 +14,9 @@ allowed-tools: Read, Grep, Glob, Bash
 
 ## Writing Style
 
-- Keep it concise — match depth to the scope of the change
+- Keep it concise — match depth to the scope of the change. **Length is a defect**: a long description is usually carrying process narrative or sections duplicating each other, so cut rather than reorganise
 - Adapt or omit template sections to fit the PR; don't fill in sections that add no value
+- **Extend the same pass to every surface the change touches** — code comments and docstrings, READMEs and instruction files, dashboards and alert text, anything user- or integrator-facing. Copy describing the pre-change world is worse than none
 - Don't repeat what's already obvious from commit messages — reference them instead
 - Describe the end state, not how it was reached. "Originally X, then Y, now Z" is a log; a reviewer needs what it is plus short why / why-not. One exception: a rejected alternative is worth a sentence when it pre-empts an obvious question. Re-derive numbers against the current diff before each review round and before merge — test counts, "not yet deployed", and figures a later commit superseded are the usual stale ones
 - Use backticks for file and symbol references — no file hyperlinks (editor-generated markdown file links don't render on GitHub)

@@ -31,7 +31,7 @@ Before claiming a tool isn't installed or recommending an install step, check th
 
 - Don't read, `cat`, or print the contents of files that may hold secrets or sensitive local config — `.env` files, `.credentials.json`, private keys, local `mise` TOML (`mise.local.toml`) — unless the user explicitly asks. Referencing them by path, sourcing them, or passing them to a tool (e.g. `--env-file`) is fine.
 - If you need a value from one, ask the user rather than reading the file.
-- **mise is where env and secrets live** — the repo's `.mise.toml` for shared values, git-ignored `.mise.local.toml` for secrets, reached with `mise exec --`. Prefer it over introducing a `.env` file: two places holding the same configuration is the duplication problem in config form, and the one that silently wins is rarely the one being edited. Watch the inline-assignment trap — `mise exec -- FOO= cmd` re-injects `FOO` after the assignment, so clearing a variable needs `mise exec -- env FOO= cmd`.
+- **In repos we set up we prefer mise for env and secrets** (`.mise.toml` shared, git-ignored local file for secrets) over a `.env`, since of two config homes the one that silently wins is rarely the one being edited. Check what a repo actually uses rather than assuming either. Watch mise's inline-assignment trap: `mise exec -- FOO= cmd` re-injects `FOO`, so clearing a variable needs `mise exec -- env FOO= cmd`.
 
 ## Documentation over memory
 
@@ -65,6 +65,7 @@ When the system framework suggests saving a memory, route the content to the rig
 
 - Prefer staging specific files over `git add -A` or `git add .` — review `git status` first to avoid adding unintended changes
 - When asked to fold changes into an earlier commit, default to `git commit --fixup=<sha>`. Rewriting history is in bounds on an unmerged branch you own — autosquash the fixups and fold commits with no standalone value before anyone else reads the branch. Never rewrite shared or merged history (`main`, or a branch someone else has based work on) without asking. Before any destructive git op (`reset --hard`, force-push, rebase), capture uncommitted work first (stash or `git diff > patch`).
+- **Bringing the base branch into a feature branch: rebase by default, merge when pragmatic.** Rebase keeps history linear; merging resolves a conflict once instead of per commit, so it is the sensible escape when a rebase would mean re-resolving the same conflict repeatedly. Neither corrupts a review: every merge-base-relative diff (a PR diff, `main...HEAD`, a CodeRabbit run pinned to the merge base) shows only your own changes either way. What does break, identically for both, is an incremental diff against a remembered SHA — it picks up whatever the base brought in and reads it as yours, so re-derive against the current merge base instead of trusting the marker.
 - Check `git diff` (and `git diff --staged` if applicable) before writing the commit message
 - Commit message titles: concise, under 50 chars when possible. Body lines: wrap at 72 chars.
 - Focus on WHAT changed and WHY, not implementation details
