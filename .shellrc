@@ -34,6 +34,15 @@ if $IS_MAC; then
 fi
 
 
+#### Visma
+# Must stay ahead of the mise block: it exports MISE_TRUSTED_CONFIG_PATHS, and
+# `mise activate` calls hook-env immediately, which hard-errors on an untrusted
+# config in cwd's chain. Sourced later, a login shell in an untrusted dir (a
+# fresh worktree) greets you with mise trust errors, while a nested shell stays
+# quiet — it inherits the var. Keep this above.
+[ -f ~/dotfiles/.shellrc-visma ] && source ~/dotfiles/.shellrc-visma
+
+
 #### mise
 if command -v mise &>/dev/null; then
     eval "$(mise activate -s zsh)"
@@ -197,7 +206,3 @@ gh-work()     { __gh-run work "$@"; }
 
 #### Secrets (not tracked in dotfiles)
 [ -f ~/.secrets.env ] && source ~/.secrets.env
-
-
-#### Visma
-[ -f ~/dotfiles/.shellrc-visma ] && source ~/dotfiles/.shellrc-visma
