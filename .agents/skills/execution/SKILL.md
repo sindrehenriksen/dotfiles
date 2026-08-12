@@ -95,4 +95,5 @@ The neutral agent judges the artifact; the conversation knows what it can't see 
 
 - Before an autonomous stretch: confirm scope and batch clarifying questions in ONE round. Then run; interrupt only for scope decisions, destructive or outward-facing actions, and blockers you can't resolve.
 - Durable learnings go to versioned docs (instruction files, skills, tickets) as they happen — not chat history, which gets summarized away in long sessions.
+- When a compaction or a fresh session is coming, the `handoff` skill covers the prompt pair that carries the work across — and what belongs on disk instead of in a prompt.
 - Keep load-bearing state (task lists, decisions, open questions) in files the session can re-read, so the conversation surviving a compaction doesn't lose the plot. That is also what makes a run interruption-proof: an agent killed mid-run resumes from a short message stating the *disk* state — checkboxes, `git status`, which tests were red — with zero rework. Corollary for research agents: have them write the deliverable file incrementally, never only at the end.
