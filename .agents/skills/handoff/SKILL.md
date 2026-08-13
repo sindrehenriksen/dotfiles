@@ -12,7 +12,7 @@ Carrying work across a context boundary. The deliverable is prompts the user pas
 
 ## Before writing either prompt
 
-- **Confirm nothing is in flight.** Unpushed commits, a running deploy or watcher, live subagents, a dirty worktree, a drafted message not yet sent. A handoff across an unfinished action loses it. Either finish it, or name it in the keep-list as in-flight state *with how to resume from disk* — SHA, run id, which checkboxes are ticked, which tests were red.
+- **Make what's moving findable, rather than winding it down.** Unpushed commits, a dirty worktree, a deploy, a watcher, a running agent — these carry across the boundary or can be started again, so the keep-list names them instead: how to resume from disk (SHA, run id, which checkboxes are ticked, which tests were red), and for anything still running, what it is doing and what to do with its result when it lands — a live subagent, for instance, keeps working through the compaction and reports into the new context, which needs to know what to expect from it. What a boundary does lose is whatever exists nowhere but the conversation — an unsent draft, a half-applied write with no record elsewhere — so finish that first.
 - **Put durable content where it belongs first.** Anything that outlives this handoff — analysis, decisions, scope — goes into the ticket, plan doc or instruction file *now*, so the prompt can say "read it" instead of carrying a copy that will rot. The prompt is only for what has no other home.
 - If either check turns something up, say so and deal with it before producing prompts.
 
