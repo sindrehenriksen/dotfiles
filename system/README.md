@@ -80,11 +80,20 @@ killer now limps on instead of being stopped cleanly. Weighed against a journal
 in which every OOM kill was Claude Code in a Ghostty tab, that's a theoretical
 cost against a measured benefit.
 
-Applies to new scopes after `systemctl --user daemon-reexec` or a re-login;
-Ghostty's memory limit likewise only affects tabs opened after a config reload.
+`DefaultOOMPolicy` needs `systemctl --user daemon-reexec` (or a re-login), and
+then applies to *every* scope, existing tabs included — Ghostty never sets
+`OOMPolicy` itself, so the value resolves from the manager default at query
+time rather than being stamped at scope creation.
+
+`MemoryHigh` is the opposite: stamped at creation, from whatever config the
+running Ghostty process loaded **at startup**. Editing `ghostty/config` and
+opening a new tab is *not* enough — the new tab inherits the old config. Reload
+with `ctrl+shift+,` first, then open a tab. Tabs already open keep `max` for
+life.
 
 ```bash
-systemctl --user show -p DefaultOOMPolicy    # continue
+systemctl --user show -p DefaultOOMPolicy                        # continue
+cat /sys/fs/cgroup$(cut -d: -f3 /proc/$$/cgroup)/memory.high     # 6442450944
 ```
 
 If it recurs, start here:
