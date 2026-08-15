@@ -1,3 +1,7 @@
+#!/usr/bin/env bash
+# Needs bash, not sh: the platform check below uses [[ ]], which dash errors on —
+# silently taking the Linux branch on macOS.
+
 link() {
     if [ -e "$2" ] && ! [ -L "$2" ]; then
         echo "WARNING: $2 exists and is not a symlink — skipping"
