@@ -21,6 +21,13 @@ window-padding-y = 4
 cursor-style = block
 cursor-style-blink = false
 
+# Resource limits (Linux/systemd only; ignored elsewhere)
+# 6 GiB soft cap (MemoryHigh) per tab, so a runaway agent session is throttled
+# instead of dragging the machine into swap. Normal use is under 2 GB; raise
+# this if a legitimately heavy tab feels sluggish. Only applies to tabs opened
+# after a reload. Full story: system/README.md, "Claude Code OOM kills".
+linux-cgroup-memory-limit = 6442450944
+
 # Misc
 copy-on-select = clipboard
 mouse-hide-while-typing = true

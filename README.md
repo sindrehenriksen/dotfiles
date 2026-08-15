@@ -16,7 +16,7 @@ Personal dev environment: zsh, Neovim, Ghostty, Git, AI agent configs. Cross-pla
 | `.claude/` | Claude Code global config (`CLAUDE.md`, `settings.json`) |
 | `.agents/skills/` | Agent skills — single source, symlinked to `~/.agents/skills/` and `~/.claude/skills/` (global) plus `~/dotfiles/.claude/skills/` for repo-only skills |
 | `secrets/` | Example secrets templates (real secrets live in `~/.secrets.env`, untracked) |
-| `system/` | Linux-only: GNOME keybinds, logind, battery conservation — see `system/README.md` |
+| `system/` | Linux-only: GNOME keybinds, logind, battery conservation, systemd user-manager OOM policy — see `system/README.md` |
 | `git-hooks/` | Repo-local git hooks (`core.hooksPath`): `commit-msg` enforces 50/72 title + reflows body at 72, `pre-commit` delegates to the `pre-commit` framework if installed |
 
 ## Setup

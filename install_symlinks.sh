@@ -62,4 +62,9 @@ else
     # Linux: Ghostty config
     mkdir -p ~/.config/ghostty
     link ~/dotfiles/ghostty/config ~/.config/ghostty/config
+
+    # Linux: systemd user manager — keeps an OOM-killed process from taking its
+    # whole Ghostty tab with it. See system/README.md.
+    mkdir -p ~/.config/systemd
+    link ~/dotfiles/system/systemd-user.conf ~/.config/systemd/user.conf
 fi

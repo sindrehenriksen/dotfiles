@@ -44,6 +44,66 @@ sudo systemctl enable --now tlp
 
 Verify: `sudo tlp-stat -s` (enabled), `sudo tlp-stat -r` (wifi power saving on).
 
+### Claude Code OOM kills and Ghostty tabs (`systemd-user.conf`)
+
+Symptom: a Ghostty tab goes sluggish, then closes outright and takes its
+scrollback with it. Always while agents are running.
+
+Cause is Claude Code's memory, which grows with session length and with the
+number of subagents — `fork` agents especially, since each inherits the
+parent's whole context. On this 13 GiB machine it has reached 7-11 GB and been
+OOM-killed seven times in the month to 14 Aug 2026. Nothing else on this
+machine has *ever* been OOM-killed; every victim in the journal is Claude.
+
+The tab dies as a side effect rather than directly. These are all *global*
+kernel OOMs (`constraint=CONSTRAINT_NONE`), which kill a single chosen process
+— Claude sets its own `oom_score_adj` to 200, volunteering itself ahead of the
+desktop — and `memory.oom.group` is 0, so nothing else in the tab is touched.
+But Ghostty runs each tab in its own transient systemd scope, and systemd's
+stock `DefaultOOMPolicy=stop` then terminates that whole scope, shell included.
+
+Three parts, all needed:
+
+1. `linux-cgroup-memory-limit` in `ghostty/config` — 6 GiB per tab. This is
+   `MemoryHigh`, a *soft* limit: a runaway tab gets throttled and reclaimed
+   rather than killed, so it crawls instead of dragging the machine into swap.
+2. `DefaultOOMPolicy=continue` here — if a process is OOM-killed anyway, the
+   shell and scrollback survive and the tab just shows `killed`.
+3. `!mem:<rss>` in the Claude Code status line (`.claude/statusline.sh`), shown
+   above 3 GiB — the cue to `/clear` or start a fresh session.
+
+`continue` applies to every user unit, not only Ghostty: Ghostty exposes no
+per-surface OOM policy, and the scope names are PID-based
+(`app-ghostty-surface-transient-6451.scope`), so no drop-in can target them.
+The cost is that a multi-process user service losing one process to the OOM
+killer now limps on instead of being stopped cleanly. Weighed against a journal
+in which every OOM kill was Claude Code in a Ghostty tab, that's a theoretical
+cost against a measured benefit.
+
+Applies to new scopes after `systemctl --user daemon-reexec` or a re-login;
+Ghostty's memory limit likewise only affects tabs opened after a config reload.
+
+```bash
+systemctl --user show -p DefaultOOMPolicy    # continue
+```
+
+If it recurs, start here:
+
+```bash
+journalctl -b --no-pager | grep -E 'Out of memory: Killed|ghostty-surface.*oom-kill'
+```
+
+The victim appears under its own process name — the native Claude binary's
+`comm` is its version string (e.g. `2.1.232`), not `claude`, which is why the
+status-line check keys on the largest-RSS ancestor instead of a name.
+
+Two gotchas when reading that output. `journalctl -k` has under-reported these
+kills here (it missed six of seven); grep the unfiltered journal instead. And a
+`systemd-oomd invoked oom-killer` line does *not* mean oomd killed anything —
+it names whichever process's allocation happened to fail, and oomd has never
+actually killed a thing on this machine. If oomd ever did, it SIGKILLs the
+whole cgroup and `DefaultOOMPolicy` would not save the tab.
+
 ### Note: avoid Toshy
 
 [Toshy](https://github.com/RedBearAK/toshy) (Mac-style keybindings for Linux) conflicts
