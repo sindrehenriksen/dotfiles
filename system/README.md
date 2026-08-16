@@ -44,7 +44,7 @@ sudo systemctl enable --now tlp
 
 Verify: `sudo tlp-stat -s` (enabled), `sudo tlp-stat -r` (wifi power saving on).
 
-### Claude Code OOM kills and Ghostty tabs (`systemd-user.conf`)
+### Claude Code OOM kills and Ghostty tabs
 
 Symptom: a Ghostty tab goes sluggish, then closes outright and takes its
 scrollback with it. Always while agents are running.
@@ -62,7 +62,19 @@ desktop — and `memory.oom.group` is 0, so nothing else in the tab is touched.
 But Ghostty runs each tab in its own transient systemd scope, and systemd's
 stock `DefaultOOMPolicy=stop` then terminates that whole scope, shell included.
 
-Three parts, all needed:
+**The trap: the memory cap manufactures oomd's kill trigger.** `MemoryHigh`
+works BY forcing reclaim. Ubuntu's systemd-oomd kills on *pressure with reclaim
+activity*. Ghostty opts every surface scope into oomd itself
+(`ManagedOOMMemoryPressure=kill`, matching its docs' advice to "configure
+something like systemd-oom"). So capping a tab creates exactly the condition
+oomd hunts for — and an oomd kill SIGKILLs the **whole cgroup**, shell
+included, which `DefaultOOMPolicy=continue` cannot save. Adding part 1 alone
+trades a kernel kill that spares the tab for an oomd kill that destroys it.
+That happened on 16 Aug 2026: `Killed …transient-5090.scope due to memory
+pressure for …user@1000.service being 89.32% > 50.00% for > 20s with reclaim
+activity`. Parts 4 and 5 exist to close that path.
+
+Five parts, all needed:
 
 1. `linux-cgroup-memory-limit` in `ghostty/config` — 6 GiB per tab. This is
    `MemoryHigh`, a *soft* limit: a runaway tab gets throttled and reclaimed
@@ -71,6 +83,23 @@ Three parts, all needed:
    shell and scrollback survive and the tab just shows `killed`.
 3. `!mem:<rss>` in the Claude Code status line (`.claude/statusline.sh`), shown
    above 3 GiB — the cue to `/clear` or start a fresh session.
+4. `user-service-oomd-off.conf` — drops Ubuntu's session-wide 50% oomd rule.
+5. `oomd-no-pressure-kill.conf` — raises the per-scope limit Ghostty sets
+   directly, which part 4 cannot reach.
+
+Parts 4 and 5 are root-owned and cannot be symlinked, so they are copied:
+
+```bash
+sudo mkdir -p /etc/systemd/system/user@.service.d /etc/systemd/oomd.conf.d
+sudo cp ~/dotfiles/system/user-service-oomd-off.conf \
+        /etc/systemd/system/user@.service.d/oomd-off.conf
+sudo cp ~/dotfiles/system/oomd-no-pressure-kill.conf \
+        /etc/systemd/oomd.conf.d/no-pressure-kill.conf
+sudo systemctl daemon-reload && sudo systemctl restart systemd-oomd
+```
+
+Do not restart `user@1000.service` to apply part 4 — that logs you out;
+`daemon-reload` is enough for PID 1 to re-push the setting to oomd.
 
 `continue` applies to every user unit, not only Ghostty: Ghostty exposes no
 per-surface OOM policy, and the scope names are PID-based
@@ -94,7 +123,12 @@ life.
 ```bash
 systemctl --user show -p DefaultOOMPolicy                        # continue
 cat /sys/fs/cgroup$(cut -d: -f3 /proc/$$/cgroup)/memory.high     # 6442450944
+systemctl show user@1000.service -p ManagedOOMMemoryPressure     # auto
+oomctl | grep -E 'Default Memory Pressure Limit|Pressure Limit'  # all 100.00%
 ```
+
+`oomctl` is the one that matters after any change here: it shows what oomd is
+actually monitoring and at what limit, rather than what the units claim.
 
 If it recurs, start here:
 
@@ -106,12 +140,23 @@ The victim appears under its own process name — the native Claude binary's
 `comm` is its version string (e.g. `2.1.232`), not `claude`, which is why the
 status-line check keys on the largest-RSS ancestor instead of a name.
 
-Two gotchas when reading that output. `journalctl -k` has under-reported these
-kills here (it missed six of seven); grep the unfiltered journal instead. And a
-`systemd-oomd invoked oom-killer` line does *not* mean oomd killed anything —
-it names whichever process's allocation happened to fail, and oomd has never
-actually killed a thing on this machine. If oomd ever did, it SIGKILLs the
-whole cgroup and `DefaultOOMPolicy` would not save the tab.
+Three gotchas when reading that output:
+
+- `journalctl -k` has under-reported these kills here (it missed six of seven).
+  Grep the unfiltered journal instead.
+- A `systemd-oomd invoked oom-killer` line does *not* mean oomd killed
+  anything — it names whichever process's allocation happened to fail. A real
+  oomd kill says `systemd-oomd killed some process(es) in this unit` and, in
+  `systemd-oomd`'s own journal, `Killed <cgroup> due to memory pressure`.
+- An oomd kill leaves **no failed unit and no kernel OOM line**, so the greps
+  above miss it entirely. If a tab vanished and those come back empty, check
+  `journalctl -u systemd-oomd` and `journalctl --user | grep oomd` before
+  concluding nothing happened.
+
+Status as of 16 Aug 2026: parts 4 and 5 are verified *as configured* — every
+scope reports a 100% pressure limit — but not yet proven against a real
+runaway. The only kill since the cap went in is the 12:04 one that prompted
+them.
 
 ### Note: avoid Toshy
 
