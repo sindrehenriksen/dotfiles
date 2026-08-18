@@ -59,7 +59,9 @@ When the system framework suggests saving a memory, route the content to the rig
 - Don't over-comment. If the behavior is obvious from the code, the names, or the diff, skip the comment — narration is noise.
 - Comment the non-obvious *why*: rationale, gotchas, invariants, cross-references, "this looks wrong but isn't" cases. Not the *what*.
 - Applies to tests too — don't add comments that just restate the assertion.
-- Match the surrounding file's existing comment density and style rather than a fixed rule.
+- Say what the code does now, not how it came to be. The alternative tried, the bug that prompted the guard, the review that asked for it — that is the ticket's job and the PR's, which is where someone goes looking for it.
+- Don't reference reflexively. A ticket, PR, commit, date or person earns a mention only where it does work the sentence can't — pointing at an incident, or a decision someone would otherwise re-litigate. Which ticket produced a line is what `git log` is for, and a reference never belongs in a filename, a test name, or an identifier.
+- Match the surrounding file's existing comment density and style rather than a fixed rule — unless that density is itself the problem, in which case matching it is how the problem spreads.
 
 ## Git Conventions
 
