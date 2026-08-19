@@ -56,11 +56,19 @@ OOM-killed seven times in the month to 14 Aug 2026. Nothing else on this
 machine has *ever* been OOM-killed; every victim in the journal is Claude.
 
 The tab dies as a side effect rather than directly. These are all *global*
-kernel OOMs (`constraint=CONSTRAINT_NONE`), which kill a single chosen process
-— Claude sets its own `oom_score_adj` to 200, volunteering itself ahead of the
-desktop — and `memory.oom.group` is 0, so nothing else in the tab is touched.
-But Ghostty runs each tab in its own transient systemd scope, and systemd's
-stock `DefaultOOMPolicy=stop` then terminates that whole scope, shell included.
+kernel OOMs (`constraint=CONSTRAINT_NONE`), which kill a single chosen process,
+and `memory.oom.group` is 0, so nothing else in the tab is touched. But Ghostty
+runs each tab in its own transient systemd scope, and systemd's stock
+`DefaultOOMPolicy=stop` then terminates that whole scope, shell included.
+
+Why the victim is always something in a terminal: the GNOME session runs
+launched apps at `oom_score_adj=200` and keeps `gnome-shell` and
+`systemd --user` at 100, so Ghostty sits at 200 and **everything spawned in a
+tab inherits it**. Claude does not set this — nor does Ghostty; it is
+session-wide policy, and it applies to any process you start in a terminal.
+The kernel therefore prefers a tab process over the browser regardless of which
+is actually larger. On 18 Aug 2026 that picked `ld` (6.08 GB) during a kernel
+build while Chrome sat untouched.
 
 **The trap: the memory cap manufactures oomd's kill trigger.** `MemoryHigh`
 works BY forcing reclaim. Ubuntu's systemd-oomd kills on *pressure with reclaim
@@ -153,10 +161,16 @@ Three gotchas when reading that output:
   `journalctl -u systemd-oomd` and `journalctl --user | grep oomd` before
   concluding nothing happened.
 
-Status as of 16 Aug 2026: parts 4 and 5 are verified *as configured* — every
-scope reports a 100% pressure limit — but not yet proven against a real
-runaway. The only kill since the cap went in is the 12:04 one that prompted
-them.
+Status as of 19 Aug 2026: **proven in the wild.** On 18 Aug at 00:25 a kernel
+build's `ld` was OOM-killed at 6.08 GB inside
+`app-ghostty-surface-transient-6270.scope`, and the scope stayed
+`ActiveState=active, Result=success` — the tab and its scrollback survived a
+kill that would previously have closed it.
+
+Corollary for heavy builds in a tab: the 6 GiB cap is per-tab, and everything
+in the tab inherits `oom_score_adj=200`, so a big `make -j` is both memory-
+capped and first in line to be killed. Build with low parallelism (`-j2` for a
+kernel link, which alone wants ~6 GB) rather than one job per core.
 
 ### Note: avoid Toshy
 
