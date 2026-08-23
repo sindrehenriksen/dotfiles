@@ -35,6 +35,13 @@ Four questions per unit of work: **problem → design (only when needed) → pla
 
 Being allowed to go back is the easy half; **noticing that an assumption broke** is the hard half, because an unstated assumption cannot be contradicted — it just quietly makes everything downstream wrong. So when a step hands off, name in the plan doc or the brief what it is assuming that the next step could disprove. Then, when something small and odd turns up later, check it against that list before explaining it away.
 
+**Four questions at every boundary**, asked out loud rather than left to be noticed — noticing is exactly what stops happening under momentum.
+
+- **What would falsify this, and who would notice?** The assumption list above is the answer; an empty list is itself the finding.
+- **Who hasn't been asked whose objection would change the answer?** Not everyone relevant — only the ones who could move the decision.
+- **Is this the second or third fix at the same seam?** Make it a lookup rather than an intuition: `git log` the files being touched and read what the earlier fixes there were for. A second patch at one seam is a design (`~/.agents/principles.md`, "Ask what you are compensating for").
+- **Has anyone actually used it?** Not "do the gates pass" — has a person or an agent operated the surface end to end. This is the one that never fires on its own.
+
 ## Measure it
 
 - **Everything should be measurable**, through logging or metrics. Any mechanism that silently changes what happens — a guard, a cap, a retry, a drop path, a cache, a fallback — ships with the counter that makes it visible. Before merging, ask: if this misbehaved, what number would move, and is anyone emitting it? Full reasoning in `~/.agents/principles.md`, "Log for the debugging you will actually do".
@@ -99,6 +106,18 @@ Never review work from the conversation that produced it — that context is bia
 On a local working diff, before there is a PR, the `coderabbit` skill can run as an independent second pass beside the neutral agent — an extra reviewer, never a substitute for one.
 
 The neutral agent judges the artifact; the conversation knows what it can't see — where the design felt fragile, which constraints were negotiated, what almost went wrong. Use that context for the complementary pass: decide what else to exercise (targeted tests, evals, checks), run it now, and promote what has lasting value into the suite or CI rather than leaving it one-off.
+
+**What to run is a function of what the change touched**, and the same mapping picks the design lenses at the start — one rule at both ends, so nobody has to remember which review this deserves.
+
+- Correctness is the floor and always runs.
+- Untrusted input, authn/authz, secrets, a new boundary → a security pass.
+- Deploy, CI, cost, data retention → an infra pass.
+- A new seam, or a second implementation of a concept that already exists → an architecture pass.
+- Anything a future reader has to navigate → conventions and repo ergonomics.
+- A user-facing surface → **two** passes, and they are not the same thing. A **UX review** judges the shape by reasoning: hierarchy, affordance, flow, wording. A **product critic** operates the running thing and reports what actually happened. Only the second finds the clipped popover and the word that reads wrong.
+- Prose gets its own pass, and it must be allowed to delete: does this read like a log of events, does something else already say it, can it be shorter.
+
+**The outer loop.** Everything above attaches to a change, and some rot doesn't. Run a step-back pass that examines the product rather than the diff — UX, architecture, infra, CI, plans, docs — sized to whatever has moved since the last one. Drive it by trigger rather than calendar: before a large change, which is the cheapest moment to discover the shape is wrong and the one that never happens on its own; after one lands; and a floor of N iterations so it cannot drift indefinitely.
 
 ## Model and effort choice
 
