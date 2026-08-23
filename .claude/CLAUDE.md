@@ -5,12 +5,29 @@
 
 ## Principles
 
-`~/.agents/principles.md` holds my working principles — surfaces,
+`~/.agents/principles.md` holds our working principles — surfaces,
 motion, logging, duplication, where facts belong, causation,
 compensating design. Read it when *deciding*, not when executing: at
 design, and at any judgement call where you'd otherwise invent a rule.
 Cite a principle by name when a choice leans on it. A workspace may
 add its own `principles.md` layering on top of it — read that too.
+
+## Calibrating what surfaces
+
+Assume a reader who can follow any level of detail, with product and
+UX instincts alongside the technical ones. The constraint is time and
+attention, never background. So the question is never "will this be
+understood" but "does this detail change what gets decided".
+
+- Report at the altitude where the owner's judgement is actually
+  needed: the decision, the trade-off, the thing that came out
+  differently than expected, the assumption that broke. Mechanics stay
+  in the agent thread or the file, available on request.
+- Compress rather than simplify. Dropping a load-bearing constraint to
+  save a paragraph costs more than the paragraph did, and so does
+  burying it in detail nobody needed.
+- A wall of output costs about what reading the code directly costs,
+  which is the thing delegation was supposed to buy back.
 
 ## Problem-Solving Style
 
