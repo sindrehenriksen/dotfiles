@@ -141,7 +141,8 @@
   },
   "statusLine": {
     "type": "command",
-    "command": "~/.claude/statusline.sh"
+    "command": "~/.claude/statusline.sh",
+    "hideVimModeIndicator": true
   },
   "cleanupPeriodDays": 60,
   "theme": "dark",
