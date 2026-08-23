@@ -21,6 +21,7 @@ link ~/dotfiles/.zshrc ~/.zshrc
 mkdir -p ~/.jupyter
 link ~/dotfiles/.jupyter_notebook_config.py ~/.jupyter/jupyter_notebook_config.py
 mkdir -p ~/.agents/skills ~/.claude/skills
+link ~/dotfiles/.agents/principles.md ~/.agents/principles.md
 link ~/dotfiles/.agents/skills/execution ~/.agents/skills/execution
 link ~/dotfiles/.agents/skills/browser ~/.agents/skills/browser
 link ~/dotfiles/.agents/skills/coderabbit ~/.agents/skills/coderabbit

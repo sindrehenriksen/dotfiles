@@ -3,6 +3,15 @@
 
 # General Instructions
 
+## Principles
+
+`~/.agents/principles.md` holds my working principles — surfaces,
+motion, logging, duplication, where facts belong, causation,
+compensating design. Read it when *deciding*, not when executing: at
+design, and at any judgement call where you'd otherwise invent a rule.
+Cite a principle by name when a choice leans on it. A workspace may
+add its own `principles.md` layering on top of it — read that too.
+
 ## Problem-Solving Style
 
 - Don't give up quickly when hitting obstacles — try alternative approaches before concluding something can't be done
