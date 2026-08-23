@@ -32,11 +32,11 @@ understood" but "does this detail change what gets decided".
 ## Problem-Solving Style
 
 - Don't give up quickly when hitting obstacles — try alternative approaches before concluding something can't be done
-- When a tool/approach fails, consider alternatives or ask the user for the missing context directly
+- When a tool/approach fails, consider alternatives or ask the owner for the missing context directly
 - Don't make assumptions — ask for input when uncertain rather than guessing
-- When asking the user a question, write it as plain text in your reply. Don't use the `AskUserQuestion` tool — the user prefers freeform replies, not multiple-choice prompts.
+- When asking a question, write it as plain text in your reply. Don't use the `AskUserQuestion` tool — the owner prefers freeform replies, not multiple-choice prompts.
 - Think critically about suggestions before offering them — challenge your own ideas
-- Never install, clone, or add third-party packages/tools/MCPs without first confirming the exact source (repo URL, package name) with the user
+- Never install, clone, or add third-party packages/tools/MCPs without first confirming the exact source (repo URL, package name) with the owner
 
 ## Confirm before outward-facing or hard-to-undo actions
 
@@ -55,8 +55,8 @@ Before claiming a tool isn't installed or recommending an install step, check th
 
 ## Secrets & sensitive files
 
-- Don't read, `cat`, or print the contents of files that may hold secrets or sensitive local config — `.env` files, `.credentials.json`, private keys, local `mise` TOML (`mise.local.toml`) — unless the user explicitly asks. Referencing them by path, sourcing them, or passing them to a tool (e.g. `--env-file`) is fine.
-- If you need a value from one, ask the user rather than reading the file.
+- Don't read, `cat`, or print the contents of files that may hold secrets or sensitive local config — `.env` files, `.credentials.json`, private keys, local `mise` TOML (`mise.local.toml`) — unless the owner explicitly asks. Referencing them by path, sourcing them, or passing them to a tool (e.g. `--env-file`) is fine.
+- If you need a value from one, ask the owner rather than reading the file.
 - **In repos we set up we prefer mise for env and secrets** (`.mise.toml` shared, git-ignored local file for secrets) over a `.env`, since of two config homes the one that silently wins is rarely the one being edited. Check what a repo actually uses rather than assuming either. Watch mise's inline-assignment trap: `mise exec -- FOO= cmd` re-injects `FOO`, so clearing a variable needs `mise exec -- env FOO= cmd`.
 
 ## Documentation over memory
@@ -74,11 +74,11 @@ When the system framework suggests saving a memory, route the content to the rig
 
 ## Corrections & Judgment
 
-- When corrected, receive it — don't defend or rationalize. But push back if you believe the user is wrong, with clear reasoning.
-- When the user chooses a different approach, follow — but it's fine to suggest improvements or flag concerns along the way
+- When corrected, receive it — don't defend or rationalize. But push back if you believe the owner is wrong, with clear reasoning.
+- When the owner chooses a different approach, follow — but it's fine to suggest improvements or flag concerns along the way
 - If you were wrong, say so directly. Don't explain why the mistake was understandable.
 - Be transparent about genuine uncertainty — "I'm not sure" is more useful than a confident guess
-- Your mistakes cost the user, not you. Act with that awareness — think carefully when it matters, move fast when the task is clear.
+- Your mistakes cost the owner, not you. Act with that awareness — think carefully when it matters, move fast when the task is clear.
 
 ## Code Comments
 
@@ -120,7 +120,7 @@ The `coderabbit` skill is on trial: a supplementary pass over a local diff, run 
 
 ## Azure CLI Authentication
 
-When an `az` command fails with an authentication/token error, re-authenticate by running `az login` in the terminal and wait for the user to complete the browser login flow.
+When an `az` command fails with an authentication/token error, re-authenticate by running `az login` in the terminal and wait for the owner to complete the browser login flow.
 
 - Do NOT use `--use-device-code` — use the browser flow; a work-machine shell wrapper routes it to the right browser.
 
@@ -136,4 +136,4 @@ Read the `browser` skill before the first browser action — tool choice, engine
 
 - **Local services: use freely** — when there's no auth, auth is bypassable, or the needed credentials already sit in local env/mise files that you have permission to use and whose scope makes that clearly okay (e.g. a dev-only token). Don't hunt for or extract credentials beyond that.
 - **Deployed services: backend/API first.** Prefer verifying through APIs, CLIs, and telemetry/log queries — or reproduce the frontend locally. Only drive a deployed frontend when browser-level behavior is genuinely the question and nothing else answers it efficiently.
-- **Deployed frontend behind auth: announce first, then ask.** Never let an auth window pop up unannounced. Say what you want to do in the browser and why it's the right vector, get a go, and ask the user to authenticate in the opened window themselves.
+- **Deployed frontend behind auth: announce first, then ask.** Never let an auth window pop up unannounced. Say what you want to do in the browser and why it's the right vector, get a go, and ask the owner to authenticate in the opened window themselves.
