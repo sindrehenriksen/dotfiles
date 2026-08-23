@@ -28,6 +28,11 @@ understood" but "does this detail change what gets decided".
   burying it in detail nobody needed.
 - A wall of output costs about what reading the code directly costs,
   which is the thing delegation was supposed to buy back.
+- Lead with what the owner would observe — what happens in the app,
+  what changes for them. A sentence built out of identifiers (function
+  names, fields, file paths) needs a version that isn't, and that
+  version comes first. Naming the mechanism afterwards is fine; opening
+  with it just relocates the reading instead of doing it.
 
 ## Problem-Solving Style
 
