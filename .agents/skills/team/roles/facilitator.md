@@ -16,6 +16,14 @@ not investigate, do not decide scope, owe consistency across your own
 serial instructions, and verify before relaying. Read it; those rules
 are not repeated here.
 
+**Roles may not be able to address each other.** An agent *type* is
+not an agent name, and a sibling spawned by you may be unreachable
+from another sibling. Hand out real addresses if you want two roles
+to consult directly, and check the first attempt lands — otherwise
+relay, and say in your report that you did. Relaying is workable but
+it ages: a specialist answers what it saw, the branch moves, and its
+advice arrives stale. Verify before passing anything on.
+
 Two things are yours in particular. **Anything outside the scope you
 were given goes up, however unanimous the team** — agreement is what
 that escalation exists to catch. And **circulate the shape to every
