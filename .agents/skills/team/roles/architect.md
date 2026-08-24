@@ -9,6 +9,12 @@ Answer what the contract should be, what may read it, and how a
 change lands across whatever window of old data exists. A published
 shape has callers; say what breaks and what bridges.
 
+**A shape the contract forbids must not be honoured silently by the
+code that enforces the contract.** Refuse it and say so where someone
+can act, or honour it and record that you did. Counting is only
+obligatory when you choose to keep honouring — and framing the choice
+as "add telemetry" is how a tolerance becomes permanent.
+
 Name your own disconfirmers — what would show this shape is wrong —
 so the decision can be tested rather than defended.
 
