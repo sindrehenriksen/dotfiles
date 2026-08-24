@@ -96,7 +96,9 @@ Two rules that cost nothing and pay:
   describing a screen does not provoke the question a picture does.
   Publishing it as a page the owner can open is usually the cheapest
   way to do that, and the lead redeploys it in place as the shape
-  moves.
+  moves — carrying, on the page, what changed since they last looked.
+  Without that they re-read the whole thing hunting for the diff, and
+  stop opening it.
   Better still, let the owner talk to the role that made it — see
   Authority.
 - **Show the content, not only the layout.** The list, the strings,
