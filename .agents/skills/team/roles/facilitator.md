@@ -95,6 +95,13 @@ perspective at once:
   **architecture**
 - anything a future reader must navigate → **conventions**
 - prose, and it must be allowed to delete → **editorial**
+- **an interface in a language the round has not been working in →
+  a reviewer writing in that language.** Translated strings can be
+  correct and still read as translated; only someone thinking in the
+  language catches a compound spelled as two words, a term nobody
+  uses, or a sentence that is grammatical and wrong. Worth calling
+  now and then even when nothing changed, since copy drifts one
+  string at a time.
 - a user-facing surface → **two**: a UX review that judges the shape
   by reasoning, and a **critic** that opens the running thing and
   reports what happened. Only the second finds a clipped control or

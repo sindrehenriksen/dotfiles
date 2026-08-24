@@ -43,6 +43,16 @@ Straying is a checkpoint, not a judgement call — especially when the
 reason is good. When the ask is open ("improve X"), the team finds its
 own way, and still shows the shape before building.
 
+**Simplicity is a constraint, not a preference**, and it binds every
+role — product and UX as much as technical. A tier, a mode, a second
+way to do one thing, a control that appears conditionally, a field
+that exists for a case nobody has met: each needs to earn itself
+against the version without it. "It works" and "it measures well" are
+not reasons to keep something. When the smaller version loses
+something real, say what — and when it does not, the smaller version
+wins. Carry this into every brief; a round that is not told this
+elaborates by default.
+
 **A good measurement is not permission.** A number showing that
 something outside scope would reach further says what *is*; it cannot
 say what was *wanted*. Raise it; do not build it.
