@@ -5,7 +5,7 @@ description: 'How work gets executed: delegation as the default, briefing and ve
 
 # Execution
 
-How work runs: what gets delegated, how agents are briefed and checked, and the phases a piece of work moves through. Generic mechanics only — it deliberately does not cover a repo's own artifacts, gates or commands, which live in its instruction files and project skills. **If this workspace has its own execution layer, read that too** and apply it on top of this. Written for an Opus 5-class main loop, so most of what follows is restraint, brief quality and trust boundaries — not encouragement to delegate or to self-check.
+How work runs: what gets delegated, how agents are briefed and checked, and the phases a piece of work moves through. **For open work — anything still needing a shape decided — the `team` skill runs on top of this and is the default; load this alone when the task is already planned and clearly shaped.** Generic mechanics only — it deliberately does not cover a repo's own artifacts, gates or commands, which live in its instruction files and project skills. **If this workspace has its own execution layer, read that too** and apply it on top of this. Written for an Opus 5-class main loop, so most of what follows is restraint, brief quality and trust boundaries — not encouragement to delegate or to self-check.
 
 ## Delegate by default
 

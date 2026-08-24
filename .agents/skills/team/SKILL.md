@@ -1,0 +1,190 @@
+---
+name: team
+description: 'Running work through a team of roles: who to convene, how to keep them independent, and what the lead does and does not do. USE FOR: any work that is open, needs planning, or has a shape still to be decided — features, redesigns, investigations with a decision at the end. DO NOT USE FOR: a task whose shape is already agreed and only needs executing (the `execution` skill covers that), or a repo''s own artifacts and gates.'
+---
+
+# Team
+
+The default for open work. When a task arrives already planned and
+clearly shaped, `execution` is enough on its own; when the shape is
+still to be decided, this runs on top of it. **If this workspace has
+its own layer — its own skill, its instruction files, its conventions
+— read that too and apply it over both**, and point the roles at it
+in their briefs; a workspace's own rules are not repeated here and
+will not reach a role any other way. `execution` covers
+delegating to *an agent* — briefs, trust boundaries, commits, model
+tiers. This covers delegating to *a team*, and does not restate it.
+
+## What the lead is for, and is not
+
+The lead holds scope, briefs, decides what reaches the owner, and
+carries context nobody else has.
+
+**The lead does not run things.** Devs write and test code; the trio
+may sketch something light; the lead may occasionally write
+documentation. Running gates is not lead work — and re-running someone
+else's suite is not verification anyway (see Reviews). Reading state
+to know where work stands is different and stays with the lead.
+
+**The lead does not investigate.** Reading to write a brief is
+bounded and fine. Spot-checking a delegated claim — the one number or
+file that would falsify it — is required. Open-ended investigation
+that ends in a conclusion goes to an agent, including when it looks
+cheap. Cheapness is what lets the exception swallow the rule.
+
+**The lead does not decide scope.** See below.
+
+## Scope fidelity
+
+**A specified outcome is a boundary; an open outcome is a direction.**
+
+When the ask names the shape, forward it as scope and hold it.
+Straying is a checkpoint, not a judgement call — especially when the
+reason is good. When the ask is open ("improve X"), the team finds its
+own way, and still shows the shape before building.
+
+**A good measurement is not permission.** A number showing that
+something outside scope would reach further says what *is*; it cannot
+say what was *wanted*. Raise it; do not build it.
+
+**Build from what was asked for, not from what the data contains.**
+Assembling a list from what a system already holds looks like
+diligence and is a way of widening scope. Before it ships, put the
+list beside the owner's own words and name every entry that is in one
+and not the other.
+
+## Lead and facilitator
+
+The **lead** talks to the owner, holds scope, and decides what reaches
+them. The **facilitator** runs the round: convenes roles, keeps them
+independent, synthesises, and decides what the team can settle itself.
+
+The lead spawns the facilitator; the facilitator spawns everyone
+else. Spawn one whenever a round runs more than two roles or will
+outlast a few exchanges; below that the lead runs the round itself
+and **`roles/facilitator.md` binds it while it does** — convening,
+sequencing and calling reviews all live there, not here.
+
+The lead never hands over owner contact, scope, or the final report.
+
+**Exactly one agent writes per checkout; every other role is
+read-only.** Two writers on one index is the hazard: a pre-commit
+framework stashes the whole unstaged tree, so a concurrent writer's
+in-flight edits silently revert.
+
+## What the owner sees before it is built
+
+**Anything the owner would have an opinion about gets seen before it
+is implemented** — what is on screen, what it says, what they tap,
+what content appears in it. Not internal structure, matching logic or
+data shapes. The team produces it; `roles/facilitator.md` has when,
+and `roles/ux.md` has what form.
+
+Two rules that cost nothing and pay:
+
+- **Relay the artifact, not a description of it.** A paragraph
+  describing a screen does not provoke the question a picture does.
+  Better still, let the owner talk to the role that made it — see
+  Authority.
+- **Show the content, not only the layout.** The list, the strings,
+  the rows. That is where the owner's opinions actually are.
+
+## Briefs
+
+Role files in `roles/` carry the standing brief. The lead's brief
+carries the task, the evidence and the decisions already made — never
+a retyped version of the role.
+
+- **Quote the owner verbatim for anything load-bearing** — the
+  requirement, the constraint, the rejection — and compress only the
+  surrounding narrative. A framing invented in a brief propagates
+  into code, comments and records, and nothing downstream can tell it
+  from the owner's own words.
+- **Carry measured facts forward** rather than making each round
+  re-derive them — but "verified" must mean the number was checked,
+  never that its reading was.
+- **Mark your own inferences as yours**, and name the alternatives.
+  A lead's reading presented as a premise is the cheapest way to
+  get agreement instead of thought.
+
+## Instructions must stay consistent
+
+Any hub issuing instructions serially can contradict itself: each
+message is written with full sight of the last, so noticing is work
+it can do. When a new instruction conflicts with a standing one,
+resolve it if the answer is obvious, otherwise hand both back and let
+the team resolve it. Never issue a third instruction on top of two
+that conflict.
+
+**Verify before relaying.** Advice ages between being asked and being
+answered — a specialist cannot see the branch move. Check the current
+state before passing a finding on, or finished work gets redone.
+
+## Authority
+
+The team decides. The lead is involved when the team genuinely cannot
+settle it; the owner when the lead cannot either. Do not bounce a
+decision upward for reassurance, and do not manufacture confidence —
+a split on something load-bearing is a legitimate reported outcome.
+
+**Scope is the exception, and it is absolute.** Anything outside what
+was asked for goes to the owner, however good the reason and however
+unanimous the team. A team agreeing that an unasked-for thing is a
+good idea has not settled anything — agreement is what the escalation
+exists to catch. The lead holds scope in the sense of guarding it,
+never in the sense of being able to widen it.
+
+The owner can attach to any running agent directly (`claude agents`,
+then `→`), or `@name (agent) …` from the main session. Use that for
+design work rather than relaying it: the artifact and the
+conversation both stay with the role that owns them.
+
+## Reviews
+
+**A neutral review is mandatory** once a change is more than
+mechanical, and it comes from an agent that saw neither the code nor
+the conversation that produced it. **The facilitator convenes it and
+picks the lenses — not the lead, not the dev.** `roles/facilitator.md`
+carries how. A lead that runs the review itself has taken the round's
+work back, and doing it because it seems quicker is how every other
+"the lead does not do this" rule gets broken.
+
+What the lead owes is different and smaller: **spot-check the one
+number or file that would falsify a delegated claim.** That is not a
+review and does not substitute for one. Do not re-run the gates —
+re-running a suite proves the report honest, never the premise sound,
+since the tests were written alongside the code and share its
+beliefs. Green gates, personally re-run with a red-proof included,
+have cleared a change resting on a false invariant.
+
+**Give the reviewer the owner's own words.** `execution` says a
+neutral agent gets no framing; scope is the exception, because a
+review asked only whether the code is correct will pass work that is
+correct and unasked-for. Quote rather than summarise, or the review
+certifies the lead's account of the request instead of the request.
+
+## What reaches the owner
+
+**Short, plain, and only what changes what they decide.** They can
+follow any level of detail; the constraint is time, never background.
+So the test is never "will this be understood" but "does this detail
+change anything".
+
+- **Lead with what they would observe** — what happens in the app,
+  what they can and cannot do that they could before. Identifiers,
+  file paths and field names come after that, and only where a plain
+  sentence cannot carry the point. A finding built out of function
+  names hands the reading back rather than doing it.
+- **Do not relay a report.** Agents write for the lead, not for the
+  owner. One long enough that forwarding feels easier is the signal
+  to compress harder.
+- **Progress is not news.** Say something when a decision is theirs,
+  when a number changes what they thought, or when something they
+  were told is now wrong. A round that is simply proceeding needs no
+  message.
+- **Correct your own figures out loud**, briefly, and move on.
+
+Closing a round: what they would observe, the accepted losses with
+numbers, anything needing their decision — then stop. How the round
+moved and what the brief got wrong go in the record, and to the owner
+only where one of them changes a decision.

@@ -34,6 +34,12 @@ understood" but "does this detail change what gets decided".
   version comes first. Naming the mechanism afterwards is fine; opening
   with it just relocates the reading instead of doing it.
 
+## How work runs
+
+`team` is the default skill for open work — anything still needing a
+shape decided. `execution` alone is for a task already planned and
+clearly shaped. A workspace may layer its own on top of both.
+
 ## Problem-Solving Style
 
 - Don't give up quickly when hitting obstacles — try alternative approaches before concluding something can't be done

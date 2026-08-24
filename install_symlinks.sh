@@ -28,12 +28,14 @@ link ~/dotfiles/.agents/skills/coderabbit ~/.agents/skills/coderabbit
 link ~/dotfiles/.agents/skills/pr-description ~/.agents/skills/pr-description
 link ~/dotfiles/.agents/skills/ci-debugging ~/.agents/skills/ci-debugging
 link ~/dotfiles/.agents/skills/handoff ~/.agents/skills/handoff
+link ~/dotfiles/.agents/skills/team ~/.agents/skills/team
 link ~/dotfiles/.agents/skills/execution ~/.claude/skills/execution
 link ~/dotfiles/.agents/skills/browser ~/.claude/skills/browser
 link ~/dotfiles/.agents/skills/coderabbit ~/.claude/skills/coderabbit
 link ~/dotfiles/.agents/skills/pr-description ~/.claude/skills/pr-description
 link ~/dotfiles/.agents/skills/ci-debugging ~/.claude/skills/ci-debugging
 link ~/dotfiles/.agents/skills/handoff ~/.claude/skills/handoff
+link ~/dotfiles/.agents/skills/team ~/.claude/skills/team
 # Repo-specific skills (not global)
 mkdir -p ~/dotfiles/.claude/skills
 link ~/dotfiles/.agents/skills/sync ~/dotfiles/.claude/skills/sync
