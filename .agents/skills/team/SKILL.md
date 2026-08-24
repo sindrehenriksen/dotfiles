@@ -84,10 +84,14 @@ Two rules that cost nothing and pay:
 
 - **Relay the artifact, not a description of it.** A paragraph
   describing a screen does not provoke the question a picture does.
+  Publishing it as a page the owner can open is usually the cheapest
+  way to do that, and the lead redeploys it in place as the shape
+  moves.
   Better still, let the owner talk to the role that made it — see
   Authority.
 - **Show the content, not only the layout.** The list, the strings,
-  the rows. That is where the owner's opinions actually are.
+  the rows — the owner's own, not invented ones. That is where the
+  owner's opinions actually are.
 
 ## Briefs
 
