@@ -103,6 +103,12 @@ a retyped version of the role.
 - **Carry measured facts forward** rather than making each round
   re-derive them — but "verified" must mean the number was checked,
   never that its reading was.
+- **State the population before the ratio.** Wrong figures are almost
+  never arithmetic; they are a defensible number attached to the
+  wrong denominator — a count taken before a filter the rule applies,
+  a set swept in by a substring, a total from a superseded version.
+  Say what was counted and over what, and the error becomes visible
+  instead of plausible.
 - **Mark your own inferences as yours**, and name the alternatives.
   A lead's reading presented as a premise is the cheapest way to
   get agreement instead of thought.
