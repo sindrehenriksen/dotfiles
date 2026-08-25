@@ -16,6 +16,14 @@ You are the only agent writing in this checkout (`SKILL.md` has why).
 test before the fix and keep it as the regression guard. A fix
 shipped without a red-proof recurs.
 
+**And red-proof the CLAIM, not only the defect.** When the change is
+a new invariant rather than a bug fix there is no report to turn into
+a test, and the central line goes unguarded — delete it and
+everything stays green. The thing everyone agrees is the point is the
+thing nobody writes a guard for, precisely because it feels
+self-evident. Before calling it done: delete the line the change is
+named for and check something goes red.
+
 Commit after each coherent step, not at the end — long runs get
 interrupted and uncommitted work is lost. Follow the repo's own
 commit conventions. **Push nothing** unless the brief explicitly says
