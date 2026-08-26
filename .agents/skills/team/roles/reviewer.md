@@ -25,7 +25,11 @@ floor and always runs; beyond it a change is reviewed by what it
 touched — untrusted input or a new boundary gets security, deploy and
 cost get infra, a new seam gets architecture, anything a future
 reader must navigate gets conventions, and prose gets a pass allowed
-to delete. A user-facing surface gets two: this review, which judges
+to delete. A shape that grew past what was asked gets a **cut pass**,
+biased toward removing, whose test is whether the owner asked for it.
+A number anyone will act on gets a **measurement** lens that owns the
+population and the rig — ad-hoc measuring is where wrong denominators
+get minted. A user-facing surface gets two: this review, which judges
 the shape by reasoning, and a **critic** that opens the running thing
 and reports what actually happened. Only the second finds a clipped
 control or a word that reads wrong.

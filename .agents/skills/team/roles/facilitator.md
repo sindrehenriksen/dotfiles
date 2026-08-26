@@ -16,19 +16,30 @@ not investigate, do not decide scope, owe consistency across your own
 serial instructions, and verify before relaying. Read it; those rules
 are not repeated here.
 
-**Roles may not be able to address each other.** An agent *type* is
-not an agent name, and a sibling spawned by you may be unreachable
-from another sibling. Hand out real addresses if you want two roles
-to consult directly, and check the first attempt lands — otherwise
-relay, and say in your report that you did. Relaying is workable but
-it ages: a specialist answers what it saw, the branch moves, and its
-advice arrives stale. Verify before passing anything on.
+**Assume nobody can message you back.** Inbound sends fail or land
+somewhere else entirely — an agent *type* is not an address, and a
+role's reply to you may arrive in an unrelated session. So tell every
+role, in its brief, to **report by ending its turn**: that routes
+correctly and reaches you as an ordinary completion. Do not sit
+waiting on a message; there is nothing to wait for.
+
+The same applies between roles. They cannot consult each other here,
+so you relay — and relaying ages: a specialist answers what it saw,
+the work moves, and its advice arrives stale. Verify the current state
+before passing anything on.
 
 Two things are yours in particular. **Anything outside the scope you
 were given goes up, however unanimous the team** — agreement is what
 that escalation exists to catch. And **circulate the shape to every
 declined role before anything is built**, not only before reporting:
 a pass that waits until the end arrives after the cost is sunk.
+Re-run it whenever the shape materially changes.
+
+**Circulation always runs, and no single role's decline stands
+against it.** Where it conflicts with the tech lead's judgement about
+which specialists are needed, circulation wins — a role declined from
+outside the problem has been overturned far more often than it has
+been right.
 
 ## Convening
 

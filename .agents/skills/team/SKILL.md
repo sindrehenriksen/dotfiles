@@ -69,6 +69,18 @@ The **lead** talks to the owner, holds scope, and decides what reaches
 them. The **facilitator** runs the round: convenes roles, keeps them
 independent, synthesises, and decides what the team can settle itself.
 
+**The lead talks to the facilitator and to nobody else in the round;
+the facilitator talks to the roles.** No traffic in either direction
+between the lead and a role — a role receiving instructions from two
+places acts on the later one instead of flagging that they conflict,
+and a lead fielding role reports drowns in work it did not ask for.
+
+**The facilitator only facilitates.** It runs no gates, writes no
+code, applies no migrations and makes no commits — and that holds
+hardest when a round is long or unattended, which is exactly when it
+dissolves. Being the only agent still awake is not a reason to become
+the dev; it is a reason to spawn one.
+
 The lead spawns the facilitator; the facilitator spawns everyone
 else. Spawn one whenever a round runs more than two roles or will
 outlast a few exchanges; below that the lead runs the round itself
@@ -81,6 +93,32 @@ The lead never hands over owner contact, scope, or the final report.
 read-only.** Two writers on one index is the hazard: a pre-commit
 framework stashes the whole unstaged tree, so a concurrent writer's
 in-flight edits silently revert.
+
+## Debugging starts at a reproduction
+
+For a reported defect, **the first artifact is a reproduction in the
+reported state** — not a hypothesis, not a fix. Build the reporter's
+conditions rather than the convenient ones: their device and engine,
+their data volume, their configuration, a warm cache or a cold one.
+A measurement taken on a clean rig with everything enabled describes
+someone who does not exist, and everything downstream inherits that
+population. **"It does not reproduce here" is a result**, not a
+failure — it relocates the cause.
+
+Two habits go with it. **Read the instrument before reasoning about
+the system**: the telemetry the product already emits usually knows
+the onset, and nobody looks. And **name what a measurement cannot
+see** before believing it — a tool that collapses rows, omits a field
+or samples the wrong layer reports a confident nothing.
+
+For a regression, the first obligation is to find what changed. A
+redesign that would make the symptom go away is not a fix for a
+regression nobody has identified.
+
+**Route it straight to a dev.** Reproduce, find the cause, fix it —
+the trio is convened only once the problem turns out to be complex or
+wide-reaching, not as the standard path. Most defects do not need a
+round.
 
 ## What the owner sees before it is built
 
@@ -104,6 +142,14 @@ Two rules that cost nothing and pay:
 - **Show the content, not only the layout.** The list, the strings,
   the rows — the owner's own, not invented ones. That is where the
   owner's opinions actually are.
+
+## Ground truth before opinions
+
+Before convening anyone, establish the facts everyone will argue
+from — read-only agents that produce a file each brief can point at.
+It is the cheapest thing in a round: roles that start from a shared
+reading disagree about the decision instead of about what is true,
+and the facts survive when a role does not.
 
 ## Briefs
 
@@ -149,6 +195,18 @@ settle it; the owner when the lead cannot either. Do not bounce a
 decision upward for reassurance, and do not manufacture confidence —
 a split on something load-bearing is a legitimate reported outcome.
 
+Resolve what you can, including by compromise — a compromise that
+genuinely settles a question is a fine answer. What must not happen
+is a compromise standing in for a conflict it only papers over: name
+those and send them up. The ladder runs team → facilitator → lead →
+owner, and nothing skips a rung, because roles cannot reach the lead
+directly.
+
+**Progress does not stop waiting for the owner.** Where something has
+been authorised, it proceeds. Parking work until they look again means
+they may return to find nothing moved, or test a build that predates
+the fix they are testing for.
+
 **Scope is the exception, and it is absolute.** Anything outside what
 was asked for goes to the owner, however good the reason and however
 unanimous the team. A team agreeing that an unasked-for thing is a
@@ -163,9 +221,16 @@ conversation both stay with the role that owns them.
 
 ## Reviews
 
-**A neutral review is mandatory** once a change is more than
-mechanical, and it comes from an agent that saw neither the code nor
-the conversation that produced it. **The facilitator convenes it and
+**Nothing ships without a neutral review** — not once a change is
+"more than mechanical", which is a judgement that lets the large
+thing through while the small one gets scrutinised. Tie it to
+shipping and the judgement disappears. The reviewer is an agent that
+saw neither the code nor the conversation that produced it.
+
+**It gets the owner's own words, verbatim.** The optional lenses tend
+to get quotes and the mandatory one gets a summary, which is the
+substitution this skill warns about happening in the one place it
+calls compulsory. **The facilitator convenes it and
 picks the lenses — not the lead, not the dev.** `roles/facilitator.md`
 carries how. A lead that runs the review itself has taken the round's
 work back, and doing it because it seems quicker is how every other
@@ -203,7 +268,14 @@ change anything".
 - **Progress is not news.** Say something when a decision is theirs,
   when a number changes what they thought, or when something they
   were told is now wrong. A round that is simply proceeding needs no
-  message.
+  message, and a running commentary on it is worse than silence.
+- **Send only what they need to read.** Not a shorter version of
+  everything — less of it. If a paragraph would not change what they
+  do, it does not go. Length is the most common complaint and the
+  easiest to fix.
+- **Taste question or design question?** Send the first, answer the
+  second. A question only the owner can answer is worth their
+  attention; one the team could settle by looking is not.
 - **Correct your own figures out loud**, briefly, and move on.
 
 Closing a round: what they would observe, the accepted losses with
