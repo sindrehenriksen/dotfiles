@@ -129,12 +129,6 @@ Use the `pr-description` skill — it has the full guidelines.
 
 The `coderabbit` skill is on trial: a supplementary pass over a local diff, run after your own review, never instead of it. Say whether it added anything — that decides whether it stays.
 
-## Azure CLI Authentication
-
-When an `az` command fails with an authentication/token error, re-authenticate by running `az login` in the terminal and wait for the owner to complete the browser login flow.
-
-- Do NOT use `--use-device-code` — use the browser flow; a work-machine shell wrapper routes it to the right browser.
-
 ## CI/CD Debugging
 
 Use the `ci-debugging` skill — fetching CI logs, flaky-job reruns, and stale-PR merge states.
