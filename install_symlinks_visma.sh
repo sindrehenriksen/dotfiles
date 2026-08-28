@@ -29,3 +29,4 @@ link_work_skill ~/dev/flyt/dev-setup/skills/confluence confluence
 link_work_skill ~/dev/flyt/.claude/skills/pr-review pr-review
 link_work_skill ~/dev/flyt/.claude/skills/jira-visma jira-visma
 link_work_skill ~/dev/flyt/.claude/skills/flyt-handoff flyt-handoff
+link_work_skill ~/dev/flyt/.claude/skills/flyt-team flyt-team
