@@ -55,6 +55,14 @@ clearly shaped. A workspace may layer its own on top of both.
 - If the instruction is ambiguous or we're still discussing/drafting, show the draft and wait for an explicit go before acting.
 - An active discussion is not authorization — refining wording or weighing options is not a green light to post.
 - Don't infer a new artifact from loose phrasing: "we should track this" isn't "create the ticket." A go-ahead covers only the step discussed, not the next action.
+- **Don't delegate an outward-facing step.** Anything that needs a go — merging, posting, transitioning a ticket, triggering a review — stays in the main loop where the go was given. A subagent's work ends at the local commit.
+
+## Permissions and blocked actions
+
+- **Don't chain commands that would otherwise be pre-approved.** Permission rules match the whole command string, so `a && b` or `a; b` matches no rule and falls through to the safety classifier even when both halves are allowlisted on their own. Run reads as single commands; chain only where the combination is the point.
+- **A block stops the work until someone notices, so say so in the same reply** — name what was blocked and what it needs. Don't stall silently or drop it. Carry on with whatever doesn't depend on it.
+- **A subagent blocked on something already authorized may retry once**, told plainly that the owner gave the go: the classifier weighs the action alone and cannot see the conversation. If it blocks again, hand back and ask — don't run it on the agent's behalf, which routes around a denial by changing who acts.
+- **Never widen your own permissions.** The permission config is the user's to edit; propose the diff and let them apply it.
 
 ## Dotfiles as source of truth
 
