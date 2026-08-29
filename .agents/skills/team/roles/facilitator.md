@@ -143,9 +143,11 @@ unconvened:
   both, and the second is a separate agent that operates the running
   thing. Folded into the UX review it becomes reasoning about the
   surface again, and nobody finds the clipped control.
-- **A reviewer writing in the interface's language.** Nothing in a
-  diff asks for one, so it gets convened only by being remembered —
-  worth calling now and then even when no copy changed.
+- **A reviewer writing in the language the text is in.** The trigger
+  is the language rather than where the text sits, so a document, a
+  ticket or a deck earns the pass exactly as a UI string does.
+  Nothing in a diff asks for one, so it gets convened only by being
+  remembered — worth calling now and then even when no copy changed.
 
 Name the lens in the brief. An unnamed reviewer defaults to
 correctness and the rest goes unexamined. Give every reviewer the
