@@ -68,7 +68,7 @@ clearly shaped. A workspace may layer its own on top of both.
 
 ## Dotfiles as source of truth
 
-Most of `~` (shell configs, tool settings, Claude config, skills) is symlinked from `~/dotfiles` via `install_symlinks.sh` — that repo is the source of truth. When looking up "where is X configured," check `~/dotfiles` first rather than searching `~` broadly.
+Most of `~` (shell configs, tool settings, Claude config, skills) is symlinked from `~/dotfiles` via `install_symlinks.sh` — that repo is the source of truth. **`~/dotfiles` is a public repo**, so nothing work-internal goes in it — no internal hostnames or URLs, repo or project names, issue keys, infra names, or descriptions of internal process. Work-specific config belongs in the private work repo instead. This matters most when editing dotfiles from *outside* it, which is when its own `AGENTS.md` does not load; that file has the details. When looking up "where is X configured," check `~/dotfiles` first rather than searching `~` broadly.
 
 **The exception is machine-local config, which is untracked on purpose.** `~/.claude/settings.local.json` sits beside the symlinked `settings.json` and is gitignored via `~/.config/git/ignore`, so a setting that is true on this machine and false on the next belongs there rather than in the tracked file. Paths in it must be literal and absolute — globs don't match.
 
