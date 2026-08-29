@@ -1,0 +1,32 @@
+{
+  "$schema": "https://www.schemastore.org/claude-code-keybindings.json",
+  "$docs": "https://code.claude.com/docs/en/keybindings",
+  "bindings": [
+    {
+      "context": "Global",
+      "bindings": {
+        "ctrl+shift+b": "app:toggleBrief",
+        "ctrl+shift+o": "app:toggleTeammatePreview"
+      }
+    },
+    {
+      "context": "Settings",
+      "bindings": {
+        "enter": "settings:close",
+        "up": "select:previous",
+        "down": "select:next",
+        "k": "select:previous",
+        "j": "select:next",
+        "ctrl+p": "select:previous",
+        "ctrl+n": "select:next"
+      }
+    },
+    {
+      "context": "Footer",
+      "bindings": {
+        "ctrl+p": "footer:up",
+        "ctrl+n": "footer:down"
+      }
+    }
+  ]
+}

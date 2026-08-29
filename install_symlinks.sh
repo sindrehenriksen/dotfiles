@@ -46,11 +46,12 @@ git -C ~/dotfiles config core.hooksPath git-hooks
 link ~/dotfiles/.agents/AGENTS.md ~/.claude/CLAUDE.md
 link ~/dotfiles/.claude/settings.json ~/.claude/settings.json
 link ~/dotfiles/.claude/statusline.sh ~/.claude/statusline.sh
+link ~/dotfiles/.claude/keybindings.json ~/.claude/keybindings.json
 # Claude Code work-account config dir (shared config symlinked from personal)
 mkdir -p ~/.claude-work
 link ~/dotfiles/.agents/AGENTS.md ~/.claude-work/CLAUDE.md
 link ~/dotfiles/.claude/settings.json ~/.claude-work/settings.json
-link ~/.claude/keybindings.json ~/.claude-work/keybindings.json
+link ~/dotfiles/.claude/keybindings.json ~/.claude-work/keybindings.json
 link ~/.claude/skills ~/.claude-work/skills
 link ~/.claude/plugins ~/.claude-work/plugins
 
