@@ -8,6 +8,15 @@ description: 'Running work through a team of roles: who to convene, how to keep 
 **Read by the lead and by the facilitator** — it binds both. Roles
 read their own file in `roles/` plus whatever the brief carries.
 
+**The files in `roles/` are the core roles, not the permitted set.**
+Where a round needs a perspective none of them covers, invent the
+role — that is expected rather than exceptional. To be usable it owes
+what the others have: its own standing brief in `roles/`, written to
+outlast this round rather than living inside one brief, and the same
+independence rules as the rest — instructed by the facilitator alone,
+read-only unless it is the one writer in the checkout, reporting by
+ending its turn.
+
 The default for open work. When a task arrives already planned and
 clearly shaped, `execution` is enough on its own; when the shape is
 still to be decided, this runs on top of it. **An unknown answer is
