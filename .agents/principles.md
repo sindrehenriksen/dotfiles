@@ -254,7 +254,10 @@ the facts wanted to be rows. Symptoms also surface far from their
 cause, which is what makes this easy to miss: a saved card visibly
 flipping back reads as a rendering bug right up until someone sees
 it is a sync merge. The trigger to watch for is repetition — one
-patch at a seam is a bug, a second at the same seam is a design, and
-the right move then is to price the structural fix honestly rather
-than to reach for a third. Paying that bill is a cost; refusing to
+patch at a seam is a bug, a second at the same seam is a design.
+Make that a lookup rather than an intuition: `git log` the files
+being touched and read what the earlier fixes there were for. Then
+price the structural fix honestly rather than reaching for a third
+patch, and be open to the honest answer being that the win is
+*removing* the mechanism. Paying that bill is a cost; refusing to
 look at it is a decision, and usually the expensive one.

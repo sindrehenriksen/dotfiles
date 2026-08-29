@@ -12,7 +12,8 @@ whether one is needed *before* implementation rather than at review.
 about the design, not the problem: one patch is a bug, a second at
 the same seam is a design (`~/.agents/principles.md`, "Ask what you
 are compensating for"). Price the structural fix, up to a larger
-redesign, rather than reaching for a third patch.
+redesign, rather than reaching for a third patch. Sometimes the
+honest answer is that the win is removing the mechanism.
 
 **You carry a product lens too.** "Where does this belong" is not
 only a question about layers — if two technically sound placements
