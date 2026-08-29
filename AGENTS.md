@@ -1,5 +1,7 @@
 # Dotfiles Repo
 
+Rules for working *in* this repo. The user-level instructions that apply in every project are also kept here, in `.agents/AGENTS.md` (symlinked to `~/.agents/AGENTS.md`, `~/.claude/CLAUDE.md` and `~/.claude-work/CLAUDE.md`), and load alongside this file. Anything general belongs there; this file carries only what is specific to the repo.
+
 ## This repo is PUBLIC
 
 Pushed to a public GitHub repo. Never commit work-internal or employer-confidential content here:
