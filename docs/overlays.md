@@ -37,6 +37,14 @@ two. Anything there that merely restates the team repo is duplication, and worse
 than untidy: the bridging repo's instruction file is a parent of every team
 checkout, so a stale copy auto-loads *ahead* of the team repo's own guidance.
 
+The same test routes a lesson at the moment it is learned, which is the only
+moment it is cheap: send it to the widest tier it holds for — the team repo if it
+is about that product, the bridge if it is about this machine or the seams
+between tiers, here if it would be just as true at a different employer with
+different repos. Once it is up, what stays below is a pointer by name at most.
+The upward half is the half that gets skipped, because writing it where the work
+happened is always the shorter path.
+
 ## The discovery asymmetry
 
 The two kinds of config are found by different rules, and the difference drives
@@ -63,12 +71,22 @@ a stale one fails silently — so re-run the private installer after adding,
 renaming or moving any skill, and treat "the skill didn't load" as a missing link
 before anything else.
 
+The reverse direction has no link to fix it. With cwd at the bridging root, a
+team repo's own skills are equally undiscovered, and force-linking those up is
+not the answer: several team repos legitimately define the same skill name,
+which is the collision below. Nor can an undiscovered skill be invoked by name —
+it is absent from the session's skill list, so the call errors rather than
+loading it. Read its `SKILL.md` as a file, or start the session inside the repo.
+
 **The skill namespace is flat, so two tiers can collide.** User-level and
 repo-level skills share one name space; give a team-repo skill a name the
 personal tier already uses and the two land on one path, with one silently
 clobbering the other. Prevent it by construction rather than by discipline: name
 team-tier copies for their subject rather than their vendor, or prefix them, so a
-collision cannot arise.
+collision cannot arise. The sharpest case is a skill meant to *extend* the tier
+above it: a same-named skill at the narrower scope replaces the wider one instead
+of composing with it, so a layer over a personal skill has to be named something
+else or it silently hides the half it was adding to.
 
 **Where two tiers disagree, the repo wins on repo matters.** A personal skill and
 a team-repo skill often cover the same ground — the personal one complete because
