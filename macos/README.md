@@ -74,6 +74,13 @@ holding it, or pressing any key or mouse button while it is down, is a normal
 modifier. Gestures that hold a modifier over the mouse (Ctrl+scroll to zoom)
 outlast the window on their own.
 
+Shift also has to be followed by 80 ms of quiet, because a Shift released a
+fraction early — just before the letter it was meant to capitalise — is
+indistinguishable from a deliberate tap until that letter lands. Tapping Shift
+twice in a row still gives two tabs back: the second press releases the first.
+Ctrl has no such window and stays instant. Both constants are at the top of the
+block in `hammerspoon/init.lua`.
+
 Caps as a hold-modifier — window focus and jump-to-app — is documented in
 `docs/window-layout.md`.
 

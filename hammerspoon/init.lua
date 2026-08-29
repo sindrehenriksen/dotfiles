@@ -579,19 +579,39 @@ shift_delete_tap:start()
 --   Left Shift                                               → Ctrl+Shift+Tab
 -- Gestures that hold a modifier over the mouse (Ctrl+scroll to zoom) outlast
 -- MOD_TAP_MS on their own, so only clicks need to cancel explicitly.
+--
+-- Shift additionally has to be followed by a quiet window: a shift released a
+-- fraction early, just before the key it was meant to capitalise, looks exactly
+-- like a deliberate tap until that next key lands. Ctrl has no such window —
+-- nothing follows a Ctrl tap by accident, and it stays instant.
 local MOD_TAP_MS = 200
+local SETTLE_MS = 80
 
 local mod_taps = {
-  [59] = { flag = "ctrl",  mods = { "ctrl" } },             -- left Ctrl
-  [56] = { flag = "shift", mods = { "ctrl", "shift" } },    -- left Shift
+  [59] = { flag = "ctrl",  mods = { "ctrl" } },                              -- left Ctrl
+  [56] = { flag = "shift", mods = { "ctrl", "shift" }, settle = SETTLE_MS }, -- left Shift
 }
 
 local mod_tap_kc = nil
 local mod_tap_timer = nil
+local settling = nil       -- tapped, waiting out its quiet window
+local settle_timer = nil
 
 local function cancel_mod_tap()
   mod_tap_kc = nil
   if mod_tap_timer then mod_tap_timer:stop(); mod_tap_timer = nil end
+end
+
+local function stop_settle()
+  if settle_timer then settle_timer:stop(); settle_timer = nil end
+  local spec = settling
+  settling = nil
+  return spec
+end
+
+local function fire_settled()
+  local spec = stop_settle()
+  if spec then hs.eventtap.keyStroke(spec.mods, "tab", 0) end
 end
 
 local function alone(flags, want)
@@ -609,6 +629,7 @@ mod_tap = hs.eventtap.new({
   hs.eventtap.event.types.otherMouseDown,
 }, function(e)
   if e:getType() ~= hs.eventtap.event.types.flagsChanged then
+    stop_settle()   -- something landed in the quiet window: it was not a tap
     cancel_mod_tap()
     return false
   end
@@ -616,13 +637,17 @@ mod_tap = hs.eventtap.new({
   local kc = e:getKeyCode()
   local spec = mod_taps[kc]
   if not spec or f18_down then
+    stop_settle()
     cancel_mod_tap()
     return false
   end
 
   local flags = e:getFlags()
   if flags[spec.flag] then
-    -- Pressed. A second modifier on top of a pending one is a chord, not a tap.
+    -- Pressed. The same modifier again is a repeat tap, so let the waiting one
+    -- through; any other is the start of something else.
+    if settling == spec then fire_settled() else stop_settle() end
+    -- A second modifier on top of a pending one is a chord, not a tap.
     if mod_tap_kc or not alone(flags, spec.flag) then
       cancel_mod_tap()
     else
@@ -631,7 +656,12 @@ mod_tap = hs.eventtap.new({
     end
   elseif mod_tap_kc == kc then
     cancel_mod_tap()
-    hs.eventtap.keyStroke(spec.mods, "tab", 0)
+    if spec.settle then
+      settling = spec
+      settle_timer = hs.timer.doAfter(spec.settle / 1000, fire_settled)
+    else
+      hs.eventtap.keyStroke(spec.mods, "tab", 0)
+    end
   end
   return false
 end)
