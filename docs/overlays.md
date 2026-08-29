@@ -58,16 +58,19 @@ the whole design.
   `.claude/skills/` in cwd and its parents only *up to the enclosing
   repository's root*, plus user level. A nested checkout is a wall.
 
-Three consequences:
+Four consequences:
 
 **A bridging-tier skill is invisible where the work happens.** With cwd inside a
 team checkout (or one of its worktrees), the upward walk stops at that checkout's
 root and never reaches the bridging repo's `.claude/skills/` — while its
 `CLAUDE.md`, one directory further up, loads fine. The fix is to force-link it
 up: the private installer symlinks each skill directory into
-`~/.claude/skills/<name>` and `~/.agents/skills/<name>`. Those links are the
-*only* reason such a skill is discoverable, they are invisible in both repos, and
-a stale one fails silently — so re-run the private installer after adding,
+`~/.claude/skills/<name>`, which is the path the agent actually reads, and into
+`~/.agents/skills/<name>`, which is the vendor-neutral convention other agents
+read and is kept in step deliberately — a skill present only there does not load.
+That link is the *only* reason such a skill is discoverable, it is invisible in
+both repos, and a stale one fails silently: a dangling entry raises nothing, the
+skill is simply absent — so re-run the private installer after adding,
 renaming or moving any skill, and treat "the skill didn't load" as a missing link
 before anything else.
 
@@ -87,6 +90,17 @@ collision cannot arise. The sharpest case is a skill meant to *extend* the tier
 above it: a same-named skill at the narrower scope replaces the wider one instead
 of composing with it, so a layer over a personal skill has to be named something
 else or it silently hides the half it was adding to.
+
+**Each account needs its own skills directory**, which is where the two-account
+isolation stops being a separate concern. Given a second config dir, the tempting
+wiring is one symlink from its `skills` to the first account's: one directory,
+both accounts, nothing to maintain. What it does is promote every tier's skills
+to every account — an overlay repo links into what is correctly its own account's
+directory and lands in the other one too, so private guidance is offered in
+sessions that must never see it. Nothing fails; the skills simply appear where
+they should not. Link each generic skill individually into each account instead.
+The cost is a loop, and it is what lets a second overlay repo be added without
+auditing where its skills surfaced.
 
 **Where two tiers disagree, the repo wins on repo matters.** A personal skill and
 a team-repo skill often cover the same ground — the personal one complete because
