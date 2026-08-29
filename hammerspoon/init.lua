@@ -366,8 +366,8 @@ for key, dir in pairs(directions) do
   hs.hotkey.bind({ "cmd", "ctrl" }, key, function() swap(dir) end)
 end
 
--- Dual-function Caps Lock (remapped to F18 at the HID level via
--- ~/Library/LaunchAgents/remap_application_key.plist):
+-- Dual-function Caps Lock (remapped to F18 at the HID level by
+-- macos/keyboard-remap.sh):
 --   Tap               → Escape
 --   Hold + h/t/n/s    → focus window west/north/south/east (instant)
 --   Hold + other key  → passes through as normal (after TAP_MS commit)
@@ -487,5 +487,24 @@ caps_tap = hs.eventtap.new({
   return false
 end)
 caps_tap:start()
+
+-- Shift+Backspace -> forward delete, which macOS itself only offers as
+-- fn+Delete. Rewriting the event in place rather than posting a new one keeps
+-- key repeat and the matching keyUp intact.
+local backspace_kc = hs.keycodes.map.delete
+local forwarddelete_kc = hs.keycodes.map.forwarddelete
+
+shift_delete_tap = hs.eventtap.new({
+  hs.eventtap.event.types.keyDown,
+  hs.eventtap.event.types.keyUp,
+}, function(e)
+  if e:getKeyCode() ~= backspace_kc then return false end
+  local f = e:getFlags()
+  if not f.shift or f.cmd or f.alt or f.ctrl or f.fn then return false end
+  e:setKeyCode(forwarddelete_kc)
+  e:setFlags({})
+  return false
+end)
+shift_delete_tap:start()
 
 hs.alert.show("Hammerspoon loaded")

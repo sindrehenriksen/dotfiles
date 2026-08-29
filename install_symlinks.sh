@@ -61,6 +61,11 @@ if [[ "$(uname)" == "Darwin" ]]; then
     # macOS: Hammerspoon config
     mkdir -p ~/.hammerspoon
     link ~/dotfiles/hammerspoon/init.lua ~/.hammerspoon/init.lua
+
+    # macOS: keyboard remapping at login — see macos/README.md
+    mkdir -p ~/Library/LaunchAgents
+    link ~/dotfiles/macos/com.local.KeyRemapping.plist \
+         ~/Library/LaunchAgents/com.local.KeyRemapping.plist
 else
     # Linux: Ghostty config
     mkdir -p ~/.config/ghostty

@@ -67,10 +67,14 @@ brew install --cask hammerspoon
 # any files change". Config is symlinked via install_symlinks.sh.
 
 #### macOS keyboard tweaks
-# Caps Lock <-> Escape swap (built-in, persistent, per-keyboard):
-# System Settings > Keyboard > Keyboard Shortcuts... > Modifier Keys.
-# Pick the keyboard from the dropdown, then set Caps Lock Key -> Escape
-# and Escape Key -> Caps Lock. Repeat for each connected keyboard.
+# Key remapping (Caps Lock, fn/Ctrl swap, per-keyboard Alt/Cmd) is handled by
+# macos/keyboard-remap.sh, run at login by the launch agent that
+# install_symlinks.sh places. Do not use the Modifier Keys panel in System
+# Settings — it writes the same property and gets overwritten. See
+# macos/README.md.
+#
+# Caps Lock depends on Hammerspoon being installed and running: the script only
+# maps it to F18, and hammerspoon/init.lua turns that into Escape.
 #
 # Free up Ctrl+Space (used by other tools — e.g. autosuggest-accept in zsh):
 # System Settings > Keyboard > Keyboard Shortcuts... > Input Sources.
