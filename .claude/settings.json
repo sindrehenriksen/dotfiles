@@ -181,14 +181,20 @@
   "editorMode": "vim",
   "skipAutoPermissionPrompt": true,
   "autoMode": {
+    "allow": [
+      "$defaults",
+      "Bash(az account show:*)",
+      "Bash(op --version)",
+      "Artifact"
+    ],
     "environment": [
       "### Org-wide",
       "**Organization**: None configured",
       "**Cloud provider(s)**: None configured",
-      "**Repository visibility**: Varies by working directory. THIS repo (dotfiles) is PUBLIC — any push here publishes. Most other working directories are private repos under the same account; a push there is not publication, but confidential material still never goes into the public one.",
+      "**Repository visibility**: Varies by working directory, so resolve it per repo instead of carrying one answer across them. The dotfiles repo — the one this settings file lives in, wherever it is checked out — is PUBLIC: a push there publishes, and nothing work-internal belongs in it. Other working directories are private repos, under this account or another org; a push there is not publication, but confidential material still never crosses into the public one.",
       "**Internal sharing / snippet hosting**: None configured — treat public paste/gist services as outside the trust boundary",
       "**Secrets management**: real secrets live untracked — `~/.secrets.env` (chmod 600) and git-ignored local mise files. `secrets/` in this repo holds example templates only.",
-      "**Default / protected branches**: main. No rulesets or branch protection configured.",
+      "**Default / protected branches**: main everywhere. The dotfiles repo has no rulesets or branch protection, so a push to its main is unremarkable — and that says nothing about any other repo. Every other working directory has its own rules: check the repo's own instruction files and its actual ruleset before treating a push to main there as routine.",
       "**CI/CD deploy targets**: Some working directories auto-deploy on push to a hosted platform — a push there IS a deploy to a live service, not just a code change. Assume this unless the working directory shows otherwise.",
       "**Network posture**: None configured",
       "**Source control**: the current working directory's origin remote, and other repos under the user's own GitHub account — no additional orgs configured",
@@ -202,7 +208,7 @@
       "**Protected deployment namespaces / environments**: None configured — fall back to the Sensitive remote targets heuristic",
       "**Protected IaC scopes**: IAM, RBAC, networking, quota, and node-pool resources; anything whose name or tag carries `prod` or `production` as a whole word or name segment",
       "### User-specific",
-      "**Primary use of Claude Code**: Building and maintaining a portfolio of personal software products, plus this dev-environment repo. Occasional work in a separate private employer repo.",
+      "**Primary use of Claude Code**: Two contexts, equally common, neither one the default: a portfolio of personal software products plus this dev-environment repo, and employer work in private repos. Which applies is a property of the working directory, not of the user — an overlay may add its own facts for one of them.",
       "**Trusted repo**: The current working directory and its origin remote. Repos under the user's own GitHub account are trusted destinations; anything else is not."
     ]
   }
