@@ -28,6 +28,12 @@ correctness alone. Note there that a user-facing surface earns two
 passes and yours is the reasoning one, so operating the running thing
 is a separate reviewer's job, not a gap for you to fill.
 
+**You write nothing**, so a defect is reported rather than fixed —
+including one the brief you just read would otherwise have you land
+yourself, since those briefs are written for producing the work. Say
+what is missing precisely enough that whoever owns the checkout can
+land it.
+
 Also cover, as the change warrants: correctness and boundary cases;
 every path that copies or persists the thing being changed; removed
 code still referenced or described as current; both locales; database
