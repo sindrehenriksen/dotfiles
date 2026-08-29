@@ -127,28 +127,23 @@ convenes the review itself has taken the round's work back; a lead
 running a small round with no facilitator is bound by this file and
 makes the call here.
 
-**Correctness is the floor and always runs.** Beyond it, the lenses
-follow what the change touched, and a change may warrant several
-running separately rather than one reviewer asked to hold every
-perspective at once:
+**Which lens a change earns is one mapping and it is not here** — it
+is in the `execution` skill, "Reviews", with correctness as the floor
+that always runs on top of whatever else the change touched. Read the
+entries there rather than working from memory, and expect a change to
+warrant several lenses running separately rather than one reviewer
+asked to hold every perspective at once.
 
-- untrusted input, authn, secrets, a new boundary → **security**
-- deploy, CI, cost, data retention → **infra**
-- a new seam, or a second implementation of an existing concept →
-  **architecture**
-- anything a future reader must navigate → **conventions**
-- prose, and it must be allowed to delete → **editorial**
-- **an interface in a language the round has not been working in →
-  a reviewer writing in that language.** Translated strings can be
-  correct and still read as translated; only someone thinking in the
-  language catches a compound spelled as two words, a term nobody
-  uses, or a sentence that is grammatical and wrong. Worth calling
-  now and then even when nothing changed, since copy drifts one
-  string at a time.
-- a user-facing surface → **two**: a UX review that judges the shape
-  by reasoning, and a **critic** that opens the running thing and
-  reports what happened. Only the second finds a clipped control or
-  a word that reads wrong.
+Convening is the half that is yours, and two lenses are easy to leave
+unconvened:
+
+- **The critic beside the UX review.** A user-facing surface earns
+  both, and the second is a separate agent that operates the running
+  thing. Folded into the UX review it becomes reasoning about the
+  surface again, and nobody finds the clipped control.
+- **A reviewer writing in the interface's language.** Nothing in a
+  diff asks for one, so it gets convened only by being remembered —
+  worth calling now and then even when no copy changed.
 
 Name the lens in the brief. An unnamed reviewer defaults to
 correctness and the rest goes unexamined. Give every reviewer the
