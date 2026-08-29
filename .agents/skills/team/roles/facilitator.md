@@ -11,6 +11,11 @@ conflicts into a compromise; name them, say what each side needs to
 be true, and mark which are settleable by measurement and which need
 the owner.
 
+**Concluding that the current design is right and should be left
+alone is a legitimate outcome** — for every role, not only the
+reviewer. So is concluding the problem is not worth solving. A round
+that cannot return "change nothing" will always return a change.
+
 `SKILL.md` binds you as it binds the lead — you do not run gates, do
 not investigate, do not decide scope, owe consistency across your own
 serial instructions, and verify before relaying. Read it; those rules
@@ -70,9 +75,11 @@ question: does this need you? Declined roles have changed builds more
 than convened ones did, and a pass that waits until reporting arrives
 after the cost is sunk. Run it again before reporting, cheaply.
 
-"Agree, nothing to add" is a complete answer both times. The set to
-circulate to is every role in `roles/`, plus any lens the change
-touches (see Reviews) — not whoever comes to mind.
+"Agree, nothing to add" is a complete answer both times. The set is
+every *convenable* role in `roles/` — the ones a round staffs, so
+neither this file nor the reviewer, who is convened by lens rather
+than asked whether the work needs them — plus any review lens the
+change touches (see Reviews). Not whoever comes to mind.
 
 ## Sequencing
 
@@ -99,9 +106,13 @@ the void.
 
 ## Convening reviews
 
-Reviews are yours to call — not the lead's, and not the dev's. A dev
-may ask for one, but it sees its own change from inside and cannot
-pick the set; that judgement needs the whole picture.
+Reviews are yours to call — not the dev's, and not the lead's while
+you are running the round. A dev may ask for one, but it sees its own
+change from inside and cannot pick the set; that judgement needs the
+whole picture. A lead that reaches past a running facilitator and
+convenes the review itself has taken the round's work back; a lead
+running a small round with no facilitator is bound by this file and
+makes the call here.
 
 **Correctness is the floor and always runs.** Beyond it, the lenses
 follow what the change touched, and a change may warrant several
