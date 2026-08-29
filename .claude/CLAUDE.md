@@ -72,6 +72,8 @@ Most of `~` (shell configs, tool settings, Claude config, skills) is symlinked f
 
 Before claiming a tool isn't installed or recommending an install step, check the environment — `$TERM_PROGRAM` (`ghostty`, `iTerm.app`, `Apple_Terminal`), `$SHELL`, `$HOMEBREW_PREFIX`, `uname -m` (`arm64` vs `x86_64`), `which <cmd>`. The session env block is brief; one quick probe beats a guess.
 
+**The same holds for identities, secrets and subscriptions, where guessing costs more.** Prove each one with a read-only command before acting — which account or subscription a thing lives in, an identity's role assignments and federated credentials, which store holds a value — never inferring it from a name, a memory, or "it usually is". And confirm a secret is the *right* one with a cheap call, or by reading its non-secret half (a client id, an endpoint), rather than trusting the title the item was filed under.
+
 ## Secrets & sensitive files
 
 - Don't read, `cat`, or print the contents of files that may hold secrets or sensitive local config — `.env` files, `.credentials.json`, private keys, local `mise` TOML (`mise.local.toml`) — unless the owner explicitly asks. Referencing them by path, sourcing them, or passing them to a tool (e.g. `--env-file`) is fine.
