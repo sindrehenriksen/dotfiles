@@ -7,13 +7,20 @@ description: 'Running work through a team of roles: who to convene, how to keep 
 
 The default for open work. When a task arrives already planned and
 clearly shaped, `execution` is enough on its own; when the shape is
-still to be decided, this runs on top of it. **If this workspace has
-its own layer — its own skill, its instruction files, its conventions
-— read that too and apply it over both**, and point the roles at it
-in their briefs; a workspace's own rules are not repeated here and
-will not reach a role any other way. `execution` covers
-delegating to *an agent* — briefs, trust boundaries, commits, model
-tiers. This covers delegating to *a team*, and does not restate it.
+still to be decided, this runs on top of it. **An unknown answer is
+not an open shape**: work whose next step is to go and find something
+out — a cause, a reproduction, a number — is scoped work with an
+investigation inside it, and it goes straight to an agent on
+`execution` alone. That holds for a defect, a feature and a redesign
+alike, and is said once here rather than per kind of work.
+
+**If this workspace has its own layer — its own skill, its
+instruction files, its conventions — read that too and apply it over
+both**, and point the roles at it in their briefs; a workspace's own
+rules are not repeated here and will not reach a role any other way.
+`execution` covers delegating to *an agent* — briefs, trust
+boundaries, commits, model tiers. This covers delegating to *a team*,
+and does not restate it.
 
 ## What the lead is for, and is not
 
