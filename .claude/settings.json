@@ -119,6 +119,8 @@
       "Bash(pre-commit run *)"
     ],
     "deny": [
+      "Bash(curl * -X DELETE *)",
+      "Bash(curl * --request DELETE *)",
       "Bash(git push --force)",
       "Bash(git push --force *)",
       "Bash(git push * --force)",
