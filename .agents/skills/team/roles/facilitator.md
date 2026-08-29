@@ -71,7 +71,9 @@ reader touches. Do not staff a role for symmetry.
   the tech lead owns how the pieces meet, and picks which to pull.
 - **Architect for structure and contract; a deeper dev for a hard
   implementation problem.** Different questions — pick deliberately.
-  Both are escalated to, never convened by default.
+  Neither is in the trio: the tech lead pulls them in, and the
+  architect is convened by an architecture lens besides (see
+  Reviews).
 - **Specialists are not review-only.** The tech lead judges whether
   one is needed *before* implementation.
 - Any role may ask for a read-only investigation agent. Grant it
