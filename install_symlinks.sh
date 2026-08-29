@@ -22,6 +22,7 @@ mkdir -p ~/.jupyter
 link ~/dotfiles/.jupyter_notebook_config.py ~/.jupyter/jupyter_notebook_config.py
 mkdir -p ~/.agents/skills ~/.claude/skills
 link ~/dotfiles/.agents/principles.md ~/.agents/principles.md
+link ~/dotfiles/.agents/AGENTS.md ~/.agents/AGENTS.md
 link ~/dotfiles/.agents/skills/execution ~/.agents/skills/execution
 link ~/dotfiles/.agents/skills/browser ~/.agents/skills/browser
 link ~/dotfiles/.agents/skills/coderabbit ~/.agents/skills/coderabbit
@@ -42,12 +43,12 @@ link ~/dotfiles/.agents/skills/sync ~/dotfiles/.claude/skills/sync
 # Git hooks (repo-local)
 git -C ~/dotfiles config core.hooksPath git-hooks
 # Claude Code
-link ~/dotfiles/.claude/CLAUDE.md ~/.claude/CLAUDE.md
+link ~/dotfiles/.agents/AGENTS.md ~/.claude/CLAUDE.md
 link ~/dotfiles/.claude/settings.json ~/.claude/settings.json
 link ~/dotfiles/.claude/statusline.sh ~/.claude/statusline.sh
 # Claude Code work-account config dir (shared config symlinked from personal)
 mkdir -p ~/.claude-work
-link ~/dotfiles/.claude/CLAUDE.md ~/.claude-work/CLAUDE.md
+link ~/dotfiles/.agents/AGENTS.md ~/.claude-work/CLAUDE.md
 link ~/dotfiles/.claude/settings.json ~/.claude-work/settings.json
 link ~/.claude/keybindings.json ~/.claude-work/keybindings.json
 link ~/.claude/skills ~/.claude-work/skills
