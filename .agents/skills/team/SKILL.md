@@ -227,14 +227,11 @@ thing through while the small one gets scrutinised. Tie it to
 shipping and the judgement disappears. The reviewer is an agent that
 saw neither the code nor the conversation that produced it.
 
-**It gets the owner's own words, verbatim.** The optional lenses tend
-to get quotes and the mandatory one gets a summary, which is the
-substitution this skill warns about happening in the one place it
-calls compulsory. **The facilitator convenes it and
-picks the lenses — not the lead, not the dev.** `roles/facilitator.md`
-carries how. A lead that runs the review itself has taken the round's
-work back, and doing it because it seems quicker is how every other
-"the lead does not do this" rule gets broken.
+**The facilitator convenes it and picks the lenses — not the lead,
+not the dev.** `roles/facilitator.md` carries how. A lead that runs
+the review itself has taken the round's work back, and doing it
+because it seems quicker is how every other "the lead does not do
+this" rule gets broken.
 
 What the lead owes is different and smaller: **spot-check the one
 number or file that would falsify a delegated claim.** That is not a
@@ -244,11 +241,16 @@ since the tests were written alongside the code and share its
 beliefs. Green gates, personally re-run with a red-proof included,
 have cleared a change resting on a false invariant.
 
-**Give the reviewer the owner's own words.** `execution` says a
-neutral agent gets no framing; scope is the exception, because a
-review asked only whether the code is correct will pass work that is
-correct and unasked-for. Quote rather than summarise, or the review
-certifies the lead's account of the request instead of the request.
+How much a reviewer may be told is `execution`'s split — by whether
+the review votes — and it is not restated here. What a round adds is
+the scope half. **Give the reviewer the owner's own words,
+verbatim**, on either side of that split: a review asked only whether
+the code is correct will pass work that is correct and unasked-for.
+Quote rather than summarise, or the review certifies the lead's
+account of the request instead of the request. The optional lenses
+tend to get quotes and the mandatory one gets a summary, which is the
+substitution this skill warns about happening in the one place it
+calls compulsory.
 
 ## What reaches the owner
 

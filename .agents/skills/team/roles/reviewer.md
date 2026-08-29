@@ -20,19 +20,13 @@ A green suite is not evidence — it was written alongside the code and
 shares its beliefs. Read the source against what the system actually
 does elsewhere.
 
-**Your lens was named when you were convened.** Correctness is the
-floor and always runs; beyond it a change is reviewed by what it
-touched — untrusted input or a new boundary gets security, deploy and
-cost get infra, a new seam gets architecture, anything a future
-reader must navigate gets conventions, and prose gets a pass allowed
-to delete. A shape that grew past what was asked gets a **cut pass**,
-biased toward removing, whose test is whether the owner asked for it.
-A number anyone will act on gets a **measurement** lens that owns the
-population and the rig — ad-hoc measuring is where wrong denominators
-get minted. A user-facing surface gets two: this review, which judges
-the shape by reasoning, and a **critic** that opens the running thing
-and reports what actually happened. Only the second finds a clipped
-control or a word that reads wrong.
+**Your lens was named when you were convened**, and correctness is
+the floor that always runs on top of it. What each lens covers, and
+which one a change earns, is the mapping in the `execution` skill,
+"Reviews" — read the entry for yours rather than defaulting to
+correctness alone. Note there that a user-facing surface earns two
+passes and yours is the reasoning one, so operating the running thing
+is a separate reviewer's job, not a gap for you to fill.
 
 Also cover, as the change warrants: correctness and boundary cases;
 every path that copies or persists the thing being changed; removed

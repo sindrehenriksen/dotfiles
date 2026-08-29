@@ -103,7 +103,7 @@ Whenever a model sits inside the product's contract — not the agent building i
 
 Close each meaningful unit of work — an iteration, a phase, a coherent set of changes — with a review before calling it done; skip only trivial or mechanical changes. If the repo or session carries its own review guidance (skills, instruction files, plan-doc conventions), follow that first — what's below is the floor, not a replacement.
 
-Never review work from the conversation that produced it — that context is biased toward approving its own build. Spawn a neutral agent whose entire input is the artifact reference (PR, diff, doc) plus the review instructions; no framing, focus hints, or expected verdict.
+Never review work from the conversation that produced it — that context is biased toward approving its own build. Spawn a neutral agent that has read neither the code nor the conversation behind it. **How much you may tell it splits by whether its review votes.** Where a verdict gets posted, approves, or routes a reviewer, its entire input is the artifact reference (PR, diff, doc) plus the review instructions — unframed neutrality is there to protect the *verdict*, so no framing, focus hints or expected outcome. Where nothing is posted and nothing votes, saying what the unit was for, what to weight and what is already settled buys no independence back and saves a pass spent rediscovering context. What is never supplied either way is the answer you expect.
 
 On a local working diff, before there is a PR, the `coderabbit` skill can run as an independent second pass beside the neutral agent — an extra reviewer, never a substitute for one.
 
@@ -116,8 +116,11 @@ The neutral agent judges the artifact; the conversation knows what it can't see 
 - Deploy, CI, cost, data retention → an infra pass.
 - A new seam, or a second implementation of a concept that already exists → an architecture pass.
 - Anything a future reader has to navigate → conventions and repo ergonomics.
+- A shape that grew past what was asked for → a **cut pass**, biased toward removing, whose test is whether the user asked for it.
+- A number anyone will act on → a **measurement** lens that owns the population and the rig. Ad-hoc measuring is where wrong denominators get minted.
+- Prompts, evals, judge models, quality gates, test datasets, retrieval behaviour → an **AI-quality** pass, which asks what was verified live rather than assumed ("Verifying model-shaped work" above).
 - A user-facing surface → **two** passes, and they are not the same thing. A **UX review** judges the shape by reasoning: hierarchy, affordance, flow, wording. A **product critic** operates the running thing and reports what actually happened. Only the second finds the clipped popover and the word that reads wrong.
-- Prose gets its own pass, and it must be allowed to delete: does this read like a log of events, does something else already say it, can it be shorter.
+- Prose gets its own pass, and it must be allowed to delete: does this read like a log of events, does something else already say it, can it be shorter. **Run it as its own agent** — bundled into a review it loses every time, because a reviewer judges what is in front of them and prose defends itself in the act of being read. Two habits make the difference: form the expectation from the diffstat *before* reading the justifications, since reading a seventeen-line comment before deciding whether the change needed seventeen lines is how it survives; and ask the generative question rather than the evaluative one — not "is this justified" (almost always yes) but what the shortest version carrying the load-bearing content looks like, then diff that against what is there.
 
 **The outer loop.** Everything above attaches to a change, and some rot doesn't. Run a step-back pass that examines the product rather than the diff — UX, architecture, infra, CI, plans, docs — sized to whatever has moved since the last one. Drive it by trigger rather than calendar: before a large change, which is the cheapest moment to discover the shape is wrong and the one that never happens on its own; after one lands; and a floor of N iterations so it cannot drift indefinitely.
 
