@@ -1,6 +1,6 @@
 ---
 name: handoff
-description: 'Prompt pairs that carry work across a context boundary — one to pass with `/compact`, one to kick off after. USE FOR: "two prompts", handoff prompt, prompt to go with /compact, kick-off prompt, running out of context/tokens, splitting remaining work across conversations. DO NOT USE FOR: handing work to a human teammate (share-findings), the summary the harness writes on its own.'
+description: 'Prompt pairs that carry work across a context boundary — one to pass with `/compact`, one to kick off after. USE FOR: "two prompts", handoff prompt, prompt to go with /compact, kick-off prompt, running out of context/tokens, splitting remaining work across conversations. DO NOT USE FOR: handing work to a human teammate, the summary the harness writes on its own.'
 allowed-tools: Read, Grep, Glob, Bash
 ---
 
