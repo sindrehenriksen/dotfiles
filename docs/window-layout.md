@@ -35,14 +35,15 @@ A predictable, static three-column layout on widescreen: browser on the left, pr
 
 Alt-tabbing between columns is painful. Dvorak home row `h/t/n/s` = west/north/south/east, matching Ghostty's split nav cluster (`Ctrl+h/t/n/s`), but with different modifiers to avoid conflicts.
 
-- **Focus**: `Ctrl+Alt+h/t/n/s` — move focus to the window in that direction (crosses screens).
+- **Focus**: hold Caps + `h/t/n/s` — move focus to the window in that direction (crosses screens). Caps is dual-function: tap for Escape, hold as a modifier (see `macos/README.md`).
 - **Swap**: `Cmd+Ctrl+h/t/n/s` — exchange frames with the window in that direction (useful for reordering middle-column terminals).
+- **Jump to app**: hold Caps + `c` Chrome / `g` Ghostty / `l` Slack / `r` Notes / `z` Safari / `b` Finder / `w` Claude — Dvorak top and bottom rows, clear of the home-row focus keys.
 
 **macOS (Hammerspoon):** implemented via `hs.window.focusWindow{East,West,North,South}()` for focus and `windowsTo{...}` + frame-exchange for swap.
 
 **Linux:** directional focus is built into Tiling Shell, Forge, and PaperWM (configure in the extension's settings). Swap semantics vary by extension.
 
-Same chords on both OSes for muscle-memory transfer. `Cmd+Ctrl` was chosen over `Ctrl+Alt+Shift` (too heavy) and `Cmd` alone (breaks hide/new/save).
+Swap uses the same chord on both OSes for muscle-memory transfer; the Caps-hold keys are macOS-only, since Caps depends on Hammerspoon. `Cmd+Ctrl` was chosen over `Ctrl+Alt+Shift` (too heavy) and `Cmd` alone (breaks hide/new/save).
 
 ## Why this shape
 

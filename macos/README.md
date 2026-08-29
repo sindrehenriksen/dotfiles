@@ -58,8 +58,24 @@ the key it displaces; fn is still needed for fn+arrows (Home/End/PgUp/PgDn),
 fn+Delete and real F-keys, so it can't just be dropped. Note this leaves fn as
 the *only* Control on that keyboard — MacBooks have no right Control.
 
-Shift+Backspace is bound to forward delete in `hammerspoon/init.lua` — macOS
-itself only offers fn+Delete.
+## Chords bound in Hammerspoon
+
+`hammerspoon/init.lua` adds three things that behave like keyboard features
+rather than window management:
+
+- **Shift+Backspace** → forward delete, which macOS itself only offers as
+  fn+Delete.
+- **Tap left Ctrl** → Ctrl+Tab. On the built-in keyboard that is the fn key
+  position, so the tab-forward chord sits under the corner of the hand.
+- **Tap left Shift** → Ctrl+Shift+Tab, the same one backwards.
+
+A modifier tap only fires when the key goes down and up alone inside 200 ms —
+holding it, or pressing any key or mouse button while it is down, is a normal
+modifier. Gestures that hold a modifier over the mouse (Ctrl+scroll to zoom)
+outlast the window on their own.
+
+Caps as a hold-modifier — window focus and jump-to-app — is documented in
+`docs/window-layout.md`.
 
 ## Other keyboard settings (still in the Settings app)
 

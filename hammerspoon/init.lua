@@ -368,9 +368,15 @@ end
 
 -- Dual-function Caps Lock (remapped to F18 at the HID level by
 -- macos/keyboard-remap.sh):
---   Tap               → Escape
---   Hold + h/t/n/s    → focus window west/north/south/east (instant)
---   Hold + other key  → passes through as normal (after TAP_MS commit)
+--   Tap                  → Escape
+--   Hold + h/t/n/s       → focus window west/north/south/east
+--   Hold + c/g/l/r/z/b/w → launch or focus an app
+--   Hold + other key     → passes through as normal (after TAP_MS commit)
+-- Every bound key is also a vim command, so caps→b is ambiguous: Escape then
+-- back-a-word, or Caps+b for Finder. The two differ only in release order — a
+-- chord lets the letter up first, a roll lets Caps up first — so the first
+-- bound key of a hold waits for whichever comes up first (or TAP_MS, if both
+-- are held). Once one has fired, the rest of that hold acts on press.
 -- During the tap-decision window non-bound keys are buffered and replayed
 -- after the tap/hold decision, so fast rolls like caps→b correctly produce
 -- Escape followed by b instead of dropping Escape.
@@ -386,10 +392,29 @@ end
 -- ioreg — it names loginwindow, not the app actually holding it.
 local TAP_MS = 150
 local f18_kc = hs.keycodes.map.f18
-local dir_kcs = {}
-for k, v in pairs(directions) do dir_kcs[hs.keycodes.map[k]] = v end
+
+-- Dvorak top and bottom rows, so they stay clear of the h/t/n/s home row.
+local hold_apps = {
+  c = "Google Chrome",
+  g = "Ghostty",
+  l = "Slack",
+  r = "Notes",
+  z = "Safari",
+  b = "Finder",
+  w = "Claude",
+}
+
+local hold_actions = {}
+for k, dir in pairs(directions) do
+  hold_actions[hs.keycodes.map[k]] = function() focus(dir) end
+end
+for k, app in pairs(hold_apps) do
+  hold_actions[hs.keycodes.map[k]] = function() hs.application.launchOrFocus(app) end
+end
 
 local f18_down = false
+local acted_on = {}              -- keycodes whose keyDown fired a hold action
+local pending_action_kc = nil    -- bound key held, waiting on the release order
 local decision_pending = false   -- buffering, waiting on tap/hold decision
 local committed_to_hold = false  -- decided hold (timer fired or bound key)
 local pending = {}
@@ -416,13 +441,32 @@ end
 
 local function commit_hold()
   decision_pending = false
+  pending_action_kc = nil
   committed_to_hold = true
   cancel_timer()
   replay_pending()
 end
 
+-- The held key won: run its action and drop its own buffered press, keeping
+-- anything typed after it.
+local function commit_action(kc)
+  cancel_timer()
+  decision_pending = false
+  pending_action_kc = nil
+  committed_to_hold = true
+  acted_on[kc] = true
+  local rest = {}
+  for _, d in ipairs(pending) do
+    if d.kc ~= kc then rest[#rest + 1] = d end
+  end
+  pending = rest
+  hold_actions[kc]()
+  replay_pending()
+end
+
 local function commit_tap()
   decision_pending = false
+  pending_action_kc = nil
   cancel_timer()
   hs.eventtap.keyStroke({}, "escape", 0)
   replay_pending()
@@ -439,6 +483,8 @@ caps_tap = hs.eventtap.new({
     if is_down then
       if not f18_down then
         f18_down = true
+        acted_on = {}
+        pending_action_kc = nil
         decision_pending = false
         committed_to_hold = false
         pending = {}
@@ -457,14 +503,34 @@ caps_tap = hs.eventtap.new({
   end
 
   if f18_down then
-    -- Bound directional key → immediate focus
-    if is_down and dir_kcs[kc] then
-      if decision_pending then commit_hold() end
-      committed_to_hold = true
-      focus(dir_kcs[kc])
+    local action = hold_actions[kc]
+
+    -- First bound key of the hold: buffer it and let the release order decide.
+    if is_down and action and not committed_to_hold then
+      cancel_timer()
+      decision_pending = true
+      pending_action_kc = kc
+      pending = { { kc = kc, mods = flags_to_mods(e:getFlags()), is_down = true } }
+      decision_timer = hs.timer.doAfter(TAP_MS / 1000, function() commit_action(kc) end)
       return true
     end
-    if not is_down and dir_kcs[kc] then
+
+    -- Already committed to hold, so no ambiguity left.
+    if is_down and action then
+      acted_on[kc] = true
+      action()
+      return true
+    end
+
+    -- Came up while Caps is still down: a chord, not a roll.
+    if not is_down and pending_action_kc == kc then
+      commit_action(kc)
+      acted_on[kc] = nil
+      return true
+    end
+
+    if not is_down and acted_on[kc] then
+      acted_on[kc] = nil
       return true  -- swallow keyUp to match swallowed keyDown
     end
     -- Non-bound key: open the decision window on first occurrence,
@@ -506,5 +572,69 @@ shift_delete_tap = hs.eventtap.new({
   return false
 end)
 shift_delete_tap:start()
+
+-- Tap a modifier on its own → a chord that otherwise needs two hands. Holding
+-- it, or pressing any key or mouse button while it is down, behaves normally.
+--   Left Ctrl (the fn key position on the built-in keyboard) → Ctrl+Tab
+--   Left Shift                                               → Ctrl+Shift+Tab
+-- Gestures that hold a modifier over the mouse (Ctrl+scroll to zoom) outlast
+-- MOD_TAP_MS on their own, so only clicks need to cancel explicitly.
+local MOD_TAP_MS = 200
+
+local mod_taps = {
+  [59] = { flag = "ctrl",  mods = { "ctrl" } },             -- left Ctrl
+  [56] = { flag = "shift", mods = { "ctrl", "shift" } },    -- left Shift
+}
+
+local mod_tap_kc = nil
+local mod_tap_timer = nil
+
+local function cancel_mod_tap()
+  mod_tap_kc = nil
+  if mod_tap_timer then mod_tap_timer:stop(); mod_tap_timer = nil end
+end
+
+local function alone(flags, want)
+  for k, v in pairs(flags) do
+    if v and k ~= want and k ~= "capslock" then return false end
+  end
+  return true
+end
+
+mod_tap = hs.eventtap.new({
+  hs.eventtap.event.types.flagsChanged,
+  hs.eventtap.event.types.keyDown,
+  hs.eventtap.event.types.leftMouseDown,
+  hs.eventtap.event.types.rightMouseDown,
+  hs.eventtap.event.types.otherMouseDown,
+}, function(e)
+  if e:getType() ~= hs.eventtap.event.types.flagsChanged then
+    cancel_mod_tap()
+    return false
+  end
+
+  local kc = e:getKeyCode()
+  local spec = mod_taps[kc]
+  if not spec or f18_down then
+    cancel_mod_tap()
+    return false
+  end
+
+  local flags = e:getFlags()
+  if flags[spec.flag] then
+    -- Pressed. A second modifier on top of a pending one is a chord, not a tap.
+    if mod_tap_kc or not alone(flags, spec.flag) then
+      cancel_mod_tap()
+    else
+      mod_tap_kc = kc
+      mod_tap_timer = hs.timer.doAfter(MOD_TAP_MS / 1000, cancel_mod_tap)
+    end
+  elseif mod_tap_kc == kc then
+    cancel_mod_tap()
+    hs.eventtap.keyStroke(spec.mods, "tab", 0)
+  end
+  return false
+end)
+mod_tap:start()
 
 hs.alert.show("Hammerspoon loaded")
