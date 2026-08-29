@@ -70,6 +70,8 @@ Agents see nothing of the conversation. Every delegation prompt includes:
 - The report format, and keep it terse: files changed, decisions it made itself, test results, identifiers (SHAs, paths). Ask for a short factual report — default reports run long.
 - **Whether the agent may sub-delegate, and where.** An agent handed a large scope will parallelise it, and by default it will do so inside the checkout you gave it — which is the collision above. Say explicitly: sub-delegate freely for read-only work, never for concurrent writes to one tree.
 - **Ask what the brief got wrong.** Briefs carry errors — a stale path, a wrong name, an assumption that doesn't hold. Agents that say so plainly are far more useful than ones that quietly work around it, so make it a named line in the report format rather than hoping it surfaces.
+- **A wrong question is worse than a wrong sentence.** A sentence gets shot at; a question quietly bounds what anyone can find. "Does X get worse without the bonus" has its answer built in — ask which direction it moves. Before a brief goes out, check whether any question in it admits only one interesting answer.
+- **Frame a measurement so a null result is a win.** "A flat curve is a fully successful outcome", said in the brief, is what makes a ruled-out column trustworthy. Otherwise an agent that finds nothing keeps looking for something.
 - **Ask for evidence honesty explicitly** ("state plainly if the window gave you nothing"). It works.
 
 ## Trust boundaries

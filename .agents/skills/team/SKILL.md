@@ -203,15 +203,6 @@ a retyped version of the role.
   a set swept in by a substring, a total from a superseded version.
   Say what was counted and over what, and the error becomes visible
   instead of plausible.
-- **A wrong question is worse than a wrong sentence.** A sentence
-  gets shot at; a question quietly bounds what anyone can find. "Does
-  X get worse without the bonus" has its answer built in — ask which
-  direction it moves. Before a brief goes out, check whether any
-  question in it admits only one interesting answer.
-- **Frame a measurement so a null result is a win.** "A flat curve is
-  a fully successful outcome", said in the brief, is what makes a
-  ruled-out column trustworthy. Otherwise an agent that finds nothing
-  keeps looking for something.
 - **Mark your own inferences as yours**, and name the alternatives.
   A lead's reading presented as a premise is the cheapest way to
   get agreement instead of thought.
