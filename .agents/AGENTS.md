@@ -125,6 +125,7 @@ When the system framework suggests saving a memory, route the content to the rig
 - Check `git diff` (and `git diff --staged` if applicable) before writing the commit message
 - Commit message titles: concise, under 50 chars when possible. Body lines: wrap at 72 chars.
 - Focus on WHAT changed and WHY, not implementation details
+- **A subject has to stand on its own.** It is read later by someone with no memory of the work — in `git log`, out of order, with no ticket or conversation open. Referencing a ticket or a decision record explicitly is fine; leaning on unstated shared context is not, and it is the easy mistake at the end of a long session, when the phrasing that felt obvious was carrying the conversation rather than the change.
 - Skip the body for cosmetic/trivial changes. When a body is warranted, summarise shape and reason — don't duplicate identifiers, paths, or quotes already visible in the diff
 - Don't include counts like "3 files" or "5 tests"
 - Don't reference temporary artifacts (TODO.md, implementation plans, step numbers) in commit messages
