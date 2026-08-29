@@ -28,7 +28,7 @@ Instructions **to the compactor**, not a summary of the session. It replaces a f
 
 - **Detail gradient, thin to thick**: the whole arc in a line or two → recent changes → in-flight and open work → what's next. Most of the words belong to the last two.
 - **An explicit drop-list**, and it's the part that gets skipped. Name the narratives that dominate the transcript but are finished: concluded investigations, support correspondence, message drafts, deploy tracking, designs that were superseded.
-- **Point at sources of truth instead of copying them** — "read VFAI-887 on Cloud rather than relying on memory" survives; a paraphrase competes with the real thing and loses. Copy only what lives nowhere else: exact identifiers (SHAs, run ids, paths, symbol and constant names with their values) and numbers that were expensive to measure.
+- **Point at sources of truth instead of copying them** — "read the ticket in the tracker rather than relying on memory" survives; a paraphrase competes with the real thing and loses. Copy only what lives nowhere else: exact identifiers (SHAs, run ids, paths, symbol and constant names with their values) and numbers that were expensive to measure.
 - **Decisions already settled, each with its reason, marked do-not-relitigate.** Highest-value block in the prompt: without the reason the next turn reopens them, and the default template's every-user-message habit actively feeds that.
 - **Decisions still open, as a separate list, marked as needing the user.** An open decision that reads like a settled one gets invented.
 - **Gotchas that actually bit us** — environmental traps, a convention that was violated anyway. These travel only in briefs and prompts.

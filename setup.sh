@@ -147,7 +147,7 @@ claude mcp add -s user playwright -- npx @playwright/mcp@latest
 #   codex mcp add playwright -- npx @playwright/mcp@latest
 
 #### Work-specific setup (MCP servers, etc.)
-# Lives in the private work repo: ~/dev/flyt/dev-setup/
+# Kept out of this repo — set up separately on work machines.
 
 #### Install vim-plug (if not already installed)
 curl -fLo ~/.vim/autoload/plug.vim --create-dirs \

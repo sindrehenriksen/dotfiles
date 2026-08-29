@@ -22,7 +22,7 @@ Pull latest from origin and apply locally.
 Review the pulled diff and apply what's needed:
 
 - **Symlinks**: `source ~/dotfiles/install_symlinks.sh`. If a target exists as a regular file, compare — back up and replace if repo version is a superset, otherwise report. The script only adds links, so a rename or removal upstream leaves a dangling one: after a pull that renamed anything, check `find ~/.claude/skills ~/.agents/skills -maxdepth 1 -xtype l` and remove only those whose source the pull deleted, leaving links that point outside dotfiles alone.
-- **Setup scripts** (`setup.sh`, `setup-visma.sh`): identify and run only affected sections, or flag for the user. Don't re-run blindly.
+- **Setup scripts** (`setup.sh`): identify and run only affected sections, or flag for the user. Don't re-run blindly.
 - **Shell configs**: nudge user to reload shell or source the changed file.
 - **Tool configs** (nvim plugins, ghostty, etc.): note if restart/reload/install is needed.
 - **Quick wins**: if something is easy to verify (alias, keybinding, setting), test it or prompt the user to.

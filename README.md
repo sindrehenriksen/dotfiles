@@ -7,7 +7,6 @@ Personal dev environment: zsh, Neovim, Ghostty, Git, AI agent configs. Cross-pla
 | Path | What |
 |---|---|
 | `.zshrc`, `.zprofile`, `.bashrc`, `.profile`, `.shellrc` | Shell init; `.shellrc` is sourced by both bash and zsh |
-| `.shellrc-visma` | Work-specific shell additions, sourced via `.shellrc` |
 | `.gitconfig`, `.gitlint` | Git config and commit linting |
 | `.fzf_config` | fzf defaults (rg-backed file list) |
 | `nvim/` | Neovim Lua config (lazy.nvim, native LSP, blink.cmp, telescope, gitsigns, diffview, gruvbox.nvim) |
@@ -26,7 +25,7 @@ On a fresh machine:
 
 1. Run `setup.sh` step-by-step (it's a checklist, not a script — different steps for macOS vs Ubuntu).
 2. Run `install_symlinks.sh` to place the symlinks.
-3. For work machines: also run `setup-visma.sh` and `install_symlinks_visma.sh`.
+3. Work machines need additional setup, which is kept out of this repo.
 4. Copy `secrets/secrets.env.example` to `~/.secrets.env`, edit, `chmod 600`.
 5. Open nvim — lazy.nvim bootstraps itself and installs plugins. `:Mason` to install LSP servers.
 
@@ -56,11 +55,13 @@ Lua config under `nvim/lua/`: `options.lua`, `keymaps.lua`, `autocmds.lua`, `plu
 - **Claude Code** is the primary agent. Global instructions in `.agents/AGENTS.md` (vendor-neutral, with `.claude/CLAUDE.md` a symlink to it), settings in `.claude/settings.json`; both are symlinked to `~/.claude/`. Two accounts are isolated via `CLAUDE_CONFIG_DIR`: `~/.claude/` (personal, default) and `~/.claude-work/` (work). Shell functions `claude-personal` / `claude-work` in `.shellrc` set the config dir before launching; bare `claude` resolves the account from `$CLAUDE_DEFAULT_ACCOUNT`, then the shared `$DEFAULT_ACCOUNT`, defaulting to `personal`. Set the account *per machine* in `~/.shellrc.local` (untracked — never commit the value): `export DEFAULT_ACCOUNT=work` flips every account-aware tool at once, or use `CLAUDE_DEFAULT_ACCOUNT` to override just this one. Shared config (CLAUDE.md, settings, skills) is symlinked from `~/.claude/` into `~/.claude-work/` via `install_symlinks.sh` — credentials in each dir's `.credentials.json` are not shared. `claude-*` also exports `GH_CONFIG_DIR` so the bundled `gh` CLI targets the matching account.
 - **gh CLI** uses the same pattern: `gh-personal` / `gh-work` shell functions point at `~/.config/gh-personal` / `~/.config/gh-work`; bare `gh` honors an explicit `$GH_CONFIG_DIR` first (so `claude-*` sessions inherit their account), then `$GH_DEFAULT_ACCOUNT`, then the shared `$DEFAULT_ACCOUNT`, defaulting to `personal`. Per-process env vars mean concurrent sessions don't stomp each other. The wrapper auto-injects `--insecure-storage` on `auth login` / `auth refresh` so tokens land in each dir's `hosts.yml` (chmod 600) instead of the system keyring — the keyring is keyed by host only, so two accounts would otherwise collide on one entry and the last write would silently win for both (`gh auth status` reads the user label from `hosts.yml`, not the actual token, so the breakage isn't obvious). Use `command gh ...` to bypass the wrapper.
 - **Copilot CLI** and **Codex CLI** have MCP setup in `setup.sh` but haven't been validated in a real workflow yet — see `TODO.md`.
-- **Skills** in `.agents/skills/` cover: `pr-description`, `ci-debugging`, `browser`, `coderabbit`, `execution`, `sync`. Symlinked into both Codex and Claude locations via `install_symlinks.sh`. (Work-only skills such as `confluence` live in a separate private repo.)
+- **Skills** in `.agents/skills/` cover: `pr-description`, `ci-debugging`, `browser`, `coderabbit`, `execution`, `sync`. Symlinked into both Codex and Claude locations via `install_symlinks.sh`. (Work-only skills are kept out of this repo and linked in separately.)
 
 ## Work-specific setup
 
-Work-machine tooling setup (MCP servers, work-only skills, work secrets template) lives in a **separate private repo**, not here. `install_symlinks_visma.sh` wires the local symlinks — `.shellrc-visma`, plus the Confluence skill sourced from that private repo. Work secrets live in that private repo (gitignored), sourced by `.shellrc-visma`.
+Anything tied to an employer, a client, or an internal project — tooling, secrets, skills, agent config, git identity — is kept out of this repo, and work machines set it up separately.
+
+What this repo provides is two untracked hooks for it to attach to, both no-ops when the file is absent: `.shellrc` sources `~/.shellrc.early` (ahead of the mise block, so it can set env mise depends on), and `.gitconfig` includes `~/.gitconfig.local` (after `[user]`, so it can override the identity or add conditional includes). The late, general-purpose `~/.shellrc.local` is still sourced at the end of `.shellrc`.
 
 ## Outstanding work
 
