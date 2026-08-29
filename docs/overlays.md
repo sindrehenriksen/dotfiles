@@ -96,7 +96,20 @@ with no overlay is unaffected. The full set:
 | `~/.shellrc.early` | `.shellrc` sources it if present | *above* the version-manager block, because it may export the variable that block reads on activation |
 | `~/.secrets.env` | `.shellrc`, last line of all | exported credentials, `chmod 600` — template in `secrets/` |
 | `~/.gitconfig.local` | `.gitconfig` includes it | just after `[user]`, so it can override the identity or add conditional includes |
-| `~/.claude/settings.local.json` | the agent, per config dir | what is true of this machine only — resolved temp paths, extra permission rules; wins over the tracked `settings.json` beside it |
+| `~/.claude/settings.local.json` | the agent, per config dir | what is true of this machine only — resolved temp paths, extra permission rules; wins over the tracked `settings.json` beside it, but see the `autoMode` exception below |
+| `CLAUDE_PERSONAL_SETTINGS`, `CLAUDE_WORK_SETTINGS` | `.shellrc`'s `claude` wrapper, per account | exported from `~/.shellrc.early`; names a whole extra settings file, passed as `--settings`. The one slot that is a variable rather than a path, because there is no fixed location the agent reads it from |
+
+**The `autoMode` block does not follow the rest of the settings.** It is read
+only from the config dir's own `settings.json`, a `--settings` file, and
+admin-managed settings; in project and local settings it is parsed, ignored, and
+warned about — deliberately, since a checked-out repo could otherwise hand itself
+classifier rules. So the machine-local slot above cannot carry an overlay's
+`autoMode`, and the extra-settings variable exists for it. Entries there are
+*appended* to this repo's — `allow`, `soft_deny`, `hard_deny` and `environment`
+all concatenate across the three permitted scopes — so an overlay states only its
+own facts and never restates the shared half. That makes the split clean: the
+generic environment description lives here, and each overlay adds the names,
+hosts and namespaces that are true only for it.
 
 Ordering is the one real constraint. `~/.shellrc.early` runs *before* the
 version-manager block because it may export what that block reads on
@@ -128,3 +141,4 @@ to overwrite a path that exists and is not already a symlink.
 | Wrong commit author | `git config --show-origin user.email`; then whether the `includeIf` path still resolves |
 | Work env missing in a fresh shell | whether the `~/.shellrc.early` symlink exists, and whether it is sourced early enough |
 | Stale guidance overriding the repo's own | the bridging tier's instruction file, which loads above every checkout |
+| An overlay's `autoMode` rules having no effect | which file they are in — a `settings.local.json` or project settings is ignored for `autoMode`, and the session warns once |

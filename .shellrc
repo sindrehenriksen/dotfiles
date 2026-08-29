@@ -140,10 +140,24 @@ fi
 # Also exports GH_CONFIG_DIR so `gh` inside the Claude session targets the
 # matching account (Claude's Bash tool runs non-interactively and doesn't load
 # the gh-* shell functions below).
+#
+# CLAUDE_PERSONAL_SETTINGS / CLAUDE_WORK_SETTINGS (set in ~/.shellrc.early) name
+# an extra settings file for one account, passed as --settings. That is the only
+# scope besides the config dir's own settings.json that may carry an autoMode
+# block — project and local settings are ignored for it, deliberately, since a
+# repo could otherwise hand itself classifier rules. Its autoMode allow,
+# soft_deny and environment entries are appended to the ones here rather than
+# replacing them, which is what lets an account keep its context out of this
+# repo without restating the shared half.
 _claude-run() {
     local account=$1; shift
     local dir=~/.claude
-    [ "$account" = work ] && dir=~/.claude-work
+    local extra=$CLAUDE_PERSONAL_SETTINGS
+    if [ "$account" = work ]; then
+        dir=~/.claude-work
+        extra=$CLAUDE_WORK_SETTINGS
+    fi
+    [ -n "$extra" ] && set -- --settings "$extra" "$@"
     echo "[claude] using ${account} account" >&2
     # CLAUDE_CODE_NO_FLICKER=1 enables alt-screen rendering so the input stays
     # pinned and scrolling doesn't snap to bottom. Upstream's accepted answer
