@@ -1,12 +1,12 @@
-# Wiring agent config across a public and a private repo
+# Overlaying a more specific setup on this repo
 
-Agent configuration — instruction files, skills, permission rules — wants to live
-in version control, but not all of it can live in the *same* version control.
-This repo is public. Work configuration names an employer, internal hosts and
-project keys, so it is private. And a team repo checked out inside that private
-tree has its own agent config, read by teammates who have neither of the other
-two. This is the pattern for wiring the three together: what belongs where, what
-the discovery rules force, and what breaks.
+Configuration wants to live in version control, but not all of it can live in
+the *same* version control. This repo is the generic base: personal, public,
+carried to every machine. Layered over it are more specific setups — a machine,
+an employer, a team — each with its own repo, its own agent config, and readers
+who have none of this one. This is the pattern for composing them: what belongs
+where, what the discovery rules force, which slots this repo leaves open, and
+what breaks.
 
 For the two-account isolation (`CLAUDE_CONFIG_DIR` / `GH_CONFIG_DIR`), see the
 AI agents section of `README.md` — that is a separate concern from tiering.
@@ -19,13 +19,13 @@ AI agents section of `README.md` — that is a separate concern from tiering.
 | Bridging | a private work repo, above the team checkouts | its instruction file everywhere below it; its skills only at its own level | this machine's wiring, what this account may do, the seams between the other two |
 | Team | a repo cloned inside the bridging one | only with cwd inside that checkout | everything about the product — its lifecycle, its gates, its tooling |
 
-The middle tier is not organisational tidiness, it is forced. A public repo
-cannot reference a private one: the reference itself leaks the name, and it is
-dead weight on any machine that lacks the private repo. A private repo should not
-be *depended on* by a public one for the same reason from the other side. And the
-team repo can assume neither, since it is read by people with no access to
-either. So anything that spans two tiers has nowhere to live but a third home
-that knows about both — and only the bridging tier does.
+The middle tier is not organisational tidiness, it is forced. Nothing shared may
+depend on one person's personal configuration, and that is what this tier is —
+personal preference, personal setup — so a team repo reaching into it would be
+inheriting one individual's choices. References therefore run one way only: the
+specific setup reaches into the generic slots the base offers, never outward. So
+anything that spans two tiers has nowhere to live but a third home that knows
+about both — and only the bridging tier does.
 
 The rule that falls out: **generic mechanism public, specific content private.**
 The public tier describes a shape; the private tier fills it with names, paths
@@ -81,67 +81,46 @@ to load last, differently each session.
 
 ## The local-hook inversion
 
-Some config cannot move into the private repo at all, because a tool reads it at
-a fixed path in `~`: a shell rc, a git config. The naive fix is for the public
-file to name the private path and source it. Don't — that is exactly the
-reference the public tier may not carry.
+Some config cannot move into the specific repo at all, because a tool reads it at
+a fixed path in `~`: a shell rc, a git config. The naive fix is for the tracked
+file here to name the other repo's path and source it. Don't — that is the
+reference running the wrong way.
 
-Invert it. The public file offers a **generic, untracked hook that no-ops when
-absent**, and the private installer symlinks its own file into that path. The
-public repo describes a slot; only the private side knows what fills it, and a
-machine with no private repo is unaffected. This repo provides two:
+Invert it. This repo offers a **generic, untracked slot that no-ops when
+absent**, and the specific side's installer symlinks its own file into that path.
+The base describes the slot; only the overlay knows what fills it, and a machine
+with no overlay is unaffected. The full set:
 
-| Hook | Offered by | Placement, and why |
+| Slot | Consumed by | Placement, and why |
 |---|---|---|
 | `~/.shellrc.early` | `.shellrc` sources it if present | *above* the version-manager block, because it may export the variable that block reads on activation |
+| `~/.shellrc.local` | `.shellrc`, near the end | the late, general-purpose slot; the per-machine account default lives here |
+| `~/.secrets.env` | `.shellrc`, last line of all | exported credentials, `chmod 600` — template in `secrets/` |
 | `~/.gitconfig.local` | `.gitconfig` includes it | just after `[user]`, so it can override the identity or add conditional includes |
+| `~/.claude/settings.local.json` | the agent, per config dir | what is true of this machine only — resolved temp paths, extra permission rules; wins over the tracked `settings.json` beside it |
+| `.claude/settings.local.json` | the agent, with cwd in this repo | rules for working *on* this repo; wins over the user-level pair |
 
-`~/.shellrc.local`, sourced at the end of `.shellrc`, is the late, general-purpose
-equivalent for anything with no ordering constraint.
+Two axes sort them. **Early or late:** only `~/.shellrc.early` runs before the
+version-manager block, and it exists for the values that block needs on
+activation; anything without an ordering constraint belongs in
+`~/.shellrc.local`. Ordering is a real constraint, not a nicety, and it fails
+asymmetrically: a hook sourced too late still sets the variable, so a nested
+shell that inherited it stays quiet while a fresh login shell errors. An overlay
+whose early file needs secrets carries its own copy rather than waiting for
+`~/.secrets.env`, which is sourced last of everything.
 
-Ordering is a real constraint, not a nicety, and it fails asymmetrically: a hook
-sourced too late still sets the variable, so a nested shell that inherited it
-stays quiet while a fresh login shell errors. Put the hook where the earliest
-consumer can see it.
+**Symlinked in or written per machine:** `~/.shellrc.early`, `~/.gitconfig.local`
+and the second account's `settings.local.json` are the overlay installer's to
+place. `~/.secrets.env`, `~/.shellrc.local` and the primary account's
+`settings.local.json` are hand-written on each machine and belong to no repo at
+all. (`~/.claude/keybindings.json` is untracked too but is not a slot — this
+repo's installer only mirrors whatever is there into the second account's config
+dir.) Both `settings.local.json` paths are ignored by git — the in-repo one via
+the global ignore file — so neither can be committed by accident.
 
-Two guards make the arrangement safe to re-run: both hooks are conditional on the
-file existing, and the `link` helper in each installer refuses to overwrite a
-path that exists and is not already a symlink.
-
-## Gotchas that cost real time
-
-**A user-level `AGENTS.md` is not discovered.** At user level Claude Code reads
-`CLAUDE.md`; no setting redirects it to a vendor-neutral name. To keep one source
-file with a neutral name, make the discovered path a symlink to it —
-`~/.claude/CLAUDE.md` → the tracked `AGENTS.md` — which is what this repo's
-installer does, for both account config dirs. One documented exception to be
-aware of: in Cowork sessions on the desktop app, a `~/.claude/CLAUDE.md` that is
-itself a symlink or hard link is skipped, as is any import in a user-scope file
-resolving outside the session's working directory. So neither the symlink nor the
-`@AGENTS.md` import route survives there, and a Cowork session runs without the
-personal tier. Interactive and headless CLI sessions load it normally.
-
-**Renaming the file behind an `includeIf` silently changes your commit author.**
-Git ignores a missing include path — no warning, exit 0 — so between renaming the
-included identity file and updating the path that names it, the include
-evaporates and commits fall back to the outer `[user]`, landing under the wrong
-identity. Check `git log --format='%an %ae'` after any such rename, and repair
-with `git commit --amend --reset-author` (or a rebase with `--reset-author` over
-the affected range).
-
-**A permission rule is a convenience, not a security boundary.** Rules match the
-whole command string with globs, so a rule that pins a host —
-`Bash(curl * "https://api.example.com/…")` — cannot also say *and no other host
-appears in this command*: the wildcard in the middle swallows one. Narrow rules
-still earn their place — they cut prompts without widening much — but don't reason
-about them as if they constrained the command.
-
-**Two writers in one checkout corrupt each other.** A pre-commit framework
-stashes the whole *unstaged* tree, runs the hooks, and restores; interrupt that
-cycle and a concurrent writer's in-flight edits revert to HEAD mid-edit, which
-reads as an agent undoing its own work rather than as a collision. File-disjoint
-work is not enough, and serialising commits does not fix it. One writer per
-checkout — give each its own worktree.
+Two guards make the arrangement safe to re-run: every shell and git slot is
+conditional on the file existing, and the `link` helper in each installer refuses
+to overwrite a path that exists and is not already a symlink.
 
 ## Diagnosing a break
 
