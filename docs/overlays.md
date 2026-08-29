@@ -100,7 +100,10 @@ directory and lands in the other one too, so private guidance is offered in
 sessions that must never see it. Nothing fails; the skills simply appear where
 they should not. Link each generic skill individually into each account instead.
 The cost is a loop, and it is what lets a second overlay repo be added without
-auditing where its skills surfaced.
+auditing where its skills surfaced. Settings and skills differ here by design
+rather than by accident: the extra-settings file is *appended* to what this repo
+declares, while a skills directory is not merged at all, so each account must
+have its own rather than a link to another's.
 
 **Where two tiers disagree, the repo wins on repo matters.** A personal skill and
 a team-repo skill often cover the same ground — the personal one complete because
