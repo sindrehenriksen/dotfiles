@@ -2,9 +2,10 @@
 	name = sindrehenriksen
 	email = sindrehenriksen93@gmail.com
 
-# Work identity for repos under ~/dev/flyt/ (personal projects keep the default above).
-[includeIf "gitdir:~/dev/flyt/"]
-	path = ~/dev/flyt/dev-setup/gitconfig-visma
+# Machine-local git config — identity overrides and conditional includes for
+# checkouts that need a different one. Untracked; ignored if absent.
+[include]
+	path = ~/.gitconfig.local
 
 [alias]
     c = commit

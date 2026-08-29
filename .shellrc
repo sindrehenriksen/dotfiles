@@ -34,13 +34,14 @@ if $IS_MAC; then
 fi
 
 
-#### Visma
-# Must stay ahead of the mise block: it exports MISE_TRUSTED_CONFIG_PATHS, and
-# `mise activate` calls hook-env immediately, which hard-errors on an untrusted
-# config in cwd's chain. Sourced later, a login shell in an untrusted dir (a
-# fresh worktree) greets you with mise trust errors, while a nested shell stays
-# quiet — it inherits the var. Keep this above.
-[ -f ~/dotfiles/.shellrc-visma ] && source ~/dotfiles/.shellrc-visma
+#### Machine-local early config
+# Untracked drop-in for anything that has to run before the mise block below —
+# typically because it exports MISE_TRUSTED_CONFIG_PATHS, and `mise activate`
+# calls hook-env immediately, which hard-errors on an untrusted config in cwd's
+# chain. Sourced later, a login shell in an untrusted dir greets you with mise
+# trust errors, while a nested shell stays quiet — it inherits the var. Keep
+# this above. ~/.shellrc.local, at the end of this file, is the late equivalent.
+[ -f ~/.shellrc.early ] && source ~/.shellrc.early
 
 
 #### mise
@@ -135,7 +136,7 @@ fi
 # CLAUDE_DEFAULT_ACCOUNT=work for just this one.
 # Explicit: claude-personal, claude-work. Each account uses its own config dir,
 # which means MCP servers registered via `claude mcp add` are per-account —
-# register Visma MCPs with `claude-work mcp add`, personal ones with `claude`.
+# register work MCPs with `claude-work mcp add`, personal ones with `claude`.
 # Also exports GH_CONFIG_DIR so `gh` inside the Claude session targets the
 # matching account (Claude's Bash tool runs non-interactively and doesn't load
 # the gh-* shell functions below).
