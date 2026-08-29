@@ -78,9 +78,25 @@ independent, synthesises, and decides what the team can settle itself.
 
 **The lead talks to the facilitator and to nobody else in the round;
 the facilitator talks to the roles.** No traffic in either direction
-between the lead and a role — a role receiving instructions from two
-places acts on the later one instead of flagging that they conflict,
-and a lead fielding role reports drowns in work it did not ask for.
+between the lead and a role. That is a messaging fact before it is a
+hierarchy: inbound sends fail or land somewhere else entirely, since
+an agent *type* is not an address (`roles/facilitator.md`, "Assume
+nobody can message you back"), so a role has no reliable address for
+a lead in the first place. Hence **a role receives its instructions
+from one source** — instructed from two places it acts on the later
+one instead of flagging that the two cannot both be true, and the
+conflict resurfaces as a defect nobody can trace back. The
+facilitator owns the channel to each role; a second voice needing
+something from a role goes through that channel. A lead fielding
+role reports also drowns in work it did not ask for.
+
+**Each hop inward reports like the outward one.** A role handing back
+to the facilitator, the facilitator handing back to the lead: the
+decision, the trade-off, what came out differently than expected,
+what is still open — not the transcript of how it was reached. The
+reasoning is `execution`, "What reaches the user"; the mechanical
+half is that the lead's main loop is what a human reads along, so a
+round reporting upward in full detail buries it one hop at a time.
 
 **The facilitator only facilitates.** It runs no gates, writes no
 code, applies no migrations and makes no commits — and that holds
@@ -88,11 +104,15 @@ hardest when a round is long or unattended, which is exactly when it
 dissolves. Being the only agent still awake is not a reason to become
 the dev; it is a reason to spawn one.
 
-The lead spawns the facilitator; the facilitator spawns everyone
-else. Spawn one whenever a round runs more than two roles or will
-outlast a few exchanges; below that the lead runs the round itself
-and **`roles/facilitator.md` binds it while it does** — convening,
-sequencing and calling reviews all live there, not here.
+**The facilitator is a context firewall for the human reading the
+lead's main loop**: the round's traffic — briefs going out, roles
+reporting back, reviews being convened — happens a level down, and
+the loop stays followable. So the lead spawns the facilitator and the
+facilitator spawns everyone else; spawn one whenever a round runs
+more than two roles or will outlast a few exchanges. Below that the
+lead runs the round itself and **`roles/facilitator.md` binds it
+while it does** — convening, sequencing and calling reviews all live
+there, not here.
 
 The lead never hands over owner contact, scope, or the final report.
 
@@ -168,6 +188,10 @@ a retyped version of the role.
 - **Mark your own inferences as yours**, and name the alternatives.
   A lead's reading presented as a premise is the cheapest way to
   get agreement instead of thought.
+- **Where the work is model-shaped** — prompts, evals, judge models,
+  quality gates, retrieval — point the brief at `execution`,
+  "Verifying model-shaped work". Those rules bind whoever touches the
+  work, not only a round that staffs a specialist for it.
 
 ## Instructions must stay consistent
 
