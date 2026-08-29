@@ -112,6 +112,17 @@ would have shown otherwise was never emitted. The test is simple
 and worth applying before merging: if this mechanism misbehaved,
 what number would move — and is anyone emitting it?
 
+The counterpart is what such a mechanism owes when it cannot judge
+at all: a guard, gate or probe that loses the input it judges has
+to fail loudly, never fall through to the permissive answer. A
+check degrading to "pass" when it could not run reports exactly what
+a check that ran and found nothing reports, which is the one
+distinction anyone wanted from it. The shell form is a `|| echo ""`
+turning a missing value into an empty one the next step accepts; the
+Python form is a broad `except Exception` returning the benign value,
+and ruff's `BLE001` catches that one — so enable it where such
+guards live rather than leaving it to review.
+
 ## Where a thing appears is part of what it says
 
 Screen position carries meaning before anyone reads a word. The
@@ -203,7 +214,10 @@ for an old stored shape — each is written to be temporary and
 each becomes permanent by default, because nothing marks it as
 having an expiry. Give them a single greppable marker and state
 the condition under which they can go, at the code itself. Then
-removing them is a search rather than an archaeology project.
+removing them is a search rather than an archaeology project. If
+the condition cannot be stated, that is itself the finding: the
+thing is probably not transitional, and calling it what it is beats
+giving it an expiry nothing will ever trigger.
 One project does this as a `COMPAT:` convention: one bridge per
 problem, tests carrying the marker they die with.
 
