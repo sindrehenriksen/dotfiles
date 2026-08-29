@@ -18,10 +18,11 @@ sudo apt install fonts-firacode
 # enable ligatures
 
 #### Install packages
+# git-delta installs a binary named `delta`; .gitconfig sets it as the pager.
 # if mac
-brew install eza ripgrep fzf tldr
+brew install eza ripgrep fzf tldr git-delta
 # if linux (ubuntu)
-sudo apt install eza ripgrep fzf tldr xclip
+sudo apt install eza ripgrep fzf tldr xclip git-delta
 
 #### zsh plugins
 # No plugin manager — .zshrc sources these directly. pure pulls in zsh-async.

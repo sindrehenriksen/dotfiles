@@ -21,6 +21,7 @@
     pnv = push --no-verify
     pl = pull
     d = diff
+    dm = diff origin/main...HEAD
     a = add
     f = fetch
     ui = update-index
@@ -31,6 +32,7 @@
     rb = rebase
     loga = log --oneline --decorate --graph --all --color
     lom = log --oneline main..
+    lp = log -p --reverse origin/main..HEAD
     fd = diff-tree --no-commit-id --name-only -r
     fdpc = log --pretty=format:'%h %s%n' --name-only
     cp = cherry-pick
@@ -52,3 +54,19 @@
 	autoSetupRemote = true
 [core]
 	hooksPath = ~/dotfiles/git-hooks
+	# Word-level diff highlighting. Needs the git-delta package on PATH,
+	# so install it before this config reaches a new machine.
+	pager = delta
+
+[interactive]
+	diffFilter = delta --color-only
+
+[delta]
+	line-numbers = true
+	navigate = true
+	# Prose here is written as one long line per paragraph, well past
+	# delta's 512-char default. Truncating cuts off the changed words.
+	max-line-length = 0
+
+[diff]
+	colorMoved = default
