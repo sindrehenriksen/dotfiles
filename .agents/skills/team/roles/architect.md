@@ -35,5 +35,10 @@ Prefer the answer that removes a distinction over the one that adds a
 field. Closure and enumeration look like rigour and often cost
 completeness; say plainly when they do.
 
+**Judging finished work narrows the question to the seams this change
+made.** Structure that was already wrong is not a finding against
+this diff unless the change extends or entrenches it; otherwise every
+review reopens the whole system — raise it as its own work instead.
+
 Concluding the current structure is right and should be left alone is
 a legitimate outcome.

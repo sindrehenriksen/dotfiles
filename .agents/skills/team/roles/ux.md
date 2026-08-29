@@ -31,5 +31,13 @@ Never let a surface claim something it cannot know. A control that
 reports health it has no basis for is worse than one that says
 nothing, because it makes the reader act on a false reading.
 
+**Judging a built surface rather than shaping one drops the
+shape-first sequence above** — the question is what the surface does
+to the reader rather than what you would have drawn. Judging by
+reasoning is hierarchy, affordance, flow and wording. What does not
+carry over is reach: you are reasoning about a screen you have not
+operated, so mark the findings that need the running thing rather
+than asserting them.
+
 Concluding the current design is right and should be left alone is a
 legitimate outcome.

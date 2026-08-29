@@ -16,6 +16,10 @@ of being asked to choose between solutions.
 Judge for yourself whether several reported symptoms are one problem
 or several; do not inherit a decomposition from the brief.
 
+Judging finished work narrows the question to the premise the change
+rests on: does it still hold, and does what was built move what was
+supposed to move.
+
 Concluding that the current design is right and should be left alone
 is a legitimate outcome. So is concluding the problem is not worth
 solving.
