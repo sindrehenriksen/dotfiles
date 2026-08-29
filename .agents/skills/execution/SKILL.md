@@ -57,7 +57,7 @@ The reproduction then stays as the guard: "The user's bug report IS the repro sp
 ## Measure it
 
 - **Everything should be measurable**, through logging or metrics. Any mechanism that silently changes what happens — a guard, a cap, a retry, a drop path, a cache, a fallback — ships with the counter that makes it visible. Before merging, ask: if this misbehaved, what number would move, and is anyone emitting it? Full reasoning in `~/.agents/principles.md`, "Log for the debugging you will actually do".
-- **Be evidence-driven from the start.** Collect metrics — logged or otherwise, quantitative or qualitative — *before* deciding, rather than reasoning from intuition and measuring afterwards to confirm what you already chose.
+- **Be evidence-driven from the start.** Collect metrics — logged or otherwise, quantitative or qualitative — *before* deciding, rather than reasoning from intuition and measuring afterwards. A number collected afterwards to confirm a choice already made measures the choice rather than the problem, and it agrees, because agreeing is what it was collected for.
 
 ## Delegation prompts
 
@@ -155,7 +155,7 @@ This is reasoning rather than measurement, and should not be cited as a validate
 
 ## Improving the setup
 
-- **Promote or it rots.** Plan docs and result notes are working artifacts for the run. Anything future-load-bearing — semantics, invariants, gotchas, "why not X" — gets promoted into a canonical home (instruction files, reference docs, decision records, code comments) as part of closing the work. Archives are narrative, not retrieval.
+- **Promote or it rots.** Plan docs and result notes are working artifacts for the run. Anything future-load-bearing — semantics, invariants, gotchas, "why not X" — gets promoted into a canonical home (instruction files, reference docs, decision records, code comments) as part of closing the work. Archives are narrative, not retrieval: moving a thing to an archive, a changelog or a historical appendix takes it off the path anyone walks to answer a question. If it has to be found later, it goes where the question gets asked.
 - **Fold friction into the setup, in the same run.** When a run hits friction — a git-flow accident, a model tier under-delivering, a test gap that let a regression through, an ambiguous instruction — fold the lesson into the relevant config, docs or instructions before the run ends. Don't accumulate process debt. The same goes for a small defect noticed in passing — a doc claim that is no longer true, a fixture that cannot exercise the thing it exists for, a command that silently does the wrong thing: FIX IT IN THE RUN rather than handing it back as a finding. The test is whether it is obvious and whether it needs a human decision, not whether it was in scope. List these changes at the end of an autonomous run; ask first only when genuinely unsure, sparingly, since docs-only changes are cheap to reverse.
 - **Reconsider the autonomy when results keep getting rejected.** If work that ran unattended is work the user sends back at the end review, tighten toward step-wise check-ins for that kind of task rather than re-briefing harder.
 
