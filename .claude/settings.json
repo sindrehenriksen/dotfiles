@@ -1,4 +1,5 @@
 {
+  "cleanupPeriodDays": 60,
   "permissions": {
     "allow": [
       "Bash(ls *)",
@@ -90,7 +91,32 @@
       "Bash(pnpm run format)",
       "Bash(pnpm install *)",
       "Bash(pnpm install)",
-      "Bash(pnpm i)"
+      "Bash(pnpm i)",
+      "Bash(az account show *)",
+      "Bash(az account list *)",
+      "Bash(az * show *)",
+      "Bash(az * list *)",
+      "Bash(az monitor activity-log list *)",
+      "Bash(az bicep build *)",
+      "Bash(gh pr checks *)",
+      "Bash(gh label list *)",
+      "Bash(gh workflow list *)",
+      "Bash(gh run watch *)",
+      "Bash(git rev-parse *)",
+      "Bash(git rev-list *)",
+      "Bash(git merge-base *)",
+      "Bash(git worktree list)",
+      "Bash(git worktree list *)",
+      "Bash(git remote -v)",
+      "Bash(git blame *)",
+      "Bash(git describe *)",
+      "Bash(git config --get *)",
+      "Bash(git shortlog *)",
+      "Bash(diff *)",
+      "Bash(comm *)",
+      "Bash(uniq *)",
+      "Bash(jq *)",
+      "Bash(pre-commit run *)"
     ],
     "deny": [
       "Bash(git push --force)",
@@ -144,7 +170,6 @@
     "command": "~/.claude/statusline.sh",
     "hideVimModeIndicator": true
   },
-  "cleanupPeriodDays": 60,
   "theme": "dark",
   "editorMode": "vim",
   "skipAutoPermissionPrompt": true
