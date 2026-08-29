@@ -112,10 +112,11 @@ hardest when a round is long or unattended, which is exactly when it
 dissolves. Being the only agent still awake is not a reason to become
 the dev; it is a reason to spawn one.
 
-**The facilitator is a context firewall for the human reading the
-lead's main loop**: the round's traffic — briefs going out, roles
-reporting back, reviews being convened — happens a level down, and
-the loop stays followable. So the lead spawns the facilitator and the
+**The facilitator facilitates — that is the whole of the role**, and
+a second property falls out of it: the round's traffic — briefs going
+out, roles reporting back, reviews being convened — happens a level
+down, so the lead's main loop, which is what a human reads along,
+stays followable. The lead spawns the facilitator and the
 facilitator spawns everyone else; spawn one whenever a round runs
 more than two roles or will outlast a few exchanges. Below that the
 lead runs the round itself and **`roles/facilitator.md` binds it
@@ -238,9 +239,17 @@ owner, and nothing skips a rung, because roles cannot reach the lead
 directly.
 
 **Progress does not stop waiting for the owner.** Where something has
-been authorised, it proceeds. Parking work until they look again means
-they may return to find nothing moved, or test a build that predates
-the fix they are testing for.
+been authorised, it proceeds, and minor, obvious or plainly-wanted
+things do not need asking at all. Parking work until they look again
+means they may return to find nothing moved, or test a build that
+predates the fix they are testing for.
+
+Distinguish that from `execution`'s rule that an outward-facing
+action waits for a go every time. **A standing authorisation is a
+thing the owner said; a run of approvals is a thing that happened.**
+The first stays given until withdrawn — "push when it is ready"
+covers the next push. The second is not evidence of anything: five
+approved posts do not authorise a sixth.
 
 **Scope is the exception, and it is absolute.** Anything outside what
 was asked for goes to the owner, however good the reason and however
