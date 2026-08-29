@@ -70,6 +70,8 @@ clearly shaped. A workspace may layer its own on top of both.
 
 Most of `~` (shell configs, tool settings, Claude config, skills) is symlinked from `~/dotfiles` via `install_symlinks.sh` — that repo is the source of truth. When looking up "where is X configured," check `~/dotfiles` first rather than searching `~` broadly.
 
+**The exception is machine-local config, which is untracked on purpose.** `~/.claude/settings.local.json` sits beside the symlinked `settings.json` and is gitignored via `~/.config/git/ignore`, so a setting that is true on this machine and false on the next belongs there rather than in the tracked file. Paths in it must be literal and absolute — globs don't match.
+
 ## Check the environment before assuming
 
 Before claiming a tool isn't installed or recommending an install step, check the environment — `$TERM_PROGRAM` (`ghostty`, `iTerm.app`, `Apple_Terminal`), `$SHELL`, `$HOMEBREW_PREFIX`, `uname -m` (`arm64` vs `x86_64`), `which <cmd>`. The session env block is brief; one quick probe beats a guess.
@@ -95,6 +97,8 @@ This covers temporary work that spans conversations too (e.g., a project `TODO.m
 **Narrow exception:** facts that are machine-*divergent* — true on this machine but false on another (e.g. package manager, machine-specific hardware quirks) — can't live in dotfiles, since that one repo is shared across machines; these may live in memory. But the bar is high: the session's environment block already states platform/shell/OS (so "this is a Linux laptop" is not exception material — it's already given), and memory loads per-project by cwd, so it rarely earns its keep. Don't rebuild a machine/user profile.
 
 When the system framework suggests saving a memory, route the content to the right tier above instead — or, if it's truly transient, don't persist it.
+
+**An ephemeral addition doesn't get documented yet.** A one-off diagnostic script, a throwaway repro, an in-flight experiment: add the script or config and stop there. A README or other repo doc waits until the addition clearly sticks — it gained a second caller, survived a few weeks, or was asked for explicitly. Documenting churn costs more than the entry is worth, and the entry tends to outlive the thing it describes.
 
 ## Corrections & Judgment
 
