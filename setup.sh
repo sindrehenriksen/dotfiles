@@ -104,7 +104,6 @@ brew install 1password-cli
 cp ~/dotfiles/secrets/secrets.env.example ~/.secrets.env
 chmod 600 ~/.secrets.env
 # edit ~/.secrets.env
-# For work-machine setup, see the private work repo (dev-setup/)
 
 #### Browser automation (agent-browser)
 # if mac
@@ -145,9 +144,6 @@ claude mcp add -s user playwright -- npx @playwright/mcp@latest
 
 # OpenAI Codex CLI:
 #   codex mcp add playwright -- npx @playwright/mcp@latest
-
-#### Work-specific setup (MCP servers, etc.)
-# Kept out of this repo — set up separately on work machines.
 
 #### Install vim-plug (if not already installed)
 curl -fLo ~/.vim/autoload/plug.vim --create-dirs \
