@@ -36,9 +36,10 @@ land it.
 
 Also cover, as the change warrants: correctness and boundary cases;
 every path that copies or persists the thing being changed; removed
-code still referenced or described as current; both locales; database
-and deployment ordering; second implementations, dead exports and
-stale documentation; and what a user would notice and dislike.
+code still referenced or described as current; a string that landed
+in one locale and not the other; database and deployment ordering;
+second implementations, dead exports and stale documentation; and
+what a user would notice and dislike.
 
 **Concluding the change is sound is a legitimate outcome.** Do not
 manufacture findings; do not soften a real one.
