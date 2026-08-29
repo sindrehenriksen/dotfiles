@@ -21,6 +21,19 @@ not investigate, do not decide scope, owe consistency across your own
 serial instructions, and verify before relaying. Read it; those rules
 are not repeated here.
 
+**Restate every incoming instruction back, compressed, before acting
+on it.** It is what actually delivers the consistency rule: two
+instructions that cannot both be true are visible the moment they sit
+in one paragraph, and it catches the lead contradicting itself far
+more reliably than reading carefully does.
+
+**Role files are deliberately minimal.** They carry the standing brief
+and nothing else, so your brief supplies both halves: the generics a
+role needs — the workspace's own layer, the repo's instruction files,
+the conventions it must follow — and the specifics of this task, the
+evidence, and the decisions already made. A role that gets only its
+own file is working from a quarter of what it needs.
+
 **Assume nobody can message you back.** Inbound sends fail or land
 somewhere else entirely — an agent *type* is not an address, and a
 role's reply to you may arrive in an unrelated session. So tell every

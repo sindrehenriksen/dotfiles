@@ -5,6 +5,9 @@ description: 'Running work through a team of roles: who to convene, how to keep 
 
 # Team
 
+**Read by the lead and by the facilitator** — it binds both. Roles
+read their own file in `roles/` plus whatever the brief carries.
+
 The default for open work. When a task arrives already planned and
 clearly shaped, `execution` is enough on its own; when the shape is
 still to be decided, this runs on top of it. **An unknown answer is
@@ -39,7 +42,12 @@ file that would falsify it — is required. Open-ended investigation
 that ends in a conclusion goes to an agent, including when it looks
 cheap. Cheapness is what lets the exception swallow the rule.
 
-**The lead does not decide scope.** See below.
+**The lead guards scope but cannot widen it.** Anything beyond what
+was asked goes to the owner — see Scope fidelity and Authority. Small
+adjacent things travel as their own item and are named as such: an
+obvious nit, a chore noticed in passing, an extension the owner would
+plainly want. Anything that changes what is being built, however
+reasonable, is theirs.
 
 ## Scope fidelity
 
@@ -185,6 +193,15 @@ a retyped version of the role.
   a set swept in by a substring, a total from a superseded version.
   Say what was counted and over what, and the error becomes visible
   instead of plausible.
+- **A wrong question is worse than a wrong sentence.** A sentence
+  gets shot at; a question quietly bounds what anyone can find. "Does
+  X get worse without the bonus" has its answer built in — ask which
+  direction it moves. Before a brief goes out, check whether any
+  question in it admits only one interesting answer.
+- **Frame a measurement so a null result is a win.** "A flat curve is
+  a fully successful outcome", said in the brief, is what makes a
+  ruled-out column trustworthy. Otherwise an agent that finds nothing
+  keeps looking for something.
 - **Mark your own inferences as yours**, and name the alternatives.
   A lead's reading presented as a premise is the cheapest way to
   get agreement instead of thought.
