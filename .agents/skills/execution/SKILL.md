@@ -42,6 +42,16 @@ Being allowed to go back is the easy half; **noticing that an assumption broke**
 - **Is this the second or third fix at the same seam?** Make it a lookup rather than an intuition: `git log` the files being touched and read what the earlier fixes there were for. A second patch at one seam is a design (`~/.agents/principles.md`, "Ask what you are compensating for").
 - **Has anyone actually used it?** Not "do the gates pass" — has a person or an agent operated the surface end to end. This is the one that never fires on its own.
 
+## Debugging starts at a reproduction
+
+For a reported defect the **problem** phase has a specific shape: the first artifact is a reproduction in the reported state, not a hypothesis and not a fix. Build the reporter's conditions rather than the convenient ones — their device and engine, their data volume, their configuration, a warm cache or a cold one. A measurement taken on a clean rig with everything enabled describes someone who does not exist, and everything downstream inherits that population. **"It does not reproduce here" is a result**, not a failure: it relocates the cause.
+
+**Read the instrument before reasoning about the system.** The telemetry the product already emits usually knows the onset, and nobody looks. Then name what a measurement cannot see before believing it — a tool that collapses rows, omits a field or samples the wrong layer reports a confident nothing, which is the same trap as "An empty result is not evidence of absence" under Trust boundaries.
+
+For a **regression** the first obligation is to find what changed. A redesign that would make the symptom go away is not a fix for a regression nobody has identified.
+
+The reproduction then stays as the guard: "The user's bug report IS the repro spec" under Verifying model-shaped work states it for model behaviour, and it is the general rule.
+
 ## Measure it
 
 - **Everything should be measurable**, through logging or metrics. Any mechanism that silently changes what happens — a guard, a cap, a retry, a drop path, a cache, a fallback — ships with the counter that makes it visible. Before merging, ask: if this misbehaved, what number would move, and is anyone emitting it? Full reasoning in `~/.agents/principles.md`, "Log for the debugging you will actually do".

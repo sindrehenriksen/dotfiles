@@ -94,29 +94,16 @@ read-only.** Two writers on one index is the hazard: a pre-commit
 framework stashes the whole unstaged tree, so a concurrent writer's
 in-flight edits silently revert.
 
-## Debugging starts at a reproduction
+## Debugging
 
-For a reported defect, **the first artifact is a reproduction in the
-reported state** — not a hypothesis, not a fix. Build the reporter's
-conditions rather than the convenient ones: their device and engine,
-their data volume, their configuration, a warm cache or a cold one.
-A measurement taken on a clean rig with everything enabled describes
-someone who does not exist, and everything downstream inherits that
-population. **"It does not reproduce here" is a result**, not a
-failure — it relocates the cause.
+`execution` has how a reported defect is worked: the reproduction in
+the reported state before any hypothesis, reading the instrument the
+product already emits, naming what a measurement cannot see, and
+finding what changed before redesigning anything for a regression.
 
-Two habits go with it. **Read the instrument before reasoning about
-the system**: the telemetry the product already emits usually knows
-the onset, and nobody looks. And **name what a measurement cannot
-see** before believing it — a tool that collapses rows, omits a field
-or samples the wrong layer reports a confident nothing.
-
-For a regression, the first obligation is to find what changed. A
-redesign that would make the symptom go away is not a fix for a
-regression nobody has identified.
-
-**Route it straight to a dev.** Reproduce, find the cause, fix it —
-the trio is convened only once the problem turns out to be complex or
+What is a round's to decide is where it goes, and the answer is
+almost always **straight to a dev** — reproduce, find the cause, fix
+it. The trio is convened once the problem turns out to be complex or
 wide-reaching, not as the standard path. Most defects do not need a
 round.
 
