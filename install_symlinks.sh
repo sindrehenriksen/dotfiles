@@ -27,8 +27,6 @@ mkdir -p ~/.config
 link ~/dotfiles/nvim ~/.config/nvim
 link ~/dotfiles/.zprofile ~/.zprofile
 link ~/dotfiles/.zshrc ~/.zshrc
-mkdir -p ~/.jupyter
-link ~/dotfiles/.jupyter_notebook_config.py ~/.jupyter/jupyter_notebook_config.py
 mkdir -p ~/.agents/skills ~/.claude/skills
 link ~/dotfiles/.agents/principles.md ~/.agents/principles.md
 link ~/dotfiles/.agents/AGENTS.md ~/.agents/AGENTS.md
