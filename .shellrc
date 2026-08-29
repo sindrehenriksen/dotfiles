@@ -40,7 +40,7 @@ fi
 # calls hook-env immediately, which hard-errors on an untrusted config in cwd's
 # chain. Sourced later, a login shell in an untrusted dir greets you with mise
 # trust errors, while a nested shell stays quiet — it inherits the var. Keep
-# this above. ~/.shellrc.local, at the end of this file, is the late equivalent.
+# this above.
 [ -f ~/.shellrc.early ] && source ~/.shellrc.early
 
 
@@ -132,7 +132,7 @@ fi
 
 #### Claude Code account switcher
 # Default account is personal. Override per machine with DEFAULT_ACCOUNT=work
-# in ~/.shellrc.local (untracked) to flip every account-aware tool at once, or
+# in ~/.shellrc.early (untracked) to flip every account-aware tool at once, or
 # CLAUDE_DEFAULT_ACCOUNT=work for just this one.
 # Explicit: claude-personal, claude-work. Each account uses its own config dir,
 # which means MCP servers registered via `claude mcp add` are per-account —
@@ -199,10 +199,6 @@ gh() {
 }
 gh-personal() { __gh-run personal "$@"; }
 gh-work()     { __gh-run work "$@"; }
-
-
-#### Local overrides (not tracked in dotfiles)
-[ -f ~/.shellrc.local ] && source ~/.shellrc.local
 
 
 #### Secrets (not tracked in dotfiles)

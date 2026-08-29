@@ -94,29 +94,26 @@ with no overlay is unaffected. The full set:
 | Slot | Consumed by | Placement, and why |
 |---|---|---|
 | `~/.shellrc.early` | `.shellrc` sources it if present | *above* the version-manager block, because it may export the variable that block reads on activation |
-| `~/.shellrc.local` | `.shellrc`, near the end | the late, general-purpose slot; the per-machine account default lives here |
 | `~/.secrets.env` | `.shellrc`, last line of all | exported credentials, `chmod 600` — template in `secrets/` |
 | `~/.gitconfig.local` | `.gitconfig` includes it | just after `[user]`, so it can override the identity or add conditional includes |
 | `~/.claude/settings.local.json` | the agent, per config dir | what is true of this machine only — resolved temp paths, extra permission rules; wins over the tracked `settings.json` beside it |
-| `.claude/settings.local.json` | the agent, with cwd in this repo | rules for working *on* this repo; wins over the user-level pair |
 
-Two axes sort them. **Early or late:** only `~/.shellrc.early` runs before the
-version-manager block, and it exists for the values that block needs on
-activation; anything without an ordering constraint belongs in
-`~/.shellrc.local`. Ordering is a real constraint, not a nicety, and it fails
-asymmetrically: a hook sourced too late still sets the variable, so a nested
-shell that inherited it stays quiet while a fresh login shell errors. An overlay
-whose early file needs secrets carries its own copy rather than waiting for
-`~/.secrets.env`, which is sourced last of everything.
+Ordering is the one real constraint. `~/.shellrc.early` runs *before* the
+version-manager block because it may export what that block reads on
+activation, and it fails asymmetrically when it doesn't: a hook sourced too late
+still sets the variable, so a nested shell that inherited it stays quiet while a
+fresh login shell errors. There is deliberately no late shell slot — one hook is
+easier to reason about than two, and anything an overlay wants late it can do
+from the early file. An overlay whose early file needs secrets carries its own
+copy rather than waiting for `~/.secrets.env`, which is sourced last of all.
 
-**Symlinked in or written per machine:** `~/.shellrc.early`, `~/.gitconfig.local`
-and the second account's `settings.local.json` are the overlay installer's to
-place. `~/.secrets.env`, `~/.shellrc.local` and the primary account's
-`settings.local.json` are hand-written on each machine and belong to no repo at
-all. (`~/.claude/keybindings.json` is untracked too but is not a slot — this
-repo's installer only mirrors whatever is there into the second account's config
-dir.) Both `settings.local.json` paths are ignored by git — the in-repo one via
-the global ignore file — so neither can be committed by accident.
+Everything else is placed by the overlay's installer, not written by hand:
+`~/.shellrc.early`, `~/.gitconfig.local` and the second account's
+`settings.local.json` are all symlinks into the more specific repo, which is
+what keeps them version-controlled. `~/.secrets.env` is the exception and
+belongs to no repo. (`~/.claude/keybindings.json` is untracked too but is not a
+slot — this repo's installer only mirrors whatever is there into the second
+account's config dir.)
 
 Two guards make the arrangement safe to re-run: every shell and git slot is
 conditional on the file existing, and the `link` helper in each installer refuses
