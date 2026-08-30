@@ -64,10 +64,14 @@ Four consequences:
 team checkout (or one of its worktrees), the upward walk stops at that checkout's
 root and never reaches the bridging repo's `.claude/skills/` — while its
 `CLAUDE.md`, one directory further up, loads fine. The fix is to force-link it
-up: the private installer symlinks each skill directory into
-`~/.claude/skills/<name>`, which is the path the agent actually reads, and into
-`~/.agents/skills/<name>`, which is the vendor-neutral convention other agents
-read and is kept in step deliberately — a skill present only there does not load.
+up: the private installer symlinks each skill directory into the skills
+directory of the *account it belongs to* — `~/.claude/skills/<name>` for a
+personal overlay, `~/.claude-work/skills/<name>` for a work one — which is the
+path the agent actually reads. It does not also link into the vendor-neutral
+`~/.agents/skills/<name>`: nothing reads that today, and it has no account
+separation, so a link there would show an overlay's skills to every account at
+once. That is deferred until a vendor-neutral agent is actually in use, whose
+own convention then decides where it goes.
 That link is the *only* reason such a skill is discoverable, it is invisible in
 both repos, and a stale one fails silently: a dangling entry raises nothing, the
 skill is simply absent — so re-run the private installer after adding,
