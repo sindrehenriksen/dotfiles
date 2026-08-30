@@ -197,6 +197,14 @@ a retyped version of the role.
   surrounding narrative. A framing invented in a brief propagates
   into code, comments and records, and nothing downstream can tell it
   from the owner's own words.
+- **Verbatim in a brief; plain in the repo.** Quoting is for briefs.
+  When the same input has to be RECORDED — a design brief, an entry a
+  later round reads — write the asks plainly instead: what keeps a
+  framing from being invented is that the writer adds no conclusions,
+  which quotation marks neither guarantee nor replace. Keep the raw
+  wording in a local untracked file (a gitignored path inside the repo,
+  so it survives the session), point the round at it, and delete it
+  when the work it briefs is done. It is meant to be temporary.
 - **Carry measured facts forward** rather than making each round
   re-derive them — but "verified" must mean the number was checked,
   never that its reading was.
