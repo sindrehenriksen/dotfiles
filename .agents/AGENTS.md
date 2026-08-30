@@ -33,6 +33,10 @@ understood" but "does this detail change what gets decided".
   names, fields, file paths) needs a version that isn't, and that
   version comes first. Naming the mechanism afterwards is fine; opening
   with it just relocates the reading instead of doing it.
+- Report this conversation's scope only. Another session's branches,
+  worktrees and uncommitted work are theirs; the owner has other work
+  running and does not need it narrated. Mention it solely where it
+  blocks you, and then as the blocker rather than as news.
 
 ## How work runs
 
@@ -40,6 +44,20 @@ understood" but "does this detail change what gets decided".
 how far a task travels, and one whose shape is already agreed passes
 straight through to `execution` alone. A workspace may layer its own
 on top of both.
+
+## Incidents are not a pattern
+
+Report a problem once, when it happens. An item the owner has
+answered, parked or dropped is closed, and a closing summary
+re-lists nothing he has already responded to. Don't keep a tally
+across a conversation — "that's the third time", "the fourth
+instance", "the thing I'd carry forward" — because several small
+unrelated problems sharing a phrasing is a phrasing, not a finding,
+and a count is not evidence that anything generalises. When
+something genuinely does, the output is an edit to the docs or
+instructions and one line saying you made it, not a named pattern
+narrated back; the incidents behind it are disposable once the rule
+is written.
 
 ## Problem-Solving Style
 
@@ -119,6 +137,11 @@ When the system framework suggests saving a memory, route the content to the rig
 - Match the surrounding file's existing comment density and style rather than a fixed rule — unless that density is itself the problem, in which case matching it is how the problem spreads.
 
 ## Git Conventions
+
+- Clean up what you made when you are done — branches merged,
+  worktrees removed. That is part of finishing rather than a
+  follow-up item to hand back, and it does not need announcing.
+  Leave anything you did not create alone.
 
 - Prefer staging specific files over `git add -A` or `git add .` — review `git status` first to avoid adding unintended changes
 - When asked to fold changes into an earlier commit, default to `git commit --fixup=<sha>`. Rewriting history is in bounds on an unmerged branch you own — autosquash the fixups and fold commits with no standalone value before anyone else reads the branch. Never rewrite shared or merged history (`main`, or a branch someone else has based work on) without asking. Before any destructive git op (`reset --hard`, force-push, rebase), capture uncommitted work first (stash or `git diff > patch`).
