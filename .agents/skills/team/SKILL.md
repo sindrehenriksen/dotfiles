@@ -220,7 +220,7 @@ a retyped version of the role.
 - **Where the work is model-shaped** — prompts, evals, judge models,
   quality gates, retrieval — point the brief at `execution`,
   "Verifying model-shaped work". Those rules bind whoever touches the
-  work, not only a round that staffs a specialist for it.
+  work, not only a round that staffs `roles/ai-engineer.md` for it.
 
 ## Instructions must stay consistent
 

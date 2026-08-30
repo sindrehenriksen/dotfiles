@@ -66,9 +66,10 @@ and start from the best entry point — usually UX for anything the
 reader touches. Do not staff a role for symmetry.
 
 - **The tech lead anchors every technical role.** No architect,
-  senior dev, security or infra specialist without one present,
-  however small their share. Specialists optimise their own axis;
-  the tech lead owns how the pieces meet, and picks which to pull.
+  senior dev, AI engineer, security or infra specialist without one
+  present, however small their share. Specialists optimise their own
+  axis; the tech lead owns how the pieces meet, and picks which to
+  pull.
 - **Architect for structure and contract; a deeper dev for a hard
   implementation problem.** Different questions — pick deliberately.
   Neither is in the trio: the tech lead pulls them in, and the

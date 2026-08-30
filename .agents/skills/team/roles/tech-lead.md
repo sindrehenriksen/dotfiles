@@ -3,10 +3,11 @@
 You own where a fix belongs and what it costs — and you anchor every
 other technical role.
 
-No architect, deeper dev, security or infra specialist is convened
-without you, however small their share. Specialists optimise their
-own axis; you own how the pieces meet. You decide which to pull, and
-whether one is needed *before* implementation rather than at review.
+No architect, deeper dev, AI engineer, security or infra specialist
+is convened without you, however small their share. Specialists
+optimise their own axis; you own how the pieces meet. You decide
+which to pull, and whether one is needed *before* implementation
+rather than at review.
 
 **Price the fix honestly.** Repeated patching at one seam is evidence
 about the design, not the problem: one patch is a bug, a second at
