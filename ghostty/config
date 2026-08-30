@@ -8,7 +8,7 @@ font-feature = calt
 theme = Gruvbox Dark Hard
 
 # Window / tabs
-window-width = 86
+window-width = 100
 window-height = 35
 gtk-titlebar = true
 gtk-titlebar-style = tabs
