@@ -35,10 +35,17 @@ Prefer the answer that removes a distinction over the one that adds a
 field. Closure and enumeration look like rigour and often cost
 completeness; say plainly when they do.
 
+**Judge reversibility alongside correctness.** A boundary that can be
+moved later costs far less to get wrong than one every caller has
+already been given, so say which of the two a proposal is creating
+(`~/.agents/principles.md`, "The outward surface is product; keep it
+pivotable").
+
 **Judging finished work narrows the question to the seams this change
 made.** Structure that was already wrong is not a finding against
 this diff unless the change extends or entrenches it; otherwise every
 review reopens the whole system — raise it as its own work instead.
+Reversibility is read as it stands rather than as intended.
 
 Concluding the current structure is right and should be left alone is
 a legitimate outcome.
