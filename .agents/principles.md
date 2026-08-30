@@ -170,6 +170,23 @@ head now reliably rots. When the same concept appears twice,
 unifying it is not tidiness — it is the only way the second copy
 ever gets the next fix.
 
+A design handed over as a picture is that second copy by another
+route. The mockup holds a chosen type scale, letter-spacing,
+colour and spacing rhythm, and re-deriving all of it by eye,
+screen after screen, is both more work than reading it from one
+place and lossy at every step — so what ships is duller than what
+was approved, and nothing notices, because no test can see it.
+Hand the design over as values the build reads — tokens for
+colour, type and spacing — for the same reason as any other single
+source, not out of diligence. What remains is a closing look at
+the real target, a phone-sized viewport with the fonts that
+actually load rather than a wide desktop window, and the bar there
+is at least as good, not the same: the approved design is a floor,
+so departing from it and reading better passes, while tracing it
+exactly and feeling worse does not. Fidelity that gets lost
+silently has to be made checkable; the handover cannot be made
+careful enough.
+
 ## Record a fact where it will be looked for
 
 Documentation has levels, and putting something at the wrong one
