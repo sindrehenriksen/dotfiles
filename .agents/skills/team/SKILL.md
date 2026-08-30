@@ -1,6 +1,6 @@
 ---
 name: team
-description: 'Running work through a team of roles: who to convene, how to keep them independent, and what the lead does and does not do. USE FOR: any work that is open, needs planning, or has a shape still to be decided — features, redesigns, investigations with a decision at the end. DO NOT USE FOR: a task whose shape is already agreed and only needs executing (the `execution` skill covers that), or a repo''s own artifacts and gates.'
+description: 'Running work through a team of roles: who to convene, how to keep them independent, and what the lead does and does not do. USE FOR: work of any size — it is the default entry point and decides how far a task travels, from a shaped one passed straight to a single agent to an open one that runs a round. DO NOT USE FOR: a repo''s own artifacts and gates, or the generic delegation mechanics beneath this (`execution`).'
 ---
 
 # Team
@@ -17,10 +17,13 @@ independence rules as the rest — instructed by the facilitator alone,
 read-only unless it is the one writer in the checkout, reporting by
 ending its turn.
 
-The default for open work. When a task arrives already planned and
-clearly shaped, `execution` is enough on its own; when the shape is
-still to be decided, this runs on top of it. **An unknown answer is
-not an open shape**: work whose next step is to go and find something
+**The default entry point, for work of any size.** What varies is how
+far a task travels: one whose shape is already agreed passes straight
+through to an agent on `execution` alone, while an open one runs a
+round. Deciding which is what this file is for — it is not a tier
+reserved for large work.
+
+**An unknown answer is not an open shape**: work whose next step is to go and find something
 out — a cause, a reproduction, a number — is scoped work with an
 investigation inside it, and it goes straight to an agent on
 `execution` alone. That holds for a defect, a feature and a redesign

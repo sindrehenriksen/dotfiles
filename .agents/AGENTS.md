@@ -36,9 +36,10 @@ understood" but "does this detail change what gets decided".
 
 ## How work runs
 
-`team` is the default skill for open work — anything still needing a
-shape decided. `execution` alone is for a task already planned and
-clearly shaped. A workspace may layer its own on top of both.
+`team` is the default entry point, for work of any size — it decides
+how far a task travels, and one whose shape is already agreed passes
+straight through to `execution` alone. A workspace may layer its own
+on top of both.
 
 ## Problem-Solving Style
 
