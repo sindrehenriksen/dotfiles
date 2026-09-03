@@ -667,4 +667,31 @@ mod_tap = hs.eventtap.new({
 end)
 mod_tap:start()
 
+-- hidutil mappings are per-device and only reach the keyboards connected when
+-- macos/keyboard-remap.sh runs, so one plugged in after login comes up with
+-- only the unscoped mappings — a Windows keyboard keeps Alt where Cmd should
+-- be. Re-run the script on USB attach and on wake. USB attach fires once per
+-- interface, hence the debounce. A Bluetooth keyboard paired mid-session is
+-- not covered; that still needs the kickstart in macos/README.md.
+local remap_script = os.getenv("HOME") .. "/dotfiles/macos/keyboard-remap.sh"
+local remap_timer = nil
+
+local function reapply_key_remap()
+  if remap_timer then remap_timer:stop() end
+  remap_timer = hs.timer.doAfter(1, function()
+    remap_timer = nil
+    hs.task.new(remap_script, nil):start()
+  end)
+end
+
+usb_watcher = hs.usb.watcher.new(function(ev)
+  if ev.eventType == "added" then reapply_key_remap() end
+end)
+usb_watcher:start()
+
+wake_watcher = hs.caffeinate.watcher.new(function(ev)
+  if ev == hs.caffeinate.watcher.systemDidWake then reapply_key_remap() end
+end)
+wake_watcher:start()
+
 hs.alert.show("Hammerspoon loaded")

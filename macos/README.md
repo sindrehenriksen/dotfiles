@@ -34,11 +34,11 @@ Two `hidutil` gotchas the script depends on:
 - The unscoped `--set` hits every device including the scoped ones, so it has
   to run first.
 
-`--set` applies to the keyboards connected *at that moment*. A keyboard
-plugged in or paired after login may come up unmapped; re-run the `kickstart`
-above. (Untested — the external keyboards weren't to hand when this was
-written. If it turns out to bite regularly, an `hs.usb.watcher` in
-`hammerspoon/init.lua` can re-run the script on connect.)
+`--set` applies to the keyboards connected *at that moment*, so one attached
+after login comes up with only the unscoped mappings — confirmed on the
+Microsoft keyboard, which kept Alt where Cmd should be. `hammerspoon/init.lua`
+therefore re-runs this script on USB attach and on wake. A Bluetooth keyboard
+paired mid-session is not covered by either; run the `kickstart` above.
 
 Mappings are simultaneous, not chained: with `fn -> Control` and
 `Control -> fn` both listed, each key produces the other rather than one
