@@ -39,6 +39,8 @@ hidutil property --matching '{"Product":"Apple Internal Keyboard / Trackpad"}' -
   "{\"UserKeyMapping\":[$CAPS_TO_F18,$FN_TO_CTRL,$CTRL_TO_FN]}" >/dev/null
 
 # Microsoft keyboard: Alt <-> Cmd, so Cmd sits next to the space bar as it
-# does on a Mac keyboard.
+# does on a Mac keyboard. That leaves the Menu key carrying AltGr, since the
+# swap takes the real right Alt — it is what types a/o/e as the Norwegian
+# letters on Programmer Dvorak.
 hidutil property --matching '{"VendorID":1118,"ProductID":1957}' --set \
-  "{\"UserKeyMapping\":[$CAPS_TO_F18,$LEFT_ALT_TO_CMD,$LEFT_CMD_TO_ALT,$RIGHT_ALT_TO_CMD,$RIGHT_CMD_TO_ALT]}" >/dev/null
+  "{\"UserKeyMapping\":[$CAPS_TO_F18,$MENU_TO_RIGHT_ALT,$LEFT_ALT_TO_CMD,$LEFT_CMD_TO_ALT,$RIGHT_ALT_TO_CMD,$RIGHT_CMD_TO_ALT]}" >/dev/null
