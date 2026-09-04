@@ -1,2 +1,15 @@
 export FZF_DEFAULT_COMMAND='rg --smart-case --files --hidden --follow -g "!.git"'
 export FZF_DEFAULT_OPTS='-m --height 40% --layout=reverse'
+
+# `**<TAB>` does NOT use FZF_DEFAULT_COMMAND. fzf's completion calls these two
+# hooks and, undefined, falls back to a bare `find` that walks node_modules and
+# every other thing ~/.ignore exists to keep out. Routing them through rg is
+# what makes the ignore rules apply to completion as well as to search.
+_fzf_compgen_path() {
+    rg --files --follow -- "$1" 2>/dev/null
+}
+_fzf_compgen_dir() {
+    command find -L "$1" -mindepth 1 \
+        \( -name .git -o -name node_modules -o -name .venv \) -prune -o \
+        -type d -print 2>/dev/null
+}

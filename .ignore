@@ -7,6 +7,10 @@
 # own `.ignore`, which ripgrep reads from ancestors of the search path.
 
 node_modules/
+
+# Worktree checkouts are excluded per repo instead, in that repo's own .ignore:
+# a multi-component pattern here does not match from above a repo root, while a
+# basename one broad enough to work would hide directories nobody meant to hide.
 .venv/
 __pycache__/
 dist/

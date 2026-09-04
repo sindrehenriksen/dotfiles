@@ -119,7 +119,9 @@ ones, so a search rooted above a nested repository still reaches inside it, and
 What stays out of a search is `~/.ignore` plus any `.ignore` a workspace or repo
 adds — dependencies, build output, and checkouts that would return every hit
 twice. `--no-ignore` reaches those when they are the point; `git -C <repo> grep`
-is still the cheapest way to search one repo.
+is still the cheapest way to search one repo. To find a file by name rather
+than by content, `rg --files -g '<glob>'` — `fd` is not installed, and `fzf` is
+interactive, so neither is available to an agent.
 
 ## Check the environment before assuming
 
