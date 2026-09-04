@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Claude Code status line. Reads JSON on stdin and prints a single line:
-#   [<vim>] t:<tokens> (<ctx%>) | [!mem:<rss>] 5h:<rem%> w:<rem%> | <model>[ th:<state>] | <dir>[ <branch>]
+#   [<vim>] t:<tokens> (<ctx%>) | [!mem:<rss>] 5h:<rem%> w:<rem%> | <model>[ th:<state>] | <dir>[ <branch>][ #<pr>]
 # th:<state> is the effort level when thinking is on, "on" when thinking is on but the
 # model has no effort parameter, or "off" when thinking is disabled.
 # !mem: appears only above MEM_WARN_KB — see below.
@@ -62,6 +62,47 @@ for _ in 1 2 3 4 5 6; do
 done
 [ "$mem_max" -ge "$MEM_WARN_KB" ] && mem=$(awk -v k="$mem_max" 'BEGIN{printf "!mem:%.1fG", k/1048576}')
 
+# Open PR for the checked-out branch, as "#1234". Asking GitHub is a network
+# round trip and this line re-renders several times a second, so a render never
+# waits on one: it prints whatever the cache holds and, once that is PR_TTL old,
+# hands the refresh to a detached process whose result lands in time for a later
+# render. Cache lines are "<epoch> [number]" — an empty number is a cached "no
+# open PR", which is what stops a branch without one being asked about forever.
+# The gh account comes from the GH_CONFIG_DIR the `claude` wrapper exports; an
+# unauthenticated or ambiguous repo just reads as no PR.
+PR_TTL=120
+pr=""
+# No local origin/<branch> means nothing was pushed, so there is no PR to find,
+# and the default branch is not where PRs come from. Both checks are local and
+# free, which is the point of doing them before spending a network call.
+pr_git_dir=$(git -C "$cwd" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)
+pr_default=$(git -C "$cwd" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null)
+if [ -n "$branch" ] && [ -n "$pr_git_dir" ] && [ "origin/$branch" != "$pr_default" ] &&
+    git -C "$cwd" rev-parse --verify --quiet "refs/remotes/origin/$branch" >/dev/null &&
+    command -v gh >/dev/null 2>&1; then
+    # Keyed on the common git dir, so every worktree of a repo shares one cache.
+    pr_dir="${XDG_CACHE_HOME:-$HOME/.cache}/claude-statusline"
+    pr_cache="$pr_dir/pr-$(printf '%s#%s' "$pr_git_dir" "$branch" | tr -c 'A-Za-z0-9._-' '_')"
+    pr_at=0
+    [ -r "$pr_cache" ] && read -r pr_at pr <"$pr_cache"
+    case $pr_at in '' | *[!0-9]*) pr_at=0 ;; esac
+    case $pr in *[!0-9]*) pr="" ;; esac
+    now=${EPOCHSECONDS:-$(date +%s)}
+    if [ $((now - pr_at)) -ge "$PR_TTL" ]; then
+        # Stamp the cache before forking, so renders landing while gh is in
+        # flight see a fresh entry instead of each forking a query of its own.
+        mkdir -p "$pr_dir"
+        printf '%s %s\n' "$now" "$pr" >"$pr_cache"
+        (
+            cd "$cwd" || exit
+            pr_new=$(gh pr list --head "$branch" --state open --json number --jq '.[0].number // empty' 2>/dev/null)
+            printf '%s %s\n' "${EPOCHSECONDS:-$(date +%s)}" "$pr_new" >"$pr_cache.$$"
+            mv -f "$pr_cache.$$" "$pr_cache"
+        ) </dev/null >/dev/null 2>&1 &
+    fi
+    [ -n "$pr" ] && pr="#$pr"
+fi
+
 middle=""
 [ -n "$mem" ] && middle="$mem"
 [ -n "$five_rem" ] && middle="${middle:+$middle }5h:${five_rem}%"
@@ -78,5 +119,6 @@ out="$left"
 [ -n "$right" ] && out="$out | $right"
 prompt="$dir"
 [ -n "$branch" ] && prompt="$prompt $branch"
+[ -n "$pr" ] && prompt="$prompt $pr"
 out="$out | $prompt"
 echo "$out"
