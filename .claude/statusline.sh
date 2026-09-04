@@ -118,7 +118,16 @@ out="$left"
 [ -n "$middle" ] && out="$out | $middle"
 [ -n "$right" ] && out="$out | $right"
 prompt="$dir"
-[ -n "$branch" ] && prompt="$prompt $branch"
+if [ -n "$branch" ]; then
+    # A worktree directory is usually named after the branch checked out in it,
+    # so printing both spends 30-odd columns of a line the terminal truncates.
+    # The separator is part of the match, or a directory ending in "…-domain"
+    # would swallow the "main" it happens to end with.
+    case $cwd in
+        */"$branch" | *[-_.]"$branch") ;;
+        *) prompt="$prompt $branch" ;;
+    esac
+fi
 [ -n "$pr" ] && prompt="$prompt $pr"
 out="$out | $prompt"
 echo "$out"
