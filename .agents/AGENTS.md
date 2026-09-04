@@ -70,11 +70,11 @@ is written.
 
 ## Confirm before outward-facing or hard-to-undo actions
 
-- Proceed freely when the ask is clear — this isn't about gating routine work. It applies to actions others will see or that are annoying to reverse: posting reviews/comments, creating or transitioning tickets, sending messages, publishing externally.
+- Proceed freely when the ask is clear — this isn't about gating routine work. It applies to actions others will see or that are annoying to reverse: posting reviews/comments, creating tickets, sending messages, publishing externally. A state change that only records a decision already taken isn't one of them — moving a ticket to in-progress once we've agreed to pick the work up, say.
 - If the instruction is ambiguous or we're still discussing/drafting, show the draft and wait for an explicit go before acting.
 - An active discussion is not authorization — refining wording or weighing options is not a green light to post.
-- Don't infer a new artifact from loose phrasing: "we should track this" isn't "create the ticket." A go-ahead covers only the step discussed, not the next action.
-- **Don't delegate an outward-facing step.** Anything that needs a go — merging, posting, transitioning a ticket, triggering a review — stays in the main loop where the go was given. A subagent's work ends at the local commit.
+- Don't infer a new artifact from loose phrasing: "we should track this" isn't "create the ticket." A go-ahead covers only the step discussed, not the next action — but it does carry what that step routinely entails, so agreeing to take on a piece of work authorizes the bookkeeping of starting it.
+- **Don't delegate an outward-facing step.** Anything that needs a go — merging, posting, creating a ticket, triggering a review — stays in the main loop where the go was given. A subagent's work ends at the local commit.
 
 ## Permissions and blocked actions
 
