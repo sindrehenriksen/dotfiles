@@ -9,6 +9,7 @@ Personal dev environment: zsh, Neovim, Ghostty, Git, AI agent configs. Cross-pla
 | `.zshrc`, `.zprofile`, `.bashrc`, `.profile`, `.shellrc` | Shell init; `.shellrc` is sourced by both bash and zsh |
 | `.gitconfig`, `.gitlint` | Git config and commit linting |
 | `.fzf_config` | fzf defaults (rg-backed file list) |
+| `ripgrep/ripgreprc`, `.ignore` | ripgrep: skip VCS ignore files and read hidden ones, so a search crosses into nested repos; `.ignore` holds what stays out regardless |
 | `nvim/` | Neovim Lua config (lazy.nvim, native LSP, blink.cmp, telescope, gitsigns, diffview, gruvbox.nvim) |
 | `ghostty/config` | Ghostty terminal config (Fira Code, Gruvbox Dark Hard, split nav on Dvorak home row) |
 | `hammerspoon/init.lua` | macOS window layout (picker on `Opt+Cmd+T`, three-column + one-off placement) — see `docs/window-layout.md` |

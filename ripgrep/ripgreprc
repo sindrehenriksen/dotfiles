@@ -1,0 +1,11 @@
+# Do not honour .gitignore / .git/info/exclude. A search rooted above a nested
+# repository is otherwise silently empty whenever the outer repo ignores the
+# inner one — and a blind result is indistinguishable from a clean one. What
+# should never be searched is in ~/.ignore instead, which this does not disable.
+--no-ignore-vcs
+
+# Hidden directories hold the things most worth finding here — .agents,
+# .claude, .github — and rg skips them by default. Git internals are the one
+# thing --hidden would otherwise drag in, and VCS ignore is off above.
+--hidden
+--glob=!.git/

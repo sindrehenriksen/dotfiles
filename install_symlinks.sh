@@ -25,6 +25,8 @@ link ~/dotfiles/.profile ~/.profile
 link ~/dotfiles/.shellrc ~/.shellrc
 mkdir -p ~/.config
 link ~/dotfiles/nvim ~/.config/nvim
+link ~/dotfiles/ripgrep ~/.config/ripgrep
+link ~/dotfiles/.ignore ~/.ignore
 link ~/dotfiles/.zprofile ~/.zprofile
 link ~/dotfiles/.zshrc ~/.zshrc
 mkdir -p ~/.agents/skills ~/.claude/skills

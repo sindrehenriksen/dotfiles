@@ -110,6 +110,17 @@ Most of `~` (shell configs, tool settings, Claude config, skills) is symlinked f
 
 **The exception is machine-local config, which is untracked on purpose.** `~/.claude/settings.local.json` sits beside the symlinked `settings.json` and is gitignored via `~/.config/git/ignore`, so a setting that is true on this machine and false on the next belongs there rather than in the tracked file. Paths in it must be literal and absolute — globs don't match.
 
+## Searching
+
+Search with `rg`, not `grep`. It is configured
+(`~/dotfiles/ripgrep/ripgreprc`) to skip VCS ignore files and to read hidden
+ones, so a search rooted above a nested repository still reaches inside it, and
+`.agents/`, `.claude/` and `.github/` are visible rather than silently absent.
+What stays out of a search is `~/.ignore` plus any `.ignore` a workspace or repo
+adds — dependencies, build output, and checkouts that would return every hit
+twice. `--no-ignore` reaches those when they are the point; `git -C <repo> grep`
+is still the cheapest way to search one repo.
+
 ## Check the environment before assuming
 
 Before claiming a tool isn't installed or recommending an install step, check the environment — `$TERM_PROGRAM` (`ghostty`, `iTerm.app`, `Apple_Terminal`), `$SHELL`, `$HOMEBREW_PREFIX`, `uname -m` (`arm64` vs `x86_64`), `which <cmd>`. The session env block is brief; one quick probe beats a guess.

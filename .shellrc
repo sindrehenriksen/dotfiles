@@ -2,6 +2,9 @@
 export VISUAL=nvim
 export EDITOR="$VISUAL"
 export LANG=en_US.UTF-8
+# rg reads no config file unless told where one is. What it holds and why:
+# ~/dotfiles/ripgrep/ripgreprc.
+export RIPGREP_CONFIG_PATH="$HOME/.config/ripgrep/ripgreprc"
 
 # Platform detection
 if [[ "$(uname)" == "Darwin" ]]; then

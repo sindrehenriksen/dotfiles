@@ -1,0 +1,22 @@
+# Read by ripgrep in addition to VCS ignore files, and — unlike them — still
+# honoured under `--no-ignore-vcs`, which ripgreprc turns on globally. That
+# split is the point: VCS ignore hides whole nested repos from a search rooted
+# above them, while these are directories nobody ever wants to read.
+#
+# Generic entries only. Anything true of one workspace or repo belongs in its
+# own `.ignore`, which ripgrep reads from ancestors of the search path.
+
+node_modules/
+.venv/
+__pycache__/
+dist/
+build/
+.next/
+.nuxt/
+.turbo/
+.svelte-kit/
+coverage/
+.vercel/
+*.lock
+pnpm-lock.yaml
+package-lock.json
