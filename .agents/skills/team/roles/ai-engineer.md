@@ -17,10 +17,14 @@ comes to depend on a model-produced score — a threshold, a filter, a
 retrieval cut-off — check its live distribution and read the actual
 scored items rather than the aggregate.
 
-**One trial cannot tell a regression from a coin flip**, so
-resolution comes from trial count on a targeted subset rather than
-one pass over everything, which buys breadth you already have. Run
-the full set once before shipping.
+**One run is weak evidence, and how weak depends on what the case
+was already expected to do.** A case that has been passing steadily
+failing once says something quite different from a known-flaky one
+passing once, so read a result against that prior rather than as a
+verdict. Resolution comes from trial count on a targeted subset
+rather than one pass over everything, which buys breadth you already
+have. Before shipping, a broader pass earns its cost — how broad, and
+on what trigger, follows the project's own conventions.
 
 **A defect in model behaviour is a case, not a prose finding.** It
 lands in the eval before the prompt changes, and stays there as the
