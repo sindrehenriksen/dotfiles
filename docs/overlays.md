@@ -68,10 +68,14 @@ up: the private installer symlinks each skill directory into the skills
 directory of the *account it belongs to* — `~/.claude/skills/<name>` for a
 personal overlay, `~/.claude-work/skills/<name>` for a work one — which is the
 path the agent actually reads. It does not also link into the vendor-neutral
-`~/.agents/skills/<name>`: nothing reads that today, and it has no account
-separation, so a link there would show an overlay's skills to every account at
-once. That is deferred until a vendor-neutral agent is actually in use, whose
-own convention then decides where it goes.
+`~/.agents/skills/<name>`. Nothing *discovers* a skill there — a skill present
+only in that directory cannot be invoked at all — so the link buys no loading,
+and the directory has no account separation, so an overlay linked there would
+show its skills to every account at once. The generic tier still populates it
+because files beneath it are read by path, which is how a review lens reaches
+`team`'s role briefs; that is a file read rather than discovery. Extending it to
+overlays is deferred until a vendor-neutral agent is actually in use, whose own
+convention then decides where it goes.
 That link is the *only* reason such a skill is discoverable, it is invisible in
 both repos, and a stale one fails silently: a dangling entry raises nothing, the
 skill is simply absent — so re-run the private installer after adding,
