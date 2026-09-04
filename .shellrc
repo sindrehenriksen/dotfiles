@@ -5,6 +5,12 @@ export LANG=en_US.UTF-8
 # rg reads no config file unless told where one is. What it holds and why:
 # ~/dotfiles/ripgrep/ripgreprc.
 export RIPGREP_CONFIG_PATH="$HOME/.config/ripgrep/ripgreprc"
+# What a NEW Claude Code session starts on. Deliberately not the `model` key in
+# settings.json: /model writes that key when you press Enter in its picker, so
+# the tracked config would change every time a session switched model. This
+# variable is only consulted when no `model` key exists — press `s` in the
+# picker to switch for the session alone and leave it that way.
+export ANTHROPIC_DEFAULT_MODEL="opus[1m]"
 
 # Platform detection
 if [[ "$(uname)" == "Darwin" ]]; then
