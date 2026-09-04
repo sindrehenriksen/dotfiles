@@ -33,6 +33,13 @@ understood" but "does this detail change what gets decided".
   names, fields, file paths) needs a version that isn't, and that
   version comes first. Naming the mechanism afterwards is fine; opening
   with it just relocates the reading instead of doing it.
+- Name the load-bearing prose a change touches, as you touch it.
+  Decision records, strategy and discovery docs, user-facing copy,
+  instruction files and skills are read later as settled fact, so say
+  which of them a change touched when you make it rather than in a
+  closing summary, and ask for a real read. Automated review leans the
+  other way: a docs-or-copy diff is exactly the shape a low-risk
+  heuristic waves through.
 - Report this conversation's scope only. Another session's branches,
   worktrees and uncommitted work are theirs; the owner has other work
   running and does not need it narrated. Mention it solely where it
