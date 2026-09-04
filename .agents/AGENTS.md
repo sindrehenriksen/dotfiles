@@ -170,6 +170,14 @@ When the system framework suggests saving a memory, route the content to the rig
 
 ## Git Conventions
 
+- **Finish a change by committing it.** Uncommitted work is
+  unreviewable and easily lost, and a commit is the cheapest object
+  in git to undo — amend it, reorder it, fold it, drop it. Leaving
+  the commit to the owner is not caution; it moves the risk onto
+  them and costs them the diff they would have reviewed. What waits
+  for a go is pushing and anything else outward-facing, never the
+  commit itself.
+
 - Clean up what you made when you are done — branches merged,
   worktrees removed. That is part of finishing rather than a
   follow-up item to hand back, and it does not need announcing.
