@@ -121,7 +121,16 @@
       "Bash(comm *)",
       "Bash(uniq *)",
       "Bash(jq *)",
-      "Bash(pre-commit run *)"
+      "Bash(pre-commit run *)",
+      "Bash(git -C * commit -F -)",
+      "Bash(git -C * commit -m *)",
+      "Bash(git -C * commit --amend -F -)",
+      "Bash(git -C * commit --amend --no-edit)",
+      "Bash(git -C * commit --fixup=*)",
+      "Bash(git commit -F -)",
+      "Bash(git commit -m *)",
+      "Bash(git commit --amend --no-edit)",
+      "Bash(git commit --fixup=*)"
     ],
     "deny": [
       "Bash(curl * -X DELETE *)",
