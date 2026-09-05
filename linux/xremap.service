@@ -10,6 +10,12 @@ Type=simple
 ExecStart=%h/.local/bin/xremap --watch=config,device %h/.config/xremap/config.yml
 Restart=on-failure
 RestartSec=2
+# The user manager sets DefaultOOMPolicy=continue so an OOM-killed process does
+# not take its whole Ghostty tab with it (system/README.md). Inheriting that
+# here would mean systemd declining to act on the unit when the remapper is the
+# thing killed, and a silently dead remapper presents as "the keyboard stopped
+# working" — an unpleasant thing to diagnose. Opt this one unit back in.
+OOMPolicy=stop
 
 [Install]
 WantedBy=graphical-session.target
