@@ -61,7 +61,7 @@ end
 local THIRD = 1 / 3
 
 -- Named grid slots. Any window whose frame matches one of these (on its
--- current screen) is considered "on-grid" and participates in displacement.
+-- current screen) counts as a known placement for the screen-cycling check.
 local slots = {
   full_L   = { col = 0, xf = 0,         yf = 0,    wf = THIRD, hf = 1    },
   upper_L  = { col = 0, xf = 0,         yf = 0,    wf = THIRD, hf = 0.5  },
@@ -117,106 +117,8 @@ local function should_cycle(frame, target, screen)
      and not matches_other_known(frame, target, screen)
 end
 
--- Return the slot name matching win's current frame on its screen, or nil.
-local function window_slot(win)
-  local screen = win:screen()
-  local f = win:frame()
-  for name, _ in pairs(slots) do
-    if frames_equal(f, slot_frame(screen, name)) then return name end
-  end
-  return nil
-end
-
--- Displacement rules per target slot:
---   conflicts = slots whose occupant overlaps the target and must be moved.
---   options   = slots in the same column that do NOT overlap the target;
---               valid destinations for a displaced occupant.
---   canonical = default destination when no swap is possible.
--- Full-column (full_L/C/R) and half-width / full-screen placements are
--- intentionally absent — no displacement there.
-local displacement = {
-  upper_L  = { conflicts = { "full_L", "upper_L" }, options = { "lower_L" }, canonical = "lower_L" },
-  lower_L  = { conflicts = { "full_L", "lower_L" }, options = { "upper_L" }, canonical = "upper_L" },
-  upper_R  = { conflicts = { "full_R", "upper_R" }, options = { "lower_R" }, canonical = "lower_R" },
-  lower_R  = { conflicts = { "full_R", "lower_R" }, options = { "upper_R" }, canonical = "upper_R" },
-  upper_C  = { conflicts = { "full_C", "upper_C" }, options = { "lower_C" }, canonical = "lower_C" },
-  lower_C  = { conflicts = { "full_C", "lower_C" }, options = { "upper_C" }, canonical = "upper_C" },
-}
-
--- Slots that geometrically overlap a given slot (besides itself). Used to
--- check whether moving a displaced window to a destination would crush
--- another on-grid occupant.
-local slot_overlaps = {
-  full_L   = { "upper_L", "lower_L" },
-  upper_L  = { "full_L" },
-  lower_L  = { "full_L" },
-  full_C   = { "upper_C", "lower_C" },
-  upper_C  = { "full_C" },
-  lower_C  = { "full_C" },
-  full_R   = { "upper_R", "lower_R" },
-  upper_R  = { "full_R" },
-  lower_R  = { "full_R" },
-}
-
--- Classify windows on the given screen (excluding `exclude`) into a map of
--- slot_name → first window found at that slot. Off-grid windows are ignored.
-local function classify(screen, exclude)
-  local by_slot = {}
-  for _, win in ipairs(hs.window.visibleWindows()) do
-    if win ~= exclude and win:screen():getUUID() == screen:getUUID() then
-      local name = window_slot(win)
-      if name and not by_slot[name] then by_slot[name] = win end
-    end
-  end
-  return by_slot
-end
-
--- Is `dest` a safe destination for moving `occupant`? Safe iff `dest`
--- itself and every slot that geometrically overlaps it are free of other
--- on-grid windows. The occupant's current slot counts as vacated.
-local function dest_valid(dest, occupant, by_slot)
-  if by_slot[dest] and by_slot[dest] ~= occupant then return false end
-  for _, ov in ipairs(slot_overlaps[dest] or {}) do
-    if by_slot[ov] and by_slot[ov] ~= occupant then return false end
-  end
-  return true
-end
-
--- For each conflict occupant:
---   1. If focused came from one of the target's options, swap: displaced
---      goes to focused's old slot.
---   2. Else use the canonical complement.
--- Either way, only perform the move if the destination is safe (no new
--- overlap with another on-grid window).
-local function displace(focused, target_name, screen)
-  local rule = displacement[target_name]
-  if not rule then return end
-  local focused_old = window_slot(focused)
-  local by_slot = classify(screen, focused)
-  local function option_contains(name)
-    for _, o in ipairs(rule.options) do if o == name then return true end end
-    return false
-  end
-  for _, conflict_name in ipairs(rule.conflicts) do
-    local occupant = by_slot[conflict_name]
-    if occupant then
-      local dest
-      if focused_old and option_contains(focused_old) then
-        dest = focused_old
-      else
-        dest = rule.canonical
-      end
-      if dest and dest_valid(dest, occupant, by_slot) then
-        occupant:setFrame(slot_frame(screen, dest))
-        by_slot[dest] = occupant
-        by_slot[conflict_name] = nil
-      end
-    end
-  end
-end
-
 -- Place the focused window into a named slot. If it's already there, cycle
--- to the next screen. Applies displacement on the destination screen.
+-- to the next screen.
 local function place_slot(name)
   local win = hs.window.focusedWindow()
   if not win then return end
@@ -231,7 +133,6 @@ local function place_slot(name)
       crossing = true
     end
   end
-  displace(win, name, screen)
   win:setFrame(target)
   if crossing then
     hs.timer.doAfter(0.05, function() win:setFrame(target) end)
@@ -239,7 +140,7 @@ local function place_slot(name)
 end
 
 -- Raw placement for slots not in the named grid (half-width, full-screen).
--- No displacement, but keeps screen-cycling on repeat.
+-- Keeps screen-cycling on repeat.
 local function place_raw(xf, yf, wf, hf)
   local win = hs.window.focusedWindow()
   if not win then return end
