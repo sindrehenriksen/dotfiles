@@ -31,10 +31,15 @@ keyd is the better tool for pure key-position remapping and it works at the cons
 
 ## Verifying
 
-Two values in `xremap.yml` were written from documentation rather than measurement, and both should be confirmed once the service runs:
+Two values in `xremap.yml` were written from documentation and have since been confirmed on this machine. Both are worth re-checking on different hardware, since each fails quietly:
 
-- **The Menu key is assumed to send `KEY_COMPOSE`.** It carries AltGr, so the Norwegian letters depend on it. Check with `RUST_LOG=debug xremap --watch=config,device ~/.config/xremap/config.yml` and press it.
-- **Ghostty's window class is assumed to be `com.mitchellh.ghostty`.** If it is wrong, the terminal gets the general Super translation and `Super+C` starts interrupting things rather than copying. Check with:
+- **The Menu key sends `KEY_COMPOSE`.** It carries AltGr, so the Norwegian letters depend on it. A keyboard without that key loses them. `RUST_LOG=debug xremap --watch=config,device ~/.config/xremap/config.yml` names each key as you press it; the keyboard's capability map answers the same question without stopping the service:
+
+```sh
+grep -A6 'AT Translated' /proc/bus/input/devices   # bit 127 of B: KEY= is KEY_COMPOSE
+```
+
+- **Ghostty's window class is `com.mitchellh.ghostty`.** If this were wrong the terminal would fall into the general Super translation, and `Super+C` would interrupt rather than copy:
 
 ```sh
 busctl --user call org.gnome.Shell /com/k0kubun/Xremap com.k0kubun.Xremap WMClasses
