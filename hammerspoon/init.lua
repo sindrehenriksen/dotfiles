@@ -89,6 +89,37 @@ local raw_layouts = {
   { 0,    0, 1,   1 },
 }
 
+-- Two windows sharing a screen: one large beside one small, for the common
+-- case of a terminal and a browser. Each is centred vertically and sits a
+-- fixed margin in from its outer edge, so left and right mirror exactly.
+-- Geometry is per display: the ultrawide has room to tile both with air
+-- around them, the laptop does not, so there the large window takes the
+-- screen and the small one floats over it.
+local two_up = {
+  wide   = { margin = 0.10,  small = { w = 0.295, h = 0.70 }, large = { w = 0.48, h = 0.90 } },
+  narrow = { margin = 0.005, small = { w = 0.49,  h = 0.66 }, large = { w = 0.73, h = 0.96 } },
+}
+
+local function screen_kind(screen)
+  local f = screen:frame()
+  return f.w / f.h > 2 and "wide" or "narrow"
+end
+
+-- Fractional rect for one of the four two-up placements on `screen`.
+local function two_up_rect(screen, size, side)
+  local spec = two_up[screen_kind(screen)]
+  local box = spec[size]
+  local xf = side == "left" and spec.margin or 1 - spec.margin - box.w
+  return xf, (1 - box.h) / 2, box.w, box.h
+end
+
+local two_up_placements = {}
+for _, size in ipairs({ "small", "large" }) do
+  for _, side in ipairs({ "left", "right" }) do
+    two_up_placements[#two_up_placements + 1] = { size, side }
+  end
+end
+
 -- True if `frame` matches any known placement on `screen` other than
 -- `target`. Used to distinguish "stuck oversized at target" (where we
 -- want to cycle screens) from "currently at a different known slot, just
@@ -106,6 +137,12 @@ local function matches_other_known(frame, target, screen)
       return true
     end
   end
+  for _, p in ipairs(two_up_placements) do
+    local f = target_frame(screen, two_up_rect(screen, p[1], p[2]))
+    if not frames_equal(f, target) and frames_equal(frame, f) then
+      return true
+    end
+  end
   return false
 end
 
@@ -117,19 +154,20 @@ local function should_cycle(frame, target, screen)
      and not matches_other_known(frame, target, screen)
 end
 
--- Place the focused window into a named slot. If it's already there, cycle
--- to the next screen.
-local function place_slot(name)
+-- Place the focused window at a rect given as a function of the screen. If it
+-- is already there, cycle to the next screen — recomputing the rect for that
+-- screen, since two-up geometry differs between displays.
+local function place_by(rect_for)
   local win = hs.window.focusedWindow()
   if not win then return end
   local screen = win:screen()
-  local target = slot_frame(screen, name)
+  local target = target_frame(screen, rect_for(screen))
   local crossing = false
   if should_cycle(win:frame(), target, screen) then
     local next_screen = screen:next()
     if next_screen and next_screen:getUUID() ~= screen:getUUID() then
       screen = next_screen
-      target = slot_frame(screen, name)
+      target = target_frame(screen, rect_for(screen))
       crossing = true
     end
   end
@@ -139,26 +177,17 @@ local function place_slot(name)
   end
 end
 
--- Raw placement for slots not in the named grid (half-width, full-screen).
--- Keeps screen-cycling on repeat.
+local function place_slot(name)
+  local s = slots[name]
+  place_by(function() return s.xf, s.yf, s.wf, s.hf end)
+end
+
 local function place_raw(xf, yf, wf, hf)
-  local win = hs.window.focusedWindow()
-  if not win then return end
-  local screen = win:screen()
-  local target = target_frame(screen, xf, yf, wf, hf)
-  local crossing = false
-  if should_cycle(win:frame(), target, screen) then
-    local next_screen = screen:next()
-    if next_screen and next_screen:getUUID() ~= screen:getUUID() then
-      screen = next_screen
-      target = target_frame(screen, xf, yf, wf, hf)
-      crossing = true
-    end
-  end
-  win:setFrame(target)
-  if crossing then
-    hs.timer.doAfter(0.05, function() win:setFrame(target) end)
-  end
+  place_by(function() return xf, yf, wf, hf end)
+end
+
+local function place_two_up(size, side)
+  place_by(function(screen) return two_up_rect(screen, size, side) end)
 end
 
 local picker = hs.hotkey.modal.new({ "alt", "cmd" }, "t")
@@ -199,6 +228,12 @@ bind({ "shift" }, "n", function() place_raw(0.5,  0, 0.5, 1) end)
 
 -- Full screen
 bind(nil, "s", function() place_raw(0, 0, 1, 1) end)
+
+-- Two windows sharing a screen: small or large, on either side
+bind(nil, ",", function() place_two_up("small", "left")  end)
+bind(nil, ".", function() place_two_up("small", "right") end)
+bind(nil, "o", function() place_two_up("large", "left")  end)
+bind(nil, "e", function() place_two_up("large", "right") end)
 
 picker:bind({}, "escape", function() picker:exit() end)
 

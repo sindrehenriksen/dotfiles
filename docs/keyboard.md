@@ -111,6 +111,7 @@ So every binding in `hammerspoon/init.lua`, which is written in Dvorak letters, 
 | `g` `c` `r` `l` | `u` `i` `o` `p` |
 | `m` `w` `v` | `m` `,` `.` |
 | `b` `z` | `n` `/` |
+| `,` `.` `o` `e` | `w` `e` `s` `d` |
 
 ## Parity
 

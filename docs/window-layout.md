@@ -69,12 +69,27 @@ Single config file (`hammerspoon/init.lua`), symlinked to `~/.hammerspoon/init.l
 | `m` / `w` / `v` | lower half of that column |
 | `Shift+h` / `t` / `n` | left / center / right **half** (wider than third) |
 | `s` | full screen |
+| `,` / `.` | **small** of a two-window pair, left / right |
+| `o` / `e` | **large** of a two-window pair, left / right |
 
 **Display cycling:** pressing the same key again when the window is already at that target cycles it to the next screen. Cross-screen moves apply `setFrame` twice (second via a 0.05s timer) to correct a mixed-DPI sizing glitch.
 
 **Gaps:** `GAP` constant at the top of `init.lua` (default 10px) — air around every window including screen edges. Tune to taste.
 
 Placement only places. An earlier version shoved the occupant of a target slot into the complementary slot; it went unused and was most of the file.
+
+**Two-window pairs** (`,` `.` `o` `e`) are for the common case of one terminal and one browser, where the three-column grid is more structure than the situation needs. Each window is centred vertically and sits a fixed margin in from its outer edge, so left and right mirror exactly and the two sides can be swapped without anything shifting.
+
+Their geometry is per display, since the two screens do not want the same thing:
+
+| | ultrawide (2.39:1) | laptop (16:10) |
+|---|---|---|
+| outer margin | 10% (344px) | 0.5% (10px) |
+| small | 29.5% × 70% | 49% × 66% |
+| large | 48% × 90% | 73% × 96% |
+| between them | 86px gap | 442px overlap |
+
+The ultrawide has room to tile both with air around them. The laptop does not, so the large window takes the screen and the small one floats over it. Screens are told apart by aspect ratio (wider than 2:1 counts as wide), not by resolution, so the split survives a different monitor.
 
 ### Linux/Ubuntu — GNOME Shell extension
 
