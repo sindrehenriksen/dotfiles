@@ -41,8 +41,14 @@ The tap/hold split has to disambiguate a chord (letter released first) from a ro
 | `z` | Safari | Brave |
 | `b` | Finder | Files (nautilus) |
 | `w` | Claude | Claude |
-| `r` | Notes | *open — Apple Notes has no Linux client* |
+| `r` | Notes | *unmapped — see below* |
 | `l` | Slack | *pending — not installed* |
+
+`r` stays unmapped on Linux rather than pointed at a replacement. Apple Notes has no Linux client, and iCloud web paints the note body into a canvas, so selection and copy are pixels the browser cannot reach. What keeps it in use regardless is iPhone Spotlight: pull down from the home screen, type a note's name, and it is there without opening an app. No third-party notes app does that — Core Spotlight is open to them, but Obsidian, Joplin and Notesnook have never shipped it, and the end-to-end encrypted ones structurally cannot. The trade has been weighed once already; don't re-suggest a replacement without a new argument.
+
+### An escape hatch for Cmd-bound web apps
+
+iCloud's web apps bind their handlers to `metaKey`, which is exactly what Chrome reports for Super on Linux. A Super chord that reaches Chrome *untranslated* may therefore work where Ctrl does nothing — the one remaining lever on iCloud Notes' broken copy path. Translation is per-application and cannot see a URL, so keep one chord that passes Super through verbatim rather than exempting Chrome wholesale.
 
 ## Modifier taps
 
@@ -88,7 +94,7 @@ Emitted as sequences, which works in far more places than the nearest single cho
 | `switch-applications` | `<Super>Tab` | keep — already matches Cmd+Tab |
 | `panel-main-menu` | `<Super>space` | keep — stands in for Spotlight |
 | `minimize` | `<Super>h` | keep — matches Cmd+H |
-| `show-desktop` | `<Super>d` | keep unless Cmd+D (bookmark) is wanted |
+| `show-desktop` | `<Super>d` | free it — bookmarking is the more useful chord |
 
 ## Layouts, and a trap worth knowing
 
@@ -111,6 +117,8 @@ So every binding in `hammerspoon/init.lua`, which is written in Dvorak letters, 
 A change on one machine should be mirrored on the other, unless there is a reason not to and that reason is written down here. Divergences that are deliberate today:
 
 - **fn ↔ Ctrl** is macOS-only. The laptop already has Ctrl in the corner.
+- **`z` is Safari on macOS, Brave on Linux.** Brave is not used on the Mac.
+- **`Super+D` is freed on Linux** so `Cmd+D` bookmarking works. Nothing to mirror: show-desktop on macOS is F11 and Mission Control, not Cmd+D.
 - **Caps hold** is a software layer on macOS (Hammerspoon) and belongs in the input remapper on Linux, but the bindings should match.
 
 ## Status
