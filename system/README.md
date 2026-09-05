@@ -195,23 +195,19 @@ For non-Lenovo laptops, use TLP thresholds instead:
 
 ### Keyboard resume fix (`keyboard-reset`)
 
-Some Lenovo models lose the internal keyboard entirely after s2idle resume.
-Same root cause as the Fn media keys bug below (EC timing race on resume from
-deep sleep). Both are fixed by the DKMS module below — script is currently
-**disabled** (`chmod -x`) and kept as a fallback only.
-
-[This Reddit thread](https://www.reddit.com/r/Lenovo/comments/1q02pr7/solved_keyboard_not_working_after_suspendsleep_on/)
-suggests disabling battery optimization via a udev rule as a fix, but that trades
-battery life for reliability. Our approach keeps battery optimization and re-scans
-the keyboard controller on resume instead.
+Some Lenovo models lose the internal keyboard entirely after s2idle resume —
+same EC timing race as the Fn media keys, and fixed by the same patch, which is
+now in-tree on the mainline kernel and carried by DKMS on the 7.0 fallback. The
+script is **disabled** (`chmod -x`) and kept only in case both routes are ever
+unavailable at once.
 
 ```bash
 sudo cp ~/dotfiles/system/keyboard-reset /usr/lib/systemd/system-sleep/
 sudo chmod +x /usr/lib/systemd/system-sleep/keyboard-reset
 ```
 
-Manual workaround if keyboard dies: `kbr` alias (defined in `.shellrc`),
-or directly: `sudo sh -c 'echo -n "rescan" > /sys/devices/platform/i8042/serio0/drvctl'`
+Manual workaround if the keyboard dies: `kbr` alias (defined in `.shellrc`), or
+`sudo sh -c 'echo -n "rescan" > /sys/devices/platform/i8042/serio0/drvctl'`
 
 ### Lid close
 
@@ -227,72 +223,97 @@ keycodes, so `KEY_F1..F12` appear on the AT keyboard where
 `KEY_VOLUMEUP` etc. should. `/dev/input/event6` ("Ideapad extra
 buttons") goes silent.
 
-Until fixed upstream, only reboot resolves a broken state.
+Only a reboot resolves a broken state.
 
-Upstream bug: https://bugzilla.kernel.org/show_bug.cgi?id=221383
+Upstream bug: https://bugzilla.kernel.org/show_bug.cgi?id=221383 — reported and
+tested from this machine, merged 2026-07-25 and backported to the 6.6 / 6.12 /
+6.18 / 7.1-stable trees. Fixed in the running mainline kernel; on the 7.0
+fallback the DKMS module still provides it, because 7.0.y is not a longterm
+branch and never received the backport. `git log` has the year of diagnosis if
+it is ever needed again.
 
-Status (2026-05-13): patch v3 submitted 2026-05-12, now `Cc: stable@vger.kernel.org`
-so it'll be backported once merged. Reviewed-by from both Ilpo Järvinen (Intel) and
-Mario Limonciello (AMD). Sindre credited with Reported-by and Tested-by. The 83K
-prefix match covers this device; 83MM (IdeaPad Slim 3 15ARP10) added as a third
-explicit DMI entry in v3.
+Two device caveats that survive the fix, both harmless: while charging, s2idle
+never reaches the deepest state and the `Delaying suspend by 2.5s` line spams
+the log — it scales with charging time, not suspend duration, and self-clears.
+And timer/wakealarm wakeups still break the keyboard on some Zen3 models
+(`i8042.nopnp` helps there); this 83K6 is unaffected.
 
-Update (2026-05-29): still ASSIGNED upstream, not yet merged. Local DKMS module
-bumped to 0.0.3 (the v2 patch series + 83MM quirk + crash fix for undetected
-devices).
+**DKMS module** (https://github.com/DanielGibson/amd_pmc-ideapad, at
+`~/src/amd_pmc-ideapad/`) is still installed and still needed — but only for
+7.0.x. Check which driver a kernel is using:
 
-Update (2026-07-25): **merged upstream and backported to stable.** Patch went
-v3→v6 (v4/v5 fixed series-assembly and log-spam nits), landed with Reviewed-by
-from Mario Limonciello (AMD), Ilpo Järvinen (Intel) and Hans de Goede (pdx86
-maintainer), then Greg KH queued it into the 6.6 / 6.12 / 6.18 / 7.1-stable
-trees. Note our Ubuntu HWE base is 7.0, which is *not* a longterm branch and
-isn't among those trees — so the fix won't arrive via a 7.0.y stable import.
-Expect it via a Canonical cherry-pick into a later 7.0.0-NN update, or when the
-24.04 HWE stack rebases onto a ≥7.1 base. DKMS workaround stays active until
-then; confirm the stock kernel has the fix after any kernel update with:
-`strings $(find /lib/modules/$(uname -r)/kernel -name 'amd-pmc.ko*') | grep -c 'Delaying suspend'`
-(≥1 = in-tree, safe to run the teardown below).
-
-Charging caveat: while actively charging, s2idle never reaches the deepest state
-and the `Delaying suspend by 2.5s` line spams the log (~1 every 2.6s). The
-`.check` callback fires once per intermediate s2idle wakeup, and the EC's charge
-chatter causes constant wakeups. So the count scales with time spent *charging*,
-not suspend duration: a confirmed-charging 2 min suspend logged it 51x, while a
-~22 h battery suspend logged it once and reached deepest state. Not fixed by 0.0.3
-(Daniel expected once-per-suspend; reported back that it isn't, for the charging
-case). Charging-only and self-clearing, so no action needed. A 15ARP10 (83K7) user
-reported worse symptoms on charge (userland crashes + ACPI storm, github issue #3),
-but that does not reproduce on this 83K6.
-
-Timer/wakealarm caveat: Daniel's 82XR (Zen3) still breaks with timer-based wakeups
-even with the fix. Tested on this device (83K6, Zen3+) with the DKMS workaround —
-timer case works fine here, and another user reported the same on 14ARP10 (also
-83K). For affected Zen3 devices, `i8042.nopnp` on the kernel cmdline restores
-most of the keyboard after a wakealarm-triggered suspend without impairing
-regular suspend/resume.
-
-**Workaround (active):** DKMS module from https://github.com/DanielGibson/amd_pmc-ideapad
-installed at `~/src/amd_pmc-ideapad/`. Replaces the in-kernel `amd_pmc` module
-with a patched version that adds a 2.5s delay before deep sleep. Auto-rebuilds
-on kernel updates. Verify with:
 ```bash
-ls /sys/module/amd_pmc/parameters/delay_suspend   # file exists = patched module loaded
-journalctl -b | grep "platform bug"               # appears after first suspend
+modinfo -k <version> amd_pmc | grep filename   # updates/dkms = out-of-tree
+cat /proc/sys/kernel/tainted                   # 0 = nothing out-of-tree loaded
 ```
-Prefer retiring this before any release upgrade (24.04 → 26.04): an out-of-tree
-module has to rebuild against the new release's kernel, and a major-version jump
-is where that's most likely to break. If it's still installed, re-verify the
-keyboard after upgrading.
 
-**When the upstream fix lands in an Ubuntu kernel update, clean up:**
-- `sudo dkms remove amd_pmc/0.0.3 --all` and `rm -rf ~/src/amd_pmc-ideapad`
-- Re-enable or remove the keyboard-reset script
-- Remove `~/mok.key`, `~/mok.crt`, `~/mok.der` and `/var/lib/dkms/mok.*`
-- Remove `~/kernel-bug-221383/` (diagnostic artifacts, no longer needed)
-- Remove this section and the keyboard-reset section from this README
+**Retire it when the 7.0 fallback goes** — not before, and note the MOK keys are
+now load-bearing for signing mainline kernels, so they stay regardless:
+- `sudo dkms remove amd_pmc/0.0.3 --all`, then `rm -rf ~/src/amd_pmc-ideapad`
+- Re-enable or delete the keyboard-reset script
+- Remove `~/kernel-bug-221383/` (diagnostic artifacts)
+- Keep `~/mok.key` / `~/mok.crt` / `~/mok.der` unless self-built kernels are
+  also gone
+
+### Mainline kernel (self-built)
+
+This machine runs a **self-built mainline kernel**, not Ubuntu's. `uname -r`
+says `7.2.0` where Ubuntu ships `7.0.0-NN`.
+
+Why: resume from s2idle intermittently came back with a dead display — backlight
+on, black screen, then a wedge needing a 7-second power-off, roughly once or
+twice a week. The journal shows a DMCUB storm and `mpc2_assert_mpcc_idle_before_connect`
+warnings from amdgpu on resume. AMD fixed it in 7.2-rc7 / 7.1.8. **`7.0.y` is
+EOL upstream**, so neither 24.04's HWE stack nor 26.04 (which also ships 7.0)
+will ever receive it, and Ubuntu's mainline PPA had no amd64 builds for the
+fixed versions. Building was the only route. It also brings the `amd_pmc` fix
+in-tree, which is why the kernel is untainted again.
+
+**Still unverified.** Running 7.2.0 since 2026-09-05; the fix is not confirmed on
+this hardware yet. The failure was intermittent, five hard power-offs in the four
+weeks before the switch, so only a quiet stretch settles it. **Check again after
+2026-10-05.** Two quiet months means it worked and this paragraph can go. A
+recurrence means 7.2 was the wrong answer, and the next step is the amdgpu bug
+that was never filed (AMD's advice was that it belongs separately from 221383,
+which covers the EC hotkey bug only) rather than another rebuild. Worth also
+confirming the Fn media keys survive a long suspend, since the in-tree driver now
+does that job instead of the DKMS module.
+
+**Nothing updates it.** `apt` has no repository for `linux-image-7.2.0` — its
+only source is the local dpkg status — so it receives no security patches at
+all. Ubuntu's own kernel line keeps updating and stays patched as the fallback,
+and all userspace packages update normally. The exposure is kernel-local
+privilege escalation, which needs an attacker already on the machine; real, but
+not the class a laptop behind NAT meets first.
+
+**Rebuild:** `~/dotfiles/system/kernel-mainline-build.sh 7.2.3` — fetches,
+verifies against kernel.org's checksums, configures from the running kernel,
+builds outside the terminal's cgroup, installs and signs. Roughly 40 minutes,
+mostly unattended. GRUB then defaults to the highest version on its own.
+
+**Check every month or so** whether a newer 7.2.x exists (`https://kernel.org`),
+and rebuild if so. Last checked: **2026-09-05**, on 7.2.0, with 7.2 the current
+mainline.
+
+**Stop doing this when either trigger fires:**
+- **Ubuntu ships ≥7.1** in the HWE stack or a release upgrade. Then drop back:
+  `sudo apt remove linux-image-7.2.0 linux-headers-7.2.0`, reboot, confirm the
+  display bug stays away on the stock kernel. This is the preferred exit —
+  supported kernels get security updates.
+- **7.2 goes EOL** (it will, once 7.3 ships — 7.2 is not a longterm branch
+  either). Move to the next mainline with the same script, or take the exit
+  above if it is available by then.
+
+Do not delete `~/src/kernel-mainline` casually: an existing tree makes a rebuild
+incremental. It is safe to delete, just slower afterwards.
 
 ### MOK signing key
 
-A Machine Owner Key was enrolled (2026-04-27) to load test modules under
-Secure Boot. Key files at `~/mok.key` / `~/mok.crt` — reuse to sign future
-test modules without another enrollment reboot.
+A Machine Owner Key was enrolled (2026-04-27) to load test modules under Secure
+Boot. Key files at `~/mok.key` / `~/mok.crt` — reuse to sign without another
+enrollment reboot.
+
+**Now load-bearing:** every self-built kernel is signed with it, or Secure Boot
+refuses to boot. Do not delete these while a mainline kernel is installed. A
+capsule BIOS flash resets firmware settings and can clear enrolled MOKs, so
+re-enrol afterwards before rebooting into a self-built kernel.
