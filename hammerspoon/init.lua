@@ -453,8 +453,17 @@ shift_delete_tap:start()
 -- fraction early, just before the key it was meant to capitalise, looks exactly
 -- like a deliberate tap until that next key lands. Ctrl has no such window —
 -- nothing follows a Ctrl tap by accident, and it stays instant.
+--
+-- Both need a quiet window *before* the press too: a stray tap happens in the
+-- middle of typing, a deliberate one from rest. Tab is kept out of that clock
+-- so the gesture's own output cannot block the next one — two quick taps are
+-- two switches, which is how you walk back several tabs.
 local MOD_TAP_MS = 200
 local SETTLE_MS = 80
+local QUIET_MS = 300
+
+local tab_kc = hs.keycodes.map.tab
+local last_typing = 0
 
 local mod_taps = {
   [59] = { flag = "ctrl",  mods = { "ctrl" } },                              -- left Ctrl
@@ -498,6 +507,9 @@ mod_tap = hs.eventtap.new({
   hs.eventtap.event.types.otherMouseDown,
 }, function(e)
   if e:getType() ~= hs.eventtap.event.types.flagsChanged then
+    if e:getType() == hs.eventtap.event.types.keyDown and e:getKeyCode() ~= tab_kc then
+      last_typing = hs.timer.secondsSinceEpoch()
+    end
     stop_settle()   -- something landed in the quiet window: it was not a tap
     cancel_mod_tap()
     return false
@@ -516,8 +528,10 @@ mod_tap = hs.eventtap.new({
     -- Pressed. The same modifier again is a repeat tap, so let the waiting one
     -- through; any other is the start of something else.
     if settling == spec then fire_settled() else stop_settle() end
-    -- A second modifier on top of a pending one is a chord, not a tap.
-    if mod_tap_kc or not alone(flags, spec.flag) then
+    -- A second modifier on top of a pending one is a chord, not a tap, and a
+    -- press that lands mid-burst is a mistap rather than a gesture.
+    local quiet = (hs.timer.secondsSinceEpoch() - last_typing) * 1000 >= QUIET_MS
+    if mod_tap_kc or not alone(flags, spec.flag) or not quiet then
       cancel_mod_tap()
     else
       mod_tap_kc = kc
