@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Raise an app if it is already running, start it otherwise. Takes a desktop
+# id without the .desktop suffix.
+#
+# gtk-launch activates the existing instance for anything single-instance,
+# which covers every app on the Caps layer today. It is not general: an app
+# that opens a second window instead would need real window activation, and
+# that has to come from the GNOME Shell extension.
+set -euo pipefail
+exec gtk-launch "${1%.desktop}"

@@ -28,6 +28,25 @@ cursor-style-blink = false
 # after a reload. Full story: system/README.md, "Claude Code OOM kills".
 linux-cgroup-memory-limit = 6442450944
 
+# Super is the app-command modifier (docs/keyboard.md). Ghostty binds it
+# natively rather than letting xremap translate into it: no synthetic chords,
+# no dependence on window detection, and Ctrl stays free for control codes —
+# which is the whole reason for moving app commands off it.
+keybind = super+c=copy_to_clipboard
+keybind = super+v=paste_from_clipboard
+keybind = super+t=new_tab
+keybind = super+w=close_tab
+keybind = super+n=new_window
+keybind = super+1=goto_tab:1
+keybind = super+2=goto_tab:2
+keybind = super+3=goto_tab:3
+keybind = super+4=goto_tab:4
+keybind = super+5=goto_tab:5
+keybind = super+6=goto_tab:6
+keybind = super+7=goto_tab:7
+keybind = super+8=goto_tab:8
+keybind = super+9=last_tab
+
 # Misc
 copy-on-select = clipboard
 mouse-hide-while-typing = true

@@ -84,4 +84,11 @@ else
     # whole Ghostty tab with it. See system/README.md.
     mkdir -p ~/.config/systemd
     link ~/dotfiles/system/systemd-user.conf ~/.config/systemd/user.conf
+
+    # Linux: xremap keyboard layer — see linux/README.md. The binary and the
+    # GNOME extension are installed separately by linux/install.sh.
+    mkdir -p ~/.config/xremap ~/.config/systemd/user ~/.local/bin
+    link ~/dotfiles/linux/xremap.yml ~/.config/xremap/config.yml
+    link ~/dotfiles/linux/xremap.service ~/.config/systemd/user/xremap.service
+    link ~/dotfiles/linux/focus-or-launch ~/.local/bin/focus-or-launch
 fi

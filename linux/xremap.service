@@ -1,0 +1,15 @@
+[Unit]
+Description=xremap keyboard remapper
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+# --watch=config,device picks up an edited config and a keyboard plugged in
+# later, which is what the USB and wake watchers do on the macOS side.
+ExecStart=%h/.local/bin/xremap --watch=config,device %h/.config/xremap/config.yml
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=graphical-session.target

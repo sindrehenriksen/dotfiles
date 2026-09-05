@@ -1,0 +1,111 @@
+# Keyboard layer for Linux. The model this serves — and why Super rather than
+# Ctrl carries app commands — is in ../docs/keyboard.md. This file is only the
+# mechanism. A change here should be mirrored on the macOS side
+# (hammerspoon/init.lua, macos/keyboard-remap.sh) or the divergence recorded
+# under "Parity" in that doc.
+#
+# READ THIS BEFORE EDITING.
+#
+# Every key name below is a PHYSICAL POSITION, named after the US-QWERTY letter
+# that sits there. The layout is Programmer Dvorak, so the key that types `c` is
+# called `i` here. Two consequences:
+#
+#   - Where a mapping keeps the letter (Super+C -> Ctrl+C) the translation
+#     cancels out: both sides name the same position, so the Super block below
+#     reads as though nothing were remapped. It is still correct.
+#   - Everywhere else the Dvorak letter is named in a comment. Trust the
+#     comment over the key name.
+#
+# `xremap --list-windows` does not work on GNOME Wayland. To find an app's name
+# for an `application:` filter:
+#   busctl --user call org.gnome.Shell /com/k0kubun/Xremap com.k0kubun.Xremap WMClasses
+
+# Some Wayland clients drop synthesised events sent back to back.
+keypress_delay_ms: 20
+
+virtual_modifiers:
+  - CapsLock
+
+modmap:
+  - name: Modifier positions
+    remap:
+      # Super next to the space bar on both sides, the way Cmd sits on a Mac.
+      Alt_L: Super_L
+      Super_L: Alt_L
+      Alt_R: Super_R
+      # That claims the key AltGr lived on, and AltGr types the Norwegian
+      # letters. It moves to the Menu key, which is otherwise unused. xkb's
+      # lv3:ralt_switch still expects to see a right Alt, so that is what the
+      # Menu key becomes rather than AltGr directly.
+      KEY_COMPOSE: Alt_R
+
+  - name: Caps is Escape tapped, a layer held
+    remap:
+      CapsLock:
+        held: CapsLock
+        alone: Esc
+        alone_timeout_millis: 250
+
+  - name: Tap a modifier to walk through tabs
+    # macOS also suppresses a tap that lands mid-typing, which is what stops
+    # a brushed Shift from switching tabs. xremap has no equivalent, so expect
+    # more stray fires here until something better turns up.
+    remap:
+      Control_L:
+        held: Control_L
+        alone: [Control_L, Tab]
+        alone_timeout_millis: 250
+      Shift_L:
+        held: Shift_L
+        alone: [Control_L, Shift_L, Tab]
+        alone_timeout_millis: 250
+
+keymap:
+  - name: Caps layer, jump to an app
+    # Directional window focus (Caps + h/t/n/s) belongs here too, but it needs
+    # the GNOME Shell extension that does not exist yet.
+    remap:
+      CapsLock-i:      { launch: ["focus-or-launch", "google-chrome"] }         # c
+      CapsLock-u:      { launch: ["focus-or-launch", "com.mitchellh.ghostty"] } # g
+      CapsLock-slash:  { launch: ["focus-or-launch", "brave-browser"] }         # z
+      CapsLock-n:      { launch: ["focus-or-launch", "org.gnome.Nautilus"] }    # b
+      CapsLock-comma:  { launch: ["focus-or-launch", "com.anthropic.Claude"] }  # w
+      # CapsLock-p (l) is Slack, not installed here.
+      # CapsLock-o (r) is Notes; see ../docs/keyboard.md for why it stays open.
+
+  - name: Super as the app-command modifier
+    # Ghostty is excluded because it binds super+ natively, which avoids both a
+    # synthetic chord and a race on window detection. Everything else here
+    # cannot be told about Super and has to be translated.
+    application:
+      not: [com.mitchellh.ghostty]
+    remap:
+      # Same position on both sides — see the header. Dvorak letter on the right.
+      Super-i:         C-i          # c  copy
+      Super-dot:       C-dot        # v  paste
+      Super-b:         C-b          # x  cut
+      Super-a:         C-a          # a  select all
+      Super-slash:     C-slash      # z  undo
+      Super-k:         C-k          # t  new tab
+      Super-comma:     C-comma      # w  close tab
+      Super-l:         C-l          # n  new window
+      Super-y:         C-y          # f  find
+      Super-semicolon: C-semicolon  # s  save
+      Super-o:         C-o          # r  reload
+      Super-p:         C-p          # l  address bar
+      Super-h:         C-h          # d  bookmark
+
+      # Text navigation, as sequences rather than the nearest single chord:
+      # Ctrl+U only deletes to line start in readline, not in a GTK field.
+      Super-Left:      Home
+      Super-Right:     End
+      Super-Up:        C-Home
+      Super-Down:      C-End
+      Super-Backspace: [Shift-Home, BackSpace]
+
+      # iCloud's web apps bind their handlers to metaKey, which is what Chrome
+      # reports for Super. Adding Alt sends the chord through untranslated so it
+      # reaches the page as Cmd would on a Mac — the one lever left on iCloud
+      # Notes' broken copy path.
+      Super-Alt-i:     Super-i      # c
+      Super-Alt-dot:   Super-dot    # v

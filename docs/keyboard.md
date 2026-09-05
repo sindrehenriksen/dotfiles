@@ -120,10 +120,14 @@ A change on one machine should be mirrored on the other, unless there is a reaso
 - **fn ↔ Ctrl** is macOS-only. The laptop already has Ctrl in the corner.
 - **`z` is Safari on macOS, Brave on Linux.** Brave is not used on the Mac.
 - **`Super+D` is freed on Linux** so `Cmd+D` bookmarking works. Nothing to mirror: show-desktop on macOS is F11 and Mission Control, not Cmd+D.
-- **Caps hold** is a software layer on macOS (Hammerspoon) and belongs in the input remapper on Linux, but the bindings should match.
+- **Caps hold** is a software layer on macOS (Hammerspoon) and lives in the input remapper on Linux, but the bindings match.
+- **Stray modifier taps are only suppressed on macOS.** Hammerspoon ignores a tap that lands mid-typing; xremap has no equivalent, so a brushed Shift can still switch tabs on Linux. Not a decision, a gap.
+- **The two-window layouts are macOS-only for now.** They belong on both; the Linux side waits on the Shell extension.
 
 ## Status
 
 macOS is built (`hammerspoon/init.lua`, `macos/keyboard-remap.sh`).
 
-Linux is not built yet. Two dead stubs from an earlier attempt want clearing out first: `keyd` is installed and running against a 0-byte config, and the `xremap@k0kubun.com` GNOME extension is enabled with no `xremap` binary behind it.
+Linux has the keyboard layer but not the window layer, in `linux/` — see its README for how the pieces fit and what still needs confirming on first run. Everything on this page below "Caps as a layer" is implemented there except directional focus, which needs the GNOME Shell extension nobody has written yet.
+
+The earlier attempt left two things that `linux/setup-input.sh` and `gnome-shortcuts.sh` clear out: `keyd`, installed and running against a 0-byte config, and Ubuntu's Tiling Assistant. The `xremap@k0kubun.com` entry in `enabled-extensions` was never backed by an installed extension at all.
