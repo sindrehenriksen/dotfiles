@@ -11,6 +11,14 @@ gsettings set org.gnome.shell.keybindings focus-active-notification "[]"
 # Super+D becomes bookmark. macOS never bound show-desktop there either.
 gsettings set org.gnome.desktop.wm.keybindings show-desktop "[]"
 
+# Input sources move off Alt+Shift. The key right of the space bar is a Copilot
+# key, not the Menu key it looks like: it emits Meta+Shift+F23 in one press, and
+# the modifier swap below turns that Meta into Alt — so the key was switching
+# layout every time it was touched. Nothing can be mapped onto it either, since
+# its Meta and Shift are indistinguishable from the real ones.
+gsettings set org.gnome.desktop.wm.keybindings switch-input-source "['<Super><Shift>space']"
+gsettings set org.gnome.desktop.wm.keybindings switch-input-source-backward "[]"
+
 # The overview moves off a bare Super tap and onto Super+Space, which is the
 # Mac arrangement: tapping Cmd does nothing, Cmd+Space searches. A modifier
 # held dozens of times an hour should not open anything on its own. GNOME

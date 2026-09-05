@@ -18,10 +18,10 @@ Goal on both machines: the app-command modifier sits next to the space bar on bo
 |---|---|---|
 | Caps | → F18, then tap/hold in software | → tap/hold layer |
 | Left of space | Alt ↔ Cmd swapped (external kbd) | Alt ↔ Super to be swapped |
-| Right of space | Alt ↔ Cmd swapped (external kbd) | AltGr → Super, Menu → AltGr |
+| Right of space | Alt ↔ Cmd swapped (external kbd) | AltGr, left alone |
 | Bottom-left corner | fn ↔ Ctrl on the built-in keyboard | already Ctrl, nothing to do |
 
-AltGr is load-bearing — it types the Norwegian letters on Programmer Dvorak — so it has to land somewhere. On the Mac's external keyboard it moves to the Menu key; the laptop has a Menu key to the right of space that goes unused, so it takes AltGr there too.
+AltGr is load-bearing — it types the Norwegian letters on Programmer Dvorak — so it has to land somewhere. On the Mac's external keyboard it moves to the Menu key. The laptop has no Menu key to move it to. The key in that position is printed with a small menu glyph and is not one: it is a **Copilot key**, and one press emits `KEY_LEFTMETA` + `KEY_LEFTSHIFT` + `KEY_F23` together. The legend is worth distrusting on sight — it is what sent this diagnosis the wrong way for an afternoon. Nothing can be mapped onto it, because its Meta and Shift are the same events the real keys send. So the right-hand side is left alone there, AltGr keeps its position, and Super lives only to the left of the space bar.
 
 ## Caps as a layer
 
@@ -90,9 +90,11 @@ Emitted as sequences, which works in far more places than the nearest single cho
 |---|---|---|
 | `toggle-message-tray` | `<Super>v`, `<Super>m` | must move — `Super+V` is paste |
 | `focus-active-notification` | `<Super>n` | must move — `Super+N` is new window |
-| `overlay-key` | `Super_L` | clear it; a bare tap of a heavily-held modifier should not open Activities |
+| `overlay-key` | `Super_L` | clear it; a modifier held all day should not open anything on its own, and the overview moves to `Super+Space` |
 | `switch-applications` | `<Super>Tab` | keep — already matches Cmd+Tab |
-| `panel-main-menu` | `<Super>space` | keep — stands in for Spotlight |
+| `panel-main-menu` | `<Super>space` | clear it — the binding does nothing at all in Shell 46 |
+| `toggle-overview` | unbound | bind to `<Super>space` — this is the Spotlight equivalent |
+| `switch-input-source` | `<Alt>Shift_L` | move it — the Copilot key emits Alt+Shift and fires it on every press |
 | `minimize` | `<Super>h` | keep — matches Cmd+H |
 | `show-desktop` | `<Super>d` | free it — bookmarking is the more useful chord |
 
@@ -123,6 +125,8 @@ A change on one machine should be mirrored on the other, unless there is a reaso
 - **Caps hold** is a software layer on macOS (Hammerspoon) and lives in the input remapper on Linux, but the bindings match.
 - **Stray modifier taps are only suppressed on macOS.** Hammerspoon ignores a tap that lands mid-typing; xremap has no equivalent, so a brushed Shift can still switch tabs on Linux. Not a decision, a gap.
 - **The two-window layouts are macOS-only for now.** They belong on both; the Linux side waits on the Shell extension.
+- **Super is on both sides of the space bar on macOS, only the left on Linux.** The right-hand key there has to stay AltGr for the Norwegian letters, and the key that would otherwise take AltGr is a Copilot key that cannot be remapped at all.
+- **The Caps layer engages by hold time on Linux, by release order on macOS.** Hammerspoon waits to see which key comes up first and replays what it buffered, so a `caps`→`b` roll yields Escape then b with no delay. xremap cannot reorder, so it needs a hold threshold instead, and the layer costs a real wait before it engages.
 
 ## Status
 

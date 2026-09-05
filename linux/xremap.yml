@@ -32,18 +32,16 @@ modmap:
       # Spelled with raw KEY_ names, not the Alt_L/Super_L aliases: xremap
       # documents those only for the left-hand modifiers, and an _R alias that
       # matches the right key as a source can still emit the LEFT one as a
-      # destination. That silently put plain Alt on the Menu key, which cost
-      # AltGr and left a stray Alt firing GNOME shortcuts.
+      # destination — silently, with no config error.
       #
-      # Super next to the space bar on both sides, the way Cmd sits on a Mac.
+      # Super sits left of the space bar only, unlike the Mac where Cmd is on
+      # both sides. The right side belongs to AltGr, which types the Norwegian
+      # letters through xkb's lv3:ralt_switch. Moving it to the Menu key was
+      # tried and abandoned: that key does not emit KEY_COMPOSE on this
+      # keyboard, so nothing matched it and AltGr was simply lost. A right
+      # Super is worth less than the letters.
       KEY_LEFTALT: KEY_LEFTMETA
       KEY_LEFTMETA: KEY_LEFTALT
-      KEY_RIGHTALT: KEY_RIGHTMETA
-      # That claims the key AltGr lived on, and AltGr types the Norwegian
-      # letters. It moves to the Menu key, which is otherwise unused. xkb's
-      # lv3:ralt_switch still expects to see a right Alt, so that is what the
-      # Menu key becomes rather than AltGr directly.
-      KEY_COMPOSE: KEY_RIGHTALT
 
   - name: Caps is Escape tapped, a layer held
     remap:
@@ -55,7 +53,7 @@ modmap:
         # then b. Every letter on this layer is also a vim command, so the roll
         # is common. macOS decides by release order and replays what it
         # buffered; xremap cannot reorder, so a threshold is the nearest thing.
-        hold_threshold_millis: 150
+        hold_threshold_millis: 90
         alone_timeout_millis: 250
 
   - name: Tap a modifier to walk through tabs

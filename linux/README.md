@@ -31,13 +31,7 @@ keyd is the better tool for pure key-position remapping and it works at the cons
 
 ## Verifying
 
-Two values in `xremap.yml` were written from documentation and have since been confirmed on this machine. Both are worth re-checking on different hardware, since each fails quietly:
-
-- **The Menu key sends `KEY_COMPOSE`.** It carries AltGr, so the Norwegian letters depend on it. A keyboard without that key loses them. `RUST_LOG=debug xremap --watch=config,device ~/.config/xremap/config.yml` names each key as you press it; the keyboard's capability map answers the same question without stopping the service:
-
-```sh
-grep -A6 'AT Translated' /proc/bus/input/devices   # bit 127 of B: KEY= is KEY_COMPOSE
-```
+One value in `xremap.yml` was written from documentation and has since been confirmed on this machine. It is worth re-checking on different hardware, since it fails quietly:
 
 - **Ghostty's window class is `com.mitchellh.ghostty`.** If this were wrong the terminal would fall into the general Super translation, and `Super+C` would interrupt rather than copy:
 
@@ -50,3 +44,14 @@ busctl --user call org.gnome.Shell /com/k0kubun/Xremap com.k0kubun.Xremap WMClas
 - **Directional window focus and the placement grid are missing.** Both need a GNOME Shell extension that has not been written. Caps + `h/t/n/s` does nothing yet.
 - **Stray modifier taps fire more often than on macOS.** Hammerspoon suppresses a tap that lands mid-typing; xremap has no equivalent, so a brushed Shift can still switch tabs.
 - **Slack and Notes are unmapped** on the Caps layer. Slack is not installed; Notes is a decision recorded in the keyboard doc.
+- **Super is only on the left of the space bar**, unlike the Mac. The key right of it carries a small menu glyph but is a Copilot key: one press emits `KEY_LEFTMETA` + `KEY_LEFTSHIFT` + `KEY_F23` together, so nothing can be mapped onto it — its Meta and Shift are the same events the real keys produce. Read the scancodes rather than the legend. AltGr therefore stays where it is, on the right of the space bar.
+
+  That chord is also why input sources are bound to `Super+Shift+Space` rather than GNOME's default `Alt+Shift`: after the modifier swap the Copilot key emits Alt+Shift, so it was switching layout on every press.
+
+  To see what a key really sends, stop the service and read the device — `RUST_LOG=debug` works too but writes every keystroke to the journal:
+
+```sh
+systemctl --user stop xremap   # it holds an exclusive grab
+sudo evtest /dev/input/event2  # or read it directly; the input group suffices
+systemctl --user start xremap
+```
