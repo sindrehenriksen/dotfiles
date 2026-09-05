@@ -90,14 +90,17 @@ local raw_layouts = {
 }
 
 -- Two windows sharing a screen: one large beside one small, for the common
--- case of a terminal and a browser. Each is centred vertically and sits a
--- fixed margin in from its outer edge, so left and right mirror exactly.
--- Geometry is per display: the ultrawide has room to tile both with air
--- around them, the laptop does not, so there the large window takes the
--- screen and the small one floats over it.
+-- case of a terminal and a browser. Each sits a fixed margin in from its
+-- outer edge, so left and right mirror exactly. Geometry is per display: the
+-- ultrawide has room to tile both with air around them, the laptop does not,
+-- so there the large window takes the screen and the small one floats over it.
+--
+-- Vertical placement is centred unless a box gives an explicit `y`. The
+-- laptop's small window is deliberately high rather than centred — it is the
+-- terminal, and the space below it is where the large window stays readable.
 local two_up = {
-  wide   = { margin = 0.10,  small = { w = 0.295, h = 0.70 }, large = { w = 0.48, h = 0.90 } },
-  narrow = { margin = 0.005, small = { w = 0.49,  h = 0.66 }, large = { w = 0.73, h = 0.96 } },
+  wide   = { margin = 0.10,  small = { w = 0.295, h = 0.70 },           large = { w = 0.48, h = 0.90 } },
+  narrow = { margin = 0.005, small = { w = 0.49,  h = 0.66, y = 0.06 }, large = { w = 0.73, h = 0.96 } },
 }
 
 local function screen_kind(screen)
@@ -110,7 +113,7 @@ local function two_up_rect(screen, size, side)
   local spec = two_up[screen_kind(screen)]
   local box = spec[size]
   local xf = side == "left" and spec.margin or 1 - spec.margin - box.w
-  return xf, (1 - box.h) / 2, box.w, box.h
+  return xf, box.y or (1 - box.h) / 2, box.w, box.h
 end
 
 local two_up_placements = {}

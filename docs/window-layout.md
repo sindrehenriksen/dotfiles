@@ -78,7 +78,7 @@ Single config file (`hammerspoon/init.lua`), symlinked to `~/.hammerspoon/init.l
 
 Placement only places. An earlier version shoved the occupant of a target slot into the complementary slot; it went unused and was most of the file.
 
-**Two-window pairs** (`,` `.` `o` `e`) are for the common case of one terminal and one browser, where the three-column grid is more structure than the situation needs. Each window is centred vertically and sits a fixed margin in from its outer edge, so left and right mirror exactly and the two sides can be swapped without anything shifting.
+**Two-window pairs** (`,` `.` `o` `e`) are for the common case of one terminal and one browser, where the three-column grid is more structure than the situation needs. Each window sits a fixed margin in from its outer edge, so left and right mirror exactly and the two sides can be swapped without anything shifting.
 
 Their geometry is per display, since the two screens do not want the same thing:
 
@@ -88,8 +88,9 @@ Their geometry is per display, since the two screens do not want the same thing:
 | small | 29.5% × 70% | 49% × 66% |
 | large | 48% × 90% | 73% × 96% |
 | between them | 86px gap | 442px overlap |
+| vertical | both centred | large centred, small held near the top |
 
-The ultrawide has room to tile both with air around them. The laptop does not, so the large window takes the screen and the small one floats over it. Screens are told apart by aspect ratio (wider than 2:1 counts as wide), not by resolution, so the split survives a different monitor.
+The ultrawide has room to tile both with air around them. The laptop does not, so the large window takes the screen and the small one floats over it, held high rather than centred — the small window is the terminal, and the space below it is where the large one stays readable. Screens are told apart by aspect ratio (wider than 2:1 counts as wide), not by resolution, so the split survives a different monitor.
 
 ### Linux/Ubuntu — GNOME Shell extension
 
