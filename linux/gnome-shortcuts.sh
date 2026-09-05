@@ -19,6 +19,14 @@ gsettings set org.gnome.desktop.wm.keybindings show-desktop "[]"
 gsettings set org.gnome.desktop.wm.keybindings switch-input-source "['<Super><Shift>space']"
 gsettings set org.gnome.desktop.wm.keybindings switch-input-source-backward "[]"
 
+# The key marked PrtSc is a vendor chord too: it sends Meta+Shift+S, Windows'
+# snipping shortcut. It used to reach GNOME by coincidence — the alternate
+# screenshot binding is Super+Shift+O, and on Dvorak the key that types `o` is
+# the physical S. The modifier swap turns its Meta into Alt, so bind that form
+# as well rather than losing the key.
+gsettings set org.gnome.shell.keybindings show-screenshot-ui \
+    "['Print', '<Super><Shift>o', '<Alt><Shift>o']"
+
 # The overview moves off a bare Super tap and onto Super+Space, which is the
 # Mac arrangement: tapping Cmd does nothing, Cmd+Space searches. A modifier
 # held dozens of times an hour should not open anything on its own. GNOME

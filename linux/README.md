@@ -53,6 +53,8 @@ busctl --user call org.gnome.Shell /com/k0kubun/Xremap com.k0kubun.Xremap WMClas
 
   That chord is also why input sources are bound to `Super+Shift+Space` rather than GNOME's default `Alt+Shift`: after the modifier swap the Copilot key emits Alt+Shift, so it was switching layout on every press.
 
+- **Vendor keys built on Left Meta are the recurring trap.** Two of them ship on this keyboard: the Copilot key sends `Meta+Shift+F23`, and the one marked PrtSc sends `Meta+Shift+S`, Windows' snipping chord. Both are indistinguishable from real modifier presses, so the `KEY_LEFTMETA` swap rewrites their Meta into Alt and whatever they used to trigger stops matching. The fix is to bind the post-swap form — `show-screenshot-ui` carries `<Alt><Shift>o` for exactly this. Expect any other vendor hotkey to fail the same way, and read its scancodes before believing its label.
+
   To see what a key really sends, stop the service and read the device — `RUST_LOG=debug` works too but writes every keystroke to the journal:
 
 ```sh
