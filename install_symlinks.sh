@@ -91,4 +91,10 @@ else
     link ~/dotfiles/linux/xremap.yml ~/.config/xremap/config.yml
     link ~/dotfiles/linux/xremap.service ~/.config/systemd/user/xremap.service
     link ~/dotfiles/linux/focus-or-launch ~/.local/bin/focus-or-launch
+
+    # Linux: window placement grid. GNOME only loads an extension whose
+    # directory name matches its uuid, hence the rename in the link.
+    mkdir -p ~/.local/share/gnome-shell/extensions
+    link ~/dotfiles/linux/gnome-extension \
+         ~/.local/share/gnome-shell/extensions/window-grid@sihen.local
 fi

@@ -27,4 +27,9 @@ fi
 gnome-extensions enable "$EXT_UUID" 2>/dev/null || \
     echo "note: enable $EXT_UUID after the next login — the Shell cannot see it until then"
 
+# GNOME loads the binary form only, and it is a build artifact rather than
+# something to check in.
+glib-compile-schemas ~/dotfiles/linux/gnome-extension/schemas/
+
 echo "xremap $(~/.local/bin/xremap --version) installed."
+echo "The window-grid extension needs a logout before GNOME will see it."

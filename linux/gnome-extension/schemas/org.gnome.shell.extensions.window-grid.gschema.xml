@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist gettext-domain="window-grid">
+  <schema id="org.gnome.shell.extensions.window-grid"
+          path="/org/gnome/shell/extensions/window-grid/">
+    <key name="show-picker" type="as">
+      <default><![CDATA[['<Super><Alt>t']]]></default>
+      <summary>Enter layout mode</summary>
+    </key>
+    <key name="focus-west" type="as">
+      <default><![CDATA[['F13']]]></default>
+      <summary>Focus the window to the west</summary>
+    </key>
+    <key name="focus-north" type="as">
+      <default><![CDATA[['F14']]]></default>
+      <summary>Focus the window to the north</summary>
+    </key>
+    <key name="focus-south" type="as">
+      <default><![CDATA[['F15']]]></default>
+      <summary>Focus the window to the south</summary>
+    </key>
+    <key name="focus-east" type="as">
+      <default><![CDATA[['F16']]]></default>
+      <summary>Focus the window to the east</summary>
+    </key>
+  </schema>
+</schemalist>

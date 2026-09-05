@@ -71,10 +71,16 @@ modmap:
         alone_timeout_millis: 250
 
 keymap:
-  - name: Caps layer, jump to an app
-    # Directional window focus (Caps + h/t/n/s) belongs here too, but it needs
-    # the GNOME Shell extension that does not exist yet.
+  - name: Caps layer, focus a window and jump to an app
     remap:
+      # Directional focus, handled by the window-grid Shell extension. F13-F16
+      # are a courier: nothing else uses them, and the extension binds them so
+      # the chord never has to survive the Super translation below.
+      CapsLock-j:         F13  # h  west
+      CapsLock-k:         F14  # t  north
+      CapsLock-l:         F15  # n  south
+      CapsLock-semicolon: F16  # s  east
+
       CapsLock-i:      { launch: ["focus-or-launch", "google-chrome"] }         # c
       CapsLock-u:      { launch: ["focus-or-launch", "com.mitchellh.ghostty"] } # g
       CapsLock-slash:  { launch: ["focus-or-launch", "brave-browser"] }         # z
@@ -112,6 +118,11 @@ keymap:
       Super-Up:        C-Home
       Super-Down:      C-End
       Super-Backspace: [Shift-Home, BackSpace]
+
+      # The layout picker, Super+Alt+T, which is the same two fingers as
+      # Opt+Cmd+T on the Mac. Spelled out because the Super-k rule above would
+      # otherwise match it inexactly and turn it into Ctrl+Alt+T.
+      Super-Alt-k:     Super-Alt-k  # t
 
       # iCloud's web apps bind their handlers to metaKey, which is what Chrome
       # reports for Super. Adding Alt sends the chord through untranslated so it

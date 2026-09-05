@@ -1,0 +1,8 @@
+{
+  "uuid": "window-grid@sihen.local",
+  "name": "Window Grid",
+  "description": "Three-column placement grid and directional focus, driven by a modal picker. The macOS half of this lives in hammerspoon/init.lua; see docs/window-layout.md.",
+  "shell-version": ["45", "46", "47", "48"],
+  "settings-schema": "org.gnome.shell.extensions.window-grid",
+  "session-modes": ["user"]
+}
