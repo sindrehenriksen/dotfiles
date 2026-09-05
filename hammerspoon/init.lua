@@ -69,8 +69,6 @@ local slots = {
   full_C   = { col = 1, xf = THIRD,     yf = 0,    wf = THIRD, hf = 1    },
   upper_C  = { col = 1, xf = THIRD,     yf = 0,    wf = THIRD, hf = 0.5  },
   lower_C  = { col = 1, xf = THIRD,     yf = 0.5,  wf = THIRD, hf = 0.5  },
-  mquart_C = { col = 1, xf = THIRD,     yf = 0.5,  wf = THIRD, hf = 0.25 },
-  bquart_C = { col = 1, xf = THIRD,     yf = 0.75, wf = THIRD, hf = 0.25 },
   full_R   = { col = 2, xf = 2 * THIRD, yf = 0,    wf = THIRD, hf = 1    },
   upper_R  = { col = 2, xf = 2 * THIRD, yf = 0,    wf = THIRD, hf = 0.5  },
   lower_R  = { col = 2, xf = 2 * THIRD, yf = 0.5,  wf = THIRD, hf = 0.5  },
@@ -141,10 +139,8 @@ local displacement = {
   lower_L  = { conflicts = { "full_L", "lower_L" }, options = { "upper_L" }, canonical = "upper_L" },
   upper_R  = { conflicts = { "full_R", "upper_R" }, options = { "lower_R" }, canonical = "lower_R" },
   lower_R  = { conflicts = { "full_R", "lower_R" }, options = { "upper_R" }, canonical = "upper_R" },
-  upper_C  = { conflicts = { "full_C", "upper_C" }, options = { "lower_C", "mquart_C", "bquart_C" }, canonical = "lower_C" },
-  lower_C  = { conflicts = { "full_C", "lower_C", "mquart_C", "bquart_C" }, options = { "upper_C" }, canonical = "upper_C" },
-  mquart_C = { conflicts = { "mquart_C", "lower_C" }, options = { "upper_C", "bquart_C" }, canonical = "bquart_C" },
-  bquart_C = { conflicts = { "bquart_C", "lower_C" }, options = { "upper_C", "mquart_C" }, canonical = "mquart_C" },
+  upper_C  = { conflicts = { "full_C", "upper_C" }, options = { "lower_C" }, canonical = "lower_C" },
+  lower_C  = { conflicts = { "full_C", "lower_C" }, options = { "upper_C" }, canonical = "upper_C" },
 }
 
 -- Slots that geometrically overlap a given slot (besides itself). Used to
@@ -154,11 +150,9 @@ local slot_overlaps = {
   full_L   = { "upper_L", "lower_L" },
   upper_L  = { "full_L" },
   lower_L  = { "full_L" },
-  full_C   = { "upper_C", "lower_C", "mquart_C", "bquart_C" },
+  full_C   = { "upper_C", "lower_C" },
   upper_C  = { "full_C" },
-  lower_C  = { "full_C", "mquart_C", "bquart_C" },
-  mquart_C = { "full_C", "lower_C" },
-  bquart_C = { "full_C", "lower_C" },
+  lower_C  = { "full_C" },
   full_R   = { "upper_R", "lower_R" },
   upper_R  = { "full_R" },
   lower_R  = { "full_R" },
@@ -266,29 +260,6 @@ local function place_raw(xf, yf, wf, hf)
   end
 end
 
--- Center stack `w`: if already in a quarter, toggle to the other; otherwise
--- prefer middle-quarter but fall back to bottom-quarter if middle is occupied
--- (repeated `w` then swaps middle ↔ bottom via the displacement rule).
-local function center_quarter_toggle()
-  local win = hs.window.focusedWindow()
-  if not win then return end
-  local current = window_slot(win)
-  local target
-  if current == "mquart_C" then
-    target = "bquart_C"
-  elseif current == "bquart_C" then
-    target = "mquart_C"
-  else
-    local by_slot = classify(win:screen(), win)
-    if by_slot["mquart_C"] and not by_slot["bquart_C"] then
-      target = "bquart_C"
-    else
-      target = "mquart_C"
-    end
-  end
-  place_slot(target)
-end
-
 local picker = hs.hotkey.modal.new({ "alt", "cmd" }, "t")
 local alert_uuid
 
@@ -315,13 +286,10 @@ bind(nil, "g", function() place_slot("upper_L") end)
 bind(nil, "c", function() place_slot("upper_C") end)
 bind(nil, "r", function() place_slot("upper_R") end)
 
--- Lower half of left/right columns
+-- Lower half of each column
 bind(nil, "m", function() place_slot("lower_L") end)
+bind(nil, "w", function() place_slot("lower_C") end)
 bind(nil, "v", function() place_slot("lower_R") end)
-
--- Center column stack: w = middle/bottom quarter (toggle); Opt+w = full lower half
-bind(nil,       "w", center_quarter_toggle)
-bind({ "alt" }, "w", function() place_slot("lower_C") end)
 
 -- Half-width columns (wider than thirds)
 bind({ "shift" }, "h", function() place_raw(0,    0, 0.5, 1) end)
