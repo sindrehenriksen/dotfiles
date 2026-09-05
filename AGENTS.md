@@ -30,3 +30,5 @@ A change to one side should be mirrored on the other. Where it should not be, sa
 ## Auto-Approved Commands
 
 `~/.claude/settings.json` (symlinked from this repo) defines which Bash commands are auto-approved vs prompted, so a permission-rule change is a commit here. What belongs in `allow`, `ask` or `deny` is settled in the global instructions under "Permissions and blocked actions" — this file doesn't restate it.
+
+The `git -C * <subcommand>` rules print a warning on every launch (anthropics/claude-code#90879, tracked in `TODO.md`). They are deliberate. The `-C` form is what keeps a command aimed at another repo matching a rule at all, the paths are worktrees made per task and cannot be enumerated, and a partial wildcard does not silence the warning either. Don't narrow them to quiet it.
