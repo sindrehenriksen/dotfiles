@@ -9,3 +9,8 @@
 # thing --hidden would otherwise drag in, and VCS ignore is off above.
 --hidden
 --glob=!.git/
+
+# A lowercase query matches any case; a query you deliberately capitalise stays
+# exact. Same bargain as vim's smartcase, and it stops a search for a word that
+# happens to be capitalised somewhere from coming back silently empty.
+--smart-case
