@@ -17,6 +17,22 @@ if [ -n "$repo_root" ]; then
     fi
 fi
 
+# Syntax-check staged Lua. The Hammerspoon config only ever runs on the Mac, so
+# a typo committed from the Linux side surfaces as a silently dead config hours
+# later. Parse-only, so hs.* calls that exist nowhere else are fine. Skipped
+# where no luac is installed rather than failing the commit.
+luac_bin="$(command -v luac5.4 || command -v luac || true)"
+if [ -n "$luac_bin" ]; then
+    while IFS= read -r f; do
+        [ -n "$f" ] && [ -f "$f" ] || continue
+        if ! output=$("$luac_bin" -p "$f" 2>&1); then
+            echo "lua syntax error in $f:"
+            echo "$output"
+            exit 1
+        fi
+    done <<< "$(git diff --cached --name-only --diff-filter=ACM | grep '\.lua$')"
+fi
+
 # Delegate to pre-commit framework if installed and repo has config
 if [ -f .pre-commit-config.yaml ] && command -v pre-commit &>/dev/null; then
     pre-commit run --hook-stage pre-commit "$@"
