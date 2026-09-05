@@ -29,21 +29,33 @@ virtual_modifiers:
 modmap:
   - name: Modifier positions
     remap:
+      # Spelled with raw KEY_ names, not the Alt_L/Super_L aliases: xremap
+      # documents those only for the left-hand modifiers, and an _R alias that
+      # matches the right key as a source can still emit the LEFT one as a
+      # destination. That silently put plain Alt on the Menu key, which cost
+      # AltGr and left a stray Alt firing GNOME shortcuts.
+      #
       # Super next to the space bar on both sides, the way Cmd sits on a Mac.
-      Alt_L: Super_L
-      Super_L: Alt_L
-      Alt_R: Super_R
+      KEY_LEFTALT: KEY_LEFTMETA
+      KEY_LEFTMETA: KEY_LEFTALT
+      KEY_RIGHTALT: KEY_RIGHTMETA
       # That claims the key AltGr lived on, and AltGr types the Norwegian
       # letters. It moves to the Menu key, which is otherwise unused. xkb's
       # lv3:ralt_switch still expects to see a right Alt, so that is what the
       # Menu key becomes rather than AltGr directly.
-      KEY_COMPOSE: Alt_R
+      KEY_COMPOSE: KEY_RIGHTALT
 
   - name: Caps is Escape tapped, a layer held
     remap:
       CapsLock:
         held: CapsLock
         alone: Esc
+        # Without a hold threshold the layer engages the moment any key joins
+        # Caps, so rolling caps->b launches an app instead of typing Escape
+        # then b. Every letter on this layer is also a vim command, so the roll
+        # is common. macOS decides by release order and replays what it
+        # buffered; xremap cannot reorder, so a threshold is the nearest thing.
+        hold_threshold_millis: 150
         alone_timeout_millis: 250
 
   - name: Tap a modifier to walk through tabs

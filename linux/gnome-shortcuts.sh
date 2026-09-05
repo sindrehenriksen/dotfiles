@@ -11,9 +11,14 @@ gsettings set org.gnome.shell.keybindings focus-active-notification "[]"
 # Super+D becomes bookmark. macOS never bound show-desktop there either.
 gsettings set org.gnome.desktop.wm.keybindings show-desktop "[]"
 
-# A bare tap of a modifier held dozens of times an hour should not open the
-# overview. Super+Space still does.
+# The overview moves off a bare Super tap and onto Super+Space, which is the
+# Mac arrangement: tapping Cmd does nothing, Cmd+Space searches. A modifier
+# held dozens of times an hour should not open anything on its own. GNOME
+# ships panel-main-menu on that chord, which does nothing at all in Shell 46,
+# and leaves toggle-overview unbound.
 gsettings set org.gnome.mutter overlay-key ""
+gsettings set org.gnome.desktop.wm.keybindings panel-main-menu "[]"
+gsettings set org.gnome.shell.keybindings toggle-overview "['<Super>space']"
 
 # xremap owns Caps now: tap for Escape, hold for the layer. The xkb swap would
 # fight it. lv3:ralt_switch stays — the Menu key becomes the right Alt that
