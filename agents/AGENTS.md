@@ -1,4 +1,4 @@
-<!-- User-level agent instructions, vendor-neutral. Symlinked from ~/dotfiles/.agents/AGENTS.md to ~/.agents/AGENTS.md, ~/.claude/CLAUDE.md and ~/.claude-work/CLAUDE.md; ~/dotfiles/.claude/CLAUDE.md is a symlink back to this file. -->
+<!-- User-level agent instructions, vendor-neutral. Symlinked from ~/dotfiles/agents/AGENTS.md to ~/.agents/AGENTS.md, ~/.claude/CLAUDE.md and ~/.claude-work/CLAUDE.md. -->
 <!-- Rules for working in the dotfiles repo itself live in ~/dotfiles/AGENTS.md (auto-loaded there), not here. -->
 
 # General Instructions
@@ -141,7 +141,7 @@ Before claiming a tool isn't installed or recommending an install step, check th
 Don't use memory. Anything worth remembering belongs in transparent, version-controlled docs:
 
 - **Project-level** → project VCS. `AGENTS.md` is the cross-agent default; follow whatever conventions the repo already uses.
-- **User-level** → dotfiles (also VCS): this file, `~/dotfiles/.agents/skills/`.
+- **User-level** → dotfiles (also VCS): this file, `~/dotfiles/agents/skills/`.
 
 This covers temporary work that spans conversations too (e.g., a project `TODO.md` pruned when items complete). What doesn't survive past the conversation stays in the conversation — don't stash state in memory "just in case"; opaque persistence drifts and rots.
 

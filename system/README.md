@@ -89,7 +89,7 @@ Five parts, all needed:
    rather than killed, so it crawls instead of dragging the machine into swap.
 2. `DefaultOOMPolicy=continue` here — if a process is OOM-killed anyway, the
    shell and scrollback survive and the tab just shows `killed`.
-3. `!mem:<rss>` in the Claude Code status line (`.claude/statusline.sh`), shown
+3. `!mem:<rss>` in the Claude Code status line (`claude/statusline.sh`), shown
    above 3 GiB — the cue to `/clear` or start a fresh session.
 4. `user-service-oomd-off.conf` — drops Ubuntu's session-wide 50% oomd rule.
 5. `oomd-no-pressure-kill.conf` — raises the per-scope limit Ghostty sets

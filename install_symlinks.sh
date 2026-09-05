@@ -30,27 +30,27 @@ link ~/dotfiles/.ignore ~/.ignore
 link ~/dotfiles/.zprofile ~/.zprofile
 link ~/dotfiles/.zshrc ~/.zshrc
 mkdir -p ~/.agents/skills ~/.claude/skills
-link ~/dotfiles/.agents/principles.md ~/.agents/principles.md
-link ~/dotfiles/.agents/AGENTS.md ~/.agents/AGENTS.md
+link ~/dotfiles/agents/principles.md ~/.agents/principles.md
+link ~/dotfiles/agents/AGENTS.md ~/.agents/AGENTS.md
 for skill in "${generic_skills[@]}"; do
-    link ~/dotfiles/.agents/skills/"$skill" ~/.agents/skills/"$skill"
-    link ~/dotfiles/.agents/skills/"$skill" ~/.claude/skills/"$skill"
+    link ~/dotfiles/agents/skills/"$skill" ~/.agents/skills/"$skill"
+    link ~/dotfiles/agents/skills/"$skill" ~/.claude/skills/"$skill"
 done
 # Repo-specific skills (not global)
 mkdir -p ~/dotfiles/.claude/skills
-link ~/dotfiles/.agents/skills/sync ~/dotfiles/.claude/skills/sync
+link ~/dotfiles/agents/skills/sync ~/dotfiles/.claude/skills/sync
 # Git hooks (repo-local)
 git -C ~/dotfiles config core.hooksPath git-hooks
 # Claude Code
-link ~/dotfiles/.agents/AGENTS.md ~/.claude/CLAUDE.md
-link ~/dotfiles/.claude/settings.json ~/.claude/settings.json
-link ~/dotfiles/.claude/statusline.sh ~/.claude/statusline.sh
-link ~/dotfiles/.claude/keybindings.json ~/.claude/keybindings.json
+link ~/dotfiles/agents/AGENTS.md ~/.claude/CLAUDE.md
+link ~/dotfiles/claude/settings.json ~/.claude/settings.json
+link ~/dotfiles/claude/statusline.sh ~/.claude/statusline.sh
+link ~/dotfiles/claude/keybindings.json ~/.claude/keybindings.json
 # Claude Code work-account config dir (shared config symlinked from personal)
 mkdir -p ~/.claude-work
-link ~/dotfiles/.agents/AGENTS.md ~/.claude-work/CLAUDE.md
-link ~/dotfiles/.claude/settings.json ~/.claude-work/settings.json
-link ~/dotfiles/.claude/keybindings.json ~/.claude-work/keybindings.json
+link ~/dotfiles/agents/AGENTS.md ~/.claude-work/CLAUDE.md
+link ~/dotfiles/claude/settings.json ~/.claude-work/settings.json
+link ~/dotfiles/claude/keybindings.json ~/.claude-work/keybindings.json
 link ~/.claude/plugins ~/.claude-work/plugins
 # Skills are the exception: each account owns its directory, so an overlay
 # repo's skills reach the one account it belongs to and no other. This used to
@@ -59,7 +59,7 @@ link ~/.claude/plugins ~/.claude-work/plugins
 [ -L ~/.claude-work/skills ] && rm ~/.claude-work/skills
 mkdir -p ~/.claude-work/skills
 for skill in "${generic_skills[@]}"; do
-    link ~/dotfiles/.agents/skills/"$skill" ~/.claude-work/skills/"$skill"
+    link ~/dotfiles/agents/skills/"$skill" ~/.claude-work/skills/"$skill"
 done
 
 if [[ "$(uname)" == "Darwin" ]]; then
