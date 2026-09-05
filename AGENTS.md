@@ -27,6 +27,16 @@ The keyboard and window setups exist twice — `hammerspoon/` and `macos/` on on
 
 A change to one side should be mirrored on the other. Where it should not be, say why in `docs/keyboard.md` under "Parity" rather than leaving the two to drift silently.
 
+## The Linux laptop runs a self-built kernel
+
+Not Ubuntu's, and nothing updates it — no security patches — because the fix for
+an s2idle display bug never reached the 7.0.y branch Ubuntu is stuck on. When
+working in `system/`, or whenever kernels, suspend or updates come up, offer to
+check kernel.org for a newer release, rebuild with
+`system/kernel-mainline-build.sh`, and move the "Last checked" date. That
+section also holds the two triggers for abandoning the arrangement — take them
+when they fire rather than carrying this indefinitely.
+
 ## Auto-Approved Commands
 
 `~/.claude/settings.json` (symlinked from this repo) defines which Bash commands are auto-approved vs prompted, so a permission-rule change is a commit here. What belongs in `allow`, `ask` or `deny` is settled in the global instructions under "Permissions and blocked actions" — this file doesn't restate it.

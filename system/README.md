@@ -193,22 +193,6 @@ For non-Lenovo laptops, use TLP thresholds instead:
 `START_CHARGE_THRESH_BAT0=75` / `STOP_CHARGE_THRESH_BAT0=80` in `/etc/tlp.conf`
 (if your hardware supports it — check `sudo tlp-stat -b`).
 
-### Keyboard resume fix (`keyboard-reset`)
-
-Some Lenovo models lose the internal keyboard entirely after s2idle resume —
-same EC timing race as the Fn media keys, and fixed by the same patch, which is
-now in-tree on the mainline kernel and carried by DKMS on the 7.0 fallback. The
-script is **disabled** (`chmod -x`) and kept only in case both routes are ever
-unavailable at once.
-
-```bash
-sudo cp ~/dotfiles/system/keyboard-reset /usr/lib/systemd/system-sleep/
-sudo chmod +x /usr/lib/systemd/system-sleep/keyboard-reset
-```
-
-Manual workaround if the keyboard dies: `kbr` alias (defined in `.shellrc`), or
-`sudo sh -c 'echo -n "rescan" > /sys/devices/platform/i8042/serio0/drvctl'`
-
 ### Lid close
 
 Lid-close suspend is inconsistent due to Modern Standby (s2idle) firmware
@@ -223,7 +207,9 @@ keycodes, so `KEY_F1..F12` appear on the AT keyboard where
 `KEY_VOLUMEUP` etc. should. `/dev/input/event6` ("Ideapad extra
 buttons") goes silent.
 
-Only a reboot resolves a broken state.
+Only a reboot resolves a broken state. The same EC race also killed the internal
+keyboard outright on resume; a `system-sleep` hook that re-scanned the i8042
+controller carried that until the real fix landed, and `git log` has it.
 
 Upstream bug: https://bugzilla.kernel.org/show_bug.cgi?id=221383 — reported and
 tested from this machine, merged 2026-07-25 and backported to the 6.6 / 6.12 /
@@ -250,8 +236,6 @@ cat /proc/sys/kernel/tainted                   # 0 = nothing out-of-tree loaded
 **Retire it when the 7.0 fallback goes** — not before, and note the MOK keys are
 now load-bearing for signing mainline kernels, so they stay regardless:
 - `sudo dkms remove amd_pmc/0.0.3 --all`, then `rm -rf ~/src/amd_pmc-ideapad`
-- Re-enable or delete the keyboard-reset script
-- Remove `~/kernel-bug-221383/` (diagnostic artifacts)
 - Keep `~/mok.key` / `~/mok.crt` / `~/mok.der` unless self-built kernels are
   also gone
 
