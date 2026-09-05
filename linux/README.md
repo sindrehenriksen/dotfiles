@@ -27,7 +27,9 @@ The log-out is not optional. Group membership only applies to a new session, and
 
 ## Why xremap rather than keyd
 
-keyd is the better tool for pure key-position remapping and it works at the console, but it has no idea which window has focus. Making Super behave like Cmd needs exactly that: `Super+V` has to become `Ctrl+Shift+V` in a terminal and `Ctrl+V` everywhere else. Only xremap can ask, via its GNOME Shell extension. Running both would mean two processes grabbing the same devices and chaining virtual keyboards in the right order, for no gain.
+keyd is the better tool for pure key-position remapping and it works at the console, but it has no idea which window has focus. Making Super behave like Cmd needs exactly that: `Super+V` has to become `Ctrl+Shift+V` in a terminal and `Ctrl+V` everywhere else. Only xremap can ask, via its GNOME Shell extension.
+
+A second remapper alongside it buys nothing while the difference is only key positions, which both tools do. It stops being true if the tap-hold behaviour under Known gaps is ever wanted — kanata has primitives xremap lacks, and that is a real gain rather than a duplicated one.
 
 ## Verifying
 
@@ -43,6 +45,9 @@ busctl --user call org.gnome.Shell /com/k0kubun/Xremap com.k0kubun.Xremap WMClas
 
 - **Directional window focus and the placement grid are missing.** Both need a GNOME Shell extension that has not been written. Caps + `h/t/n/s` does nothing yet.
 - **Stray modifier taps fire more often than on macOS.** Hammerspoon suppresses a tap that lands mid-typing; xremap has no equivalent, so a brushed Shift can still switch tabs.
+- **The Caps layer waits.** It engages on hold time (`hold_threshold_millis`) rather than on which key is released first, so the layer costs a real pause that macOS does not.
+
+  Both of the above are fixable, but only by adding [kanata](https://github.com/jtroo/kanata) alongside xremap: it has `tap-hold-order`, which resolves purely by release order with no timeout, and `(require-prior-idle <ms>)`, which suppresses a tap that follows recent typing. Neither exists in xremap. kanata cannot replace it, having no window awareness for the per-application Super translation, so this means two remappers chained — kanata grabbing the keyboard and emitting a virtual device, xremap reading only that. Not done, because it doubles the input stack for a question of feel.
 - **Slack and Notes are unmapped** on the Caps layer. Slack is not installed; Notes is a decision recorded in the keyboard doc.
 - **Super is only on the left of the space bar**, unlike the Mac. The key right of it carries a small menu glyph but is a Copilot key: one press emits `KEY_LEFTMETA` + `KEY_LEFTSHIFT` + `KEY_F23` together, so nothing can be mapped onto it — its Meta and Shift are the same events the real keys produce. Read the scancodes rather than the legend. AltGr therefore stays where it is, on the right of the space bar.
 
