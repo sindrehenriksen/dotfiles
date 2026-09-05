@@ -1,5 +1,7 @@
 # Three-column window layout
 
+Modifiers, layers and app shortcuts live in [keyboard.md](keyboard.md). A change on one machine should be mirrored on the other — see "Parity" there.
+
 ## Goal
 
 A predictable, static three-column layout on widescreen: browser on the left, project terminals in the middle, nvim on the right. Project switching happens inside Ghostty tabs on the right; middle-column terminals are reordered manually as needed. No auto-resize on focus.
@@ -37,11 +39,11 @@ Alt-tabbing between columns is painful. Dvorak home row `h/t/n/s` = west/north/s
 
 - **Focus**: hold Caps + `h/t/n/s` — move focus to the window in that direction (crosses screens). Caps is dual-function: tap for Escape, hold as a modifier (see `macos/README.md`).
 - **Swap**: `Cmd+Ctrl+h/t/n/s` — exchange frames with the window in that direction (useful for reordering middle-column terminals).
-- **Jump to app**: hold Caps + `c` Chrome / `g` Ghostty / `l` Slack / `r` Notes / `z` Safari / `b` Finder / `w` Claude — Dvorak top and bottom rows, clear of the home-row focus keys.
+- **Jump to app**: hold Caps + one letter, on the Dvorak top and bottom rows, clear of the home-row focus keys. Table in [keyboard.md](keyboard.md).
 
 **macOS (Hammerspoon):** implemented via `hs.window.focusWindow{East,West,North,South}()` for focus and `windowsTo{...}` + frame-exchange for swap.
 
-**Linux:** directional focus is built into Tiling Shell, Forge, and PaperWM (configure in the extension's settings). Swap semantics vary by extension.
+**Linux:** not built yet. Directional focus has no GNOME equivalent and comes with the extension below.
 
 Swap uses the same chord on both OSes for muscle-memory transfer; the Caps-hold keys are macOS-only, since Caps depends on Hammerspoon. `Cmd+Ctrl` was chosen over `Ctrl+Alt+Shift` (too heavy) and `Cmd` alone (breaks hide/new/save).
 
@@ -64,26 +66,23 @@ Single config file (`hammerspoon/init.lua`), symlinked to `~/.hammerspoon/init.l
 |---|---|
 | `h` / `t` / `n` | left / center / right **third** (full height) |
 | `g` / `c` / `r` | upper half of that column |
-| `m` / `v` | lower half of left / right column |
-| `c` / `w` / `Opt+w` | center column: master (top 50%) / stack middle-quarter ↔ bottom-quarter (toggles) / full lower half |
+| `m` / `w` / `v` | lower half of that column |
 | `Shift+h` / `t` / `n` | left / center / right **half** (wider than third) |
 | `s` | full screen |
 
-**Display cycling:** pressing the same key again when the window is already at that target cycles it to the next screen. Works for all single-shot placements (not `w`, which keeps middle ↔ bottom toggle on the current screen). Cross-screen moves apply `setFrame` twice (second via a 0.05s timer) to correct a mixed-DPI sizing glitch.
+**Display cycling:** pressing the same key again when the window is already at that target cycles it to the next screen. Cross-screen moves apply `setFrame` twice (second via a 0.05s timer) to correct a mixed-DPI sizing glitch.
 
-**Gaps:** `GAP` constant at the top of `init.lua` (default 8px) — air around every window including screen edges. Tune to taste.
+**Gaps:** `GAP` constant at the top of `init.lua` (default 10px) — air around every window including screen edges. Tune to taste.
+
+Placement only places. An earlier version shoved the occupant of a target slot into the complementary slot; it went unused and was most of the file.
 
 ### Linux/Ubuntu — GNOME Shell extension
 
 Wayland blocks external window manipulation, so the only viable approach is a Shell extension that operates inside the compositor.
 
-**Options:**
+Written rather than adopted. The off-the-shelf tilers (Tiling Shell, Forge, PaperWM) each impose their own model — auto-tiling, tree layouts, or scrollable columns — and none offers a modal picker that drops a window into a named slot, which is the whole interaction here. Bending one into shape is more work than the placement maths, which is a dozen lines.
 
-- **Tiling Shell** — explicit layout ratios via Fancy Zones-style editor. Likely the best fit for the fixed-column + master-stack model. https://github.com/domferr/tilingshell
-- **Forge** — i3/sway-style tree tiling with vim keybindings. Master-stack is native but less GUI-friendly for column ratios. https://github.com/forge-ext/forge
-- **PaperWM** — scrollable tiling, focused window naturally takes more space. Better for dynamic focus-swap, less natural for fixed columns. Probably not the right fit. https://github.com/paperwm/PaperWM
-
-Try Tiling Shell first; Forge as a fallback.
+Ubuntu's own Tiling Assistant is enabled by default and unused; it goes when the extension lands.
 
 ## Key decisions
 

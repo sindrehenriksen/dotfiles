@@ -17,6 +17,12 @@ Anything tied to an employer, a client, or an internal project — machine setup
 - `~/.secrets.env` — untracked personal secrets (chmod 600, `export KEY=VALUE` format); sourced by shell configs. Work secrets are kept outside this repo and outside `~`.
 - `~/.shellrc.early` and `~/.gitconfig.local` — untracked hooks the shell and git configs pull in if present. Machine-local setup goes there rather than in a tracked file.
 
+## macOS and Linux stay in step
+
+The keyboard and window setups exist twice — `hammerspoon/` and `macos/` on one side, the Linux input remapper and GNOME extension on the other. `docs/keyboard.md` and `docs/window-layout.md` hold the shared model both implementations serve; read them before changing either.
+
+A change to one side should be mirrored on the other. Where it should not be, say why in `docs/keyboard.md` under "Parity" rather than leaving the two to drift silently.
+
 ## Auto-Approved Commands
 
 `~/.claude/settings.json` (symlinked from this repo) defines which Bash commands are auto-approved vs prompted, so a permission-rule change is a commit here. What belongs in `allow`, `ask` or `deny` is settled in the global instructions under "Permissions and blocked actions" — this file doesn't restate it.
