@@ -43,7 +43,8 @@ busctl --user call org.gnome.Shell /com/k0kubun/Xremap com.k0kubun.Xremap WMClas
 
 ## Known gaps
 
-- **Directional window focus and the placement grid are missing.** Both need a GNOME Shell extension that has not been written. Caps + `h/t/n/s` does nothing yet.
+- **Directional swap is missing.** On the Mac, `Cmd+Ctrl+h/t/n/s` exchanges the focused window's frame with its neighbour. The extension does the focus half but not the swap; it would be the same neighbour-finding with an exchange instead of an activate. Left undone deliberately — it sees little use.
+- **The two-window sizes live in the extension's JavaScript**, so changing one costs a logout: GNOME re-reads extension code only when the Shell restarts, and disable/enable reuses the cached module. Moving those numbers into the extension's GSettings schema would make a tweak a `gsettings` command taking effect immediately. Worth doing if they ever need more than occasional adjustment.
 - **Stray modifier taps fire more often than on macOS.** Hammerspoon suppresses a tap that lands mid-typing; xremap has no equivalent, so a brushed Shift can still switch tabs.
 - **The Caps layer waits.** It engages on hold time (`hold_threshold_millis`) rather than on which key is released first, so the layer costs a real pause that macOS does not.
 

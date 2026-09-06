@@ -43,7 +43,7 @@ Alt-tabbing between columns is painful. Dvorak home row `h/t/n/s` = west/north/s
 
 **macOS (Hammerspoon):** implemented via `hs.window.focusWindow{East,West,North,South}()` for focus and `windowsTo{...}` + frame-exchange for swap.
 
-**Linux:** not built yet. Directional focus has no GNOME equivalent and comes with the extension below.
+**Linux:** focus is implemented in the Shell extension below, since GNOME has no directional-focus equivalent of its own. Swap is not — see the gap noted there.
 
 Swap uses the same chord on both OSes for muscle-memory transfer; the Caps-hold keys are macOS-only, since Caps depends on Hammerspoon. `Cmd+Ctrl` was chosen over `Ctrl+Alt+Shift` (too heavy) and `Cmd` alone (breaks hide/new/save).
 
