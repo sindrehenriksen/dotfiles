@@ -73,13 +73,16 @@ modmap:
 keymap:
   - name: Caps layer, focus a window and jump to an app
     remap:
-      # Directional focus, handled by the window-grid Shell extension. F13-F16
-      # are a courier: nothing else uses them, and the extension binds them so
-      # the chord never has to survive the Super translation below.
-      CapsLock-j:         F13  # h  west
-      CapsLock-k:         F14  # t  north
-      CapsLock-l:         F15  # n  south
-      CapsLock-semicolon: F16  # s  east
+      # Directional focus, handled by the window-grid Shell extension. The
+      # courier chord has to be one the layout actually names: F13-F16 looked
+      # ideal, being unused, but `pc` assigns them no keysym at all, so GNOME
+      # could never match a binding on them. Ctrl+Alt+Super is unclaimed and
+      # the letters are real. xremap does not reprocess its own output, so the
+      # Super here never meets the translation below.
+      CapsLock-j:         C-Alt-Super-j  # h  west
+      CapsLock-k:         C-Alt-Super-k  # t  north
+      CapsLock-l:         C-Alt-Super-l  # n  south
+      CapsLock-semicolon: C-Alt-Super-semicolon  # s  east
 
       CapsLock-i:      { launch: ["focus-or-launch", "google-chrome"] }         # c
       CapsLock-u:      { launch: ["focus-or-launch", "com.mitchellh.ghostty"] } # g
