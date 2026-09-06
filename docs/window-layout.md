@@ -85,7 +85,7 @@ Their geometry is per display, since the two screens do not want the same thing:
 | | ultrawide (2.39:1) | laptop (16:10) |
 |---|---|---|
 | outer margin | 10% (344px) | 0.5% (10px) |
-| small | 29.5% × 70% | 49% × 66% |
+| small | 29.5% × 70% | 53% × 79% |
 | large | 48% × 90% | 73% × 96% |
 | between them | 86px gap | 442px overlap |
 | vertical | both centred | large centred, small held near the top |

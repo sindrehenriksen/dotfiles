@@ -35,7 +35,7 @@ export const RAW = {
 // floats over it, held high rather than centred.
 export const TWO_UP = {
     wide:   {margin: 0.10,  small: {w: 0.295, h: 0.70},        large: {w: 0.48, h: 0.90}},
-    narrow: {margin: 0.005, small: {w: 0.49,  h: 0.66, y: 0.06}, large: {w: 0.73, h: 0.96}},
+    narrow: {margin: 0.005, small: {w: 0.53,  h: 0.79, y: 0.06}, large: {w: 0.73, h: 0.96}},
 };
 
 export function screenKind(work) {
