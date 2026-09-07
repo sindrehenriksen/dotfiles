@@ -26,6 +26,12 @@ rather than one pass over everything, which buys breadth you already
 have. Before shipping, a broader pass earns its cost — how broad, and
 on what trigger, follows the project's own conventions.
 
+**Where an LLM judges, a run carries two sources of variance** — the
+subject and the judge — and they have to be separated rather than
+summed. Comparing two judges on freshly generated output measures
+both at once and buries the difference being looked for, so freeze
+the output first and score the same items twice.
+
 **A defect in model behaviour is a case, not a prose finding.** It
 lands in the eval before the prompt changes, and stays there as the
 guard.
