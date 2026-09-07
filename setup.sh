@@ -134,12 +134,16 @@ command -v claude >/dev/null || curl -fsSL https://claude.ai/install.sh | bash
 # Claude Code (user-scoped — available in all projects)
 claude mcp add -s user playwright -- npx @playwright/mcp@latest
 
-#### Claude Code per-machine settings (~/.claude/settings.local.json, gitignored)
+#### Claude Code per-machine settings (the account's --settings overlay)
 # Add this machine's resolved $TMPDIR to permissions.additionalDirectories so
 # coding agents can read/write there without prompts (pairs with shared /tmp
 # and /private/tmp entries in the tracked settings.json). Example:
 #   echo "$TMPDIR" | sed 's:/$::'
-# then add the result to the additionalDirectories array.
+# then add the result to the additionalDirectories array of the file named by
+# CLAUDE_PERSONAL_SETTINGS or CLAUDE_WORK_SETTINGS — exported from
+# ~/.shellrc.early and passed as --settings by the wrapper in .shellrc; see
+# docs/overlays.md. Not a settings.local.json beside the user settings.json:
+# the agent reads no such file, so a rule put there is silently lost.
 
 # GitHub Copilot CLI: add to ~/.copilot/mcp-config.json (or /mcp add interactively)
 
