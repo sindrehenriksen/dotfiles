@@ -161,7 +161,10 @@ fi
 # soft_deny and environment entries are appended to the ones here rather than
 # replacing them, which is what lets an account keep its context out of this
 # repo without restating the shared half.
-_claude-run() {
+# The helper is `__`-prefixed for the reason spelled out in the gh block
+# below: a single-`_` name does not survive Claude Code's shell snapshot,
+# so `claude` inside a Claude session fails to find it.
+__claude-run() {
     local account=$1; shift
     local dir=~/.claude
     local extra=$CLAUDE_PERSONAL_SETTINGS
@@ -179,9 +182,9 @@ _claude-run() {
         GH_CONFIG_DIR=~/.config/gh-"$account" \
         command claude "$@"
 }
-claude()          { _claude-run "${CLAUDE_DEFAULT_ACCOUNT:-${DEFAULT_ACCOUNT:-personal}}" "$@"; }
-claude-personal() { _claude-run personal "$@"; }
-claude-work()     { _claude-run work "$@"; }
+claude()          { __claude-run "${CLAUDE_DEFAULT_ACCOUNT:-${DEFAULT_ACCOUNT:-personal}}" "$@"; }
+claude-personal() { __claude-run personal "$@"; }
+claude-work()     { __claude-run work "$@"; }
 
 
 #### gh CLI account switcher
