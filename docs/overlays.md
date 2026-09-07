@@ -142,6 +142,8 @@ with no overlay is unaffected. The full set:
 
 **There is no per-machine settings file beside the user `settings.json`.** The agent reads a `settings.json` from its config dir, a `.claude/settings.json` from the cwd, and a `.claude/settings.local.json` from the git root — nothing else, so a `settings.local.json` placed in the config dir is never opened and a rule put there is silently lost. That makes the two variables above the only per-machine settings hook, and a repo's own `.claude/settings.local.json` the only per-repo one.
 
+**Reads follow a symlink; writes refuse one.** A settings write rejects a symlinked target — "Refusing to write through symlink" — and the user `settings.json` is the sole exemption, which is why the link this repo installs for it works normally. Symlink a *project* or *local* settings file and you get a half-working file: it is read fine, so rules in it apply, but the agent's own "don't ask again" cannot add to it. Such a file is hand-maintained by definition.
+
 **The `autoMode` block does not follow the rest of the settings.** It is read
 only from the config dir's own `settings.json`, a `--settings` file, and
 admin-managed settings; in project and local settings it is parsed, ignored, and
