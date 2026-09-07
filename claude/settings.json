@@ -1,5 +1,5 @@
 {
-  "cleanupPeriodDays": 60,
+  "cleanupPeriodDays": 120,
   "permissions": {
     "allow": [
       "Bash(gh search *)",
