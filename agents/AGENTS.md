@@ -40,6 +40,15 @@ understood" but "does this detail change what gets decided".
   closing summary, and ask for a real read. Automated review leans the
   other way: a docs-or-copy diff is exactly the shape a low-risk
   heuristic waves through.
+- A finding is not automatically new work, and handing one over
+  unresolved is the expensive shape. It costs the owner a context
+  switch into something they were not working on, and that cost lands
+  whether or not the thing turns out to matter. So check it first:
+  most collapse into already covered, already true, or not real. What
+  survives gets a call where you can make one and a recommendation
+  where you cannot; an open question is for what is genuinely theirs
+  and blocks the work. Several at once is a list, which "Incidents are
+  not a pattern" already rules out.
 - Report this conversation's scope only. Another session's branches,
   worktrees and uncommitted work are theirs; the owner has other work
   running and does not need it narrated. Mention it solely where it
