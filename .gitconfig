@@ -16,7 +16,7 @@
     b = branch
     co = checkout
     l = log
-    lo = log --oneline
+    lo = log --pretty=lo --date=human
     ps = push
     pnv = push --no-verify
     pl = pull
@@ -30,8 +30,8 @@
     sh = stash
     r = reset
     rb = rebase
-    loga = log --oneline --decorate --graph --all --color
-    lom = log --oneline main..
+    loga = !git lo --graph --all --color
+    lom = !git lo main..
     lp = log -p --reverse origin/main..HEAD
     fd = diff-tree --no-commit-id --name-only -r
     fdpc = log --pretty=format:'%h %s%n' --name-only
@@ -40,6 +40,14 @@
     hide = update-index --skip-worktree
     unhide = update-index --no-skip-worktree
     unhide-all = !git ls-files -v | grep '^S' | cut -c 3- | xargs -r git update-index --no-skip-worktree
+
+# Shared by lo/loga/lom. Author date, not committer date: a rebase or
+# autosquash rewrites the latter, so every commit on a freshly rebased
+# branch would carry the same timestamp. --date=human drops what the
+# reader can infer (the year on this year's commits, the date itself
+# within the past week), so the column is padded to stay a column.
+[pretty]
+    lo = tformat:%C(auto)%h %C(blue)%<(16)%ad %C(green)%<(16,trunc)%aN%C(auto)%d %C(reset)%s
 
 [rebase]
     autosquash = true
