@@ -282,6 +282,25 @@ thing through while the small one gets scrutinised. Tie it to
 shipping and the judgement disappears. The reviewer is an agent that
 saw neither the code nor the conversation that produced it.
 
+**Output with a reader outside the round needs a review that stands in
+for that reader, and it comes before the prose pass.** Not only a page
+or a document: anything answering to someone who was not here — copy
+that ships, an error message, a description someone integrates
+against. Hand an agent the output plus exactly what its reader already
+knows and nothing the work itself added, and ask what each part means
+and what it cannot decode.
+
+**Name that reader in the brief, because the calibration is the whole
+point.** Hold back what they would know and it flags what they would
+follow without effort; hand over what the round knows and it flags
+nothing, because context is what makes a comprehension defect
+invisible — the part that took a whole pass to work out is exactly the
+part that no longer needs explaining to anyone who was there. A reader
+inside the team is still a reader: someone who does not hold the
+discipline the work came from is the common case, not the exotic one.
+Run it before the prose pass, since it changes copy that pass would
+otherwise polish.
+
 **The facilitator convenes it and picks the lenses — not the lead,
 not the dev.** `roles/facilitator.md` carries how. A lead that runs
 the review itself has taken the round's work back, and doing it
