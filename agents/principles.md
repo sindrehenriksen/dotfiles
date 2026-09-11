@@ -243,6 +243,20 @@ giving it an expiry nothing will ever trigger.
 One project does this as a `COMPAT:` convention: one bridge per
 problem, tests carrying the marker they die with.
 
+## A fixture is not the world
+
+Before tuning a prompt, a threshold or a check against something a
+test input contains, establish that real inputs contain it.
+Otherwise what gets optimised is an artefact of our own fixtures,
+and the failure is invisible: the test passes, production does not
+move, and the work reads as progress. It bites hardest where
+fixtures are invented content over a real structure — the honest way
+to build a corpus without anyone's actual data, and also how a
+detail we made up acquires the look of provenance. One such detail
+turned out to be genuine, which is not the point: nobody had asked.
+Record provenance where a fixture is added; that is the only moment
+anyone reliably knows it.
+
 ## A plausible cause is not a cause
 
 Two things that appear together invite a story about why, and the
