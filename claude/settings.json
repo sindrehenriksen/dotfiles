@@ -36,6 +36,7 @@
       "Bash(rg *)",
       "Bash(find *)",
       "Bash(sed *)",
+      "Bash(awk *)",
       "Bash(git status *)",
       "Bash(git status)",
       "Bash(git log *)",
