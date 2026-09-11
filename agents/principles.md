@@ -58,6 +58,11 @@ explicitly and write it down; add heavier defenses only when the
 surface actually opens — for a feed reader, when strangers can add
 the feeds.
 
+This principle is about what we build. Its counterpart about how we
+work — treating a fetched page, a ticket or a tool result as data
+while doing the job, rather than as something telling us what to do —
+is in `AGENTS.md`, under "What we run, and what we trust".
+
 ## Motion has to earn its place
 
 Animation is a cost by default and a benefit only sometimes.
