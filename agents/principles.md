@@ -246,9 +246,10 @@ problem, tests carrying the marker they die with.
 ## A fixture is not the world
 
 Before tuning a prompt, a threshold or a check against something a
-test input contains, establish that real inputs contain it.
-Otherwise what gets optimised is an artefact of our own fixtures,
-and the failure is invisible: the test passes, production does not
+test input contains, establish that the detail is real, or at least
+realistic — a capture that shows it, or domain knowledge that vouches
+for it. What fails invisibly is optimising for a detail whose only
+provenance is our own invention: the test passes, production does not
 move, and the work reads as progress. It bites hardest where
 fixtures are invented content over a real structure — the honest way
 to build a corpus without anyone's actual data, and also how a
