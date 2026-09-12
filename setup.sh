@@ -114,14 +114,6 @@ npm install -g agent-browser
 # both: install browser binary
 agent-browser install
 
-#### CodeRabbit CLI (free tier, AI code review)
-# if mac (it's a cask — auto-resolves but --cask is explicit)
-brew install --cask coderabbit
-# if linux
-curl -fsSL https://cli.coderabbit.ai/install.sh | sh
-# both: one-time browser auth (free tier, daily rate limits)
-cr auth login
-
 #### Claude Code
 # Use the official installer, not `brew install --cask claude-code`: the cask
 # lags and may NOT carry the latest, which gates access to newer models. The

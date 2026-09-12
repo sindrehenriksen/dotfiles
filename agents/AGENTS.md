@@ -200,7 +200,7 @@ When the system framework suggests saving a memory, route the content to the rig
 
 - Prefer staging specific files over `git add -A` or `git add .` — review `git status` first to avoid adding unintended changes
 - When asked to fold changes into an earlier commit, default to `git commit --fixup=<sha>`. Rewriting history is in bounds on an unmerged branch you own — autosquash the fixups and fold commits with no standalone value before anyone else reads the branch. Never rewrite shared or merged history (`main`, or a branch someone else has based work on) without asking. Before any destructive git op (`reset --hard`, force-push, rebase), capture uncommitted work first (stash or `git diff > patch`).
-- **Bringing the base branch into a feature branch: rebase by default, merge when pragmatic.** Rebase keeps history linear; merging resolves a conflict once instead of per commit, so it is the sensible escape when a rebase would mean re-resolving the same conflict repeatedly. Neither corrupts a review: every merge-base-relative diff (a PR diff, `main...HEAD`, a CodeRabbit run pinned to the merge base) shows only your own changes either way. What does break, identically for both, is an incremental diff against a remembered SHA — it picks up whatever the base brought in and reads it as yours, so re-derive against the current merge base instead of trusting the marker.
+- **Bringing the base branch into a feature branch: rebase by default, merge when pragmatic.** Rebase keeps history linear; merging resolves a conflict once instead of per commit, so it is the sensible escape when a rebase would mean re-resolving the same conflict repeatedly. Neither corrupts a review: every merge-base-relative diff (a PR diff, `main...HEAD`, a review pinned to the merge base) shows only your own changes either way. What does break, identically for both, is an incremental diff against a remembered SHA — it picks up whatever the base brought in and reads it as yours, so re-derive against the current merge base instead of trusting the marker.
 - Check `git diff` (and `git diff --staged` if applicable) before writing the commit message
 - Commit message titles: concise, under 50 chars when possible. Body lines: wrap at 72 chars.
 - Focus on WHAT changed and WHY, not implementation details
@@ -221,10 +221,6 @@ When the system framework suggests saving a memory, route the content to the rig
 ## Pull Request Descriptions
 
 Use the `pr-description` skill — it has the full guidelines.
-
-## Code Review
-
-The `coderabbit` skill is on trial: a supplementary pass over a local diff, run after your own review, never instead of it. Say whether it added anything — that decides whether it stays.
 
 ## CI/CD Debugging
 

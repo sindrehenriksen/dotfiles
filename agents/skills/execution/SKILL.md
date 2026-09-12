@@ -125,8 +125,6 @@ Close each meaningful unit of work — an iteration, a phase, a coherent set of 
 
 Never review work from the conversation that produced it — that context is biased toward approving its own build. Spawn a neutral agent that has read neither the code nor the conversation behind it. **How much you may tell it splits by whether its review votes.** Where a verdict gets posted, approves, or routes a reviewer, its entire input is the artifact reference (PR, diff, doc) plus the review instructions — unframed neutrality is there to protect the *verdict*, so no framing, focus hints or expected outcome. Where nothing is posted and nothing votes, saying what the unit was for, what to weight and what is already settled buys no independence back and saves a pass spent rediscovering context. What is never supplied either way is the answer you expect.
 
-On a local working diff, before there is a PR, the `coderabbit` skill can run as an independent second pass beside the neutral agent — an extra reviewer, never a substitute for one.
-
 The neutral agent judges the artifact; the conversation knows what it can't see — where the design felt fragile, which constraints were negotiated, what almost went wrong. Use that context for the complementary pass: decide what else to exercise (targeted tests, evals, checks), run it now, and promote what has lasting value into the suite or CI rather than leaving it one-off.
 
 **What to run is a function of what the change touched**, and the same mapping picks the design lenses at the start — one rule at both ends, so nobody has to remember which review this deserves.
