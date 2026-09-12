@@ -56,12 +56,22 @@ modmap:
         hold_threshold_millis: 90
         alone_timeout_millis: 250
 
-  # No tap-to-switch-tabs here, unlike macOS. A dual-function modifier in
-  # xremap stops carrying its modifier into POINTER events — key events are
-  # unaffected, which is why every shortcut kept working and this hid until
-  # Ctrl+click stopped opening links in a new tab. Ctrl+click and Shift+click
-  # are worth more than the gesture. Position-swapped modifiers are fine; it is
-  # specifically held/alone that does it.
+  - name: Tap a modifier to walk through tabs
+    # This costs Ctrl+click and Shift+click, knowingly. A dual-function
+    # modifier in xremap does not carry its modifier into POINTER events at
+    # any hold threshold, so a modified click arrives bare and links stop
+    # opening in new tabs. Keyboard shortcuts are unaffected, which is what
+    # hides it. Position-swapped modifiers are fine; it is held/alone only.
+    # Getting both needs a remapper whose tap-hold does not have this flaw.
+    remap:
+      Control_L:
+        held: Control_L
+        alone: [Control_L, Tab]
+        alone_timeout_millis: 250
+      Shift_L:
+        held: Shift_L
+        alone: [Control_L, Shift_L, Tab]
+        alone_timeout_millis: 250
 
 keymap:
   - name: Caps layer, focus a window and jump to an app
