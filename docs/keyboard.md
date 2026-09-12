@@ -56,7 +56,7 @@ Select the text and press `Super+Shift+V` in Ghostty instead. The selection is r
 
 ## Modifier taps
 
-Tapping a modifier on its own sends a chord that otherwise needs two hands. Holding it, or using it with anything else, behaves normally.
+**macOS only.** Tapping a modifier on its own sends a chord that otherwise needs two hands. Holding it, or using it with anything else, behaves normally.
 
 - Left Ctrl → `Ctrl+Tab` (next tab)
 - Left Shift → `Ctrl+Shift+Tab` (previous tab)
@@ -67,6 +67,8 @@ Two guards keep stray taps from firing, since both keys are ones the hand brushe
 - **Quiet after** (80 ms, Shift only): a Shift released a fraction early, just before the letter it was meant to capitalise, is indistinguishable from a deliberate tap until that letter lands.
 
 `Shift+Tab` deliberately stays free — it is reverse focus traversal in GUI apps and the mode switch in Claude Code.
+
+Linux cannot have this. A dual-function modifier in xremap stops carrying its modifier into pointer events, so `Ctrl+click` and `Shift+click` silently lose their modifier and links stop opening in new tabs. Key events are unaffected, which is why every shortcut kept working and the breakage stayed hidden. Position-swapped modifiers are fine; it is specifically the held/alone form that does it.
 
 ## Super as the app-command modifier (Linux)
 
@@ -127,7 +129,7 @@ A change on one machine should be mirrored on the other, unless there is a reaso
 - **`z` is Safari on macOS, Brave on Linux.** Brave is not used on the Mac.
 - **`Super+D` is freed on Linux** so `Cmd+D` bookmarking works. Nothing to mirror: show-desktop on macOS is F11 and Mission Control, not Cmd+D.
 - **Caps hold** is a software layer on macOS (Hammerspoon) and lives in the input remapper on Linux, but the bindings match.
-- **Stray modifier taps are only suppressed on macOS.** Hammerspoon ignores a tap that lands mid-typing; xremap has no equivalent, so a brushed Shift can still switch tabs on Linux. Not a decision, a gap.
+- **The modifier taps are macOS-only.** On Linux they cost `Ctrl+click` and `Shift+click`, which is not a trade worth making. See the section above.
 - **The two-window layouts are macOS-only for now.** They belong on both; the Linux side waits on the Shell extension.
 - **Super is on both sides of the space bar on macOS, only the left on Linux.** The right-hand key there has to stay AltGr for the Norwegian letters, and the key that would otherwise take AltGr is a Copilot key that cannot be remapped at all.
 - **The Caps layer engages by hold time on Linux, by release order on macOS.** Hammerspoon waits to see which key comes up first and replays what it buffered, so a `caps`→`b` roll yields Escape then b with no delay. xremap cannot reorder, so it needs a hold threshold instead, and the layer costs a real wait before it engages.
