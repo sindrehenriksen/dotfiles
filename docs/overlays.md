@@ -16,7 +16,7 @@ AI agents section of `README.md` — that is a separate concern from tiering.
 | Tier | Repo | Visible where | Holds |
 |---|---|---|---|
 | Personal | this one, public | everywhere | the generic craft — how work runs, how to review, how to drive a browser |
-| Bridging | a private work repo, above the team checkouts | its instruction file everywhere below it; its skills only at its own level | this machine's wiring, what this account may do, the seams between the other two |
+| Bridging | a private repo above the checkouts — an employer's, or a personal portfolio's | its instruction file everywhere below it; its skills only at its own level | this machine's wiring, what this account may do, the seams between the other two |
 | Team | a repo cloned inside the bridging one | only with cwd inside that checkout | everything about the product — its lifecycle, its gates, its tooling |
 
 The middle tier is not organisational tidiness, it is forced. Nothing shared may
@@ -26,6 +26,12 @@ inheriting one individual's choices. References therefore run one way only: the
 specific setup reaches into the generic slots the base offers, never outward. So
 anything that spans two tiers has nowhere to live but a third home that knows
 about both — and only the bridging tier does.
+
+Publication forces it a second way, which is why the tier appears even with no
+employer and no team in sight. This repo is public, so a portfolio's own names,
+hosts and account registry cannot go in it however personal they are — and the
+product repos are each too narrow to hold what spans them. A private repo above
+them is again the only home.
 
 The rule that falls out: **generic mechanism public, specific content private.**
 The public tier describes a shape; the private tier fills it with names, paths
@@ -81,6 +87,21 @@ both repos, and a stale one fails silently: a dangling entry raises nothing, the
 skill is simply absent — so re-run the private installer after adding,
 renaming or moving any skill, and treat "the skill didn't load" as a missing link
 before anything else.
+
+**Let the links declare which skills travel, rather than listing them.** Not
+every bridging skill should go up: one that only makes sense standing at that
+root belongs to the root, and promoting it puts a name into every session's
+namespace for nothing. The two categories also must not overlap, or a skill
+reachable both from cwd and from user level is registered twice under one name.
+Both fall out of one arrangement: keep the content in an undotted `agents/skills/`
+and give a root-only skill a `.claude/skills/<name>` symlink back to it, which is
+what keeps it discoverable with cwd there once it is not at user level. That
+symlink is then the declaration the installer reads — a skill carrying one is
+skipped and any user-level link left from a previous run removed, a skill without
+one is linked up. Adding a skill installs it, adding the link demotes it, and
+there is no list to keep in step. A hand-maintained list works too, and fails the
+way lists do: the entry gets forgotten, the skill silently never loads, and the
+instruction to remember it spreads into every document that mentions adding one.
 
 The reverse direction has no link to fix it. With cwd at the bridging root, a
 team repo's own skills are equally undiscovered, and force-linking those up is
