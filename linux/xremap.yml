@@ -127,9 +127,3 @@ keymap:
       # otherwise match it inexactly and turn it into Ctrl+Alt+T.
       Super-Alt-k:     Super-Alt-k  # t
 
-      # iCloud's web apps bind their handlers to metaKey, which is what Chrome
-      # reports for Super. Adding Alt sends the chord through untranslated so it
-      # reaches the page as Cmd would on a Mac — the one lever left on iCloud
-      # Notes' broken copy path.
-      Super-Alt-i:     Super-i      # c
-      Super-Alt-dot:   Super-dot    # v

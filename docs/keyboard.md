@@ -46,9 +46,13 @@ The tap/hold split has to disambiguate a chord (letter released first) from a ro
 
 `r` stays unmapped on Linux rather than pointed at a replacement. Apple Notes has no Linux client, and iCloud web paints the note body into a canvas, so selection and copy are pixels the browser cannot reach. What keeps it in use regardless is iPhone Spotlight: pull down from the home screen, type a note's name, and it is there without opening an app. No third-party notes app does that — Core Spotlight is open to them, but Obsidian, Joplin and Notesnook have never shipped it, and the end-to-end encrypted ones structurally cannot. The trade has been weighed once already; don't re-suggest a replacement without a new argument.
 
-### An escape hatch for Cmd-bound web apps
+### Copying out of iCloud Notes
 
-iCloud's web apps bind their handlers to `metaKey`, which is exactly what Chrome reports for Super on Linux. A Super chord that reaches Chrome *untranslated* may therefore work where Ctrl does nothing — the one remaining lever on iCloud Notes' broken copy path. Translation is per-application and cannot see a URL, so keep one chord that passes Super through verbatim rather than exempting Chrome wholesale.
+Its keyboard copy cannot be made to work on this layout, and no chord fixes it. Copy is the browser's native one, which Chrome matches on the letter, so it wants the key that types `c`. iCloud's own shortcuts match on physical position instead, and on Dvorak that key sits physically where `I` is, so iCloud reads it as italic and swallows the event first. Going the other way, the physical `C` key types `j`, which Chrome takes as its downloads shortcut. Both routes are blocked, by different layers.
+
+Passing Super through untranslated does not help: `metaKey` reaches the page perfectly well and iCloud does not act on it, so there is no Cmd-bound handler to reach. Rules that existed for that theory have been removed.
+
+Select the text and middle-click instead. The selection is real DOM text and lands in PRIMARY like any other, so the copy command is the only broken part and select-to-paste never uses it.
 
 ## Modifier taps
 
