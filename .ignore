@@ -51,8 +51,27 @@ mise*.local.toml
 
 # Ignoring a file costs discovery: `rg SOME_KEY` no longer finds where SOME_KEY
 # is declared, which is how anyone learns it exists at all. A tracked
-# `<filename>.example` beside each ignored file pays that back, carrying the
-# names without the values — `agents/AGENTS.md`, "Secrets & sensitive files",
-# has the requirement and what such a file may and may not contain. This line
-# is last in the file because a later pattern overrides an earlier one.
+# `<filename>.example` beside each ignored file pays that back. That is a
+# requirement rather than a nicety — the pair only works if both halves exist —
+# and the rules live here rather than in `agents/AGENTS.md`, which every
+# session loads and which should not carry mechanics that fire this rarely:
+#
+#   * Name it by appending `.example` to the real filename —
+#     `.mise.local.toml.example`, `.env.example`. The negation below matches
+#     exactly that shape, so a differently-named template is itself unsearchable.
+#   * It carries EVERY variable name the real file holds, with an empty value,
+#     plus enough comment to say what each is for, where its value comes from,
+#     and which are secret. The names are the payload: they are what a search
+#     finds.
+#   * It carries NO value — not a real one, not a truncated or redacted one,
+#     and not a placeholder shaped like the real thing. It is tracked, so
+#     anything in it is published.
+#   * A variable added to the real file is added here in the same change. A
+#     name missing from the example is invisible to everyone who does not
+#     already know it exists, which is the state this prevents.
+#   * What is required is that every name is findable ONCE, not that every
+#     ignored file has a twin. A generated or pulled file (`vercel env pull`
+#     output) mirrors an authored one and needs no example of its own.
+#
+# This line is last because a later pattern overrides an earlier one.
 !*.example
