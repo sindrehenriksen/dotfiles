@@ -33,9 +33,13 @@ package-lock.json
 # value is in the transcript before anyone chose to open anything. "Don't read
 # files that may hold secrets" cannot cover that, because nobody was reading —
 # so ignoring them is what makes that rule hold, and these entries are a safety
-# mechanism rather than a convenience. `--no-ignore` still reaches the real file
-# when the real file is the point; use `-l` when it does, or the value lands in
-# the transcript anyway.
+# mechanism rather than a convenience.
+#
+# `--no-ignore` reaches the real file again, and is the deliberate way in when
+# the file itself is the point — but ALWAYS pair it with `-l`. `rg --no-ignore
+# -l NAME` says which file holds a name; without `-l` it prints the assignment,
+# value and all, which is the failure this block exists to prevent and has
+# already happened once with a live key.
 #
 # Narrow on purpose. `.mise.toml` is tracked, shared, holds no secrets, and is
 # the first thing anyone greps to learn what a repo configures, so the tempting
