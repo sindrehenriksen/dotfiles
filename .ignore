@@ -1,11 +1,14 @@
 # Read by ripgrep in addition to VCS ignore files, and — unlike them — still
 # honoured under `--no-ignore-vcs`, which ripgreprc turns on globally. That
 # split is the point: VCS ignore hides whole nested repos from a search rooted
-# above them, while these are directories nobody ever wants to read.
+# above them, while these are paths that should stay out of every search.
+# ripgreprc holds flags, this file holds paths, and neither does the other's
+# job.
 #
 # Generic entries only. Anything true of one workspace or repo belongs in its
 # own `.ignore`, which ripgrep reads from ancestors of the search path.
 
+# Noise: directories nobody ever wants to read.
 node_modules/
 
 # Worktree checkouts are excluded per repo instead, in that repo's own .ignore:
@@ -24,3 +27,32 @@ coverage/
 *.lock
 pnpm-lock.yaml
 package-lock.json
+
+# Secrets, which are here for a different reason than noise. Searching a file
+# READS it: `rg SOME_KEY` lands on the line that assigns SOME_KEY, and the
+# value is in the transcript before anyone chose to open anything. "Don't read
+# files that may hold secrets" cannot cover that, because nobody was reading —
+# so ignoring them is what makes that rule hold, and these entries are a safety
+# mechanism rather than a convenience. `--no-ignore` still reaches the real file
+# when the real file is the point; use `-l` when it does, or the value lands in
+# the transcript anyway.
+#
+# Narrow on purpose. `.mise.toml` is tracked, shared, holds no secrets, and is
+# the first thing anyone greps to learn what a repo configures, so the tempting
+# `*mise*.toml` is wrong — only the `local` forms hold values.
+.env
+.env.*
+.mise*.local.toml
+mise*.local.toml
+*secrets*.env
+*credentials.json
+*.pem
+*.key
+
+# Ignoring a file costs discovery: `rg SOME_KEY` no longer finds where SOME_KEY
+# is declared, which is how anyone learns it exists at all. A tracked
+# `<filename>.example` beside each ignored file pays that back, carrying the
+# names without the values — `agents/AGENTS.md`, "Secrets & sensitive files",
+# has the requirement and what such a file may and may not contain. This line
+# is last in the file because a later pattern overrides an earlier one.
+!*.example
