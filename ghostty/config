@@ -34,6 +34,11 @@ linux-cgroup-memory-limit = 6442450944
 # which is the whole reason for moving app commands off it.
 keybind = super+c=copy_to_clipboard
 keybind = super+v=paste_from_clipboard
+# Pastes the selection clipboard, which is what a middle-click would use and
+# this laptop has no middle button for. It is the only way to get text out of
+# iCloud Notes, whose copy command cannot work on this layout (docs/keyboard.md).
+# No-op on macOS, which has no selection clipboard.
+keybind = super+shift+v=paste_from_selection
 keybind = super+t=new_tab
 keybind = super+w=close_tab
 keybind = super+n=new_window

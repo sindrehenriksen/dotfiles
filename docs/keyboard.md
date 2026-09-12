@@ -52,7 +52,7 @@ Its keyboard copy cannot be made to work on this layout, and no chord fixes it. 
 
 Passing Super through untranslated does not help: `metaKey` reaches the page perfectly well and iCloud does not act on it, so there is no Cmd-bound handler to reach. Rules that existed for that theory have been removed.
 
-Select the text and middle-click instead. The selection is real DOM text and lands in PRIMARY like any other, so the copy command is the only broken part and select-to-paste never uses it.
+Select the text and press `Super+Shift+V` in Ghostty instead. The selection is real DOM text and lands in the selection clipboard like any other, so the copy command is the only broken part and pasting the selection never uses it. That binding is Linux-only in effect: macOS has no selection clipboard, which is why none of this arises there.
 
 ## Modifier taps
 
