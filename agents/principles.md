@@ -18,18 +18,19 @@ the right call at the time — so that when constraints change, the
 decision can be reconsidered honestly. A document that records only the
 conclusion is a document that ages badly.
 
-**Write the state of the world, not the story of arriving at it.** A
-doc says what is true and why. Who proposed it, who approved it, what
-a round found, what was tried first and dropped — none of that
-survives into the record, and a decision written as someone having
-made it invites the next reader to weigh the someone rather than the
-reasoning. A name or a date earns its place only where it is
-load-bearing: a measurement needs its population and its date to stay
-checkable, and an obligation needs whoever it is owed to. The rest is
-what `git log` holds. This is not a rule about length — an entry that
-reads as a log of events gets replaced by what is true now rather
-than trimmed, and two lines surviving from twenty is the normal
-result.
+**Write the state of the world, not the story of arriving at it.** Who
+proposed it, who approved it, what a round found, what was tried and
+dropped — cut it by default, because a decision written as someone
+having made it invites the next reader to weigh the someone rather
+than the reasoning, and `git log` holds it anyway. Provenance stays
+where it does work the claim cannot do without: a measurement's
+population and date, a source the repo cannot check for itself, an
+obligation's counterparty, a rule reversed before, an abandoned
+approach someone would otherwise retry. Then it says in a clause why
+it is there — an attribution that cannot earn one is one to cut. None
+of this is about length: an entry reading as a log of events gets
+replaced by what is true now rather than trimmed, and two lines
+surviving from twenty is the normal result.
 
 ## The outward surface is product; keep it pivotable
 
