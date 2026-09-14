@@ -138,6 +138,13 @@ is still the cheapest way to search one repo. To find a file by name rather
 than by content, `rg --files -g '<glob>'` — `fd` is not installed, and `fzf` is
 interactive, so neither is available to an agent.
 
+**`find … -exec grep` is not a search idiom.** `rg` filters by name and
+searches in one pass — `rg -g '<glob>' <pattern> <path>` — and a file whose
+path you already know is just `rg <pattern> <file>`. The detour also costs a
+prompt: plain `find` is allowlisted, but `-exec` runs an arbitrary command per
+match, so it sits in the `ask` list next to `-delete` and `-ok`, and no prefix
+rule can cover it.
+
 ## Check the environment before assuming
 
 Before claiming a tool isn't installed or recommending an install step, check the environment — `$TERM_PROGRAM` (`ghostty`, `iTerm.app`, `Apple_Terminal`), `$SHELL`, `$HOMEBREW_PREFIX`, `uname -m` (`arm64` vs `x86_64`), `which <cmd>`. The session env block is brief; one quick probe beats a guess.
