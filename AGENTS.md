@@ -37,6 +37,11 @@ check kernel.org for a newer release, rebuild with
 section also holds the two triggers for abandoning the arrangement — take them
 when they fire rather than carrying this indefinitely.
 
+The display bug it was built for is still open, and `pm_trace` is switched on to
+catch the next occurrence at the cost of a wrong clock after every resume. That
+is time-boxed, so check "Display freeze on resume" for whether its removal date
+has passed.
+
 ## Auto-Approved Commands
 
 `~/.claude/settings.json` (symlinked from this repo) defines which Bash commands are auto-approved vs prompted, so a permission-rule change is a commit here. What belongs in `allow`, `ask` or `deny` is settled in the global instructions under "Permissions and blocked actions" — this file doesn't restate it.

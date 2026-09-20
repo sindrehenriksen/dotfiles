@@ -239,29 +239,101 @@ now load-bearing for signing mainline kernels, so they stay regardless:
 - Keep `~/mok.key` / `~/mok.crt` / `~/mok.der` unless self-built kernels are
   also gone
 
+### Display freeze on resume
+
+Resume from s2idle intermittently returns with a dead display (backlight on,
+black screen) and then wedges; only a 7-10 second power-off recovers. This is the
+reason the machine runs a mainline kernel. **Still open** — it recurred on 7.2.0
+on 2026-09-20.
+
+**The failure logs nothing, and that is what locates it.** The failing boot ends
+at `PM: suspend entry (s2idle)` with nothing after it. `PM: suspend exit` prints
+only once `enter_state()` returns, that is after every device has resumed
+(`kernel/power/suspend.c`), so the hang is inside the device-resume phase with
+userspace still frozen, and nothing can reach disk from there. `efi_pstore` is
+registered and captured nothing, so it is a stall rather than a panic or an oops.
+Five of the seven pre-switch failures look exactly like this; the other two had
+the cascade below.
+
+**The signature changed between kernels.** On 7.0.x the freeze was preceded by a
+`dc_dmub_srv_log_diagnostic_data: DMCUB error` storm with
+`mpc2_assert_mpcc_idle_before_connect` warnings (`dcn20_mpc.c:500-502`) and
+`optc31_disable_crtc` timeouts. That cascade fired twice, 2026-07-02 and
+2026-08-16, each a few minutes before a power-off, and has not fired once on
+7.2.0. What 7.2.0 has instead is a quieter failure in the same block, roughly
+every other day and twice within seconds of a resume:
+
+```
+amdgpu: [drm] REG_WAIT timeout 1us * 100 tries - dcn31_program_compbuf_size line:141
+WARNING: .../display/dc/hubbub/dcn31/dcn31_hubbub.c:151
+```
+
+Line 141 waits 100us for a detile-buffer resize to take effect; line 151 then
+catches `CONFIG_ERROR` on the compbuf write. Zero of these in the last clean
+20-day stretch on 7.0.x, nine in the first 15 days on 7.2.0. So 7.2 changed the
+shape of the failure rather than removing it.
+
+**Rate, counted from the journal.** Hard power-offs at a suspend boundary:
+2026-05-28, 05-30, 07-02, 07-03, 07-19, 08-01 and 08-16 on 7.0.x, then 09-20 on
+7.2.0. Seven in 100 days against one in 15 is indistinguishable, and 7.0.x had
+already produced quiet stretches of 33 and 20 days, both longer than 7.2.0 has
+run in total. Beating 33 quiet days is the bar. (An earlier version of this file
+claimed five power-offs in the four weeks before the switch. Those four weeks
+hold one; the five span six and a half weeks.)
+
+**`pm_trace` is on**, so the next failure names a device instead of leaving
+nothing behind:
+
+```bash
+sudo cp ~/dotfiles/system/pm-trace.conf /etc/tmpfiles.d/pm-trace.conf
+sudo systemd-tmpfiles --create /etc/tmpfiles.d/pm-trace.conf
+cat /sys/power/pm_trace   # 1
+```
+
+Then after a freeze and power-on, read the hash back:
+
+```bash
+journalctl -b 0 | grep -iE "Magic number|hash matches"
+cat /sys/power/pm_trace_dev_match
+```
+
+Several devices can share a hash, so treat the output as a shortlist rather than
+an answer. Both kernels support this (`CONFIG_PM_TRACE_RTC=y` in the 7.2.0 build
+and in Ubuntu's 7.0.0-31), and the machine has the legacy `rtc_cmos` the tracer
+needs.
+
+**It costs a wrong clock after every resume, not only after a failure.** The
+kernel writes hashes over the RTC, the system clock follows the RTC on resume and
+at boot, and `systemd-timesyncd` then pulls it back, so expect a jump lasting
+seconds to a minute. That is the trade, and it is deliberately time-boxed:
+**take it out once a failure has been captured**, or by 2026-11-05 if none has,
+with `sudo rm /etc/tmpfiles.d/pm-trace.conf` and a reboot.
+
+**Ruled out:** PSR. The panel reports `eDP-1: PSR support 0`, so panel self
+refresh is already disabled and `amdgpu.dcdebugmask=0x10` would be a no-op.
+
+**Nothing is filed upstream.** AMD's advice on bug 221383 was that this belongs
+in a report of its own, and "resume hangs, no log, no stack" is not something a
+maintainer can act on. A `pm_trace` device name is what would make it filable.
+
 ### Mainline kernel (self-built)
 
 This machine runs a **self-built mainline kernel**, not Ubuntu's. `uname -r`
 says `7.2.0` where Ubuntu ships `7.0.0-NN`.
 
-Why: resume from s2idle intermittently came back with a dead display — backlight
-on, black screen, then a wedge needing a 7-second power-off, roughly once or
-twice a week. The journal shows a DMCUB storm and `mpc2_assert_mpcc_idle_before_connect`
-warnings from amdgpu on resume. AMD fixed it in 7.2-rc7 / 7.1.8. **`7.0.y` is
-EOL upstream**, so neither 24.04's HWE stack nor 26.04 (which also ships 7.0)
+Why: the display freeze documented just above. AMD fixed part of it in 7.2-rc7 /
+7.1.8. **`7.0.y` is EOL upstream**, so neither 24.04's HWE stack nor 26.04 (which also ships 7.0)
 will ever receive it, and Ubuntu's mainline PPA had no amd64 builds for the
 fixed versions. Building was the only route. It also brings the `amd_pmc` fix
 in-tree, which is why the kernel is untainted again.
 
-**Still unverified.** Running 7.2.0 since 2026-09-05; the fix is not confirmed on
-this hardware yet. The failure was intermittent, five hard power-offs in the four
-weeks before the switch, so only a quiet stretch settles it. **Check again after
-2026-10-05.** Two quiet months means it worked and this paragraph can go. A
-recurrence means 7.2 was the wrong answer, and the next step is the amdgpu bug
-that was never filed (AMD's advice was that it belongs separately from 221383,
-which covers the EC hotkey bug only) rather than another rebuild. Worth also
-confirming the Fn media keys survive a long suspend, since the in-tree driver now
-does that job instead of the DKMS module.
+**Verdict still open.** Running 7.2.0 since 2026-09-05. The cascade signature is
+gone, but the freeze itself recurred on 2026-09-20, so the arrangement is only
+partly earning its keep. Nothing short of a quiet stretch beating the old
+kernel's own 33 days settles it, and another rebuild is not the next step:
+"Display freeze on resume" holds the numbers and what is now instrumented.
+**Reassess 2026-11-05.** Worth also confirming the Fn media keys survive a long
+suspend, since the in-tree driver now does that job instead of the DKMS module.
 
 **Nothing updates it.** `apt` has no repository for `linux-image-7.2.0` — its
 only source is the local dpkg status — so it receives no security patches at
