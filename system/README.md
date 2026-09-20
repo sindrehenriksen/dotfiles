@@ -2,6 +2,20 @@
 
 Scripts and configs for Linux (Ubuntu/GNOME) system-level setup.
 
+## Open items
+
+Dates and triggers live inside the sections below, where the reasoning is, and
+go stale quietly there. The list is here so working in this directory surfaces
+them.
+
+- **2026-11-05** — reassess whether the self-built kernel is still worth
+  carrying, and take `pm_trace` back out if no freeze has been captured by
+  then. "Display freeze on resume".
+- **Monthly-ish** — check kernel.org for a newer 7.2.x and rebuild. Last
+  checked 2026-09-05. "Mainline kernel (self-built)".
+- **On trigger** — Ubuntu ships >=7.1, or 7.2 goes EOL: drop the self-built
+  kernel. Both triggers and the teardown are in that same section.
+
 ## General (any Linux desktop)
 
 ### GNOME keybindings & input (`gnome-keybindings.sh`)
@@ -51,9 +65,9 @@ scrollback with it. Always while agents are running.
 
 Cause is Claude Code's memory, which grows with session length and with the
 number of subagents — `fork` agents especially, since each inherits the
-parent's whole context. On this 13 GiB machine it has reached 7-11 GB and been
-OOM-killed seven times in the month to 14 Aug 2026. Nothing else on this
-machine has *ever* been OOM-killed; every victim in the journal is Claude.
+parent's whole context. On this 13 GiB machine it reaches 7-11 GB and gets
+OOM-killed. Nothing else here has ever been; every victim in the journal is
+Claude.
 
 The tab dies as a side effect rather than directly. These are all *global*
 kernel OOMs (`constraint=CONSTRAINT_NONE`), which kill a single chosen process,
@@ -64,11 +78,9 @@ runs each tab in its own transient systemd scope, and systemd's stock
 Why the victim is always something in a terminal: the GNOME session runs
 launched apps at `oom_score_adj=200` and keeps `gnome-shell` and
 `systemd --user` at 100, so Ghostty sits at 200 and **everything spawned in a
-tab inherits it**. Claude does not set this — nor does Ghostty; it is
-session-wide policy, and it applies to any process you start in a terminal.
-The kernel therefore prefers a tab process over the browser regardless of which
-is actually larger. On 18 Aug 2026 that picked `ld` (6.08 GB) during a kernel
-build while Chrome sat untouched.
+tab inherits it**. Neither Claude nor Ghostty sets it; it is session-wide
+policy applying to anything started in a terminal. The kernel therefore prefers
+a tab process over the browser regardless of which is actually larger.
 
 **The trap: the memory cap manufactures oomd's kill trigger.** `MemoryHigh`
 works BY forcing reclaim. Ubuntu's systemd-oomd kills on *pressure with reclaim
@@ -78,11 +90,12 @@ something like systemd-oom"). So capping a tab creates exactly the condition
 oomd hunts for — and an oomd kill SIGKILLs the **whole cgroup**, shell
 included, which `DefaultOOMPolicy=continue` cannot save. Adding part 1 alone
 trades a kernel kill that spares the tab for an oomd kill that destroys it.
-That happened on 16 Aug 2026: `Killed …transient-5090.scope due to memory
-pressure for …user@1000.service being 89.32% > 50.00% for > 20s with reclaim
-activity`. Parts 4 and 5 exist to close that path.
+This is not hypothetical, it happened. Parts 4 and 5 exist to close that path.
 
-Five parts, all needed:
+Five parts, all needed. Proven in the wild, so don't drop one: a kernel build's
+`ld` was OOM-killed at 6.08 GB inside a Ghostty scope and the scope stayed
+`ActiveState=active, Result=success`, where before it would have closed.
+
 
 1. `linux-cgroup-memory-limit` in `ghostty/config` — 6 GiB per tab. This is
    `MemoryHigh`, a *soft* limit: a runaway tab gets throttled and reclaimed
@@ -112,10 +125,8 @@ Do not restart `user@1000.service` to apply part 4 — that logs you out;
 `continue` applies to every user unit, not only Ghostty: Ghostty exposes no
 per-surface OOM policy, and the scope names are PID-based
 (`app-ghostty-surface-transient-6451.scope`), so no drop-in can target them.
-The cost is that a multi-process user service losing one process to the OOM
-killer now limps on instead of being stopped cleanly. Weighed against a journal
-in which every OOM kill was Claude Code in a Ghostty tab, that's a theoretical
-cost against a measured benefit.
+The cost is that a multi-process user service losing one process now limps on
+instead of stopping cleanly — theoretical here, against a measured benefit.
 
 `DefaultOOMPolicy` needs `systemctl --user daemon-reexec` (or a re-login), and
 then applies to *every* scope, existing tabs included — Ghostty never sets
@@ -135,8 +146,8 @@ systemctl show user@1000.service -p ManagedOOMMemoryPressure     # auto
 oomctl | grep -E 'Default Memory Pressure Limit|Pressure Limit'  # all 100.00%
 ```
 
-`oomctl` is the one that matters after any change here: it shows what oomd is
-actually monitoring and at what limit, rather than what the units claim.
+`oomctl` is the one that matters: it shows what oomd actually monitors and at
+what limit, rather than what the units claim.
 
 If it recurs, start here:
 
@@ -160,12 +171,6 @@ Three gotchas when reading that output:
   above miss it entirely. If a tab vanished and those come back empty, check
   `journalctl -u systemd-oomd` and `journalctl --user | grep oomd` before
   concluding nothing happened.
-
-Status as of 19 Aug 2026: **proven in the wild.** On 18 Aug at 00:25 a kernel
-build's `ld` was OOM-killed at 6.08 GB inside
-`app-ghostty-surface-transient-6270.scope`, and the scope stayed
-`ActiveState=active, Result=success` — the tab and its scrollback survived a
-kill that would previously have closed it.
 
 Corollary for heavy builds in a tab: the 6 GiB cap is per-tab, and everything
 in the tab inherits `oom_score_adj=200`, so a big `make -j` is both memory-
