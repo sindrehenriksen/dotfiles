@@ -126,6 +126,65 @@ Body text.
 # comment line one
 # comment line two"
 
+# --- Trailer block held out of reflow (defect: fmt joins adjacent
+# trailers when a line is short enough to pull the next one up) ---
+test_reflow "short trailer followed by another trailer stays split" \
+"Short title
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01SWWZ7hbheeGQfnc25rACWJ" \
+"Short title
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01SWWZ7hbheeGQfnc25rACWJ"
+
+test_reflow "two already-long trailers stay verbatim" \
+"Short title
+
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01SWWZ7hbheeGQfnc25rACWJextralongvalueforgoodmeasure" \
+"Short title
+
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01SWWZ7hbheeGQfnc25rACWJextralongvalueforgoodmeasure"
+
+test_reflow "final paragraph prose with a colon still reflows" \
+"Short title
+
+This explains the change: it fixes a parser bug that used to drop a trailing newline when wrapping long message bodies across multiple lines for readability." \
+"Short title
+
+This explains the change: it fixes a parser bug that used to drop a
+trailing newline when wrapping long message bodies across multiple
+lines for readability."
+
+test_reflow "body with no trailers reflows normally" \
+"Short title
+
+This is a perfectly ordinary commit body with no trailers in it at all, just a normal sentence that is long enough to need wrapping at seventy two columns." \
+"Short title
+
+This is a perfectly ordinary commit body with no trailers in it at
+all, just a normal sentence that is long enough to need wrapping at
+seventy two columns."
+
+test_reflow "trailer block preceded by bullets: both mechanisms apply" \
+"Short title
+
+- bullet one
+- bullet two
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01SWWZ7hbheeGQfnc25rACWJ" \
+"Short title
+
+- bullet one
+
+- bullet two
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01SWWZ7hbheeGQfnc25rACWJ"
+
 # --- Summary ---
 echo
 echo "Ran $total tests: $pass passed, $fail failed"

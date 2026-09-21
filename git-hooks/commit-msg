@@ -15,15 +15,72 @@ msg_file="$1"
 # "- foo. - bar" mid-line. cat -s squeezes the synthetic blanks back.
 # The sed filter collapses the double-space that BSD fmt (macOS) inserts
 # after sentence-ending punctuation when joining lines.
+#
+# A trailing trailer block (Co-Authored-By:, etc.) must not go through
+# fmt at all: fmt doesn't know trailers can't be merged, and will happily
+# pull a short trailer line up into its neighbour, wrecking both. Git's
+# own definition of a trailer block is used to find one: the last
+# paragraph of the message, where every line is either "Token: value"
+# (token = letters/digits/hyphens, no spaces) or a folded continuation
+# of the line above it (git-interpret-trailers(1), "is all trailers").
+# That block, if present, is held out of the reflow and emitted verbatim.
+body_file=$(mktemp)
+tail -n +3 "$msg_file" | grep -v '^#' > "$body_file"
+
+trailer_range=$(awk '
+    { n++; lines[n] = $0 }
+    END {
+        end = n
+        while (end >= 1 && lines[end] ~ /^[ \t]*$/) end--
+        if (end < 1) { print "NONE"; exit }
+        start = end
+        while (start - 1 >= 1 && lines[start - 1] !~ /^[ \t]*$/) start--
+        for (i = start; i <= end; i++) {
+            line = lines[i]
+            if (line ~ /^[A-Za-z0-9-]+:( |$)/) continue
+            if (i > start && line ~ /^[ \t]/) continue
+            print "NONE"
+            exit
+        }
+        print start, end
+    }
+' "$body_file")
+
+rest_file="$body_file"
+trailer_file=""
+if [ "$trailer_range" != "NONE" ]; then
+    trailer_start=${trailer_range% *}
+    trailer_end=${trailer_range#* }
+    trailer_file=$(mktemp)
+    sed -n "${trailer_start},${trailer_end}p" "$body_file" > "$trailer_file"
+    rest_file=$(mktemp)
+    if [ "$trailer_start" -gt 1 ]; then
+        # Trim trailing blanks: the paragraph break before the trailer
+        # block is re-inserted explicitly below, so it must not also
+        # survive here or the two would stack into a double blank line.
+        sed -n "1,$((trailer_start - 1))p" "$body_file" \
+            | awk 'NF { p = NR } { a[NR] = $0 } END { for (i = 1; i <= p; i++) print a[i] }' > "$rest_file"
+    fi
+fi
+
 {
     head -2 "$msg_file"
-    tail -n +3 "$msg_file" | grep -v '^#' \
-        | awk 'prev != "" && /^[[:space:]]*([-*+]|[0-9]+\.) / { print "" } { print; prev = $0 }' \
-        | fmt -w 72 \
-        | sed -E 's/([.!?]) {2,}/\1 /g' \
-        | cat -s
+    if [ -s "$rest_file" ]; then
+        awk 'prev != "" && /^[[:space:]]*([-*+]|[0-9]+\.) / { print "" } { print; prev = $0 }' "$rest_file" \
+            | fmt -w 72 \
+            | sed -E 's/([.!?]) {2,}/\1 /g' \
+            | cat -s
+    fi
+    if [ -s "$trailer_file" ]; then
+        [ -s "$rest_file" ] && echo
+        cat "$trailer_file"
+    fi
     tail -n +3 "$msg_file" | grep '^#' || true
 } > "${msg_file}.tmp" && mv "${msg_file}.tmp" "$msg_file"
+
+rm -f "$body_file"
+[ -n "$trailer_file" ] && rm -f "$trailer_file"
+[ "$rest_file" != "$body_file" ] && rm -f "$rest_file"
 
 # Validate title length. Strip autosquash prefixes (fixup!/squash!/amend!,
 # which can stack) before measuring — git generates them, they're discarded on
