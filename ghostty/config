@@ -14,6 +14,11 @@ gtk-titlebar = true
 gtk-titlebar-style = tabs
 gtk-toolbar-style = flat
 macos-titlebar-style = tabs
+# `default` defers to the macOS "Close windows when quitting an application"
+# setting, under which a Cmd+Q drops the tabs and only a reboot brings them
+# back. `always` makes Ghostty save on every exit, so relaunching the app
+# restores the tabs and their working directories too. macOS only.
+window-save-state = always
 window-padding-x = 4
 window-padding-y = 4
 
