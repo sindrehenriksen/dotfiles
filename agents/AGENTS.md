@@ -145,6 +145,15 @@ prompt: plain `find` is allowlisted, but `-exec` runs an arbitrary command per
 match, so it sits in the `ask` list next to `-delete` and `-ok`, and no prefix
 rule can cover it.
 
+**Before concluding a fact is not written down, look where it would have been
+written.** The module README, the docstring on the thing itself, the comment
+beside the code — the nearer a fact sits to what it describes, the likelier
+that is its home, so search there before searching widely and before deciding
+nothing covers it. This is the reading half of `principles.md`, "Record a fact
+where it will be looked for", and its expensive failure is a recorded fact
+re-derived from scratch: the re-derivation then arrives looking like a finding,
+which is worse than not having looked.
+
 ## Check the environment before assuming
 
 Before claiming a tool isn't installed or recommending an install step, check the environment — `$TERM_PROGRAM` (`ghostty`, `iTerm.app`, `Apple_Terminal`), `$SHELL`, `$HOMEBREW_PREFIX`, `uname -m` (`arm64` vs `x86_64`), `which <cmd>`. The session env block is brief; one quick probe beats a guess.
