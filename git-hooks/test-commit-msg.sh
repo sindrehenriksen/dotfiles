@@ -34,6 +34,44 @@ test_reflow() {
     rm -f "$tmp"
 }
 
+# Rewrap test: assert the invariants rather than the break points. GNU fmt fills
+# to ~93% of -w and BSD fmt fills to the width, so pinning exact line breaks
+# makes a case that only passes on the platform it was written on.
+test_rewrap() {
+    local name="$1" input="$2"
+    total=$((total + 1))
+    local tmp
+    tmp=$(mktemp)
+    printf '%s\n' "$input" > "$tmp"
+    if ! (cd /tmp && bash "$HOOK" "$tmp") >/dev/null 2>&1; then
+        echo "FAIL [$name]: hook exited non-zero"
+        fail=$((fail + 1))
+        rm -f "$tmp"
+        return
+    fi
+    local actual over lines
+    actual=$(cat "$tmp")
+    over=$(printf '%s\n' "$actual" | awk 'length($0) > 72')
+    lines=$(printf '%s\n' "$actual" | tail -n +3 | grep -c .)
+    if [ -n "$over" ]; then
+        echo "FAIL [$name]: line over 72 columns:"
+        printf '%s\n' "$over" | sed 's/^/  /'
+        fail=$((fail + 1))
+    elif [ "$lines" -lt 2 ]; then
+        echo "FAIL [$name]: body did not wrap"
+        fail=$((fail + 1))
+    elif [ "$(printf '%s\n' "$input" | tr -s '[:space:]' '\n')" \
+         != "$(printf '%s\n' "$actual" | tr -s '[:space:]' '\n')" ]; then
+        echo "FAIL [$name]: words changed:"
+        diff <(printf '%s\n' "$input" | tr -s '[:space:]' '\n') \
+             <(printf '%s\n' "$actual" | tr -s '[:space:]' '\n') | sed 's/^/  /'
+        fail=$((fail + 1))
+    else
+        pass=$((pass + 1))
+    fi
+    rm -f "$tmp"
+}
+
 # Lint test: only check exit code. env_pfx is optional "KEY=VAL [KEY=VAL ...]".
 test_lint() {
     local name="$1" expected_exit="$2" input="$3" env_pfx="${4:-}"
@@ -148,25 +186,15 @@ Claude-Session: https://claude.ai/code/session_01SWWZ7hbheeGQfnc25rACWJextralong
 Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
 Claude-Session: https://claude.ai/code/session_01SWWZ7hbheeGQfnc25rACWJextralongvalueforgoodmeasure"
 
-test_reflow "final paragraph prose with a colon still reflows" \
+test_rewrap "final paragraph prose with a colon still reflows" \
 "Short title
 
-This explains the change: it fixes a parser bug that used to drop a trailing newline when wrapping long message bodies across multiple lines for readability." \
+This explains the change: it fixes a parser bug that used to drop a trailing newline when wrapping long message bodies across multiple lines for readability."
+
+test_rewrap "body with no trailers reflows normally" \
 "Short title
 
-This explains the change: it fixes a parser bug that used to drop a
-trailing newline when wrapping long message bodies across multiple
-lines for readability."
-
-test_reflow "body with no trailers reflows normally" \
-"Short title
-
-This is a perfectly ordinary commit body with no trailers in it at all, just a normal sentence that is long enough to need wrapping at seventy two columns." \
-"Short title
-
-This is a perfectly ordinary commit body with no trailers in it at
-all, just a normal sentence that is long enough to need wrapping at
-seventy two columns."
+This is a perfectly ordinary commit body with no trailers in it at all, just a normal sentence that is long enough to need wrapping at seventy two columns."
 
 test_reflow "trailer block preceded by bullets: both mechanisms apply" \
 "Short title
