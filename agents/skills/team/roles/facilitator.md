@@ -159,6 +159,10 @@ correctness and the rest goes unexamined. Give every reviewer the
 owner's own words as a scope check — a review that only asks whether
 the code is right will pass work that is right and unasked-for.
 
+**A reviewer that returns nothing has not passed** — the `execution`
+skill, "Reviews", has the rule; re-run it rather than reading the
+silence as clean.
+
 Report: the decision and its reasoning; how the round moved and where
 a role reversed; genuine conflicts and what would settle each; who
 you convened, declined, and why, plus any consultation between roles
