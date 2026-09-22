@@ -137,9 +137,13 @@ entries there rather than working from memory, and expect a change to
 warrant several lenses running separately rather than one reviewer
 asked to hold every perspective at once.
 
-Convening is the half that is yours, and two lenses are easy to leave
-unconvened:
+Convening is the half that is yours, and three lenses are easy to
+leave unconvened:
 
+- **The failure-mode pass on a plan that ships behaviour**, called
+  before anything is built. The mapping says what it asks; the miss is
+  calling it at review time, when a rollback lever nobody planned
+  costs a redesign rather than a line in the plan.
 - **The critic beside the UX review.** A user-facing surface earns
   both, and the second is a separate agent that operates the running
   thing. Folded into the UX review it becomes reasoning about the

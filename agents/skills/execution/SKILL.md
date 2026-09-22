@@ -134,6 +134,7 @@ The neutral agent judges the artifact; the conversation knows what it can't see 
 - Correctness is the floor and always runs.
 - Untrusted input, authn/authz, secrets, a new boundary → a security pass.
 - Deploy, CI, cost, data retention → an infra pass.
+- A plan that ships behaviour → a **failure-mode** pass, run before the user approves the plan and before anything is built. One question — how does this fail in production — asked of the lever that undoes it, a dependency that is down or slow, two things running at once, a side effect that cannot be taken back, and old and new versions live together during a deploy. A red pass earns one revision; a second red goes back to the user with the findings rather than into a third pass.
 - A new seam, or a second implementation of a concept that already exists → an architecture pass, against `roles/architect.md`.
 - Anything a future reader has to navigate → conventions and repo ergonomics.
 - A shape that grew past what was asked for → a **cut pass**, biased toward removing, whose test is whether the user asked for it.
