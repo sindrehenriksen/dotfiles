@@ -158,6 +158,10 @@ Name the lens in the brief. An unnamed reviewer defaults to
 correctness and the rest goes unexamined. Give every reviewer the
 owner's own words as a scope check — a review that only asks whether
 the code is right will pass work that is right and unasked-for.
+Prefer offering the artifact to the roles over enumerating the lenses
+yourself: naming them is right where you already know which apply,
+and it cannot catch the lens you did not think of, which is the one
+that goes unexamined.
 
 **A reviewer that returns nothing has not passed** — the `execution`
 skill, "Reviews", has the rule; re-run it rather than reading the

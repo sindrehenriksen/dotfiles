@@ -29,6 +29,12 @@ investigation inside it, and it goes straight to an agent on
 `execution` alone. That holds for a defect, a feature and a redesign
 alike, and is said once here rather than per kind of work.
 
+**Where it is not obvious that the work is that small, offer the shape
+to the roles and let each say whether it has something**, rather than
+ruling for them that none does: a round convened on the lead's own
+list can only find what was on it. A role with nothing to add costs a
+line; a perspective nobody convened costs a build.
+
 **If this workspace has its own layer — its own skill, its
 instruction files, its conventions — read that too and apply it over
 both**, and point the roles at it in their briefs; a workspace's own
@@ -133,7 +139,8 @@ facilitator spawns everyone else; spawn one whenever a round runs
 more than two roles or will outlast a few exchanges. Below that the
 lead runs the round itself and **`roles/facilitator.md` binds it
 while it does** — convening, sequencing and calling reviews all live
-there, not here.
+there, not here. When it is unclear which, spawn one: an agent is
+cheap and the loop is not.
 
 The lead never hands over owner contact, scope, or the final report.
 
