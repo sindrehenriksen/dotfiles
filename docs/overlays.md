@@ -198,6 +198,42 @@ Two guards make the arrangement safe to re-run: every shell and git slot is
 conditional on the file existing, and the `link` helper in each installer refuses
 to overwrite a path that exists and is not already a symlink.
 
+### The one file neither tier owns
+
+`~/.ssh/config` is not a slot. Nothing in it no-ops, and neither repo can own
+it: it carries a block per account plus whatever third-party hosts a machine
+talks to, so a symlink from either side would clobber the other's entries. Both
+tiers depend on it anyway, which makes it the one hand-maintained file in the
+arrangement, and its failure is silent rather than loud.
+
+Give each account its own `Host` alias, and pin every one with
+`IdentitiesOnly yes`:
+
+```
+Host github.com-<account>
+  HostName github.com
+  User git
+  IdentityFile ~/.ssh/<that account's key>
+  IdentitiesOnly yes
+```
+
+Without that last line, ssh offers every key the agent has loaded *ahead of*
+the block's own `IdentityFile`, the server accepts the first one it recognises,
+and the alias decides nothing: whichever account was last unlocked wins, in
+every repo. That is how a work commit gets pushed from a personal account and
+the reverse. Fetch hides it, since a public repo reads fine under any valid key.
+
+Add a plain `Host github.com` pinned the same way to settle what an un-aliased
+URL means, and make it the personal account. An overlay can rewrite that prefix
+for its own tree; the base cannot rewrite it for a tree it does not know about.
+
+A remote cloned as `git@github.com:…` names no alias, so an overlay pins it by
+path rather than by editing remotes one at a time: a `url.<alias>.insteadOf`
+rewrite in the same file its `includeIf` already loads for the identity. Key and
+identity then come off one switch and cannot disagree, and a checkout outside
+that tree is refused rather than pushed under the wrong name. Keep the rewrite
+on the overlay side only, because two rules rewriting one prefix is ambiguous.
+
 ## Diagnosing a break
 
 | Symptom | First thing to check |
@@ -205,6 +241,7 @@ to overwrite a path that exists and is not already a symlink.
 | A skill isn't listed where it used to be | the user-level symlink for it — re-run the private installer |
 | Two skills' guidance blended, or one vanished | a name collision on the flat namespace |
 | Wrong commit author | `git config --show-origin user.email`; then whether the `includeIf` path still resolves |
+| Push rejected, or pushed as the wrong account | `ssh -T <the alias the remote names>`, which prints who authenticated; then `IdentitiesOnly yes` on that block, and whether the remote names an alias at all. Authorship and authentication are separate mechanisms, so the row above does not cover this one |
 | Work env missing in a fresh shell | whether the `~/.shellrc.early` symlink exists, and whether it is sourced early enough |
 | Stale guidance overriding the repo's own | the bridging tier's instruction file, which loads above every checkout |
 | An overlay's `autoMode` rules having no effect | which file they are in — a `settings.local.json` or project settings is ignored for `autoMode`, and the session warns once |
