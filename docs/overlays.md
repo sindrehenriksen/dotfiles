@@ -217,11 +217,14 @@ Host github.com-<account>
   IdentitiesOnly yes
 ```
 
-Without that last line, ssh offers every key the agent has loaded *ahead of*
-the block's own `IdentityFile`, the server accepts the first one it recognises,
-and the alias decides nothing: whichever account was last unlocked wins, in
-every repo. That is how a work commit gets pushed from a personal account and
-the reverse. Fetch hides it, since a public repo reads fine under any valid key.
+Without that last line the alias holds only while its own key is in the agent.
+ssh tries agent keys matching the block's `IdentityFile` first, then every other
+key the agent holds, and only then the file on disk — so when the block's key
+is not loaded yet, the other account's key goes first, the server accepts it,
+and the alias decided nothing. Which account wins then depends on what was
+unlocked this session, which is why it works on one day and not the next. That
+is how a work commit gets pushed from a personal account and the reverse. Fetch
+hides it, since a public repo reads fine under any valid key.
 
 Add a plain `Host github.com` pinned the same way to settle what an un-aliased
 URL means, and make it the personal account. An overlay can rewrite that prefix
