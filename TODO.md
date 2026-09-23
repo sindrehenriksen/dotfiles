@@ -26,6 +26,7 @@ Three-column layout (browser | terminals | nvim tabs) — design in `docs/window
 - [ ] Test native LSP in a real TypeScript project (ts_ls)
 - [ ] Verify true color + undercurl in Ghostty → Neovim (check `TERM`, inspect diagnostics underlines)
 - [ ] Verify clipboard: yank in nvim → paste in browser; copy in one Ghostty tab → paste in another; OSC 52 over SSH
+- [ ] On the other machine: `ssh -T git@github.com` and each `github.com-<account>` alias should print the account that alias names. They won't without `IdentitiesOnly yes` on every block — ssh offers whatever key the agent holds, the alias decides nothing, and a commit goes up from the wrong account. Blocks to add: `docs/overlays.md`, "The one file neither tier owns". Fixed here, but `~/.ssh/config` is untracked so it doesn't travel, and an overlay's `insteadOf` now points at those aliases.
 
 ## Low priority
 
