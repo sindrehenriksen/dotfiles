@@ -18,6 +18,7 @@ Three-column layout (browser | terminals | nvim tabs) — design in `docs/window
 
 - [ ] Test Copilot CLI end-to-end, adapt skills/prompts where needed
 - [ ] Test Codex CLI end-to-end (reads `AGENTS.md` for project context)
+- [ ] Re-tune for Opus 5.5 after a few weeks of use (from ~2026-09-23): read a sample of recent session transcripts and check the behaviours Anthropic names as shifting from Opus 5 — over-verification, over-delegation, scope drift, going quiet mid-task, turn length at `high` effort. The Opus 5-era restraint framing in the `execution` skill is kept until then; each piece stays or goes on what the transcripts show, not on the migration guide's say-so.
 - [ ] Decide whether agent-workflow nvim keymaps are worth adding (`<leader>dv` for DiffviewOpen, etc.) or if the defaults are fine
 
 ## Verification
