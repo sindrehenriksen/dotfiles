@@ -648,6 +648,7 @@ desk_close_candidates() {
 			and .has_start_event == true
 			and (.name as $n | ($keep | index($n)) | not)
 			and (.last_activity != null)
+			and (.duplicate_pids != true)
 		) ]
 	' <<< "$all")"
 
@@ -1027,6 +1028,15 @@ desk_step_close() {
 		recheck="$recheck_matches"
 		if [ "$(jq -r '.live // false' <<< "$recheck")" != "true" ]; then
 			desk_log "$pass" "close: session $name is no longer live on re-check — not signaling"
+			continue
+		fi
+		if [ "$(jq -r '.duplicate_pids // false' <<< "$recheck")" = "true" ]; then
+			# More than one pid file names this session id (session-status.sh's
+			# own duplicate_pids) — the reader's own "prefer the live one" is
+			# a best-effort display choice, never grounds for actually
+			# signaling a process: refuse outright rather than risk killing
+			# the wrong one.
+			desk_log "$pass" "close: session $name has more than one pid file on re-check — refusing to signal"
 			continue
 		fi
 

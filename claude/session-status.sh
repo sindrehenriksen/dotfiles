@@ -28,7 +28,12 @@
 # which would overwrite `source` and — checked against the last start
 # alone — silently drop the exclusion right as he starts actually using
 # it), ended, end_reason, close_failed, close_failed_at, transcript_path,
-# has_start_event, pid, tty (the last two null unless live). close_failed is
+# has_start_event, pid, tty (the last two null unless live), duplicate_pids
+# (true when more than one $CLAUDE_CONFIG_DIR/sessions/*.json pid file
+# names this session id — a resumed session's stale leftover, or genuine
+# corruption; the live one among them, if any, is still what pid/tty/
+# status report, but a caller acting on liveness — the hotkey, `close` —
+# must refuse outright rather than trust that choice). close_failed is
 # true once a `close-failed` event (claude/hooks/session-recorder.sh) has
 # been recorded after the session's own last start — a close step's own
 # SIGTERM that the session survived, per its own "end" event (still whatever
@@ -165,31 +170,44 @@ fi
 
 # --------------------------------------------------------------------------
 # 2. Pid files: always Claude Code's own valid JSON, so one batched read is
-#    safe outright.
+#    safe outright. Grouped by sessionId rather than collapsed 1:1 — a
+#    resumed session, or a stale pid file Claude Code never cleaned up,
+#    can leave more than one pid file naming the same sessionId, and a
+#    plain `from_entries` used to just let the last one silently win with
+#    no trace anything was wrong. Every group's own liveness is checked
+#    entry by entry (two pid files for the same session can name two
+#    different pids); the live one (if any — never more than one really
+#    should be) is what "the" pid file means downstream, and
+#    duplicate_pids records that more than one existed at all, so a
+#    caller (the hotkey, `close`) can refuse rather than guess which one
+#    is real.
 # --------------------------------------------------------------------------
-pidfiles_by_id='{}'
+pidfiles_grouped='{}'
 if [ -d "$PIDFILE_DIR" ]; then
     shopt -s nullglob
     pidfiles=("$PIDFILE_DIR"/*.json)
     shopt -u nullglob
     if [ "${#pidfiles[@]}" -gt 0 ]; then
-        pidfiles_by_id=$(jq -s '
+        pidfiles_grouped=$(jq -s '
             map(select(.sessionId != null and .pid != null))
-            | map({key: .sessionId, value: .})
+            | group_by(.sessionId)
+            | map({key: .[0].sessionId, value: .})
             | from_entries
         ' "${pidfiles[@]}" 2>/dev/null)
     fi
 fi
-[ -n "$pidfiles_by_id" ] || pidfiles_by_id='{}'
+[ -n "$pidfiles_grouped" ] || pidfiles_grouped='{}'
 
 # Liveness itself needs the OS (kill -0, ps), which is inherently per-pid —
-# but only for however many sessions actually have a pid file, i.e. however
-# many are plausibly live right now, not every session ever recorded.
-live_pairs=()
-pid_tty_pairs=() # sid, pid, tty — only pushed for sessions that turn out live
+# every candidate pid file in every group gets its own check (never just
+# the group's first entry), keyed by (session id, its own index within
+# that group) since two entries sharing an id can still name two
+# different pids.
+live_pairs=()    # sid, idx, live
+pid_tty_pairs=() # sid, idx, pid, tty — only pushed for entries that turn out live
 now_epoch=$(date +%s)
-if [ "$pidfiles_by_id" != '{}' ]; then
-    while IFS=$'\t' read -r sid pid procstart; do
+if [ "$pidfiles_grouped" != '{}' ]; then
+    while IFS=$'\t' read -r sid idx pid procstart; do
         [ -n "$sid" ] || continue
         live="false"
         tty=""
@@ -212,57 +230,100 @@ if [ "$pidfiles_by_id" != '{}' ]; then
                     ;;
             esac
         fi
-        live_pairs+=("$sid" "$live")
+        live_pairs+=("$sid" "$idx" "$live")
         if [ "$live" = "true" ]; then
-            pid_tty_pairs+=("$sid" "$pid" "$tty")
+            pid_tty_pairs+=("$sid" "$idx" "$pid" "$tty")
         fi
-    done < <(jq -r 'to_entries[] | [.key, (.value.pid|tostring), (.value.procStart // "")] | @tsv' <<< "$pidfiles_by_id")
+    done < <(jq -r '
+        to_entries[] | .key as $sid | .value | to_entries[]
+        | [$sid, (.key | tostring), (.value.pid | tostring), (.value.procStart // "")] | @tsv
+    ' <<< "$pidfiles_grouped")
 fi
-live_by_id='{}'
+
+live_lines=()
 if [ "${#live_pairs[@]}" -gt 0 ]; then
-    live_tsv=""
     n=${#live_pairs[@]}
     i=0
     while [ "$i" -lt "$n" ]; do
-        live_tsv="${live_tsv}${live_pairs[$i]}	${live_pairs[$((i + 1))]}
-"
-        i=$((i + 2))
+        live_lines+=("$(printf '%s\t%s\t%s' "${live_pairs[$i]}" "${live_pairs[$((i + 1))]}" "${live_pairs[$((i + 2))]}")")
+        i=$((i + 3))
     done
-    live_by_id=$(printf '%s' "$live_tsv" | jq -R -s -c '
+fi
+live_by_id_idx='{}'
+if [ "${#live_lines[@]}" -gt 0 ]; then
+    live_by_id_idx=$(printf '%s\n' "${live_lines[@]}" | jq -R -s -c '
         split("\n") | map(select(length>0) | split("\t"))
-        | map({key: .[0], value: (.[1] == "true")})
+        | map({sid: .[0], idx: .[1], live: (.[2] == "true")})
+        | group_by(.sid)
+        | map({key: .[0].sid, value: (map({(.idx): .live}) | add)})
         | from_entries
     ' 2>/dev/null)
 fi
-[ -n "$live_by_id" ] || live_by_id='{}'
+[ -n "$live_by_id_idx" ] || live_by_id_idx='{}'
 
-# id -> pid / id -> tty, live sessions only (D7: the hotkey focuses a live
-# session's Ghostty tab by tty rather than resuming it, so both need to
-# reach the join below).
-pid_by_id='{}'
-tty_by_id='{}'
+pt_lines=()
 if [ "${#pid_tty_pairs[@]}" -gt 0 ]; then
-    pt_tsv=""
     n=${#pid_tty_pairs[@]}
     i=0
     while [ "$i" -lt "$n" ]; do
-        pt_tsv="${pt_tsv}${pid_tty_pairs[$i]}	${pid_tty_pairs[$((i + 1))]}	${pid_tty_pairs[$((i + 2))]}
-"
-        i=$((i + 3))
+        pt_lines+=("$(printf '%s\t%s\t%s\t%s' \
+            "${pid_tty_pairs[$i]}" "${pid_tty_pairs[$((i + 1))]}" "${pid_tty_pairs[$((i + 2))]}" "${pid_tty_pairs[$((i + 3))]}")")
+        i=$((i + 4))
     done
-    pid_by_id=$(printf '%s' "$pt_tsv" | jq -R -s -c '
+fi
+pid_tty_by_id_idx='{}'
+if [ "${#pt_lines[@]}" -gt 0 ]; then
+    pid_tty_by_id_idx=$(printf '%s\n' "${pt_lines[@]}" | jq -R -s -c '
         split("\n") | map(select(length>0) | split("\t"))
-        | map({key: .[0], value: (.[1] | tonumber)})
-        | from_entries
-    ' 2>/dev/null)
-    tty_by_id=$(printf '%s' "$pt_tsv" | jq -R -s -c '
-        split("\n") | map(select(length>0) | split("\t"))
-        | map({key: .[0], value: .[2]})
+        | map({sid: .[0], idx: .[1], pid: (.[2] | tonumber), tty: .[3]})
+        | group_by(.sid)
+        | map({key: .[0].sid, value: (map({(.idx): {pid, tty}}) | add)})
         | from_entries
     ' 2>/dev/null)
 fi
+[ -n "$pid_tty_by_id_idx" ] || pid_tty_by_id_idx='{}'
+
+# Per session id, the one pid-file entry everything downstream treats as
+# "the" pid file: the live one in its group if any (a resumed session's
+# stale leftover pid file never wins over the one that's actually live),
+# else the group's first entry (not live either way, so which one is
+# picked only affects informational fallback fields, never a liveness
+# decision) — plus duplicate_pids, true whenever the group held more than
+# one entry at all, live or not.
+chosen_json=$(jq -cn --argjson groups "$pidfiles_grouped" --argjson live_idx "$live_by_id_idx" --argjson pt_idx "$pid_tty_by_id_idx" '
+    $groups | to_entries | map(
+        .key as $sid
+        | .value as $entries
+        | ($live_idx[$sid] // {}) as $lv
+        | ([$entries | keys[] | tostring | select($lv[.] == true)] | .[0]) as $live_key
+        | (if $live_key != null then $live_key else "0" end) as $chosen_idx
+        | $entries[$chosen_idx | tonumber] as $pf
+        | ($lv[$chosen_idx] // false) as $is_live
+        | (($pt_idx[$sid] // {})[$chosen_idx] // null) as $pt
+        | { key: $sid, value: {
+              pf: $pf,
+              live: $is_live,
+              pid: (if $is_live then ($pt.pid // null) else null end),
+              tty: (if $is_live then ($pt.tty // null) else null end),
+              duplicate_pids: (($entries | length) > 1)
+          } }
+    ) | from_entries
+' 2>/dev/null)
+[ -n "$chosen_json" ] || chosen_json='{}'
+
+pidfiles_by_id=$(jq -c 'with_entries(.value = .value.pf)' <<< "$chosen_json" 2>/dev/null)
+live_by_id=$(jq -c 'with_entries(.value = .value.live)' <<< "$chosen_json" 2>/dev/null)
+# id -> pid / id -> tty, live sessions only (D7: the hotkey focuses a live
+# session's Ghostty tab by tty rather than resuming it, so both need to
+# reach the join below).
+pid_by_id=$(jq -c '[to_entries[] | select(.value.pid != null) | {key, value: .value.pid}] | from_entries' <<< "$chosen_json" 2>/dev/null)
+tty_by_id=$(jq -c '[to_entries[] | select(.value.tty != null) | {key, value: .value.tty}] | from_entries' <<< "$chosen_json" 2>/dev/null)
+duplicate_pids_by_id=$(jq -c 'with_entries(.value = .value.duplicate_pids)' <<< "$chosen_json" 2>/dev/null)
+[ -n "$pidfiles_by_id" ] || pidfiles_by_id='{}'
+[ -n "$live_by_id" ] || live_by_id='{}'
 [ -n "$pid_by_id" ] || pid_by_id='{}'
 [ -n "$tty_by_id" ] || tty_by_id='{}'
+[ -n "$duplicate_pids_by_id" ] || duplicate_pids_by_id='{}'
 
 # --------------------------------------------------------------------------
 # 3. Transcripts: names live in their custom-title/ai-title records. Scanned
@@ -452,6 +513,7 @@ entries_ndjson=$(jq -n -c \
     --argjson live "$live_by_id" \
     --argjson pids "$pid_by_id" \
     --argjson ttys "$tty_by_id" \
+    --argjson dup_pids "$duplicate_pids_by_id" \
     --argjson titles "$titles_by_id" \
     --argjson transcripts "$transcript_of_json" \
     --argjson mtimes "$transcript_mtime_json" '
@@ -512,6 +574,7 @@ entries_ndjson=$(jq -n -c \
         has_start_event: $ev.has_start_event,
         pid: (if $is_live then ($pids[$id] // null) else null end),
         tty: (if $is_live then ($ttys[$id] // null) else null end),
+        duplicate_pids: ($dup_pids[$id] // false),
         _name_source: $name_source
       }
 ')

@@ -160,6 +160,23 @@ jq -cn --arg sid tie-b --arg cwd "$PROJ_DIR" --arg tp "$tp_tie2" \
 backdate "$tp_tie2" "$now"
 pid_tie_b=$(start_live tie-b "Tied Name" "$now")
 
+# --- dup-pid: two pid files sharing one sessionId (review item #6) — one
+# genuinely live, one a stale leftover naming a pid that no longer runs.
+# The live one wins for pid/tty/status; duplicate_pids is set regardless.
+tp_dup_pid="$PROJ_DIR/dup-pid.jsonl"
+: > "$tp_dup_pid"
+jq -cn --arg sid dup-pid --arg cwd "$PROJ_DIR" --arg tp "$tp_dup_pid" \
+    '{session_id:$sid, cwd:$cwd, transcript_path:$tp, source:"startup"}' \
+    | "$HERE/../hooks/session-recorder.sh" start
+pid_dup_live=$(start_live dup-pid "Dup Pid Session" "$now")
+dead_pid_for_dup=99999
+while kill -0 "$dead_pid_for_dup" 2> /dev/null; do dead_pid_for_dup=$((dead_pid_for_dup + 1)); done
+jq -n --arg pid "$dead_pid_for_dup" --arg sid dup-pid --arg cwd "$PROJ_DIR" \
+    --arg procstart "Mon Jan  1 00:00:00 2024" --argjson updated "$((now * 1000))" --arg name "Dup Pid Session" \
+    '{pid:($pid|tonumber), sessionId:$sid, cwd:$cwd, startedAt:$updated, procStart:$procstart,
+      name:$name, nameSource:"user", status:"idle", updatedAt:$updated}' \
+    > "$CONFIG_DIR/sessions/$dead_pid_for_dup.json"
+
 echo "=== pid / tty fields ==="
 out=$("$READER")
 field() { printf '%s' "$out" | jq -r "select(.id == \"$1\") | $2"; }
@@ -169,6 +186,13 @@ expected_tty=$(ps -o tty= -p "$pid_alpha" | tr -d ' ')
 assert_eq "alpha: tty matches ps's own idea of it" "$expected_tty" "$(field alpha .tty)"
 assert_eq "bravo: not live, pid is null" "null" "$(field bravo .pid)"
 assert_eq "bravo: not live, tty is null" "null" "$(field bravo .tty)"
+assert_eq "alpha: not a duplicate (one pid file)" "false" "$(field alpha .duplicate_pids)"
+
+echo
+echo "=== duplicate_pids: two pid files sharing one sessionId ==="
+assert_eq "dup-pid: duplicate_pids is true" "true" "$(field dup-pid .duplicate_pids)"
+assert_eq "dup-pid: live is true (the genuinely live one wins over the stale one)" "true" "$(field dup-pid .live)"
+assert_eq "dup-pid: pid is the live process, never the dead one" "$pid_dup_live" "$(field dup-pid .pid)"
 
 echo
 echo "=== resolve: a unique user-set name ==="

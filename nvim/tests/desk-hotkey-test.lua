@@ -220,6 +220,33 @@ do
 end
 
 print()
+print("=== session, resolved with duplicate_pids: refuses outright, never guesses ===")
+
+do
+	local buf = new_buf({ "Alpha Session: doing the thing" })
+	local win = vim.api.nvim_get_current_win()
+	vim.api.nvim_win_set_buf(win, buf)
+	vim.api.nvim_win_set_cursor(win, { 1, 0 })
+	local rec = new_recorder()
+	-- Two pid files claim this session id (session-status.sh's own
+	-- duplicate_pids) — even though the reader reports it as live with a
+	-- tty, the hotkey must refuse rather than trust that choice.
+	local entry = { id = "sess-1", name = "Alpha", live = true, tty = "ttys003", cwd = "/tmp/x", duplicate_pids = true }
+	local deps = stub_deps(rec, { reader_resolve = { entry, nil }, focus_tty = { true }, open_tab = { true } })
+	hotkey.run(buf, win, config, deps)
+	wait_for("resolve completes and a notify follows", function()
+		return #rec.calls >= 2
+	end)
+	local touched = {}
+	for _, c in ipairs(rec.calls) do
+		touched[c[1]] = true
+	end
+	assert_eq("focus_tty was never called", nil, touched.focus_tty)
+	assert_eq("open_tab was never called", nil, touched.open_tab)
+	assert_eq("a notify was issued", true, touched.notify)
+end
+
+print()
 print("=== session, resolved not live: resumes by id, in its recorded cwd ===")
 
 do

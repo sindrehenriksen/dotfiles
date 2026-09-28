@@ -182,5 +182,47 @@ kill "$pid2" "$pid2b" 2> /dev/null
 rm -rf "$PASS_SCRATCH"
 
 echo
+echo "=== duplicate_pids appears only by re-check time: refused, never guessed (review item #6) ==="
+rm -rf "$STATE"
+: > "$RECORDER_LOG"
+PASS_SCRATCH="$(mktemp -d)"
+pid3="$(spawn_throwaway)"
+transcript3="$ROOT/transcript3.jsonl"
+printf '{"uuid":"aaaaaaaa-0000-0000-0000-000000000000","type":"assistant"}\n' > "$transcript3"
+# The candidate-list read: a clean single entry (so it isn't filtered out
+# by desk_close_candidates's own duplicate_pids guard before ever reaching
+# the model call). The RE-CHECK read reports duplicate_pids:true instead —
+# a second pid file for this same session id showed up in the meantime
+# (e.g. he resumed it himself between the listing and the SIGTERM).
+CALL_COUNT_FILE3="$ROOT/call-count-3"
+echo 0 > "$CALL_COUNT_FILE3"
+cat > "$FAKEBIN/session-status.sh" <<FAKE
+#!/usr/bin/env bash
+n=\$(cat "$CALL_COUNT_FILE3")
+n=\$((n + 1))
+echo "\$n" > "$CALL_COUNT_FILE3"
+if [ "\$n" -ge 2 ]; then
+	jq -nc --argjson pid "$pid3" --arg tp "$transcript3" \
+		'{id:"sess-1", name:"a-session", live:true, has_start_event:true, last_activity:0, pid:\$pid, transcript_path:\$tp, duplicate_pids:true}'
+else
+	jq -nc --argjson pid "$pid3" --arg tp "$transcript3" \
+		'{id:"sess-1", name:"a-session", live:true, has_start_event:true, last_activity:0, pid:\$pid, transcript_path:\$tp}'
+fi
+FAKE
+chmod +x "$FAKEBIN/session-status.sh"
+
+write_items_reply
+close_log3="$ROOT/close3.log"
+result="$(desk_step_close "testpass" "$step_json" "$config_json" "$repo" "2026-09-28" "${files[@]}" 2> "$close_log3")"
+assert_eq "the step still reports ok" "ok" "$result"
+sleep 1
+assert_true "the process was never signaled" "$(kill -0 "$pid3" 2> /dev/null && echo true || echo false)"
+assert_true "session-recorder was never told to close it" "$([ ! -s "$RECORDER_LOG" ] && echo true || echo false)"
+assert_true "the refusal is named explicitly" \
+	"$(grep -q 'more than one pid file on re-check' "$close_log3" && echo true || echo false)"
+kill "$pid3" 2> /dev/null
+rm -rf "$PASS_SCRATCH"
+
+echo
 echo "=== summary: $pass passed, $fail failed ==="
 [ "$fail" -eq 0 ]

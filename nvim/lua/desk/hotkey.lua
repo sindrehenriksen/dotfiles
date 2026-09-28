@@ -212,6 +212,16 @@ function M.run(bufnr, win, config, deps)
 			return
 		end
 
+		if entry.duplicate_pids then
+			-- More than one pid file names this session id (session-status.sh's
+			-- own duplicate_pids, D8's own "prefer the live one, but refuse
+			-- rather than guess") — acting on either "live" or "not live" here
+			-- would be a guess about which pid file is real; refuse outright
+			-- rather than risk focusing or resuming the wrong process.
+			notify("session '" .. token .. "' has more than one pid file recorded; refusing to act on it")
+			return
+		end
+
 		if entry.live then
 			if not entry.tty or entry.tty == "" then
 				-- Live but no tty on record: never resume (that would risk a
