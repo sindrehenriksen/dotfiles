@@ -121,6 +121,12 @@ end
 --- identical text (vim.diff itself returns `{}` here, but is skipped
 --- entirely as a small optimization — the common case once nothing between
 --- the round and this target has changed at all).
+---
+--- Exported (not just this module's own internal use): desk.review's own
+--- overview reuses this same line-shift-robust primitive to tell his own
+--- edits apart from a pending item's — a plain position-by-position
+--- comparison (which desk.review used before) only works for a same-length
+--- buffer, breaking the moment his edit adds or removes a line.
 local function diff_hunks(a_lines, b_lines)
 	local a_text = snippet.join_lines(a_lines, true)
 	local b_text = snippet.join_lines(b_lines, true)
@@ -133,6 +139,7 @@ local function diff_hunks(a_lines, b_lines)
 	end
 	return fn(a_text, b_text, { result_type = "indices", algorithm = "histogram" }) or {}
 end
+M.diff_hunks = diff_hunks
 
 --- Maps a 0-indexed "position" `p` in `a` (design.md ranges' own
 --- convention throughout this codebase: the count of `a`-lines strictly

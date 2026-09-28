@@ -310,7 +310,7 @@ do
 end
 
 print()
-print("=== D6: overview ordering (news, then in-place by position, then deferred count) ===")
+print("=== D6: overview ordering (news, then in-place by position, then postponed count) ===")
 do
 	local base = { "Alpha", "  a", "Beta", "  b", "Gamma", "  c" }
 	local repo = new_repo(base)
@@ -343,10 +343,54 @@ do
 		table.insert(texts, it.text)
 	end
 	assert_eq(
-		"news first, then in-place ordered by position, then the deferred count",
-		{ "a news item", "early in-place", "late in-place", "1 deferred" },
+		"news first, then in-place ordered by position, then the postponed count",
+		{ "a news item", "early in-place", "late in-place", "1 postponed" },
 		texts
 	)
+end
+
+print()
+print("=== D6 fix: 'yours' finds a length-changing edit, never the item's own range ===")
+do
+	local base = { "Alpha", "  a", "Beta", "  b" }
+	local repo = new_repo(base)
+	local item = { id = "add1", file = "notes.md", kind = "add", target = { under = "Alpha" }, before = "", after = "  suggested", headline = "a suggestion" }
+	seed_proposal(repo, { item })
+	local bufnr = open_notes(repo)
+	lay_in_by_hand(repo, bufnr, base, { item })
+
+	-- His own edit, unrelated to the suggestion: a brand-new line appended
+	-- at the end — a length change the old same-length check would have
+	-- silently skipped entirely (not just missed this one line: it bailed
+	-- out of the WHOLE buffer the moment lengths stopped matching).
+	local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+	table.insert(lines, "  his own note")
+	vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
+	vim.cmd("noautocmd write")
+
+	local st = review.read_state(bufnr)
+	local hunks = review.unowned_hunks(bufnr, st)
+	local hunk_lines = {}
+	for _, h in ipairs(hunks) do
+		table.insert(hunk_lines, h.line)
+	end
+	local his_note_line
+	for i, l in ipairs(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)) do
+		if l == "  his own note" then
+			his_note_line = i
+		end
+	end
+	assert_eq("his own added line is found, at its real line", { his_note_line }, hunk_lines)
+
+	review.overview(bufnr)
+	local qf_items = vim.fn.getqflist()
+	local yours_lines = {}
+	for _, it in ipairs(qf_items) do
+		if it.text == "yours" then
+			table.insert(yours_lines, it.lnum)
+		end
+	end
+	assert_eq("the overview lists it as 'yours', at the right line", { his_note_line }, yours_lines)
 end
 
 print()
@@ -727,6 +771,55 @@ do
 	assert_true("accept finds it at the top (ledger.derive_all agrees on the position)", accept_ok)
 	local idx_lines = snippet.split_lines(git.index_content(repo, "notes.md") or "")
 	assert_true("accepting it staged its content into the index", vim.tbl_contains(idx_lines, "  orphaned suggestion"))
+end
+
+print()
+print("=== D6 fix: the review key reports real deferrals and landed-on-top counts ===")
+do
+	local repo = new_repo({ "Section A", "  original line", "  something else" })
+	seed_proposal(repo, {
+		{
+			id = "bad-anchor",
+			file = "notes.md",
+			kind = "add",
+			target = { under = "a heading that doesn't exist" },
+			before = "",
+			after = "  orphaned suggestion",
+			headline = "orphaned",
+		},
+		{
+			id = "mismatch",
+			file = "notes.md",
+			kind = "edit",
+			target = { at = "  original line" },
+			before = "  original line\n  DIFFERENT next line",
+			after = "  edited line",
+			headline = "won't apply",
+		},
+	})
+	local bufnr = open_notes(repo)
+	review.attach(bufnr)
+
+	local notified = {}
+	local orig_notify = vim.notify
+	vim.notify = function(msg)
+		table.insert(notified, msg)
+	end
+	local ok_feed = pcall(
+		vim.api.nvim_feedkeys,
+		vim.api.nvim_replace_termcodes("<leader>gR", true, false, true),
+		"x",
+		false
+	)
+	vim.notify = orig_notify
+	assert_true("<leader>gR ran without erroring", ok_feed)
+
+	local combined = table.concat(notified, " | ")
+	assert_true(
+		"reports the real deferral (didn't apply cleanly), never confused with 'postponed'",
+		combined:find("1 deferred", 1, true) ~= nil
+	)
+	assert_true("reports the landed-on-top count", combined:find("1 landed on top", 1, true) ~= nil)
 end
 
 print()

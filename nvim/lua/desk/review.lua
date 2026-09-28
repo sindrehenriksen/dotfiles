@@ -613,7 +613,7 @@ end
 
 -- ---------------------------------------------------------------------------
 -- Overview: a quickfix list of pending suggestions — news first, then in-
--- place items by position, then a deferred count — plus his own unstaged
+-- place items by position, then a postponed count — plus his own unstaged
 -- edits, labelled "yours". Every jump goes through the jumplist (design.md
 -- §2), including from an overview opened in its own split: the jump moves
 -- the cursor (and sets the ' mark) in the *notes* window, never the qf one.
@@ -623,30 +623,47 @@ M.OVERVIEW_TITLE = "Desk overview"
 M.DECLINED_TITLE = "Desk declined recently"
 M.DECLINED_WINDOW_DAYS = 14
 
---- Lines that differ between his text (all pending items reverted) and the
---- index, outside of any pending item's own range — a best-effort "his own
---- edit" detector: exact for a same-length buffer (position-by-position),
---- which covers an in-place edit; it doesn't attempt a full line-level diff
---- for an edit that also inserts or deletes lines, which would need a real
---- diff algorithm this module doesn't have.
+--- True if the (1-indexed, `count` possibly 0 for a zero-width gap) ranges
+--- `[a_line, a_line+a_count-1]` and `[b_line, b_line+b_count-1]` overlap —
+--- a zero-count range is treated as occupying its own single line for this
+--- purpose (matching M.item_at_line's own "count == 0: hit at exactly this
+--- line" rule).
+local function ranges_overlap(a_line, a_count, b_line, b_count)
+	local a_end = a_line + math.max(a_count, 1) - 1
+	local b_end = b_line + math.max(b_count, 1) - 1
+	return a_line <= b_end and b_line <= a_end
+end
+
+--- Lines that differ between the worktree and the index, outside of any
+--- pending item's own current range — his own edit, not yet staged,
+--- unrelated to any suggestion (design.md's "yours" listing). Goes
+--- through desk.round's own line-shift-robust content diff (the same
+--- primitive every round-derived range is already mapped through) rather
+--- than a same-length, position-by-position comparison, which broke the
+--- moment an edit also inserted or deleted a line — a hunk here is real
+--- regardless of any length change elsewhere in the file; it's counted as
+--- "yours" only once checked against every pending item's own range, so a
+--- hunk a suggestion itself accounts for is never double-reported.
 function M.unowned_hunks(bufnr, st)
-	local pending = {}
-	for id, item in pairs(st.items) do
-		if st.states[id] == "pending" then
-			table.insert(pending, item)
+	local hunks = round.diff_hunks(st.index_lines, st.worktree_lines)
+	local out = {}
+	for _, h in ipairs(hunks) do
+		local wt_start, wt_count = h[3], h[4]
+		if wt_count > 0 then -- a deletion (nothing left in the worktree) has no line to point at
+			local owned = false
+			for _, rs in pairs(st.ranges) do
+				for _, r in ipairs(rs) do
+					if ranges_overlap(wt_start, wt_count, r.line, r.count) then
+						owned = true
+					end
+				end
+			end
+			if not owned then
+				table.insert(out, { line = wt_start })
+			end
 		end
 	end
-	local his_lines = (histext.compute(st.worktree_lines, pending, st.ranges))
-	local hunks = {}
-	if #his_lines ~= #st.index_lines then
-		return hunks -- can't safely position-compare; leave detection to gitsigns' own display
-	end
-	for i = 1, #his_lines do
-		if his_lines[i] ~= st.index_lines[i] then
-			table.insert(hunks, { line = i })
-		end
-	end
-	return hunks
+	return out
 end
 
 --- True if `win` is showing a location list rather than a quickfix list —
@@ -680,7 +697,7 @@ function M.qf_jump()
 	local idx = vim.fn.line(".")
 	local item = vim.fn.getqflist()[idx]
 	if not item or not item.bufnr or item.bufnr == 0 then
-		return -- a header-only line (the deferred count): nothing to jump to
+		return -- a header-only line (the postponed count): nothing to jump to
 	end
 	local qf_win = vim.api.nvim_get_current_win()
 	vim.cmd("wincmd p")
@@ -729,14 +746,21 @@ function M.overview(bufnr)
 		table.insert(qf_items, n.entry)
 	end
 
-	local deferred = 0
+	-- "postponed" (the ledger state a not_now'd item derives as), never
+	-- "deferred" — that word already names something else: M.review's own
+	-- returned count of items that didn't apply cleanly THIS press
+	-- (design.md §2's "an item that doesn't apply cleanly ... stays
+	-- queued"). Reusing it here for a different state read back as "how
+	-- many failed to lay in", when it actually meant "how many he's
+	-- postponed".
+	local postponed = 0
 	for id in pairs(st.items) do
 		if st.states[id] == "postponed" then
-			deferred = deferred + 1
+			postponed = postponed + 1
 		end
 	end
-	if deferred > 0 then
-		table.insert(qf_items, { text = deferred .. " deferred" })
+	if postponed > 0 then
+		table.insert(qf_items, { text = postponed .. " postponed" })
 	end
 
 	for _, hunk in ipairs(M.unowned_hunks(bufnr, st)) do
@@ -878,6 +902,33 @@ local function report(ok, err_or_result)
 	vim.notify("desk: " .. tostring(err_or_result), vim.log.levels.WARN)
 end
 
+--- Reports M.review's own result once it lands: an error same as every
+--- other whole-item action, and — on success — the two counts M.review
+--- already computes but nothing ever surfaced (design.md §2's "an item
+--- that doesn't apply cleanly ... is deferred" and "landed_on_top ... how
+--- many of this press's own lay-ins took that path"): a real deferral
+--- (his edits sit at the spot the anchor expected, so it stayed queued
+--- rather than laying in) and a landed-on-top count (the anchor's quote
+--- is simply gone, so it landed at the top instead). Silent when there is
+--- nothing to say — everything applied cleanly, nothing landed on top —
+--- same as every other action here already is.
+local function report_review(ok, result_or_err)
+	if not ok then
+		vim.notify("desk: " .. tostring(result_or_err), vim.log.levels.WARN)
+		return
+	end
+	local parts = {}
+	if (result_or_err.deferred or 0) > 0 then
+		parts[#parts + 1] = result_or_err.deferred .. " deferred (didn't apply cleanly)"
+	end
+	if (result_or_err.landed_on_top or 0) > 0 then
+		parts[#parts + 1] = result_or_err.landed_on_top .. " landed on top (its anchor is gone)"
+	end
+	if #parts > 0 then
+		vim.notify("desk: " .. table.concat(parts, ", "), vim.log.levels.INFO)
+	end
+end
+
 --- Attaches the review keymaps and review-mode toggling to `bufnr`. Safe to
 --- call more than once for the same buffer (idempotent).
 function M.attach(bufnr)
@@ -891,7 +942,7 @@ function M.attach(bufnr)
 		vim.keymap.set("n", lhs, fn, { buffer = bufnr, desc = desc })
 	end
 	map("<leader>gR", function()
-		report(M.review(bufnr))
+		report_review(M.review(bufnr))
 		M.refresh_virtual_text(bufnr)
 	end, "Review: lay in the pending proposal")
 	map("<leader>gc", function()
