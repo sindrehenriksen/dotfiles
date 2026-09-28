@@ -69,14 +69,29 @@ commit() { # msg content
 
 remote_main_sha() { git -C "$bare" rev-parse --verify -q main 2> /dev/null || echo "(none)"; }
 
-echo "=== no desk.denylist configured: push goes through, one status line ==="
+echo "=== no desk.denylist configured: refuses (fails closed), remote untouched ==="
 commit "first commit" "hello world"
 out="$(git -C "$work" push origin main 2>&1)"
 status=$?
+[ "$status" -ne 0 ] && ok "push is refused" || bad "push was NOT refused (exited 0)"
+printf '%s\n' "$out" | grep -q "desk.denylist is not set" \
+	&& ok "prints the not-set refusal" || bad "missing not-set refusal (got: $out)"
+printf '%s\n' "$out" | grep -q "git config desk.denylist" \
+	&& ok "says how to set it" || bad "doesn't say how to set it (got: $out)"
+printf '%s\n' "$out" | grep -q "desk.denylist none" \
+	&& ok "says how to opt out explicitly" || bad "doesn't say how to opt out (got: $out)"
+assert_eq "remote main was never created" "(none)" "$(remote_main_sha)"
+
+echo
+echo "=== desk.denylist explicitly set to 'none': opts out, push goes through ==="
+git -C "$work" config desk.denylist none
+out="$(git -C "$work" push origin main 2>&1)"
+status=$?
 assert_eq "push exits 0" "0" "$status"
-printf '%s\n' "$out" | grep -q "no desk.denylist configured" \
-	&& ok "prints the no-denylist status line" || bad "missing no-denylist status line (got: $out)"
+printf '%s\n' "$out" | grep -q "opted out" && ok "prints the opted-out status line" \
+	|| bad "missing opted-out status line (got: $out)"
 assert_eq "remote main advanced" "$(git -C "$work" rev-parse main)" "$(remote_main_sha)"
+git -C "$work" config --unset desk.denylist
 
 echo
 echo "=== desk.denylist set, no pattern matches: push goes through ==="

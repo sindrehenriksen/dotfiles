@@ -12,9 +12,11 @@
 #      list via `git config desk.denylist` in the current repo. One-time
 #      install step for a personal clone: `git config desk.denylist
 #      <path-to-your-private-pattern-list>` (set it locally, never tracked
-#      — the list's own contents would be the leak). Unset: prints one
-#      line and lets the push through — this build never runs it. Set but
-#      the file's missing: refuses to push.
+#      — the list's own contents would be the leak). Unset: refuses to
+#      push (design.md §5 fails closed — a fresh clone with no denylist
+#      configured yet must never read as "nothing to check"); set to the
+#      literal "none" to opt out explicitly instead. Set but the file's
+#      missing: refuses to push.
 #
 #   2. CLI form: `desk-denylist-check.sh <repo> <range> <list-file>` — all
 #      three explicit, no git config, no stdin. For another repo's own
@@ -82,7 +84,17 @@ fi
 # --- hook form (no args): chained from git-hooks/pre-push --------------------
 denylist="$(git config --get desk.denylist 2>/dev/null || true)"
 if [ -z "$denylist" ]; then
-	echo "desk-denylist-check: no desk.denylist configured — skipping"
+	# design.md §5 fails closed: an unconfigured denylist must never read
+	# as "nothing to check, let it through" — that's exactly the state a
+	# fresh clone starts in, and the one a push should never silently run
+	# under. Refuse until it's set, one way or the other.
+	echo "desk-denylist-check: desk.denylist is not set — refusing to push" >&2
+	echo "  Set it: git config desk.denylist <path-to-your-private-pattern-list>" >&2
+	echo "  Or opt out explicitly: git config desk.denylist none" >&2
+	exit 1
+fi
+if [ "$denylist" = "none" ]; then
+	echo "desk-denylist-check: desk.denylist explicitly set to 'none' — skipping (opted out)"
 	exit 0
 fi
 
