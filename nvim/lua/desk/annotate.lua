@@ -122,7 +122,7 @@ function M.tokens_in_line(line)
 	local s = nil
 	for i = 1, #line + 1 do
 		local c = line:sub(i, i)
-		local is_tok = c ~= "" and c:match("[%w_%-]") ~= nil
+		local is_tok = c ~= "" and c:match(tokens.TOKEN_CHARS) ~= nil
 		if is_tok and not s then
 			s = i
 		elseif not is_tok and s then

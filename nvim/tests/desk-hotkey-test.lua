@@ -99,6 +99,9 @@ assert_eq("cursor on the first character still finds the whole token", "TICKET-1
 tok = hotkey.token_under_cursor("TICKET-123", 9)
 assert_eq("cursor on the last character still finds the whole token", "TICKET-123", tok)
 
+tok = hotkey.token_under_cursor("møte i går", 0)
+assert_eq("æ/ø/å are token chars: 'møte' is one token, not split at ø", "møte", tok)
+
 print()
 print("=== url handler: opens the templated URL, nothing else ===")
 

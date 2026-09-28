@@ -21,7 +21,11 @@ local tokens = require("desk.tokens")
 
 local M = {}
 
-M.TOKEN_CHARS = "[%w_%-]"
+-- The shared token-char class (desk.tokens.TOKEN_CHARS) — kept as its own
+-- name here since this is the hotkey's own public constant, but defined in
+-- one place so a fix to what counts as a token char (e.g. Unicode letters)
+-- never has to land twice.
+M.TOKEN_CHARS = tokens.TOKEN_CHARS
 
 --- The token containing 0-indexed byte column `col` in `line` (nvim
 --- cursor convention), or nil if `col` doesn't sit on a token character.

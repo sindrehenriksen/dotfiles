@@ -24,6 +24,19 @@
 -- handler's `template` substitutes are never silently lowercased.
 local M = {}
 
+--- The character class a "token" is made of, shared by the hotkey (cursor
+--- token lookup) and the annotations (per-line scan) so the two never
+--- disagree about where a token starts/ends: `%w`/`_`/`-` (Lua's own ASCII
+--- word class plus the two extras this codebase already treats as token
+--- chars) and, byte-wise, every UTF-8 lead/continuation byte (0x80-0xFF) —
+--- Lua patterns have no Unicode notion of "letter", so this is the
+--- practical stand-in: æ/ø/å (and any other non-ASCII letter — Cyrillic,
+--- accented Latin, …) are multi-byte in UTF-8, every byte of which is
+--- >= 0x80, so scanning byte-by-byte with this class glues them into the
+--- token the same way consecutive ASCII word characters already do,
+--- without needing a real Unicode table.
+M.TOKEN_CHARS = "[%w_%-\128-\255]"
+
 --- Reads `$DESK_CONFIG` and returns its parsed JSON, or nil, an error
 --- message. Takes an explicit path only for tests; real callers rely on the
 --- env var, same as the runner.

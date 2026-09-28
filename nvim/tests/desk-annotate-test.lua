@@ -109,6 +109,20 @@ assert_eq("it's TICKET-9, on line 1", { line = 1, text = "TICKET-9" }, { line = 
 assert_eq("its column span covers exactly the token", "TICKET-9", lines[1]:sub(ticket_hits[1].token.start_col + 1, ticket_hits[1].token.end_col + 1))
 
 print()
+print("=== tokens_in_line: æ/ø/å (and other non-ASCII letters) stay in the token ===")
+
+local tok_hits = annotate.tokens_in_line("Åse møter Kåre på Bekkestøa")
+local tok_texts = {}
+for _, t in ipairs(tok_hits) do
+	tok_texts[#tok_texts + 1] = t.text
+end
+assert_eq(
+	"every word stays whole, none split at its æ/ø/å",
+	{ "Åse", "møter", "Kåre", "på", "Bekkestøa" },
+	tok_texts
+)
+
+print()
 print("=== refresh: end to end, reader and ticket cache both stubbed ===")
 
 do

@@ -120,5 +120,21 @@ assert_eq("tokens_from extracts the list", 2, #tokens.tokens_from(parsed))
 os.remove(tmp)
 
 print()
+print("=== TOKEN_CHARS: æ/ø/å (and other non-ASCII letters), consistently ===")
+
+local function matches_every_byte(pattern, s)
+	for i = 1, #s do
+		if s:sub(i, i):match(pattern) == nil then
+			return false
+		end
+	end
+	return true
+end
+assert_eq("æøåÆØÅ are all token chars", true, matches_every_byte(tokens.TOKEN_CHARS, "æøåÆØÅ"))
+assert_eq("a Cyrillic word is all token chars too (any non-ASCII byte counts)", true, matches_every_byte(tokens.TOKEN_CHARS, "привет"))
+assert_eq("ASCII word chars, _ and - still match", true, matches_every_byte(tokens.TOKEN_CHARS, "a_1-Z"))
+assert_eq("a space is not a token char", false, matches_every_byte(tokens.TOKEN_CHARS, " "))
+
+print()
 print(string.format("=== summary: %d passed, %d failed ===", pass, fail))
 os.exit(fail == 0 and 0 or 1)
