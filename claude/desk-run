@@ -147,8 +147,16 @@ follow_up_step="$(jq -r '.follow_up_step // empty' <<< "$pass_config")"
 gmail_window_end="$(desk_now)"
 gmail_window_lookback="$(jq -r '.gmail_window_lookback_secs // 172800' <<< "$config")"
 last_ok="$(desk_status_last_ok_run "$pass")"
-if [ -n "$last_ok" ]; then
-	gmail_window_start="$last_ok"
+# The window's own floor is last_fetch_ok, NOT last_ok_run: a weekend
+# commit-only invocation of a weekday_only_pass still finishes "ok" (the
+# commit_push step succeeds, no model step ever ran to skip), which would
+# advance last_ok_run and silently narrow the next weekday's own lookback
+# past mail/Slack the weekend itself never actually fetched. last_fetch_ok
+# only ever moves forward when a fetch step of THIS pass actually ran and
+# none failed (see the "nothing left to retry" branch below).
+last_fetch_ok="$(desk_status_last_fetch_ok "$pass")"
+if [ -n "$last_fetch_ok" ]; then
+	gmail_window_start="$last_fetch_ok"
 else
 	gmail_window_start=$((gmail_window_end - gmail_window_lookback))
 fi
@@ -230,6 +238,11 @@ stopped_at=""
 # cache that makes an already-succeeded source skip a redundant re-run
 # rather than this array growing to include it again).
 failed_sources=()
+# Whether any fetch step of THIS pass actually ran (as opposed to being
+# skipped by the weekday_only_pass/weekend guard above) — desk_status_
+# set_fetch_ok only ever advances the window when this is true, so a
+# weekend commit-only run of morning/1630 never moves it.
+any_fetch_step_ran="false"
 # The judge branch below fills this in from its own {kept, overflow}
 # result; a pass with no judge step this run (a close-only 16:30, a
 # commit_push-only pass) reports no overflow, matching status.lua's own
@@ -252,6 +265,7 @@ for ((i = 0; i < steps_len; i++)); do
 		commit_push) result="$(desk_step_commit_push_kind "$repo" "$push_enabled" "${files[@]}")" ;;
 
 		fetch)
+			any_fetch_step_ran="true"
 			if desk_fetch_already_done "$pass" "$scheduled_date" "$id"; then
 				desk_fetch_cache_restore "$pass" "$scheduled_date" "$id"
 				result="ok"
@@ -452,6 +466,13 @@ if [ "${#failed_sources[@]}" -gt 0 ]; then
 else
 	# Nothing left to retry: the same-day fetch cache has done its job.
 	desk_fetch_cache_clear "$pass"
+	# Every fetch step this pass actually ran (if any) succeeded: the
+	# window is now covered through gmail_window_end (captured before any
+	# step ran), so the next run's own window picks up exactly where this
+	# one left off rather than re-covering (or gapping) any of it. Never
+	# set at all when no fetch step ran this pass (a weekend commit-only
+	# invocation) — last_fetch_ok stays wherever it last legitimately was.
+	[ "$any_fetch_step_ran" = "true" ] && desk_status_set_fetch_ok "$pass" "$gmail_window_end"
 fi
 
 desk_status_set_result "$pass" "$overall_result" "$stopped_at" "$failed_sources_json" "$scheduled_date"

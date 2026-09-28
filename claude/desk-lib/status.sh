@@ -77,8 +77,10 @@ desk_status_set_running() {
 	# step's away-days valve), not just for the next invocation.
 	desk_status_update '
 		(.passes[$pass].last_ok_run // null) as $prev_ok
+		| (.passes[$pass].last_fetch_ok // null) as $prev_fetch_ok
 		| .passes[$pass] = { last_run: $now, result: "running", stopped_at: null, failed_sources: [] }
 		| (if $prev_ok != null then .passes[$pass].last_ok_run = $prev_ok else . end)
+		| (if $prev_fetch_ok != null then .passes[$pass].last_fetch_ok = $prev_fetch_ok else . end)
 	' --arg pass "$pass" --argjson now "$now"
 }
 
@@ -112,6 +114,30 @@ desk_status_set_result() {
 desk_status_last_ok_run() {
 	local pass="$1"
 	jq -r --arg p "$pass" '.passes[$p].last_ok_run // empty' <<< "$(desk_status_read)"
+}
+
+# The epoch through which $1's own fetch steps have actually succeeded, or
+# "" if they never have — a separate, narrower record than last_ok_run:
+# desk-run's own weekend commit-only invocations (the weekday_only_pass
+# guard skips every model-calling step, fetch included, but still runs
+# commit_push and can still finish the pass "ok") must never advance the
+# mail/Slack lookback window, since no fetch actually ran to have covered
+# anything since last_fetch_ok. Only desk_status_set_fetch_ok (called by
+# desk-run itself, only when at least one fetch step actually ran this
+# pass and none failed) ever moves this forward.
+desk_status_last_fetch_ok() {
+	local pass="$1"
+	jq -r --arg p "$pass" '.passes[$p].last_fetch_ok // empty' <<< "$(desk_status_read)"
+}
+
+# Records $1's own fetch window as covered through $2 (epoch) — the new
+# floor for the NEXT run's own gmail_window_start, so a mail/Slack window
+# never silently narrows (weekend runs) or leaves a gap (a slot that
+# retried a partial pass, whose successful sources already got the wider
+# window they asked for).
+desk_status_set_fetch_ok() {
+	local pass="$1" epoch="$2"
+	desk_status_update '.passes[$pass].last_fetch_ok = $epoch' --arg pass "$pass" --argjson epoch "$epoch"
 }
 
 desk_status_bump() {

@@ -1,0 +1,149 @@
+#!/usr/bin/env bash
+# D8 fix test (review item #5): claude/desk-run's own Gmail/Slack fetch
+# window is floored on a dedicated `last_fetch_ok` (claude/desk-lib/
+# status.sh), advanced only when a fetch step of THIS pass actually ran
+# and none failed — never on `last_ok_run`, which a weekend commit-only
+# invocation of morning/1630 (the weekday_only_pass guard skips every
+# model-calling step, fetch included, but commit_push still runs and can
+# still finish the pass "ok") would otherwise advance too, silently
+# narrowing the next weekday's own lookback past mail the weekend itself
+# never fetched.
+#
+# Drives claude/desk-run itself (a fake `claude`, a throwaway notes repo +
+# bare remote — same fixture shape as desk-run-test.sh), faking only the
+# one bare `date +%u` call desk-run's own weekend check makes (never any
+# other `date` invocation, so every other date computation in the same run
+# still uses the real clock) to force a deterministic weekday/weekend
+# without depending on which day this suite happens to run on.
+set -u
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DESK_RUN="$HERE/../../claude/desk-run"
+
+pass=0
+fail=0
+ok() { pass=$((pass + 1)); printf 'ok   - %s\n' "$1"; }
+bad() { fail=$((fail + 1)); printf 'FAIL - %s\n' "$1"; }
+assert_eq() {
+	local desc=$1 expected=$2 actual=$3
+	if [ "$expected" = "$actual" ]; then ok "$desc"; else bad "$desc (expected [$expected], got [$actual])"; fi
+}
+assert_true() {
+	local desc=$1 cond=$2
+	if [ "$cond" = "true" ]; then ok "$desc"; else bad "$desc (got [$cond])"; fi
+}
+
+ROOT="$(mktemp -d)"
+trap 'rm -rf "$ROOT"' EXIT
+
+# shellcheck source=../../tests/lib/git-safety.sh
+source "$HERE/../../tests/lib/git-safety.sh"
+desk_test_git_safety_init "$ROOT"
+
+FAKEBIN="$ROOT/fakebin"
+mkdir -p "$FAKEBIN"
+
+cat > "$FAKEBIN/claude" <<'FAKE'
+#!/usr/bin/env bash
+echo '{"type":"result","subtype":"success"}'
+exit 0
+FAKE
+chmod +x "$FAKEBIN/claude"
+
+# A real `date` underneath (found once, before this fake is put on PATH,
+# so it never recurses into itself) — every call is forwarded to it
+# unchanged EXCEPT the exact bare `date +%u` desk-run's own weekend check
+# makes, which returns $FAKE_DOW instead. desk_day_before (lock.sh) and
+# every other date computation in this same run use a different form
+# (`date -d/-j ... '+%F\t%u'`, always with extra args) and are never
+# touched by this.
+REAL_DATE="$(command -v date)"
+cat > "$FAKEBIN/date" <<FAKE
+#!/usr/bin/env bash
+if [ "\$#" -eq 1 ] && [ "\$1" = "+%u" ]; then
+	printf '%s\n' "\${FAKE_DOW:-1}"
+	exit 0
+fi
+exec "$REAL_DATE" "\$@"
+FAKE
+chmod +x "$FAKEBIN/date"
+
+export PATH="$FAKEBIN:$PATH"
+export DESK_CLAUDE_BIN=claude
+
+STATE="$ROOT/state"
+export DESK_STATE_DIR="$STATE"
+export DESK_STATUS_FILE="$STATE/status.json"
+export DESK_LOCK_ROOT="$STATE/lock"
+export DESK_GUARD_ROOT="$STATE/guard"
+export DESK_SCRATCH_ROOT="$STATE/scratch"
+export DESK_LOG_DIR="$STATE/logs"
+export DESK_FETCH_CACHE_ROOT="$STATE/fetch-cache"
+export CLAUDE_CONFIG_DIR="$ROOT/claude-config"
+
+repo="$ROOT/notes"
+remote="$ROOT/remote.git"
+desk_test_assert_repo_under_root "$ROOT" "$ROOT"
+git init -q --bare "$remote"
+mkdir -p "$repo"
+git -C "$repo" init -q
+git -C "$repo" config user.email test@example.invalid
+git -C "$repo" config user.name "Desk Test"
+printf 'Section A\n' > "$repo/notes.md"
+: > "$repo/reading.md"
+git -C "$repo" add notes.md reading.md
+git -C "$repo" commit -q -m initial
+git -C "$repo" branch -M main
+git -C "$repo" remote add origin "$remote"
+git -C "$repo" push -q origin main
+
+prompt="$ROOT/prompt.md"
+echo "a generic test prompt" > "$prompt"
+
+# One config, two independently-guarded pass names (morning/1630 — the
+# only two names desk-run's own weekday_only_pass check recognizes) so
+# each case below runs its own pass exactly once, never tripping the
+# once-a-day guard against the other's own result.
+cfg="$ROOT/config.json"
+jq -n --arg repo "$repo" --arg prompt "$prompt" '{
+	notes_repo: $repo,
+	push_enabled: false,
+	files: ["notes.md", "reading.md"],
+	passes: {
+		morning: { steps: [
+			{ id: "commit-push", kind: "commit_push" },
+			{ id: "F-test", kind: "fetch", prompt: $prompt, tools: ["Read"], connector: false, timeout: 30 }
+		] },
+		"1630": { steps: [
+			{ id: "commit-push", kind: "commit_push" },
+			{ id: "F-test", kind: "fetch", prompt: $prompt, tools: ["Read"], connector: false, timeout: 30 }
+		] }
+	}
+}' > "$cfg"
+
+echo "=== a weekday run: its fetch step ran and succeeded, so last_fetch_ok advances ==="
+t0="$(date +%s)"
+FAKE_DOW=1 DESK_CONFIG="$cfg" "$DESK_RUN" morning > "$ROOT/weekday.out" 2>&1
+rc=$?
+t1="$(date +%s)"
+assert_eq "the run succeeds" "0" "$rc"
+last_fetch_ok="$(jq -r '.passes.morning.last_fetch_ok // empty' "$DESK_STATUS_FILE")"
+assert_true "last_fetch_ok was recorded" "$([ -n "$last_fetch_ok" ] && echo true || echo false)"
+assert_true "last_fetch_ok falls within this run's own window (start of run through end)" \
+	"$([ "$last_fetch_ok" -ge "$t0" ] && [ "$last_fetch_ok" -le "$t1" ] && echo true || echo false)"
+
+echo
+echo "=== a weekend run of a DIFFERENT weekday_only_pass: fetch never ran, last_fetch_ok is never touched ==="
+FAKE_DOW=6 DESK_CONFIG="$cfg" "$DESK_RUN" 1630 > "$ROOT/weekend.out" 2>&1
+rc=$?
+assert_eq "the run still succeeds (commit_push alone)" "0" "$rc"
+assert_true "the fetch step itself was skipped (weekend, model steps only run weekdays)" \
+	"$(grep -q 'F-test.*skipped (weekend' "$ROOT/weekend.out" && echo true || echo false)"
+fetch_ok_1630="$(jq -r 'has("passes") and (.passes | has("1630")) and (.passes["1630"] | has("last_fetch_ok"))' "$DESK_STATUS_FILE")"
+assert_eq "1630's own last_fetch_ok field was never even created" "false" "$fetch_ok_1630"
+assert_eq "morning's own last_fetch_ok (a different pass) is untouched by 1630's run" \
+	"$last_fetch_ok" "$(jq -r '.passes.morning.last_fetch_ok' "$DESK_STATUS_FILE")"
+
+echo
+echo "=== summary: $pass passed, $fail failed ==="
+[ "$fail" -eq 0 ]
