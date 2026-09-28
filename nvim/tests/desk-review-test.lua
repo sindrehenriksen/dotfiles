@@ -422,9 +422,13 @@ do
 	vim.cmd("edit " .. vim.fn.fnameescape(repo .. "/file.txt"))
 	local bufnr = vim.api.nvim_get_current_buf()
 
-	-- Two independent single-line edits, far enough apart to be separate
-	-- hunks.
-	vim.api.nvim_buf_set_lines(bufnr, 1, 2, false, { "line 2 EDITED" }) -- line 2
+	-- One THREE-line hunk (lines 2-4, all edited together) and one
+	-- independent single-line edit far enough away to be its own hunk. The
+	-- three-line hunk is the point: staging "the hunk under the cursor"
+	-- (the bug) and staging only the selected lines (the fix) produce
+	-- different results only when the selection is a genuine subset of a
+	-- multi-line hunk — a single-line hunk can't tell them apart.
+	vim.api.nvim_buf_set_lines(bufnr, 1, 4, false, { "line 2 EDITED", "line 3 EDITED", "line 4 EDITED" })
 	vim.api.nvim_buf_set_lines(bufnr, 9, 10, false, { "line 10 EDITED" }) -- line 10
 	vim.cmd("write")
 
@@ -443,15 +447,19 @@ do
 	end)
 	on_attach(bufnr)
 
-	-- Visual-select only the line-2 hunk, then press <leader>ga.
-	vim.api.nvim_win_set_cursor(0, { 2, 0 })
+	-- Visual-select only the MIDDLE line of the 3-line hunk (line 3), then
+	-- press <leader>ga: a range-aware stage takes only line 3; the buggy
+	-- cursor-hunk fallback would take all of lines 2-4.
+	vim.api.nvim_win_set_cursor(0, { 3, 0 })
 	vim.cmd("normal! V")
 	vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes(" ga", true, false, true), "x", false)
 	vim.wait(200)
 
 	local idx_lines = snippet.split_lines(git.index_content(repo, "file.txt") or "")
-	assert_true("the selected hunk (line 2) was staged", idx_lines[2] == "line 2 EDITED")
-	assert_true("the other hunk (line 10) was NOT staged by the visual selection", idx_lines[10] == "line 10")
+	assert_true("the selected line (3) was staged", idx_lines[3] == "line 3 EDITED")
+	assert_true("its neighbor in the SAME hunk (line 2) was NOT staged", idx_lines[2] == "line 2")
+	assert_true("its other neighbor in the SAME hunk (line 4) was NOT staged", idx_lines[4] == "line 4")
+	assert_true("the unrelated hunk (line 10) was NOT staged", idx_lines[10] == "line 10")
 end
 
 print()
