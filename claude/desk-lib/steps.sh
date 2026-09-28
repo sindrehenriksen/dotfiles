@@ -1085,13 +1085,34 @@ desk_step_close() {
 # all "ok", not "failed" — there was simply nothing to open. The other
 # names, when more than one resolves, are logged only (design's "the
 # others' names in status"); the most recently active one is what
-# actually gets a tab, via the same helper (and the same his-default-
-# permissions envelope: no --restricted, --tools, --strict-mcp-config or
-# --permission-mode) desk_step_open_tab's own `restricted: false` path
-# uses for the Wednesday tab.
+# actually gets a tab.
+#
+# At most one tab is ever opened per (pass, scheduled_date) — a guard
+# stamp under $DESK_GUARD_DIR, written only once this function has
+# actually opened or focused something, so a later retry slot the same
+# scheduled date (a partial pass's own re-run) never opens a second one on
+# top of a tab he may already be sitting in. If the resolved session is
+# already LIVE (he's already in it — resumed it himself, or an earlier
+# slot's own call this same run is still there), this never opens a
+# second process against it: it focuses the live tab by tty instead (the
+# same D7 mechanism the notes hotkey uses for a live session), and skips
+# entirely — never resumes — if focusing fails or no tty was recorded,
+# same reasoning as the hotkey: a second process against a live transcript
+# is worse than no tab at all. Only a not-live session gets a fresh
+# `claude --resume` tab (the same his-default-permissions envelope: no
+# --restricted, --tools, --strict-mcp-config or --permission-mode)
+# desk_step_open_tab's own `restricted: false` path uses for the
+# Wednesday tab.
 desk_open_follow_up_tab() {
 	local pass="$1" scheduled_date="$2" follow_up_step="$3"
 	if [ -z "$follow_up_step" ]; then
+		echo "ok"
+		return
+	fi
+
+	local guard_marker="$DESK_GUARD_DIR/followup-$pass-$scheduled_date"
+	if [ -f "$guard_marker" ]; then
+		desk_log "$pass" "follow-up tab: already opened/focused one for $pass-$scheduled_date — skipping"
 		echo "ok"
 		return
 	fi
@@ -1144,11 +1165,32 @@ desk_open_follow_up_tab() {
 		return
 	fi
 
+	if [ "$(jq -r '.live // false' <<< "$best")" = "true" ]; then
+		local tty
+		tty="$(jq -r '.tty // empty' <<< "$best")"
+		if [ -z "$tty" ]; then
+			desk_log "$pass" "follow-up tab: $follow_up_step's session ($id) is live but has no recorded tty — never resuming a live one, skipping"
+			echo "ok"
+			return
+		fi
+		local focus_helper="${DESK_FOCUS_TAB_BIN:-desk-focus-tab.sh}"
+		if "$focus_helper" "$tty" > /dev/null 2>&1; then
+			desk_log "$pass" "follow-up tab: $follow_up_step's session ($id) is already live — focused its tab instead of opening a second one"
+			desk_write_atomic "$guard_marker" ""
+			echo "ok"
+		else
+			desk_log "$pass" "follow-up tab: $follow_up_step's session ($id) is live but focusing its tab failed — not resuming (would risk a second process)"
+			echo "ok"
+		fi
+		return
+	fi
+
 	local command
 	command="claude --resume $(desk_shq "$id")"
 	local helper="${DESK_OPEN_TAB_BIN:-desk-open-tab.sh}"
 	if "$helper" "$command" "$id" "$cwd" > /dev/null 2>&1; then
 		desk_log "$pass" "follow-up tab: opened $follow_up_step ($id) in $cwd"
+		desk_write_atomic "$guard_marker" ""
 		echo "ok"
 	else
 		desk_log "$pass" "follow-up tab: $helper failed"
