@@ -28,6 +28,10 @@ assert_true() {
 ROOT="$(mktemp -d)"
 trap 'rm -rf "$ROOT"' EXIT
 
+# shellcheck source=../../tests/lib/git-safety.sh
+source "$HERE/../../tests/lib/git-safety.sh"
+desk_test_git_safety_init "$ROOT"
+
 FAKEBIN="$ROOT/fakebin"
 mkdir -p "$FAKEBIN"
 
@@ -66,6 +70,7 @@ export DESK_CLAUDE_BIN=claude
 export FAKE_CLAUDE_ITEMS_FILE
 
 repo="$ROOT/notes"
+desk_test_assert_repo_under_root "$repo" "$ROOT"
 mkdir -p "$repo"
 git -C "$repo" init -q
 git -C "$repo" config user.email test@example.invalid

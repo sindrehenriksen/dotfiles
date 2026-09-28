@@ -30,6 +30,10 @@ assert_true() {
 ROOT="$(mktemp -d)"
 trap 'rm -rf "$ROOT"' EXIT
 
+# shellcheck source=../../tests/lib/git-safety.sh
+source "$HERE/../../tests/lib/git-safety.sh"
+desk_test_git_safety_init "$ROOT"
+
 export DESK_STATE_DIR="$ROOT/state"
 
 # shellcheck source=../../claude/desk-lib/common.sh
@@ -38,6 +42,7 @@ source "$LIB/common.sh"
 source "$LIB/git-ops.sh"
 
 repo="$ROOT/notes"
+desk_test_assert_repo_under_root "$repo" "$ROOT"
 mkdir -p "$repo"
 git -C "$repo" init -q
 git -C "$repo" config user.email test@example.invalid

@@ -28,6 +28,10 @@ assert_eq() {
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
+# shellcheck source=../../tests/lib/git-safety.sh
+source "$HERE/../../tests/lib/git-safety.sh"
+desk_test_git_safety_init "$TMP"
+
 # Sandboxed: the pending-set snapshot resolves under $DESK_STATE_DIR (real
 # default ~/.local/state/desk, same as every other desk-lib state file) —
 # never the real one from a test run.
@@ -35,6 +39,7 @@ export DESK_STATE_DIR="$TMP/state"
 
 new_repo() {
 	local repo="$1"
+	desk_test_assert_repo_under_root "$repo" "$TMP"
 	mkdir -p "$repo"
 	git -C "$repo" init -q
 	git -C "$repo" config user.email test@example.invalid

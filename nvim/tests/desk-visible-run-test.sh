@@ -36,18 +36,11 @@ assert_true() {
 ROOT="$(mktemp -d)"
 trap 'rm -rf "$ROOT"' EXIT
 
-# Safety: this test drives real git commits (a throwaway notes repo). Refuse
-# to run anywhere but under a throwaway temp dir, and never let the real
-# dotfiles hookspath (set globally on this machine) or an inherited
-# GIT_DIR/GIT_WORK_TREE point a git command at a real repo.
-case "$(cd "$ROOT" && pwd -P)" in
-	"${TMPDIR:-/nonexistent}"* | /tmp/* | /private/tmp/* | /private/var/folders/* | /var/folders/*) : ;;
-	*)
-		printf 'refusing to run: ROOT is not under a temp dir: %s\n' "$ROOT" >&2
-		exit 1
-		;;
-esac
-unset GIT_DIR GIT_WORK_TREE
+# Safety: this test drives real git commits (a throwaway notes repo) — see
+# tests/lib/git-safety.sh for what this guards against and why.
+# shellcheck source=../../tests/lib/git-safety.sh
+source "$HERE/../../tests/lib/git-safety.sh"
+desk_test_git_safety_init "$ROOT"
 
 FAKEBIN="$ROOT/fakebin"
 mkdir -p "$FAKEBIN"
@@ -126,9 +119,9 @@ export CLAUDE_SESSION_STORE="$ROOT/session-events"
 export CLAUDE_SESSION_RECORDER_LOG="$ROOT/recorder.log"
 
 repo="$ROOT/notes"
+desk_test_assert_repo_under_root "$repo" "$ROOT"
 mkdir -p "$repo"
 git -C "$repo" init -q
-git -C "$repo" config core.hookspath "$ROOT/no-hooks"
 git -C "$repo" config user.email test@example.invalid
 git -C "$repo" config user.name "Desk Test"
 printf 'Section A\n' > "$repo/notes.md"

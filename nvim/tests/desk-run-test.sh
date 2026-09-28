@@ -43,6 +43,10 @@ assert_true() {
 ROOT="$(mktemp -d)"
 trap 'rm -rf "$ROOT"' EXIT
 
+# shellcheck source=../../tests/lib/git-safety.sh
+source "$HERE/../../tests/lib/git-safety.sh"
+desk_test_git_safety_init "$ROOT"
+
 FAKEBIN="$ROOT/fakebin"
 mkdir -p "$FAKEBIN"
 cat > "$FAKEBIN/claude" <<'FAKE'
@@ -100,6 +104,7 @@ new_notes_repo() {
 	local dir="$1"
 	local repo="$dir/notes"
 	local remote="$dir/remote.git"
+	desk_test_assert_repo_under_root "$dir" "$ROOT"
 	git init -q --bare "$remote"
 	mkdir -p "$repo"
 	git -C "$repo" init -q

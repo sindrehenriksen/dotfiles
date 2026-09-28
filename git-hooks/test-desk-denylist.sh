@@ -5,31 +5,26 @@
 # Run: bash git-hooks/test-desk-denylist.sh
 set -u
 
+HERE="$(cd "$(dirname "$0")" && pwd)"
+
 # This test's own pre-commit hook (git-hooks/pre-commit) runs it FROM
 # INSIDE a real `git commit`, which leaves GIT_DIR/GIT_WORK_TREE/
 # GIT_INDEX_FILE etc pointing at the outer repo in this process's own
 # environment — an explicit GIT_DIR wins over `-C`/cwd for repo discovery,
 # so every nested `git init`/`git -C` below would otherwise silently
 # operate on the real dotfiles-desk repo instead of the throwaway one this
-# test creates.
-unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY \
-	GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_CEILING_DIRECTORIES GIT_PREFIX
-
-HERE="$(cd "$(dirname "$0")" && pwd)"
+# test creates. See tests/lib/git-safety.sh for the rest of what this
+# guards against.
+# shellcheck source=../tests/lib/git-safety.sh
+source "$HERE/../tests/lib/git-safety.sh"
+desk_test_git_env_isolate
 
 # Second line of defense on top of the unset above: if isolation ever
 # breaks anyway (a future edit re-introduces an inherited GIT_DIR, a new
 # call site forgets -C, etc), abort loudly instead of silently running
 # further git commands — commits, pushes, resets — against this real repo.
-REAL_TOPLEVEL="$(git -C "$HERE" rev-parse --show-toplevel)"
-guard_not_real_repo() { # dir
-	local dir="$1" toplevel
-	toplevel="$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null || true)"
-	if [ -n "$toplevel" ] && [ "$toplevel" = "$REAL_TOPLEVEL" ]; then
-		echo "ABORT: '$dir' resolves to this repo ($REAL_TOPLEVEL) instead of a throwaway one — refusing to continue" >&2
-		exit 1
-	fi
-}
+desk_test_git_guard_toplevel_init
+REAL_TOPLEVEL="$DESK_TEST_GIT_GUARD_REAL_TOPLEVEL"
 
 pass=0
 fail=0
@@ -42,16 +37,10 @@ assert_eq() {
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
-
-git config --global user.email 2>/dev/null | grep -q . || {
-	export HOME="$TMP/fake-home"
-	mkdir -p "$HOME"
-	git config --global user.email "test@example.com"
-	git config --global user.name "Test"
-	git config --global init.defaultBranch main
-}
+desk_test_git_safety_init "$TMP"
 
 bare="$TMP/origin.git"
+desk_test_assert_repo_under_root "$bare" "$TMP"
 git init -q --bare "$bare"
 bare_gitdir="$(git -C "$bare" rev-parse --absolute-git-dir 2>/dev/null || true)"
 if [ "$bare_gitdir" = "$REAL_TOPLEVEL/.git" ]; then
@@ -60,8 +49,9 @@ if [ "$bare_gitdir" = "$REAL_TOPLEVEL/.git" ]; then
 fi
 
 work="$TMP/work"
+desk_test_assert_repo_under_root "$work" "$TMP"
 git init -q -b main "$work"
-guard_not_real_repo "$work"
+desk_test_guard_not_real_repo "$work"
 git -C "$work" config user.email "test@example.com"
 git -C "$work" config user.name "Test"
 git -C "$work" config core.hooksPath "$HERE"

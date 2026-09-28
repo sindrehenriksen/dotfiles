@@ -28,18 +28,11 @@ ROOT="$(mktemp -d)"
 trap 'rm -rf "$ROOT"' EXIT
 
 # Safety: this test drives real git commits (git-ops.sh/steps.sh call git
-# directly, no fake). Refuse to run anywhere but under a throwaway temp
-# dir, and never let the real dotfiles hookspath (core.hookspath is set
-# globally, so an un-overridden `git init` inherits it) or an inherited
-# GIT_DIR/GIT_WORK_TREE point this test's git commands at a real repo.
-case "$(cd "$ROOT" && pwd -P)" in
-	"${TMPDIR:-/nonexistent}"* | /tmp/* | /private/tmp/* | /private/var/folders/* | /var/folders/*) : ;;
-	*)
-		printf 'refusing to run: ROOT is not under a temp dir: %s\n' "$ROOT" >&2
-		exit 1
-		;;
-esac
-unset GIT_DIR GIT_WORK_TREE
+# directly, no fake) — see tests/lib/git-safety.sh for what this guards
+# against and why.
+# shellcheck source=../../tests/lib/git-safety.sh
+source "$HERE/../../tests/lib/git-safety.sh"
+desk_test_git_safety_init "$ROOT"
 
 FAKEBIN="$ROOT/fakebin"
 mkdir -p "$FAKEBIN"
@@ -65,11 +58,9 @@ chmod +x "$FAKEBIN/session-status.sh"
 export PATH="$FAKEBIN:$PATH"
 
 repo="$ROOT/notes"
+desk_test_assert_repo_under_root "$repo" "$ROOT"
 mkdir -p "$repo"
 git -C "$repo" init -q
-# Override the machine's real global core.hookspath (~/dotfiles/git-hooks)
-# so this throwaway repo's commits never run real dotfiles hook scripts.
-git -C "$repo" config core.hookspath "$ROOT/no-hooks"
 git -C "$repo" config user.email test@example.invalid
 git -C "$repo" config user.name "Desk Test"
 printf 'Already Noted: an existing section\n' > "$repo/notes.md"

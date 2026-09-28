@@ -1,0 +1,129 @@
+# Shared safety net for every bash test in this repo that runs real git
+# commands against a throwaway repo (nvim/tests/*.sh, claude/tests/*.sh,
+# git-hooks/test-*.sh). Sourced, never executed.
+#
+# Why this exists: git-hooks/pre-commit runs these test-*.sh files FROM
+# INSIDE a real `git commit`, which leaves GIT_DIR/GIT_WORK_TREE/etc
+# pointing at the real repo in this process's own environment — an
+# explicit GIT_DIR wins over `-C`/cwd for repo discovery, so a test that
+# forgets a `-C`, or that runs `git config` instead of
+# `git -C "$repo" config`, silently operates on the real repo instead of
+# its own throwaway one. Separately, an un-overridden global/system git
+# config is this machine's real ~/.gitconfig / /etc/gitconfig — a test
+# that runs `git config --global` (rather than scoping to its own repo)
+# writes into those instead of a fixture. Both are exactly how a prior
+# build test wrote `user.name`/`user.email`/`desk.denylist` into the real
+# ~/dotfiles/.git/config: see git log for the incident this hardens
+# against.
+#
+# Usage, right after creating a throwaway root and before the first git
+# command:
+#   ROOT="$(mktemp -d)"
+#   trap 'rm -rf "$ROOT"' EXIT
+#   source "$HERE/../../tests/lib/git-safety.sh"
+#   desk_test_git_safety_init "$ROOT"
+#   ... git -C "$ROOT/whatever" ... is now safe to run ...
+#
+# A test that must run a git command before its own root exists yet (e.g.
+# to compute this real repo's own toplevel for a guard, before creating
+# anything throwaway) can call desk_test_git_env_isolate and
+# desk_test_git_guard_toplevel_init directly — desk_test_git_safety_init
+# calls both itself, so most tests never need them.
+#
+# desk_test_git_safety_init <root>:
+# - refuses to continue (exit 1) unless <root> resolves (cd -P) under a
+#   recognized temp dir (TMPDIR, /tmp, /private/tmp,
+#   /private/var/folders, /var/folders)
+# - unsets GIT_DIR, GIT_WORK_TREE, GIT_INDEX_FILE, GIT_OBJECT_DIRECTORY,
+#   GIT_ALTERNATE_OBJECT_DIRECTORIES, GIT_CEILING_DIRECTORIES, GIT_PREFIX
+#   — whatever an outer real `git commit` left in this process's
+#   environment
+# - points GIT_CONFIG_GLOBAL at a fresh file under <root> (never
+#   ~/.gitconfig) and sets GIT_CONFIG_NOSYSTEM=1 (never /etc/gitconfig);
+#   that file sets core.hookspath to an empty dir under <root> (so every
+#   repo this test creates — including a bare remote it never configures
+#   directly — gets no hooks) and a throwaway user.email/user.name (so a
+#   repo that skips its own `git config user.*` still gets to commit)
+# - exports DESK_TEST_GIT_GUARD_REAL_TOPLEVEL, this real repo's own
+#   toplevel, for desk_test_guard_not_real_repo / desk_test_assert_repo_under_root
+#
+# desk_test_assert_repo_under_root <repo> <root>: call before the first
+# git command against each repo a test creates (the notes repo, a bare
+# remote, ...) — refuses (exit 1) unless <repo> resolves under <root>.
+#
+# desk_test_guard_not_real_repo <dir>: second line of defense — aborts
+# (exit 1) if <dir> resolves (git rev-parse --show-toplevel) to this real
+# repo, in case the isolation above ever breaks anyway (a future call
+# site forgets -C, an inherited GIT_DIR survives some other way, etc).
+
+desk_test_git_env_isolate() {
+	unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY \
+		GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_CEILING_DIRECTORIES GIT_PREFIX
+}
+
+desk_test_git_guard_toplevel_init() {
+	if [ -z "${DESK_TEST_GIT_GUARD_REAL_TOPLEVEL+x}" ]; then
+		local helper_dir
+		helper_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+		DESK_TEST_GIT_GUARD_REAL_TOPLEVEL="$(git -C "$helper_dir" rev-parse --show-toplevel 2> /dev/null || true)"
+		export DESK_TEST_GIT_GUARD_REAL_TOPLEVEL
+	fi
+}
+
+desk_test_git_safety_init() {
+	local root="$1"
+	if [ -z "$root" ] || [ ! -d "$root" ]; then
+		printf 'desk_test_git_safety_init: not a directory: %s\n' "$root" >&2
+		exit 1
+	fi
+	case "$(cd "$root" && pwd -P)" in
+		"${TMPDIR:-/nonexistent}"* | /tmp/* | /private/tmp/* | /private/var/folders/* | /var/folders/*) : ;;
+		*)
+			printf 'refusing to run: root is not under a temp dir: %s\n' "$root" >&2
+			exit 1
+			;;
+	esac
+
+	desk_test_git_env_isolate
+
+	local hooks_dir="$root/.desk-test-no-hooks"
+	mkdir -p "$hooks_dir"
+	local global_config="$root/.desk-test-gitconfig-global"
+	{
+		printf '[core]\n\thookspath = %s\n' "$hooks_dir"
+		printf '[user]\n\temail = test@example.invalid\n\tname = Desk Test\n'
+		printf '[init]\n\tdefaultBranch = main\n'
+	} > "$global_config"
+	export GIT_CONFIG_GLOBAL="$global_config"
+	export GIT_CONFIG_NOSYSTEM=1
+
+	desk_test_git_guard_toplevel_init
+}
+
+desk_test_assert_repo_under_root() {
+	local repo="$1" root="$2"
+	if [ -z "$repo" ] || [ -z "$root" ]; then
+		printf 'desk_test_assert_repo_under_root: usage: <repo> <root>\n' >&2
+		exit 1
+	fi
+	local repo_real root_real
+	root_real="$(cd "$root" && pwd -P)" || exit 1
+	mkdir -p "$repo"
+	repo_real="$(cd "$repo" && pwd -P)" || exit 1
+	case "$repo_real" in
+		"$root_real" | "$root_real"/*) : ;;
+		*)
+			printf 'refusing to run: repo %s is not under root %s\n' "$repo" "$root" >&2
+			exit 1
+			;;
+	esac
+}
+
+desk_test_guard_not_real_repo() {
+	local dir="$1" toplevel
+	toplevel="$(git -C "$dir" rev-parse --show-toplevel 2> /dev/null || true)"
+	if [ -n "$toplevel" ] && [ -n "${DESK_TEST_GIT_GUARD_REAL_TOPLEVEL:-}" ] && [ "$toplevel" = "$DESK_TEST_GIT_GUARD_REAL_TOPLEVEL" ]; then
+		printf "ABORT: '%s' resolves to this repo (%s) instead of a throwaway one — refusing to continue\n" "$dir" "$toplevel" >&2
+		exit 1
+	fi
+}

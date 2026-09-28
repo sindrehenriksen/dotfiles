@@ -24,7 +24,12 @@ assert_eq() {
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
+# shellcheck source=../../tests/lib/git-safety.sh
+source "$HERE/../../tests/lib/git-safety.sh"
+desk_test_git_safety_init "$TMP"
+
 REPO="$TMP/notes"
+desk_test_assert_repo_under_root "$REPO" "$TMP"
 mkdir -p "$REPO"
 git -C "$REPO" init -q
 git -C "$REPO" config user.email test@example.invalid

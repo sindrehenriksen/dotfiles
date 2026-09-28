@@ -9,6 +9,8 @@
 -- Run: nvim --headless -u nvim/tests/minimal_init.lua -l nvim/tests/desk-ledger-test.lua
 local ledger = require("desk.ledger")
 local git = require("desk.git")
+local git_safety_here = debug.getinfo(1, "S").source:sub(2):match("^(.*)/[^/]+$") or "."
+local git_safety = dofile(git_safety_here .. "/../../tests/lib/git-safety.lua")
 
 -- Sandboxed: desk.ledger.pending_snapshot_path resolves under
 -- $DESK_STATE_DIR (real default ~/.local/state/desk), same as every other
@@ -39,6 +41,7 @@ end
 local function new_repo()
 	local repo = vim.fn.tempname()
 	vim.fn.mkdir(repo, "p")
+	git_safety.assert_repo_under_tmp(repo)
 	assert(git.run(repo, { "init", "-q" }))
 	assert(git.run(repo, { "config", "user.email", "test@example.invalid" }))
 	assert(git.run(repo, { "config", "user.name", "Desk Test" }))

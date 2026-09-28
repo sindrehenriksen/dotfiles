@@ -29,6 +29,10 @@ assert_true() {
 ROOT="$(mktemp -d)"
 trap 'rm -rf "$ROOT"' EXIT
 
+# shellcheck source=../../tests/lib/git-safety.sh
+source "$HERE/../../tests/lib/git-safety.sh"
+desk_test_git_safety_init "$ROOT"
+
 FAKEBIN="$ROOT/fakebin"
 mkdir -p "$FAKEBIN"
 ARGV_LOG="$ROOT/open-tab-argv.log"
@@ -125,6 +129,7 @@ assert_true "the helper was invoked (an ended session doesn't block a new tab)" 
 echo
 echo "=== scratch_dir + notes-diff fields: the tab opens in a fresh scratch dir seeded with notes-diff.md ==="
 notes_repo="$ROOT/notes"
+desk_test_assert_repo_under_root "$notes_repo" "$ROOT"
 mkdir -p "$notes_repo"
 git -C "$notes_repo" init -q
 git -C "$notes_repo" config user.email test@example.invalid

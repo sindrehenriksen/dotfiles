@@ -11,3 +11,9 @@ vim.g.mapleader = " "
 vim.opt.swapfile = false
 vim.opt.backup = false
 vim.opt.undofile = false
+
+-- Shared safety net for any test here that runs real git commands — see
+-- tests/lib/git-safety.lua. Applied unconditionally: harmless for a test
+-- that never touches git, and this file is the one thing every headless
+-- test in nvim/tests/ already loads (`-u minimal_init.lua`).
+dofile(here .. "/../../tests/lib/git-safety.lua").init()

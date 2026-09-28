@@ -8,6 +8,8 @@ local ledger = require("desk.ledger")
 local apply = require("desk.apply")
 local git = require("desk.git")
 local snippet = require("desk.snippet")
+local git_safety_here = debug.getinfo(1, "S").source:sub(2):match("^(.*)/[^/]+$") or "."
+local git_safety = dofile(git_safety_here .. "/../../tests/lib/git-safety.lua")
 
 -- Sandboxed: desk.review.commit_his_text (called by nearly every test here,
 -- directly or via desk.review.review) now writes the pending-set snapshot
@@ -44,6 +46,7 @@ end
 local function new_repo(lines)
 	local repo = vim.fn.tempname()
 	vim.fn.mkdir(repo, "p")
+	git_safety.assert_repo_under_tmp(repo)
 	assert(git.run(repo, { "init", "-q" }))
 	assert(git.run(repo, { "config", "user.email", "test@example.invalid" }))
 	assert(git.run(repo, { "config", "user.name", "Desk Test" }))
@@ -396,6 +399,7 @@ print("=== D6: <leader>ga in visual mode stages the selection, not the whole hun
 do
 	local repo = vim.fn.tempname()
 	vim.fn.mkdir(repo, "p")
+	git_safety.assert_repo_under_tmp(repo)
 	assert(git.run(repo, { "init", "-q" }))
 	assert(git.run(repo, { "config", "user.email", "test@example.invalid" }))
 	assert(git.run(repo, { "config", "user.name", "Desk Test" }))
