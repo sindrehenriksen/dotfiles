@@ -61,15 +61,17 @@ how far a task travels, and one whose shape is already agreed passes
 straight through to `execution` alone. A workspace may layer its own
 on top of both.
 
-**Say which tier and effort you are running at, and name the moment
-to change it.** The choice is the owner's, so work that turns out
-judgement-heavy or long-horizon earns a recommendation — raise the
-effort, or move the main loop to the frontier tier — rather than
-pressing on at whatever the session started on, and a routine one
-earns the offer to step down. Effort is the cheaper lever and the
-one that goes unused. Never put a subagent on the frontier tier by
-default; `execution` holds the rule and the single case that earns
-it.
+**Say which tier and effort you are running at, chosen before the
+job starts.** The choice is the owner's and is made up front, from
+what the work needs: judgement-heavy or long-horizon work earns a
+recommendation above the default and a routine one the offer to step
+down, rather than inheriting whatever the session started on.
+Changing mid-job is the exception, for work that turned out
+different from how it looked. Effort is the lever that goes unused,
+and the first to consider for work on the right track but thin;
+work that keeps missing the shape wants a stronger model, where one
+exists. A frontier-class tier never goes on a subagent without the
+owner's specific go; `execution` holds the rule and the reasoning.
 
 ## Incidents are not a pattern
 
