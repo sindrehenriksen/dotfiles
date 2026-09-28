@@ -69,6 +69,7 @@ BASH_SUITES=(
 	nvim/tests/desk-url-allowlist-test.sh
 	nvim/tests/desk-validate-test.sh
 	nvim/tests/desk-visible-run-test.sh
+	nvim/tests/desk-w-count-check-test.sh
 	nvim/tests/desk-write-pinned-test.sh
 	nvim/tests/desk-write-step-kind-test.sh
 	claude/tests/session-recorder-test.sh

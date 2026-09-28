@@ -432,6 +432,28 @@ $(git -C "$repo" show "HEAD:$f" 2> /dev/null)"
 					result="ok"
 				else
 					result="$(desk_step_write "$pass" "$step_json" "$pinned_args_json" "$placeholders" "$scheduled_date")"
+					# design.md §5's own "W count mismatch" loud failure:
+					# the deny hook's own --pinned only ever stops W from
+					# unlabelling something OUTSIDE the pinned set — it
+					# can't tell "unlabelled all of them" from "unlabelled
+					# only some, or none" (the model called the tool fewer
+					# times than there were ids to act on, or not at all).
+					# This is the other half: compare what the call's own
+					# tool_use arguments actually named against the full
+					# pinned set, after the fact, and fail loudly on any
+					# mismatch — never silently treat "acted on some" as
+					# "acted on all".
+					if [ "$result" = "ok" ]; then
+						write_tool="$(jq -r '(.tools // [])[0] // empty' <<< "$step_json")"
+						actual_ids_text="$(jq -r --arg t "$write_tool" \
+							'select(.name == $t) | .input.threadId // empty' \
+							"$PASS_SCRATCH/${id}-tool-uses.jsonl" 2> /dev/null | sort -u)"
+						pinned_ids_text="$(jq -r '.[].id' <<< "$ids_subjects" | sort -u)"
+						if [ "$actual_ids_text" != "$pinned_ids_text" ]; then
+							desk_log "$pass" "$id: unlabelled thread ids don't match the pinned set (W count mismatch) — failing the pass"
+							result="failed"
+						fi
+					fi
 				fi
 			fi
 			;;
