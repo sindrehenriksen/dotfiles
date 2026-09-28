@@ -129,6 +129,11 @@ write_commit_push_config() {
 	local path="$1" repo="$2"
 	jq -n --arg repo "$repo" '{
 		notes_repo: $repo,
+	timezone: "UTC",
+	ticket_search_tool: "mcp__example-tickets__search",
+	mail_search_tool: "mcp__claude_ai_Gmail__search_threads",
+	ticket_status_step_id: "T",
+	mail_fetch_step_id: "F-private",
 		push_enabled: true,
 		files: ["notes.md", "reading.md"],
 		passes: { testpass: { steps: [ { id: "commit-push", kind: "commit_push" } ] } }
@@ -143,6 +148,11 @@ write_fetch_config() {
 	echo "a generic test prompt" > "$prompt"
 	jq -n --arg repo "$repo" --arg prompt "$prompt" --argjson timeout "$timeout" '{
 		notes_repo: $repo,
+	timezone: "UTC",
+	ticket_search_tool: "mcp__example-tickets__search",
+	mail_search_tool: "mcp__claude_ai_Gmail__search_threads",
+	ticket_status_step_id: "T",
+	mail_fetch_step_id: "F-private",
 		push_enabled: true,
 		files: ["notes.md", "reading.md"],
 		passes: { testpass: { steps: [

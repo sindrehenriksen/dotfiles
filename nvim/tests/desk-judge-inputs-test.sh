@@ -150,7 +150,7 @@ EOF
 pass_ctx="$(jq -n --arg repo "$repo" --arg sources_path "$sources_path" --arg pass_scratch "$PASS_SCRATCH" \
 	--argjson old_ticket_cache "$old_ticket_cache" '{
 		repo: $repo, sources_path: $sources_path, pass_scratch: $pass_scratch,
-		old_ticket_cache: $old_ticket_cache
+		old_ticket_cache: $old_ticket_cache, mail_fetch_step_id: "F-private"
 	}')"
 placeholders="$(jq -n --arg caps "ACT ≤3, worth knowing ≤3, wildcard ≤1" \
 	'{mode: "WEEKLY", today: "2026-09-27", caps: $caps}')"

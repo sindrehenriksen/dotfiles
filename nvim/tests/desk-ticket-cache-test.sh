@@ -77,7 +77,7 @@ JSONL
 cat > "$results_file" <<'JSONL'
 {"type":"tool_result","tool_use_id":"u1","content":[{"type":"text","text":"{\"issues\":[{\"key\":\"TICKET-123\",\"fields\":{\"summary\":\"Do the thing\",\"status\":{\"name\":\"In Progress\"}}},{\"key\":\"TICKET-45\",\"fields\":{\"summary\":\"Ship it\",\"status\":{\"name\":\"Done\"}}}]}"}]}
 JSONL
-result="$(desk_build_ticket_cache "$uses_file" "$results_file")"
+result="$(desk_build_ticket_cache "$uses_file" "$results_file" "mcp__example-tickets__search")"
 assert_eq "reports ok" "ok" "$result"
 assert_true "the cache file exists" "$([ -f "$DESK_TICKET_CACHE" ] && echo true || echo false)"
 assert_eq "TICKET-123's status" "In Progress" "$(jq -r '.tickets["TICKET-123"].status' "$DESK_TICKET_CACHE")"
@@ -91,7 +91,7 @@ empty_results="$ROOT/empty-tool-results.jsonl"
 : > "$empty_results"
 empty_uses="$ROOT/empty-tool-uses.jsonl"
 : > "$empty_uses"
-result2="$(desk_build_ticket_cache "$empty_uses" "$empty_results")"
+result2="$(desk_build_ticket_cache "$empty_uses" "$empty_results" "mcp__example-tickets__search")"
 assert_eq "reports failed" "failed" "$result2"
 after_cache="$(cat "$DESK_TICKET_CACHE")"
 assert_eq "the cache file is untouched" "$before_cache" "$after_cache"

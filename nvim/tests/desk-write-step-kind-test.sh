@@ -78,6 +78,11 @@ echo "a generic test prompt" > "$prompt"
 cfg="$ROOT/config.json"
 jq -n --arg repo "$repo" --arg prompt "$prompt" '{
 	notes_repo: $repo,
+	timezone: "UTC",
+	ticket_search_tool: "mcp__example-tickets__search",
+	mail_search_tool: "mcp__claude_ai_Gmail__search_threads",
+	ticket_status_step_id: "T",
+	mail_fetch_step_id: "F-private",
 	files: ["notes.md", "reading.md"],
 	digest_gmail_label: "Digest",
 	passes: { testpass: { steps: [

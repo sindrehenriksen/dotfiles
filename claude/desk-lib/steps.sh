@@ -106,17 +106,20 @@ desk_compute_mode() {
 	if [ -n "$last_week" ] && [ "$cur_week" = "$last_week" ]; then echo DAILY; else echo WEEKLY; fi
 }
 
-# $1 (epoch) as ISO 8601 with an explicit Europe/Oslo offset (prompts/
-# README.md: "ISO 8601, Oslo offset") — always that zone, regardless of
-# this machine's own, so a test or a run from anywhere still renders the
-# zone the prompts are written against.
-desk_iso8601_oslo() {
-	local epoch="$1"
+# $1 (epoch) as ISO 8601 with an explicit offset for $2 (an IANA zone
+# name, e.g. "Europe/Oslo" — prompts/README.md: "ISO 8601, his own
+# offset") — always that zone, regardless of this machine's own, so a test
+# or a run from anywhere still renders the zone the prompts are written
+# against. $2 is a required $DESK_CONFIG field (desk-run's own "timezone"),
+# never a literal here: dotfiles names no work-specific fact, his
+# timezone included.
+desk_iso8601_at_tz() {
+	local epoch="$1" tz="$2"
 	if desk_is_linux; then
-		TZ=Europe/Oslo date -d "@$epoch" +%Y-%m-%dT%H:%M:%S%:z 2> /dev/null
+		TZ="$tz" date -d "@$epoch" +%Y-%m-%dT%H:%M:%S%:z 2> /dev/null
 	else
 		local out
-		out="$(TZ=Europe/Oslo date -j -r "$epoch" +%Y-%m-%dT%H:%M:%S%z 2> /dev/null)"
+		out="$(TZ="$tz" date -j -r "$epoch" +%Y-%m-%dT%H:%M:%S%z 2> /dev/null)"
 		# BSD date has no %:z; splice the colon into the numeric offset by hand.
 		printf '%s' "$out" | sed -E 's/([0-9]{2})([0-9]{2})$/\1:\2/'
 	fi
@@ -270,8 +273,18 @@ desk_seed_named_file() {
 			fi
 			;;
 		f-private.json | f-web.json)
-			local step_id="F-private" pass_scratch text
-			[ "$name" = "f-web.json" ] && step_id="F-web"
+			# f-private.json's own producing step id is desk-run's own
+			# required "mail_fetch_step_id" config field (threaded through
+			# ctx_json), never a hardcoded literal — the same id the write
+			# (W) step's own tool-results lookup already keys off. f-web.json
+			# has no such config-driven mapping (no work-specific tool or
+			# fact is tied to it), so it keeps its own generic literal.
+			local step_id pass_scratch text
+			if [ "$name" = "f-web.json" ]; then
+				step_id="F-web"
+			else
+				step_id="$(jq -r '.mail_fetch_step_id // empty' <<< "$ctx_json")"
+			fi
 			pass_scratch="$(jq -r '.pass_scratch // empty' <<< "$ctx_json")"
 			text="$(desk_extract_final_text "$pass_scratch/${step_id}-stream.jsonl" 2> /dev/null)"
 			if [ -n "$text" ] && jq -e . > /dev/null 2>&1 <<< "$text"; then

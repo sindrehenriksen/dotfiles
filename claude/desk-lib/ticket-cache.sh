@@ -87,7 +87,7 @@ desk_parse_jira_issues() {
 	' <<< "$text" 2> /dev/null
 }
 
-# desk_build_ticket_cache <tool-uses.jsonl> <tool-results.jsonl>
+# desk_build_ticket_cache <tool-uses.jsonl> <tool-results.jsonl> <tool-name>
 # Parses every search-tool call/result pair (across however many pages T
 # made) into the ticket cache's pinned shape and writes it atomically to
 # $DESK_TICKET_CACHE: {"checked_at": <epoch>, "tickets": {"<KEY>":
@@ -96,11 +96,13 @@ desk_parse_jira_issues() {
 # stays, its age visible") when not one page parsed as valid JSON — an
 # empty issue list from valid JSON (his notes name zero tickets, or all
 # are gone) is still an "ok", refreshing checked_at with an empty map.
+# `<tool-name>` is the instantiation's own ticket-search tool (desk-run's
+# own required $DESK_CONFIG field "ticket_search_tool") — never a literal
+# here, since dotfiles names no work-specific tool.
 desk_build_ticket_cache() {
-	local uses_file="$1" results_file="$2"
+	local uses_file="$1" results_file="$2" tool_name="$3"
 	local pairs
-	pairs="$(desk_tool_call_pairs "$uses_file" "$results_file" \
-		"mcp__atlassian-cloud__searchJiraIssuesUsingJql")"
+	pairs="$(desk_tool_call_pairs "$uses_file" "$results_file" "$tool_name")"
 	local n
 	n="$(jq 'length' <<< "$pairs" 2> /dev/null || echo 0)"
 	if [ "$n" -eq 0 ]; then

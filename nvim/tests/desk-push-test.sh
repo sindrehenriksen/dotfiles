@@ -83,6 +83,11 @@ repo1="$(new_notes_repo "$ROOT/case1")"
 cfg1="$ROOT/case1/config.json"
 jq -n --arg repo "$repo1" '{
 	notes_repo: $repo,
+	timezone: "UTC",
+	ticket_search_tool: "mcp__example-tickets__search",
+	mail_search_tool: "mcp__claude_ai_Gmail__search_threads",
+	ticket_status_step_id: "T",
+	mail_fetch_step_id: "F-private",
 	files: ["notes.md", "reading.md"],
 	passes: { testpass: { steps: [ { id: "commit-push", kind: "commit_push" } ] } }
 }' > "$cfg1"
@@ -104,6 +109,11 @@ repo2="$(new_notes_repo "$ROOT/case2")"
 cfg2="$ROOT/case2/config.json"
 jq -n --arg repo "$repo2" '{
 	notes_repo: $repo,
+	timezone: "UTC",
+	ticket_search_tool: "mcp__example-tickets__search",
+	mail_search_tool: "mcp__claude_ai_Gmail__search_threads",
+	ticket_status_step_id: "T",
+	mail_fetch_step_id: "F-private",
 	push_enabled: true,
 	files: ["notes.md", "reading.md"],
 	passes: { testpass: { steps: [ { id: "commit-push", kind: "commit_push" } ] } }
@@ -128,6 +138,11 @@ prompt="$ROOT/prompt.md"
 echo "a generic test prompt" > "$prompt"
 jq -n --arg repo "$repo3" --arg prompt "$prompt" '{
 	notes_repo: $repo,
+	timezone: "UTC",
+	ticket_search_tool: "mcp__example-tickets__search",
+	mail_search_tool: "mcp__claude_ai_Gmail__search_threads",
+	ticket_status_step_id: "T",
+	mail_fetch_step_id: "F-private",
 	push_enabled: true,
 	files: ["notes.md", "reading.md"],
 	passes: { morning: { steps: [

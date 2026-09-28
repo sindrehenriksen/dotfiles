@@ -64,6 +64,25 @@ if [ -z "$pass_config" ]; then
 	exit 2
 fi
 
+# Generic ids: dotfiles is public and names no instantiation-specific fact
+# of any kind (design.md §6), which extends to the exact MCP tool names an
+# instantiation's own connectors happen to expose, the step ids it
+# special-cases for ticket status and mail, and his own timezone — none of
+# those are guessable defaults this repo can ship, so every one is a
+# required $DESK_CONFIG field, failing loudly (never a silent fallback to
+# a work-specific literal) when absent.
+timezone="$(jq -r '.timezone // empty' <<< "$config")"
+ticket_search_tool="$(jq -r '.ticket_search_tool // empty' <<< "$config")"
+mail_search_tool="$(jq -r '.mail_search_tool // empty' <<< "$config")"
+ticket_status_step_id="$(jq -r '.ticket_status_step_id // empty' <<< "$config")"
+mail_fetch_step_id="$(jq -r '.mail_fetch_step_id // empty' <<< "$config")"
+for required_field in timezone ticket_search_tool mail_search_tool ticket_status_step_id mail_fetch_step_id; do
+	if [ -z "${!required_field}" ]; then
+		desk_log "$pass" "\$DESK_CONFIG is missing required field \"$required_field\" (no work-specific default is shipped here)"
+		exit 2
+	fi
+done
+
 # Weekdays only for morning/16:30's own MODEL steps (design.md §4's own
 # scheduling note, and the Interfaces brief: "weekdays filtered for
 # morning/16:30") — but commit-and-push runs every day, weekends included:
@@ -192,8 +211,8 @@ export CLAUDE_CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 # desk_status_set_running overwrote it) rather than re-reading it now.
 mode="$(desk_compute_mode "$last_ok")"
 today="$(date +%F)"
-window_start_iso="$(desk_iso8601_oslo "$gmail_window_start")"
-window_end_iso="$(desk_iso8601_oslo "$gmail_window_end")"
+window_start_iso="$(desk_iso8601_at_tz "$gmail_window_start" "$timezone")"
+window_end_iso="$(desk_iso8601_at_tz "$gmail_window_end" "$timezone")"
 # The morning pass's one source definition (prompts/README.md's own
 # placeholder table: the whole of a private source file, substituted
 # verbatim into F-private/F-web and copied into J's scratch dir as
@@ -225,9 +244,11 @@ old_ticket_cache="$(cat "$DESK_TICKET_CACHE" 2> /dev/null)"
 [ -n "$old_ticket_cache" ] || old_ticket_cache='{}'
 jq -e . > /dev/null 2>&1 <<< "$old_ticket_cache" || old_ticket_cache='{}'
 pass_ctx="$(jq -n --arg repo "$repo" --arg sources_path "$sources_path" --arg pass_scratch "$PASS_SCRATCH" \
-	--arg scheduled_date "$scheduled_date" --argjson old_ticket_cache "$old_ticket_cache" '{
+	--arg scheduled_date "$scheduled_date" --argjson old_ticket_cache "$old_ticket_cache" \
+	--arg mail_fetch_step_id "$mail_fetch_step_id" '{
 		repo: $repo, sources_path: $sources_path, pass_scratch: $pass_scratch,
-		scheduled_date: $scheduled_date, old_ticket_cache: $old_ticket_cache
+		scheduled_date: $scheduled_date, old_ticket_cache: $old_ticket_cache,
+		mail_fetch_step_id: $mail_fetch_step_id
 	}')"
 
 overall_result="ok"
@@ -272,7 +293,7 @@ for ((i = 0; i < steps_len; i++)); do
 				desk_log "$pass" "fetch $id: already fetched today (cached) — reusing, no re-run"
 			else
 				placeholders="$common_placeholders"
-				if [ "$id" = "T" ]; then
+				if [ "$id" = "$ticket_status_step_id" ]; then
 					notes_text=""
 					for f in "${files[@]}"; do
 						notes_text="$notes_text
@@ -287,9 +308,10 @@ $(git -C "$repo" show "HEAD:$f" 2> /dev/null)"
 					desk_fetch_cache_save "$pass" "$scheduled_date" "$id"
 				fi
 			fi
-			if [ "$id" = "T" ] && [ "$result" = "ok" ]; then
+			if [ "$id" = "$ticket_status_step_id" ] && [ "$result" = "ok" ]; then
 				desk_build_ticket_cache "$PASS_SCRATCH/${id}-tool-uses.jsonl" "$PASS_SCRATCH/${id}-tool-results.jsonl" \
-					> /dev/null || desk_log "$pass" "T: ticket cache parse failed, old cache kept"
+					"$ticket_search_tool" > /dev/null \
+					|| desk_log "$pass" "$id: ticket cache parse failed, old cache kept"
 			fi
 			if [ "$result" != "ok" ]; then
 				# A source's own failure is never fatal to the pass (design's
@@ -381,24 +403,24 @@ $(git -C "$repo" show "HEAD:$f" 2> /dev/null)"
 			# to say so.
 			pinned_args_json="null"
 			placeholders="$common_placeholders"
-			# This write step's own thread ids only ever come from
-			# F-private's own search (never re-derived, per the check
-			# below). If F-private itself is a failed source this pass,
-			# there's no real "fetched" set to unlabel against at all —
-			# proceeding would silently unlabel zero ids and report "ok",
-			# which reads as "nothing to do" rather than "the source it
-			# depends on never ran". Fail loudly instead (design's own
-			# "W asserts unlabelled = fetched").
-			fprivate_failed="false"
+			# This write step's own thread ids only ever come from the
+			# configured mail-fetch step's own search (never re-derived,
+			# per the check below). If that step itself is a failed source
+			# this pass, there's no real "fetched" set to unlabel against
+			# at all — proceeding would silently unlabel zero ids and
+			# report "ok", which reads as "nothing to do" rather than "the
+			# source it depends on never ran". Fail loudly instead
+			# (design's own "W asserts unlabelled = fetched").
+			mail_fetch_failed="false"
 			for fs in "${failed_sources[@]:-}"; do
-				[ "$fs" = "F-private" ] && fprivate_failed="true"
+				[ "$fs" = "$mail_fetch_step_id" ] && mail_fetch_failed="true"
 			done
-			if [ "$fprivate_failed" = "true" ]; then
-				desk_log "$pass" "$id: F-private (the source it unlabels against) failed this pass — refusing to unlabel"
+			if [ "$mail_fetch_failed" = "true" ]; then
+				desk_log "$pass" "$id: $mail_fetch_step_id (the source it unlabels against) failed this pass — refusing to unlabel"
 				result="failed"
 			else
-				pairs="$(desk_tool_call_pairs "$PASS_SCRATCH/F-private-tool-uses.jsonl" \
-					"$PASS_SCRATCH/F-private-tool-results.jsonl" "mcp__claude_ai_Gmail__search_threads")"
+				pairs="$(desk_tool_call_pairs "$PASS_SCRATCH/$mail_fetch_step_id-tool-uses.jsonl" \
+					"$PASS_SCRATCH/$mail_fetch_step_id-tool-results.jsonl" "$mail_search_tool")"
 				matching_pair="$(jq -c --arg q "$digest_query" \
 					'[.[] | select(.input.query == $q)] | .[0] // empty' <<< "$pairs")"
 				ids_subjects="[]"
@@ -409,7 +431,7 @@ $(git -C "$repo" show "HEAD:$f" 2> /dev/null)"
 							<<< "$result_text")"
 					fi
 				else
-					desk_log "$pass" "$id: F-private's digest search query doesn't match the configured one — no ids pinned"
+					desk_log "$pass" "$id: $mail_fetch_step_id's digest search query doesn't match the configured one — no ids pinned"
 				fi
 				n_ids="$(jq 'length' <<< "$ids_subjects")"
 				while IFS=$'\t' read -r tid subj; do

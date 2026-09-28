@@ -84,6 +84,11 @@ echo "a ticket-status test prompt" > "$ROOT/config-dir/ticket-status.md"
 cfg="$ROOT/config-dir/config.json"
 jq -n --arg repo "$repo" '{
 	notes_repo: $repo,
+	timezone: "UTC",
+	ticket_search_tool: "mcp__example-tickets__search",
+	mail_search_tool: "mcp__claude_ai_Gmail__search_threads",
+	ticket_status_step_id: "T",
+	mail_fetch_step_id: "F-private",
 	files: ["notes.md", "reading.md"],
 	passes: { testpass: { steps: [
 		{ id: "commit-push", kind: "commit_push" },
