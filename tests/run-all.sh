@@ -88,6 +88,13 @@ LUA_SUITES=(
 	nvim/tests/desk-tokens-test.lua
 )
 
+# Plain-Lua suites: run with the system `lua`, never nvim/Hammerspoon (each
+# file's own header says so) — hammerspoon/tests/tab-function-test.lua
+# loads hammerspoon/init.lua against a minimal hs.* stub.
+PLAIN_LUA_SUITES=(
+	hammerspoon/tests/tab-function-test.lua
+)
+
 pass_suites=0
 fail_suites=0
 failed_names=()
@@ -110,6 +117,10 @@ done
 
 for rel in "${LUA_SUITES[@]}"; do
 	run_suite "$rel" nvim --headless -u nvim/tests/minimal_init.lua -l "$rel"
+done
+
+for rel in "${PLAIN_LUA_SUITES[@]}"; do
+	run_suite "$rel" lua "$rel"
 done
 
 desk_test_config_guard_snapshot "$GUARD_DIR" after

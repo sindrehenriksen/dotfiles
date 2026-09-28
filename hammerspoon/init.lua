@@ -352,10 +352,30 @@ local function as_string_literal(s)
   return '"' .. tostring(s):gsub("\\", "\\\\"):gsub('"', '\\"') .. '"'
 end
 
+-- A single-quoted token for $1 at the POSIX-shell level (as opposed to
+-- as_string_literal, which quotes for the AppleScript source this whole
+-- thing is embedded in) — the one place a command line built elsewhere
+-- (already shell-quoted for ITS OWN argv, e.g. desk-lib/common.sh's own
+-- desk_shq) needs re-quoting as a single argument to a further wrapping
+-- shell.
+local function shell_single_quote(s)
+  return "'" .. tostring(s):gsub("'", "'\\''") .. "'"
+end
+
+-- Every tab command (the follow-up tab, the hotkey's resume, the
+-- Wednesday tab) runs through his own login+interactive shell rather than
+-- however Ghostty's own `command:` field would otherwise invoke it —
+-- design.md's own launch envelope assumes CLAUDE_CONFIG_DIR and PATH
+-- (~/.local/bin, mise shims, ...) come from his shell rc files, which a
+-- bare exec of the command never sources.
+local function wrap_in_login_shell(cmd)
+  return "/bin/zsh -lic " .. shell_single_quote(cmd)
+end
+
 -- Ghostty's AppleScript dictionary takes the new tab's (or window's) shell
 -- command and cwd as a `configuration` record — never typed into a terminal.
 local function tab_configuration(cmd, cwd)
-  local fields = { "command:" .. as_string_literal(cmd) }
+  local fields = { "command:" .. as_string_literal(wrap_in_login_shell(cmd)) }
   if cwd and cwd ~= "" then
     fields[#fields + 1] = "initial working directory:" .. as_string_literal(cwd)
   end
@@ -452,13 +472,26 @@ end
 -- actual focus are exercised only against real Ghostty, never in a test.
 -- ---------------------------------------------------------------------------
 
+--- Strips a leading "/dev/" so "ttys003" and "/dev/ttys003" compare equal
+--- — session-status.sh's own pid-file-derived tty and Ghostty's own `tty
+--- of t` AppleScript property aren't guaranteed to agree on which form
+--- they report.
+function DeskTab.normalize_tty(tty)
+  if type(tty) ~= "string" then
+    return tty
+  end
+  return (tty:gsub("^/dev/", ""))
+end
+
 --- Given a flat list of `{ window_id, tab_index, tty }` (every open Ghostty
---- tab) and a target `tty`, returns the matching entry or nil. Exact string
---- match only — a tty path either is or isn't the one the reader reported
---- as this session's.
+--- tab) and a target `tty`, returns the matching entry or nil. Matched
+--- after normalizing both sides (DeskTab.normalize_tty) so "ttys003" and
+--- "/dev/ttys003" are the same tty regardless of which form either side
+--- happens to report.
 function DeskTab.pick_tab_by_tty(tabs, tty)
+  local want = DeskTab.normalize_tty(tty)
   for _, t in ipairs(tabs) do
-    if t.tty == tty then
+    if DeskTab.normalize_tty(t.tty) == want then
       return t
     end
   end

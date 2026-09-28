@@ -33,6 +33,7 @@ end
 package.preload["hs.ipc"] = function() return {} end
 
 local osascript_calls = 0
+local last_osascript_script = nil
 
 hs = {
   window = {
@@ -65,8 +66,9 @@ hs = {
   screen = { allScreens = function() return {} end },
   application = { get = function() return nil end },
   osascript = {
-    applescript = function()
+    applescript = function(script)
       osascript_calls = osascript_calls + 1
+      last_osascript_script = script
       return false, "stub: never actually run in tests"
     end,
   },
@@ -186,6 +188,41 @@ assert_eq("no ultrawide, no frontmost Ghostty window (this stub): no target", fa
 assert_eq("and never calls osascript either", 0, osascript_calls)
 
 -- ---------------------------------------------------------------------------
+-- review item #8: every tab command runs through his login+interactive
+-- shell (/bin/zsh -lic '<command>'), never Ghostty's own command: field
+-- invoking it directly — CLAUDE_CONFIG_DIR and PATH have to come from his
+-- shell rc files. Reached via the laptop-only "front window is Ghostty"
+-- path (the stub's screens list stays empty), so the script actually
+-- reaches hs.osascript.applescript this time and its argument can be
+-- inspected.
+-- ---------------------------------------------------------------------------
+local real_frontmost = hs.window.frontmostWindow
+hs.window.frontmostWindow = function()
+  return { id = function() return 5 end, application = function() return { name = function() return "Ghostty" end } end }
+end
+
+osascript_calls = 0
+last_osascript_script = nil
+result = DeskOpenTab("claude --resume abc-123", nil, "/some/cwd")
+assert_eq("osascript was actually reached this time", 1, osascript_calls)
+assert_eq("the script wraps the command in a login+interactive zsh", true,
+  last_osascript_script ~= nil and last_osascript_script:find("/bin/zsh %-lic") ~= nil)
+assert_eq("the original command still appears, single-quoted for that shell", true,
+  last_osascript_script ~= nil and last_osascript_script:find("'claude %-%-resume abc%-123'") ~= nil)
+
+-- A command holding its own single quote (as desk_shq-quoted argv often
+-- does) must come through re-escaped for the wrapping shell, never break
+-- the AppleScript string it's embedded in (or the content itself) either.
+osascript_calls = 0
+last_osascript_script = nil
+result = DeskOpenTab("claude --resume 'abc-123'", nil, nil)
+assert_eq("a command with its own single quotes still reaches osascript", 1, osascript_calls)
+assert_eq("its own content survives the re-quoting intact", true,
+  last_osascript_script ~= nil and last_osascript_script:find("abc-123", 1, true) ~= nil)
+
+hs.window.frontmostWindow = real_frontmost
+
+-- ---------------------------------------------------------------------------
 -- D7: DeskTab.pick_tab_by_tty
 -- ---------------------------------------------------------------------------
 if type(DeskTab.pick_tab_by_tty) ~= "function" then
@@ -211,6 +248,18 @@ assert_eq("no matching tty returns nil", nil, found)
 
 found = DeskTab.pick_tab_by_tty({}, "ttys001")
 assert_eq("an empty tab list returns nil", nil, found)
+
+-- review item #8: normalize_tty matches both "ttysNNN" and "/dev/ttysNNN"
+-- regardless of which form either side happens to report.
+local tabs_with_dev_prefix = {
+  { window_id = 9, tab_index = 1, tty = "/dev/ttys003" },
+}
+found = DeskTab.pick_tab_by_tty(tabs_with_dev_prefix, "ttys003")
+assert_eq("a bare-form target still matches a /dev/-prefixed tab", 9, found and found.window_id)
+found = DeskTab.pick_tab_by_tty(tabs, "/dev/ttys003")
+assert_eq("a /dev/-prefixed target still matches a bare-form tab", 1, found and found.window_id)
+assert_eq("normalize_tty strips a leading /dev/", "ttys003", DeskTab.normalize_tty("/dev/ttys003"))
+assert_eq("normalize_tty leaves a bare form untouched", "ttys003", DeskTab.normalize_tty("ttys003"))
 
 -- ---------------------------------------------------------------------------
 -- D7: DeskFocusTab's early-exit paths — never reach osascript for any of
