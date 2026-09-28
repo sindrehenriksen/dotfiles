@@ -153,6 +153,68 @@ assert_eq(
 assert_eq("no tokens config at all: notes, never a guess", "notes", review.format_source("TICKET-42"))
 
 print()
+print("=== D7 fix: the status line is wired into the notes buffer's winbar ===")
+do
+	local base = { "Alpha", "  original text", "Beta", "  other" }
+	local repo = new_repo(base)
+	local move_item = {
+		id = "mv1",
+		file = "notes.md",
+		kind = "move",
+		target = { { at = "  original text" }, { under = "Beta" } },
+		before = "  original text",
+		after = "  original text (moved)",
+		headline = "a move",
+	}
+	seed_proposal(repo, { move_item })
+	local bufnr = open_notes(repo)
+	lay_in_by_hand(repo, bufnr, base, { move_item })
+
+	-- Manually stage just the LEAVING side (as if it alone had already
+	-- been committed) while the landing side stays unstaged — the leave/
+	-- land disagreement desk.histext.compute itself calls "waiting_edit"
+	-- (its own pending_ranges entry for this item ends up with only one
+	-- of the two ranges a move needs, since only one side's own state was
+	-- "pending").
+	local staged = { "Alpha", "Beta", "  other" }
+	local blob = assert(git.hash_object_write(repo, snippet.join_lines(staged, true)))
+	local idx_entry = git.index_entry(repo, "notes.md") or { mode = "100644" }
+	assert(git.update_index_cacheinfo(repo, idx_entry.mode, blob, "notes.md"))
+
+	local waiting = review.buffer_waiting_edits(bufnr)
+	assert_eq(
+		"finds exactly one waiting edit, naming the real line — never derivable from status.json's own bare id array",
+		{ "your edit (line 4) waits on the suggestion beside it" },
+		waiting
+	)
+
+	local status_path = vim.fn.tempname()
+	local sfd = assert(io.open(status_path, "w"))
+	sfd:write(vim.json.encode({ passes = { morning = { result = "ok" } } }))
+	sfd:close()
+	local old_status_file = vim.env.DESK_STATUS_FILE
+	vim.env.DESK_STATUS_FILE = status_path
+
+	review.attach(bufnr)
+	local win = vim.api.nvim_get_current_win()
+	review.refresh_status_line(bufnr)
+	assert_eq(
+		"the winbar combines the runner's status.json summary with this buffer's own live waiting-edit line",
+		"morning: ok · your edit (line 4) waits on the suggestion beside it",
+		vim.wo[win].winbar
+	)
+
+	-- Leaving the buffer clears the winbar — it's a window option, not a
+	-- real per-buffer one, so left alone it would keep showing this
+	-- notes buffer's own status line over whatever the window shows next.
+	vim.cmd("enew")
+	assert_eq("winbar is cleared once the notes buffer is left", "", vim.wo[win].winbar)
+
+	vim.env.DESK_STATUS_FILE = old_status_file
+	os.remove(status_path)
+end
+
+print()
 print("=== D6: the review key lays in a proposal ===")
 do
 	local repo = new_repo({ "Section A", "  detail" })

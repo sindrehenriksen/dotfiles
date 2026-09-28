@@ -15,6 +15,7 @@ local histext = require("desk.histext")
 local ledger = require("desk.ledger")
 local round = require("desk.round")
 local snippet = require("desk.snippet")
+local status = require("desk.status")
 local tokens = require("desk.tokens")
 
 local M = {}
@@ -612,6 +613,86 @@ function M.refresh_virtual_text(bufnr)
 end
 
 -- ---------------------------------------------------------------------------
+-- Status line (D7, design.md §2 "Status line", §9(f)): desk.status.statusline()
+-- was called by nothing — this is that wiring, into a notes buffer's own
+-- winbar (buffer-local via a per-window autocmd, since winbar itself is a
+-- window option; there's no other statusline component in nvim/lua to fit
+-- into instead). It reads two things: the runner-written status file
+-- (desk.status.statusline, global — the same for every notes buffer) and
+-- this buffer's own LIVE waiting-edit state (an edit of his that waits on
+-- the suggestion beside it — desk.histext's own "waiting_edit"), which
+-- status.json can't carry a line number for at all: its own waiting_edits
+-- field is a bare array of item ids merged across every configured file,
+-- with no live buffer to resolve a line against and no guarantee an id
+-- even belongs to THIS file. Refreshed at the same points the virtual
+-- text already is, so it never needs its own polling.
+-- ---------------------------------------------------------------------------
+
+--- Every currently pending item in `bufnr` whose own suggestion doesn't
+--- fully resolve against the worktree right now (desk.histext.compute's
+--- "waiting_edit": its round-derived ranges are missing or incomplete —
+--- design.md §2's "an edit of his that waits on the suggestion beside
+--- it"), as one formatted line each, naming the real line number when one
+--- of its ranges did resolve.
+function M.buffer_waiting_edits(bufnr)
+	local st = M.read_state(bufnr)
+	if not st then
+		return {}
+	end
+	local pending_items = {}
+	for id, item in pairs(st.items) do
+		if st.states[id] == "pending" then
+			table.insert(pending_items, item)
+		end
+	end
+	local _, results = histext.compute(st.worktree_lines, pending_items, st.ranges)
+	local out = {}
+	for id, result in pairs(results) do
+		if result == "waiting_edit" then
+			local rs = st.ranges[id]
+			local line = rs and rs[1] and display_line(bufnr, rs[1].line)
+			if line then
+				table.insert(out, string.format("your edit (line %d) waits on the suggestion beside it", line))
+			else
+				table.insert(out, "your edit waits on the suggestion beside it")
+			end
+		end
+	end
+	table.sort(out)
+	return out
+end
+
+--- The buffer-wired status line: the runner's own status.json summary plus
+--- this buffer's own live waiting-edit notices, joined the same way every
+--- other segment list in this codebase is (" · ").
+function M.status_line(bufnr)
+	local parts = {}
+	local summary = status.summary(status.read())
+	if summary ~= "" then
+		table.insert(parts, summary)
+	end
+	for _, seg in ipairs(M.buffer_waiting_edits(bufnr)) do
+		table.insert(parts, seg)
+	end
+	return table.concat(parts, " · ")
+end
+
+--- Sets every window currently showing `bufnr`'s own winbar to
+--- M.status_line(bufnr) — the actual wiring. Safe to call from a window
+--- other than the one(s) showing `bufnr` (M.attach's BufEnter callback
+--- runs with `bufnr` current, but a refresh after a review key press does
+--- too, so this never assumes which window is current).
+function M.refresh_status_line(bufnr)
+	if not vim.api.nvim_buf_is_valid(bufnr) then
+		return
+	end
+	local line = M.status_line(bufnr)
+	for _, win in ipairs(vim.fn.win_findbuf(bufnr)) do
+		vim.wo[win].winbar = line
+	end
+end
+
+-- ---------------------------------------------------------------------------
 -- Overview: a quickfix list of pending suggestions — news first, then in-
 -- place items by position, then a postponed count — plus his own unstaged
 -- edits, labelled "yours". Every jump goes through the jumplist (design.md
@@ -944,21 +1025,26 @@ function M.attach(bufnr)
 	map("<leader>gR", function()
 		report_review(M.review(bufnr))
 		M.refresh_virtual_text(bufnr)
+		M.refresh_status_line(bufnr)
 	end, "Review: lay in the pending proposal")
 	map("<leader>gc", function()
 		report(M.commit_his_text(bufnr))
+		M.refresh_status_line(bufnr)
 	end, "Commit his text (no lay-in)")
 	map("<leader>gA", function()
 		report(M.accept(bufnr))
 		M.refresh_virtual_text(bufnr)
+		M.refresh_status_line(bufnr)
 	end, "Accept the whole item under cursor")
 	map("<leader>gD", function()
 		report(M.decline(bufnr))
 		M.refresh_virtual_text(bufnr)
+		M.refresh_status_line(bufnr)
 	end, "Decline the whole item under cursor")
 	map("<leader>gN", function()
 		report(M.not_now(bufnr))
 		M.refresh_virtual_text(bufnr)
+		M.refresh_status_line(bufnr)
 	end, "Not now: postpone the whole item under cursor")
 	map("<leader>go", function()
 		M.overview(bufnr)
@@ -977,16 +1063,22 @@ function M.attach(bufnr)
 				M.enable_review_mode(bufnr)
 			end
 			M.refresh_virtual_text(bufnr)
+			M.refresh_status_line(bufnr)
 		end,
 	})
 	vim.api.nvim_create_autocmd({ "BufLeave" }, {
 		buffer = bufnr,
 		callback = function()
 			M.disable_review_mode()
+			-- winbar is a window option, not a real per-buffer one: left set,
+			-- it would keep showing this notes buffer's own status line over
+			-- whatever the window shows next.
+			vim.wo[0].winbar = ""
 		end,
 	})
 
 	M.refresh_virtual_text(bufnr)
+	M.refresh_status_line(bufnr)
 end
 
 return M

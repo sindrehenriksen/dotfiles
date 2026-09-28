@@ -50,13 +50,22 @@ assert_eq("passes sort by name", "1630: ok · morning: partial · weekly: ok", s
 print()
 print("=== summary: the proposal state and overflow ===")
 
-local pending = { proposal = { state = "pending" } }
-assert_eq("a pending proposal", "proposal pending", status.summary(pending))
+local pending = { proposal = { state = "pending", queued = 1 } }
+assert_eq("a pending proposal with something still unresolved", "proposal pending", status.summary(pending))
+
+local resolved_already = { proposal = { state = "pending", queued = 0, deferred = 0 } }
+assert_eq(
+	"'pending' with nothing left queued or deferred: silent (every item's since been resolved by hand)",
+	"",
+	status.summary(resolved_already)
+)
 
 local none = { proposal = { state = "none" } }
 assert_eq("state 'none' shows nothing", "", status.summary(none))
 
-local overflow = { proposal = { state = "pending", overflow = { act = 2, worth_knowing = 0, wildcard = 1 } } }
+local overflow = {
+	proposal = { state = "pending", queued = 1, overflow = { act = 2, worth_knowing = 0, wildcard = 1 } },
+}
 assert_eq(
 	"nonzero overflow tiers are named, a zero one is silent",
 	"proposal pending · +2 more ACT → brief · +1 more wildcard → brief",
@@ -66,17 +75,17 @@ assert_eq(
 print()
 print("=== summary: his-text counts, only when nonzero ===")
 
-local all_zero = { waiting_edits = {}, resolved_without_key = {}, accepted_by_accident = {}, deferred = 0 }
+local all_zero = { waiting_edits = {}, resolved_without_key = {}, accepted_by_accident = {}, proposal = { deferred = 0 } }
 assert_eq("every count at zero: nothing shown", "", status.summary(all_zero))
 
 local counts = {
 	waiting_edits = { 12 },
 	resolved_without_key = { "j1", "j2" },
 	accepted_by_accident = { "j3" },
-	deferred = 4,
+	proposal = { deferred = 4 }, -- desk-run's own field: under proposal, never top-level
 }
 assert_eq(
-	"each nonzero count gets its own segment, in his terms",
+	"each nonzero count gets its own segment, in his terms, deferred read from proposal.deferred",
 	"1 of your edits wait on a suggestion · 2 resolved without a key · 1 accepted by accident · 4 deferred",
 	status.summary(counts)
 )
@@ -84,8 +93,12 @@ assert_eq(
 print()
 print("=== summary: closes/refusals/lockouts, only when nonzero ===")
 
-local ops = { refused_closes = 1, failed_closes = 0, lockouts = 2 }
-assert_eq("zero fields are silent, nonzero ones show their count", "1 refused closes · 2 lockouts", status.summary(ops))
+local ops = { closes = 3, refused_closes = 1, failed_closes = 0, lockouts = 2 }
+assert_eq(
+	"zero fields are silent, nonzero ones show their count, real closes included",
+	"3 closes · 1 refused closes · 2 lockouts",
+	status.summary(ops)
+)
 
 print()
 print("=== read: a from-scratch fixture file ===")

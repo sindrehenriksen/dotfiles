@@ -11,15 +11,17 @@
 # meaningful for "failed"), failed_sources (array), scheduled_date (the
 # guard's own key, set on the most recent "ok" — desk-lib/lock.sh's
 # desk_scheduled_date_for, not necessarily last_run's own calendar date).
-# Top-level: proposal
-# ({state, overflow}), closes/refused_closes/failed_closes/lockouts (plain
-# counts), push (a plain status string), ticket_cache_age,
-# accepted_by_accident/resolved_without_key/waiting_edits (id/line arrays),
-# deferred (a count). D8a writes the per-pass fields and the push/lockouts/
-# closes counters; the his-text-derived fields (accepted_by_accident etc.)
-# are desk.ledger's/desk.histext's own results, surfaced by whichever step
-# calls them — D8a leaves them at their zero-ish defaults where no such step
-# runs.
+# Top-level: proposal ({state, partial, overflow, counts, queued,
+# deferred} — deferred lives HERE, never as its own top-level field),
+# closes/refused_closes/failed_closes/lockouts (plain counts), push (a
+# plain status string), ticket_cache_age, accepted_by_accident/
+# resolved_without_key/waiting_edits (plain arrays of item ids, never
+# id/line pairs — a line number needs a live buffer to resolve against,
+# which this file, read by any editor instance at any time, doesn't have).
+# D8a writes the per-pass fields and the push/lockouts/closes counters; the
+# his-text-derived fields (accepted_by_accident etc.) are desk.ledger's/
+# desk.histext's own results, surfaced by whichever step calls them — D8a
+# leaves them at their zero-ish defaults where no such step runs.
 set -u
 
 desk_status_read() {

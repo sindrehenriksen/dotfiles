@@ -7,15 +7,20 @@
 --
 -- §9(f) pins the per-pass fields (`last_run`, `result`, `stopped_at`,
 -- `failed_sources`) and the his-text-derived ones (`accepted_by_accident`,
--- `resolved_without_key`, `waiting_edits`, `deferred`) exactly; it doesn't
--- pin an exact shape for `proposal`, `closes`, `refused_closes`,
--- `failed_closes` or `lockouts` beyond naming them, since the runner that
--- writes them isn't built yet. Assumed here, read-only: `proposal` is
--- `{state: "pending"|"partial"|"none", overflow: {act, worth_knowing,
--- wildcard}}` (the design's own `+N more ACT → brief` wording), and
--- `closes` / `refused_closes` / `failed_closes` / `lockouts` are each a
--- plain count. If the runner ends up writing something else, this is the
--- one place to change.
+-- `resolved_without_key`, `waiting_edits` — each a plain array of item ids,
+-- never a line number: this file is read by any editor instance at any
+-- time, with no live buffer to resolve a line against) exactly. The rest
+-- is the runner's own shape (claude/desk-lib/status.sh, D8a), read-only
+-- here: `proposal` is `{state: "pending"|"partial"|"none", partial,
+-- overflow: {act, worth_knowing, wildcard}, counts, queued, deferred}` —
+-- `deferred` (an item that didn't apply cleanly at lay-in) lives HERE,
+-- never as its own top-level field, and `state` alone doesn't mean
+-- "something's unresolved": it's set from whether the standing proposal
+-- ref holds any items at all, not from whether any of them still are —
+-- `queued`/`deferred` are what's actually left for him to act on. `closes`
+-- / `refused_closes` / `failed_closes` / `lockouts` are each a plain count.
+-- If the runner ends up writing something else, this is the one place to
+-- change.
 local M = {}
 
 --- The status file path, overridable (`$DESK_STATUS_FILE`) the same way
@@ -62,11 +67,21 @@ local function pass_segments(status)
 end
 
 --- The proposal segment: "proposal pending", "proposal partial", and any
---- "+N more ACT → brief" / worth_knowing / wildcard overflow counts.
+--- "+N more ACT → brief" / worth_knowing / wildcard overflow counts. `state`
+--- alone isn't enough — desk-run sets it from whether the STANDING
+--- proposal ref holds any items at all, not from whether any of them are
+--- still unresolved, so a proposal every item of which he's since
+--- accepted/declined by hand (never through a run) would still read
+--- "pending" forever. `queued`/`deferred` (also desk-run's own fields) are
+--- what's actually left for him to act on, so the segment only shows when
+--- at least one of them is nonzero.
 local function proposal_segments(status)
 	local out = {}
 	local p = status.proposal
 	if not p or not p.state or p.state == "none" then
+		return out
+	end
+	if ((p.queued or 0) + (p.deferred or 0)) <= 0 then
 		return out
 	end
 	out[#out + 1] = "proposal " .. p.state
@@ -97,10 +112,17 @@ local function counts_segments(status)
 	if accidental > 0 then
 		out[#out + 1] = string.format("%d accepted by accident", accidental)
 	end
-	if (status.deferred or 0) > 0 then
-		out[#out + 1] = status.deferred .. " deferred"
+	-- desk-run writes this under proposal.deferred (an item that didn't
+	-- apply cleanly at lay-in), never as a top-level field — reading
+	-- status.deferred directly always read nil.
+	local deferred = status.proposal and status.proposal.deferred or 0
+	if deferred > 0 then
+		out[#out + 1] = deferred .. " deferred"
 	end
-	for _, field in ipairs({ "refused_closes", "failed_closes", "lockouts" }) do
+	-- "closes" (real, successful closes) never had a segment at all —
+	-- only its refused/failed/lockout counterparts did, so a clean run's
+	-- own closes were invisible next to its failures.
+	for _, field in ipairs({ "closes", "refused_closes", "failed_closes", "lockouts" }) do
 		local n = status[field]
 		if n and n > 0 then
 			out[#out + 1] = string.format("%d %s", n, (field:gsub("_", " ")))
