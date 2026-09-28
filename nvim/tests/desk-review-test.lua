@@ -423,6 +423,55 @@ do
 end
 
 print()
+print("=== D6 fix: a removal at the file's very last lines stays reachable ===")
+do
+	local base = { "Alpha", "  keep", "  tail line to remove" }
+	local repo = new_repo(base)
+	local item = {
+		id = "rm-eof",
+		file = "notes.md",
+		kind = "remove",
+		target = { at = "  tail line to remove" },
+		before = "  tail line to remove",
+		after = "",
+		headline = "drop the tail",
+	}
+	seed_proposal(repo, { item })
+	local bufnr = open_notes(repo)
+	lay_in_by_hand(repo, bufnr, base, { item })
+
+	local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+	assert_eq("the removal is already applied in the buffer (pending)", { "Alpha", "  keep" }, lines)
+	local last_line = #lines
+
+	local found_item = review.item_at_line(bufnr, last_line)
+	assert_true("the item is reachable with the cursor on the file's actual last line", found_item ~= nil)
+	assert_eq("...and it's the right one", "rm-eof", found_item and found_item.id)
+
+	review.overview(bufnr)
+	local qf = vim.fn.getqflist()
+	local qf_entry
+	for _, it in ipairs(qf) do
+		if it.text == "drop the tail" then
+			qf_entry = it
+		end
+	end
+	assert_true("the overview lists it", qf_entry ~= nil)
+	assert_eq("...at a valid (clamped) line, not one past the last line", last_line, qf_entry and qf_entry.lnum)
+	vim.cmd("cclose")
+
+	review.refresh_virtual_text(bufnr)
+	local marks = vim.api.nvim_buf_get_extmarks(bufnr, review.ns, 0, -1, {})
+	local mark_row = marks[1] and marks[1][2]
+	assert_eq("its virtual text is attached to the actual last line, not a phantom one past it", last_line - 1, mark_row)
+
+	local not_now_ok, not_now_err = review.not_now(bufnr, last_line)
+	assert_true("not_now succeeds from the clamped, reachable line (" .. tostring(not_now_err) .. ")", not_now_ok)
+	local restored = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+	assert_eq("the removed tail is correctly re-inserted AFTER the last line, not before it", base, restored)
+end
+
+print()
 print("=== D6: format-on-save leaves the notes buffer untouched ===")
 do
 	package.path = package.path -- (no-op; real autocmds.lua uses relative require paths already on rtp)

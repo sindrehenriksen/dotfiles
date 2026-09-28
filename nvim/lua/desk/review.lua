@@ -82,6 +82,21 @@ end
 -- Item under cursor
 -- ---------------------------------------------------------------------------
 
+--- Where a gap-shaped range (`r.count == 0` — a removal, or a move/merge's
+--- leaving side) is actually reachable/visible in `bufnr` right now: `r.line`
+--- itself, except when the content it stands for was the file's own very
+--- last lines — desk.round.derive correctly computes that gap as sitting
+--- one PAST the current last line (`#lines + 1`, the exact spot
+--- reset_item's own re-insertion needs: appending after the true last line
+--- restores the removed tail to where it belongs), but a cursor can never
+--- sit on a line that doesn't exist, and neither can a quickfix entry or an
+--- extmark row meant to look like it's attached to real content. Display/
+--- hit-test callers clamp through this; reset_item (the one place that
+--- actually re-inserts content there) uses `r.line` unclamped.
+local function display_line(bufnr, line)
+	return math.min(line, vim.api.nvim_buf_line_count(bufnr))
+end
+
 --- The pending item whose current worktree range contains `line` (1-
 --- indexed), plus the read_state() table it was found in — or nil, a
 --- message if nothing pending sits there.
@@ -92,7 +107,8 @@ function M.item_at_line(bufnr, line)
 	end
 	for id, rs in pairs(st.ranges) do
 		for _, r in ipairs(rs) do
-			local hit = (r.count > 0 and line >= r.line and line <= r.line + r.count - 1) or (r.count == 0 and line == r.line)
+			local at = display_line(bufnr, r.line)
+			local hit = (r.count > 0 and line >= r.line and line <= r.line + r.count - 1) or (r.count == 0 and line == at)
 			if hit then
 				return st.items[id], st
 			end
@@ -548,7 +564,7 @@ function M.refresh_virtual_text(bufnr)
 	vim.api.nvim_buf_clear_namespace(bufnr, M.ns, 0, -1)
 	for id, rs in pairs(st.ranges) do
 		local item = st.items[id]
-		local line = rs[1].line
+		local line = display_line(bufnr, rs[1].line)
 		local parts = {}
 		if item.headline and item.headline ~= "" then
 			table.insert(parts, item.headline)
@@ -664,7 +680,7 @@ function M.overview(bufnr)
 	local news, in_place = {}, {}
 	for id, rs in pairs(st.ranges) do
 		local item = st.items[id]
-		local entry = { bufnr = bufnr, lnum = rs[1].line, col = 1, text = item.headline or item.id }
+		local entry = { bufnr = bufnr, lnum = display_line(bufnr, rs[1].line), col = 1, text = item.headline or item.id }
 		if item.anchor == "top" then
 			table.insert(news, { pos = rs[1].line, entry = entry })
 		else
