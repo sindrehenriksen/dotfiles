@@ -119,6 +119,64 @@ desk_test_assert_repo_under_root() {
 	esac
 }
 
+#
+# Config guard (used by tests/run-all.sh and git-hooks/pre-commit — the
+# belt to the rest of this file's suspenders): snapshots each of
+# $DESK_GUARD_REPOS' (colon-separated repo paths) own `git config --local
+# --list` before a test run and fails loudly if any changed by the end,
+# regardless of which individual test caused it.
+#
+# desk_test_config_guard_resolve_repos <from_repo>: sets the array
+# DESK_TEST_GUARD_REPOS from $DESK_GUARD_REPOS, or — if that's unset — the
+# one default: <from_repo>'s main checkout (a worktree's own
+# `git rev-parse --git-common-dir` always points at the main checkout's
+# .git, so this resolves correctly whether <from_repo> is the main
+# checkout or one of its worktrees).
+desk_test_config_guard_resolve_repos() {
+	local from_repo="${1:-.}"
+	DESK_TEST_GUARD_REPOS=()
+	if [ -n "${DESK_GUARD_REPOS:-}" ]; then
+		local IFS=':'
+		read -r -a DESK_TEST_GUARD_REPOS <<< "$DESK_GUARD_REPOS"
+		return 0
+	fi
+	local common_dir
+	common_dir="$(git -C "$from_repo" rev-parse --git-common-dir 2> /dev/null)" || return 1
+	case "$common_dir" in
+		/*) : ;;
+		*) common_dir="$(cd "$from_repo" && pwd)/$common_dir" ;;
+	esac
+	DESK_TEST_GUARD_REPOS=("${common_dir%/.git}")
+}
+
+# desk_test_config_guard_snapshot <dest_dir> <suffix>: writes each guard
+# repo's `git config --local --list` to <dest_dir>/<n>.<suffix>. Call
+# once before a test run and once after, with two different suffixes.
+desk_test_config_guard_snapshot() {
+	local dest="$1" suffix="$2" i=0 repo
+	mkdir -p "$dest"
+	for repo in "${DESK_TEST_GUARD_REPOS[@]}"; do
+		git -C "$repo" config --local --list > "$dest/$i.$suffix" 2> /dev/null || : > "$dest/$i.$suffix"
+		i=$((i + 1))
+	done
+}
+
+# desk_test_config_guard_check <dest_dir> <before_suffix> <after_suffix>:
+# compares each guard repo's before/after snapshot, printing a diff for
+# and naming any repo that changed. Returns non-zero if anything did.
+desk_test_config_guard_check() {
+	local dest="$1" before_suffix="$2" after_suffix="$3" i=0 repo changed=0
+	for repo in "${DESK_TEST_GUARD_REPOS[@]}"; do
+		if ! diff -u "$dest/$i.$before_suffix" "$dest/$i.$after_suffix" > "$dest/$i.diff" 2>&1; then
+			printf 'GUARD FAILED: local git config changed for %s\n' "$repo" >&2
+			cat "$dest/$i.diff" >&2
+			changed=1
+		fi
+		i=$((i + 1))
+	done
+	return "$changed"
+}
+
 desk_test_guard_not_real_repo() {
 	local dir="$1" toplevel
 	toplevel="$(git -C "$dir" rev-parse --show-toplevel 2> /dev/null || true)"

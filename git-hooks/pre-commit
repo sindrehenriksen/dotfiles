@@ -6,14 +6,44 @@ repo_root="$(git rev-parse --show-toplevel 2>/dev/null)" || repo_root=""
 if [ -n "$repo_root" ]; then
     hook_dir_rel="${hook_dir#$repo_root/}"
     if git diff --cached --name-only | grep -q "^${hook_dir_rel}/"; then
+        # This runs test-*.sh FROM INSIDE a real `git commit`, which is
+        # exactly how a prior test wrote into the real ~/dotfiles/.git/config
+        # (git sets GIT_DIR/GIT_WORK_TREE/etc pointing at this real repo for
+        # the hook's own environment, and a subprocess inherits them unless
+        # cleared). Each test isolates itself too (tests/lib/git-safety.sh),
+        # but this is the outer layer: GIT_DIR et al are unset for every test
+        # invocation regardless, and the whole run is wrapped in the same
+        # config guard tests/run-all.sh uses, so a test that slips past its
+        # own isolation still can't corrupt this repo's config unnoticed.
+        # shellcheck source=../tests/lib/git-safety.sh
+        source "$hook_dir/../tests/lib/git-safety.sh"
+        guard_active=0
+        guard_dir=""
+        if desk_test_config_guard_resolve_repos "$repo_root"; then
+            guard_active=1
+            guard_dir="$(mktemp -d)"
+            desk_test_config_guard_snapshot "$guard_dir" before
+        fi
         for test in "$hook_dir"/test-*.sh; do
             [ -f "$test" ] || continue
-            if ! output=$(bash "$test" 2>&1); then
+            if ! output=$(unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY \
+                GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_CEILING_DIRECTORIES GIT_PREFIX
+                bash "$test" 2>&1); then
                 echo "$(basename "$test") failed:"
                 echo "$output"
+                [ "$guard_active" -eq 1 ] && rm -rf "$guard_dir"
                 exit 1
             fi
         done
+        if [ "$guard_active" -eq 1 ]; then
+            desk_test_config_guard_snapshot "$guard_dir" after
+            if ! desk_test_config_guard_check "$guard_dir" before after; then
+                echo "pre-commit: a test-*.sh run changed a guarded repo's local git config — aborting the commit"
+                rm -rf "$guard_dir"
+                exit 1
+            fi
+            rm -rf "$guard_dir"
+        fi
     fi
 fi
 

@@ -1,0 +1,122 @@
+#!/usr/bin/env bash
+# Runs every test suite in this repo, by explicit name: nvim/tests/*.sh,
+# nvim/tests/*.lua (headless, via `nvim -u minimal_init.lua -l <file>`),
+# claude/tests/*.sh, git-hooks/test-*.sh. Deliberately never
+# nvim/tests/desk-run-canary.sh — it drives a live model call under
+# DESK_CANARY_LIVE and is run by hand, never by an automated runner.
+#
+# Wraps the whole run in the config guard (tests/lib/git-safety.sh):
+# snapshots `git config --local --list` for each repo in $DESK_GUARD_REPOS
+# (colon-separated; default: this repo's own main checkout) before
+# anything runs, and fails loudly if any of it changed by the end — the
+# belt to the per-test isolation's suspenders, so a test that slips past
+# its own guard still can't corrupt a real repo's config unnoticed.
+#
+# Usage: tests/run-all.sh (from anywhere; run-all.sh finds its own repo)
+set -u
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$HERE/.." && pwd)"
+
+# shellcheck source=lib/git-safety.sh
+source "$HERE/lib/git-safety.sh"
+
+if ! desk_test_config_guard_resolve_repos "$REPO_ROOT"; then
+	echo "run-all: couldn't resolve a guard repo for $REPO_ROOT (and \$DESK_GUARD_REPOS is unset) — refusing to run" >&2
+	exit 1
+fi
+
+GUARD_DIR="$(mktemp -d)"
+trap 'rm -rf "$GUARD_DIR"' EXIT
+desk_test_config_guard_snapshot "$GUARD_DIR" before
+
+# --- explicit suite lists (never a glob — a new file here doesn't run
+# until it's named below, and desk-run-canary.sh is never named at all) --
+
+BASH_SUITES=(
+	nvim/tests/desk-capture-sessions-test.sh
+	nvim/tests/desk-cli-classify-test.sh
+	nvim/tests/desk-cli-namespace-test.sh
+	nvim/tests/desk-cli-test.sh
+	nvim/tests/desk-cli-tokens-test.sh
+	nvim/tests/desk-close-recheck-test.sh
+	nvim/tests/desk-close-test.sh
+	nvim/tests/desk-deny-hook-test.sh
+	nvim/tests/desk-judge-inputs-test.sh
+	nvim/tests/desk-judge-invalid-reply-test.sh
+	nvim/tests/desk-lock-test.sh
+	nvim/tests/desk-max-budget-test.sh
+	nvim/tests/desk-notes-diff-test.sh
+	nvim/tests/desk-open-tab-test.sh
+	nvim/tests/desk-partial-proposal-test.sh
+	nvim/tests/desk-push-test.sh
+	nvim/tests/desk-render-prompt-test.sh
+	nvim/tests/desk-run-morning-integration-test.sh
+	nvim/tests/desk-run-test.sh
+	nvim/tests/desk-runner-lock-test.sh
+	nvim/tests/desk-stage-proposal-namespace-test.sh
+	nvim/tests/desk-status-fields-test.sh
+	nvim/tests/desk-status-sh-test.sh
+	nvim/tests/desk-steps-mcp-config-test.sh
+	nvim/tests/desk-ticket-cache-test.sh
+	nvim/tests/desk-timeout-test.sh
+	nvim/tests/desk-url-allowlist-test.sh
+	nvim/tests/desk-validate-test.sh
+	nvim/tests/desk-visible-run-test.sh
+	nvim/tests/desk-write-pinned-test.sh
+	nvim/tests/desk-write-step-kind-test.sh
+	claude/tests/session-recorder-test.sh
+	claude/tests/session-status-resolve-test.sh
+	git-hooks/test-commit-msg.sh
+	git-hooks/test-desk-denylist.sh
+)
+
+LUA_SUITES=(
+	nvim/tests/desk-annotate-test.lua
+	nvim/tests/desk-histext-test.lua
+	nvim/tests/desk-hotkey-test.lua
+	nvim/tests/desk-ledger-test.lua
+	nvim/tests/desk-review-test.lua
+	nvim/tests/desk-status-test.lua
+	nvim/tests/desk-tokens-test.lua
+)
+
+pass_suites=0
+fail_suites=0
+failed_names=()
+
+run_suite() { # relative_path, run_cmd...
+	local rel="$1"
+	shift
+	printf '\n=== %s ===\n' "$rel"
+	if ( cd "$REPO_ROOT" && "$@" ); then
+		pass_suites=$((pass_suites + 1))
+	else
+		fail_suites=$((fail_suites + 1))
+		failed_names+=("$rel")
+	fi
+}
+
+for rel in "${BASH_SUITES[@]}"; do
+	run_suite "$rel" bash "$rel"
+done
+
+for rel in "${LUA_SUITES[@]}"; do
+	run_suite "$rel" nvim --headless -u nvim/tests/minimal_init.lua -l "$rel"
+done
+
+desk_test_config_guard_snapshot "$GUARD_DIR" after
+
+echo
+echo "=== run-all summary: $pass_suites suite(s) passed, $fail_suites failed ==="
+if [ "$fail_suites" -gt 0 ]; then
+	printf 'Failed: %s\n' "${failed_names[@]}"
+fi
+
+guard_status=0
+if ! desk_test_config_guard_check "$GUARD_DIR" before after; then
+	guard_status=1
+	echo "=== run-all: CONFIG GUARD TRIPPED — a test changed a guarded repo's local git config ===" >&2
+fi
+
+[ "$fail_suites" -eq 0 ] && [ "$guard_status" -eq 0 ]
