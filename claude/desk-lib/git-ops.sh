@@ -143,6 +143,26 @@ _DESK_JQ_CANON='def canon:
 	elif type == "array" then map(canon)
 	else . end;'
 
+# jq helper: matches($n; $e) — whether a candidate proposal-shaped item $n
+# (`.target`/`.kind`/`.source`/`.supersedes`) refers to the SAME suggestion
+# as an existing ledger-shaped item $e (`.anchor`/`.kind`/`.id`/`.source`).
+# design.md's own "Review rounds" section: "Supersede only when a new item
+# names it (`supersedes: <id>`) or shares its `source` URL; (target, kind)
+# supersedes only where the target isn't `top`" — top is where every news
+# item lands, so two unrelated news items sharing kind "new" and target
+# "top" must never read as the same suggestion. One predicate, used both
+# directions below: a new item matching a POSTPONED one supersedes it
+# (dropped from what's carried forward); a new item matching a PENDING one
+# is itself dropped (he already has this suggestion in front of him,
+# unresolved — never proposed a second time).
+_DESK_JQ_MATCHES='def matches($n; $e):
+	(($n.supersedes // null) != null and $n.supersedes == $e.id)
+	or ((($n.source // "") != "") and ($n.source == $e.source))
+	or (
+		(($n.target | canon) == ($e.anchor | canon)) and ($n.kind == $e.kind)
+		and (($e.anchor | canon) != ("top" | canon))
+	);'
+
 # Converts one ledger `item` record to the pinned proposal-item shape
 # (design.md §9(e)): `anchor` -> `target`, drop bookkeeping-only fields.
 _DESK_JQ_LEDGER_TO_PROPOSAL='{id, file, kind, target: .anchor, before, after, source, headline}
@@ -160,12 +180,15 @@ _DESK_JQ_PROPOSAL_TO_LEDGER='. as $it
 
 # Merges `new_items` (a JSON array, the pinned proposal shape, already
 # validated by the pass-specific step — D8b's job) into the standing
-# proposal: appends them to the ledger, re-adds every postponed item
-# (laid in, then "not now"'d) unless a new item shares its (target, kind) —
-# design's "supersedes" — and carries forward every still-queued item
-# (never laid in at all). Writes the merged set as the new
-# refs/desk/proposal tip. Prints the new proposal commit sha, or nothing
-# (and a non-zero exit) on failure.
+# proposal: drops any new item matching a currently-PENDING one
+# (_DESK_JQ_MATCHES — he already has it, unresolved, in his buffer), then
+# appends what's left to the ledger, re-adds every postponed item (laid in,
+# then "not now"'d) unless a new item matches it too (same predicate —
+# design's "supersedes"), and carries forward every still-queued item
+# (never laid in at all). A pending item itself is never carried forward —
+# it's already in his buffer; this function only ever reads it to dedup
+# against. Writes the merged set as the new refs/desk/proposal tip. Prints
+# the new proposal commit sha, or nothing (and a non-zero exit) on failure.
 #
 # $1 repo, $2 pass, $3 scheduled_date (the guard's own key — cli.lua's
 # `namespace-ids` verb namespaces every new item's id against exactly
@@ -196,16 +219,23 @@ desk_stage_and_write_proposal() {
 	# to resolve there (harmlessly landing on "pending", never mis-firing as
 	# accepted/declined). Filtering each pass's result to items whose own
 	# `.file` matches `$f` is what keeps that cross-file noise out of the
-	# postponed set gathered here.
-	local postponed_items_json="[]"
+	# postponed/pending sets gathered here. Pending items are fetched too —
+	# never to carry them forward into the proposal (he already has them,
+	# unstaged, in his buffer; re-adding one would duplicate it) — only so a
+	# new item matching one (_DESK_JQ_MATCHES) can be dropped before it's
+	# ever proposed, in the dedup filter below.
+	local postponed_items_json="[]" pending_items_json="[]"
 	local f
 	for f in "${files[@]}"; do
 		local derived
 		derived="$(desk_nvim_cli ledger-derive "$repo" "$f")" || return 1
-		local file_postponed
+		local file_postponed file_pending
 		file_postponed="$(jq -c --arg f "$f" '.states as $s | .items | to_entries
 			| map(select(.value.file == $f and $s[.key] == "postponed")) | map(.value)' <<< "$derived")"
+		file_pending="$(jq -c --arg f "$f" '.states as $s | .items | to_entries
+			| map(select(.value.file == $f and $s[.key] == "pending")) | map(.value)' <<< "$derived")"
 		postponed_items_json="$(jq -c -n --argjson a "$postponed_items_json" --argjson b "$file_postponed" '$a + $b')"
+		pending_items_json="$(jq -c -n --argjson a "$pending_items_json" --argjson b "$file_pending" '$a + $b')"
 	done
 
 	local new_items
@@ -226,19 +256,29 @@ desk_stage_and_write_proposal() {
 	jq -e . > /dev/null 2>&1 <<< "$namespace_out" || return 1
 	new_items="$(jq -c '.items' <<< "$namespace_out")"
 
-	# Postponed items superseded by a new item sharing (target, kind) are
-	# dropped; the rest are carried forward. Built by concatenating plain
+	# Dedup direction first: a new item matching a currently-PENDING one
+	# (_DESK_JQ_MATCHES) is dropped outright — he already has this
+	# suggestion sitting unresolved in his buffer, never re-proposed a
+	# second time (design.md: "don't re-propose pending items — the runner
+	# only excludes them from dedup"). Built by concatenating plain
 	# (single-quoted) jq source fragments rather than interpolating them
 	# inside a double-quoted string, so a jq `$var` reference is never
 	# mistaken for a bash one — the bug this whole function tripped on
 	# during its own testing.
+	local dedup_filter
+	dedup_filter="$_DESK_JQ_CANON$_DESK_JQ_MATCHES"'
+		($pending) as $pending_items
+		| [ .[] | select(. as $n | [$pending_items[] | select(matches($n; .))] | length == 0) ]'
+	new_items="$(jq -c --argjson pending "$pending_items_json" "$dedup_filter" <<< "$new_items")"
+
+	# Supersede direction: a POSTPONED item a new item matches
+	# (_DESK_JQ_MATCHES — an explicit `supersedes`, a shared `source`, or a
+	# same (target, kind) whose target isn't "top") is dropped; the rest
+	# are carried forward.
 	local supersede_filter
-	supersede_filter="$_DESK_JQ_CANON"'
-		($new | map({t: (.target | canon), k: .kind})) as $new_keys
-		| [ .[] | select(
-			( {t: (.anchor | canon), k: .kind} ) as $key
-			| ($new_keys | index($key)) | not
-		  ) ]'
+	supersede_filter="$_DESK_JQ_CANON$_DESK_JQ_MATCHES"'
+		($new) as $new_items
+		| [ .[] | select(. as $e | [$new_items[] | select(matches(.; $e))] | length == 0) ]'
 	local surviving_postponed
 	surviving_postponed="$(jq -c --argjson new "$new_items" "$supersede_filter" <<< "$postponed_items_json")"
 

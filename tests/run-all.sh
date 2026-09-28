@@ -59,6 +59,7 @@ BASH_SUITES=(
 	nvim/tests/desk-status-fields-test.sh
 	nvim/tests/desk-status-sh-test.sh
 	nvim/tests/desk-steps-mcp-config-test.sh
+	nvim/tests/desk-supersede-test.sh
 	nvim/tests/desk-ticket-cache-test.sh
 	nvim/tests/desk-timeout-test.sh
 	nvim/tests/desk-url-allowlist-test.sh
