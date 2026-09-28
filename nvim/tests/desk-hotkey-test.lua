@@ -336,5 +336,46 @@ do
 end
 
 print()
+print("=== D7 fix: two sections sharing one head never ping-pong ===")
+
+do
+	local buf = new_buf({
+		"Alpha Session: first section", -- 1: head #1
+		"  detail one",
+		"",
+		"Alpha Session: second section", -- 4: head #2
+		"  detail two",
+	})
+	local win = vim.api.nvim_get_current_win()
+	vim.api.nvim_win_set_buf(win, buf)
+
+	-- Hovering on the SECOND head's own "Alpha": not the same block as the
+	-- first head, so it follows there — same as the old behavior would for
+	-- this specific starting point.
+	vim.api.nvim_win_set_cursor(win, { 4, 0 }) -- "Alpha" in the second head
+	local rec = new_recorder()
+	local deps = { notify = function(msg) record(rec, "notify", msg) end }
+	hotkey.run(buf, win, config, deps)
+	assert_eq("nothing dispatched externally (jumped internally instead)", 0, #rec.calls)
+	assert_eq("landed on the FIRST section's head", 1, vim.api.nvim_win_get_cursor(win)[1])
+
+	-- Pressing again from there (now on the FIRST head, inside its own
+	-- block) must NOT bounce back to the second — the ping-pong this fixes.
+	local rec2 = new_recorder()
+	local entry = { id = "sess-9", name = "Alpha", live = false, cwd = "/tmp/z" }
+	local deps2 = stub_deps(rec2, { reader_resolve = { entry, nil }, open_tab = { true } })
+	hotkey.run(buf, win, config, deps2)
+	wait_for("resolve then open_tab complete", function()
+		return #rec2.calls >= 2
+	end)
+	assert_eq(
+		"resolved externally instead of bouncing to the other section",
+		"reader_resolve",
+		rec2.calls[1][1]
+	)
+	assert_eq("cursor stayed put (no internal jump this time)", 1, vim.api.nvim_win_get_cursor(win)[1])
+end
+
+print()
 print(string.format("=== summary: %d passed, %d failed ===", pass, fail))
 os.exit(fail == 0 and 0 or 1)

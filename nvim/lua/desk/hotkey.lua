@@ -17,6 +17,7 @@
 -- are the only part of this module that actually shells out, and they do
 -- it async (vim.system with a callback, never :wait()): the hotkey must
 -- never block typing.
+local block = require("desk.block")
 local tokens = require("desk.tokens")
 
 local M = {}
@@ -64,14 +65,21 @@ local function line_names_token(line, token)
 	return head == token
 end
 
---- The 1-indexed line, other than `current_line`, whose own text names
---- `token` as a section head — i.e. `token` appears elsewhere in the
---- buffer as more than a passing mention, so the hotkey should follow it
---- there rather than treat it as something to resolve externally. nil if
---- there's no such line.
-function M.find_other_section_line(lines, token, current_line)
+--- The first (file-order) 1-indexed line whose own text names `token` as a
+--- section head — i.e. `token` appears in the buffer as more than a
+--- passing mention. Deliberately not "some OTHER line": with two sections
+--- both headed by the same session name, "other than the cursor's own
+--- line" alternates depending on which one the cursor happens to be on,
+--- so following always lands wherever the cursor WASN'T — pressing from
+--- inside either section bounces to the other and back, forever. Always
+--- resolving to the same (first) line instead makes M.run's own "already
+--- in that block?" check (below) a stable function of the cursor's
+--- position rather than of the last jump, which is what actually breaks
+--- the ping-pong: from block two it goes to block one; from block one
+--- there is nowhere left to jump, so it resolves externally instead.
+function M.find_section_head_line(lines, token)
 	for i, line in ipairs(lines) do
-		if i ~= current_line and line_names_token(line, token) then
+		if line_names_token(line, token) then
 			return i
 		end
 	end
@@ -165,14 +173,25 @@ function M.run(bufnr, win, config, deps)
 	-- session: a plain in-notes reference to a section defined elsewhere in
 	-- this same buffer is followed internally (design.md §10 D7's done-
 	-- check) — the ' mark is set first, so Ctrl-O returns to where he was.
+	-- "Elsewhere" means the cursor isn't already inside the block that
+	-- section head starts (block.block_containing): jumping there from
+	-- within it would just be a no-op self-jump, and — when two sections
+	-- share the same head token — is what used to make following bounce
+	-- between them (see find_section_head_line). Not already there: jump
+	-- to the section head. Already there: nowhere internal left to go, so
+	-- fall through and resolve the token externally instead.
 	local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-	local other = M.find_other_section_line(lines, token, line_num)
-	if other then
-		vim.api.nvim_win_call(win, function()
-			vim.cmd("normal! m'")
-		end)
-		vim.api.nvim_win_set_cursor(win, { other, 0 })
-		return
+	local head_line = M.find_section_head_line(lines, token)
+	if head_line then
+		local head_block_start = (block.block_containing(lines, head_line))
+		local cursor_block_start = (block.block_containing(lines, line_num))
+		if cursor_block_start ~= head_block_start then
+			vim.api.nvim_win_call(win, function()
+				vim.cmd("normal! m'")
+			end)
+			vim.api.nvim_win_set_cursor(win, { head_line, 0 })
+			return
+		end
 	end
 
 	(deps.reader_resolve or function(_, cb) cb(nil, {}) end)(token, function(entry, candidates)
