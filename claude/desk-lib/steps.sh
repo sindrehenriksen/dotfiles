@@ -774,9 +774,27 @@ desk_step_capture_sessions() {
 		return
 	}
 
+	# Excludes a scheduled run's own session on any of three independent
+	# grounds (design.md's own "16:30 never captures a desk-run session" —
+	# each is a separate defense, since any one alone can miss it): the
+	# recorder's own any_desk_run_start (true the moment ANY of its start
+	# events, not just the last, was tagged desk-run — a scheduled call he
+	# later resumes himself under his own permissions gets a second, real
+	# start event that would otherwise overwrite a last-event-only check
+	# right as he starts using it); its name starting with "desk-" (the
+	# runner's own naming convention for a visible call,
+	# "desk-<pass>-<date>-<step>"); or its cwd sitting under
+	# $DESK_RUNS_ROOT (a visible call's own durable scratch dir) — this
+	# third check is what still catches one even if the first two were
+	# somehow both wrong (an old recorder record predating this field, a
+	# session renamed away from the convention).
 	local candidates
-	candidates="$(jq -c --arg src desk-run '
-		[ .[] | select(.has_start_event == true and .source != $src) ] as $eligible
+	candidates="$(jq -c --arg runs_root "$DESK_RUNS_ROOT" '
+		def is_desk_run:
+			(.any_desk_run_start == true)
+			or ((.name // "") | startswith("desk-"))
+			or (($runs_root != "") and ((.cwd // "") | startswith($runs_root)));
+		[ .[] | select(.has_start_event == true and (is_desk_run | not)) ] as $eligible
 		| [ $eligible[] | select(.live == true) | . + {capture_kind: "running"} ]
 		+ [ $eligible[] | select(.live == false and (.ended == false or .end_reason == "other")) | . + {capture_kind: "dropped"} ]
 	' <<< "$all")"
@@ -1379,6 +1397,17 @@ desk_step_open_tab() {
 	for a in "${argv[@]}"; do
 		command="${command:+$command }$(desk_shq "$a")"
 	done
+	# A non-restricted tab (the Wednesday weekly's own "his default
+	# permissions" envelope) loads his real settings and hooks exactly like
+	# any session he opens by hand, so without this its own genuine
+	# SessionStart would land untagged (source "startup") — indistinguishable
+	# from a session he actually opened himself, and never excluded from a
+	# later 16:30 capture. A plain env-var prefix on the assembled command
+	# line (never user-controlled content, so never quoted) is the only
+	# lever available here: this call never goes through desk_call_model
+	# (it opens a brand-new terminal tab, not a background call this
+	# process can set its own env on).
+	[ "$restricted" != "true" ] && command="DESK_HEADLESS=1 $command"
 
 	local helper="${DESK_OPEN_TAB_BIN:-desk-open-tab.sh}"
 	if "$helper" "$command" "" "$cwd" > /dev/null 2>&1; then

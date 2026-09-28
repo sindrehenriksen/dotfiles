@@ -93,6 +93,8 @@ session_arg="$(cat "$ARGV_LOG.session" 2> /dev/null)"
 assert_eq "cwd_outside is expanded to \$HOME" "$HOME/dev/example-workspace" "$cwd_arg"
 assert_eq "no session id is pinned (a fresh launch, not a resume)" "" "$session_arg"
 assert_true "the command starts with the claude binary" "$(grep -qE "^'claude' " <<< "$command_line" && echo true || echo false)"
+assert_true "a --restricted tab is never tagged DESK_HEADLESS (its own real hooks never load)" \
+	"$([[ "$command_line" != DESK_HEADLESS=1\ * ]] && echo true || echo false)"
 assert_true "-n names the session, so a later run's live-check can actually find it" \
 	"$(grep -qF "'-n' 'Weekly Update'" <<< "$command_line" && echo true || echo false)"
 assert_true "--restricted is present" "$(grep -q -- '--restricted' <<< "$command_line" && echo true || echo false)"
@@ -194,6 +196,8 @@ assert_true "-n still names the session" \
 	"$(grep -qF "'-n' 'Weekly Update'" <<< "$command_line" && echo true || echo false)"
 assert_true "--settings still resolves, independent of restricted" \
 	"$(grep -qE -- "--settings' '$ROOT/workspace/desk/weekly/settings.json'" <<< "$command_line" && echo true || echo false)"
+assert_true "the command is tagged DESK_HEADLESS=1 (review item #1: the Wednesday tab's session is tagged desk-run too)" \
+	"$([[ "$command_line" == DESK_HEADLESS=1\ * ]] && echo true || echo false)"
 
 echo
 echo "=== missing cwd_outside or prompt_text: fails rather than opening a bare shell ==="

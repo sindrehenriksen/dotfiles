@@ -19,9 +19,15 @@
 # Fields per line: id, name, name_source ("user" — a custom title, or a
 # live pid file's own user-set name — vs "ai_or_none": an ai-title fallback
 # or no name at all), older_names, cwd, live, status, last_activity,
-# source (the recorder's own SessionStart "source", null with no start
-# event — design.md §3's 16:30 capture excludes source "desk-run"), ended,
-# end_reason, close_failed, close_failed_at, transcript_path,
+# source (the recorder's own SessionStart "source" for the LAST start
+# event only, null with no start event — display purposes),
+# any_desk_run_start (true if ANY start event this session ever recorded
+# had source "desk-run" — design.md §3's 16:30 capture keys its own
+# exclusion off THIS, never off `source` alone: a scheduled call's session
+# he later resumes himself gets a real second start event, e.g. "resume",
+# which would overwrite `source` and — checked against the last start
+# alone — silently drop the exclusion right as he starts actually using
+# it), ended, end_reason, close_failed, close_failed_at, transcript_path,
 # has_start_event, pid, tty (the last two null unless live). close_failed is
 # true once a `close-failed` event (claude/hooks/session-recorder.sh) has
 # been recorded after the session's own last start — a close step's own
@@ -99,6 +105,7 @@ parse_etime_secs() {
 # --------------------------------------------------------------------------
 EVENTS_REDUCE='
     (map(select(.event=="start")) | last) as $s
+    | (any(.[]; .event=="start" and .source=="desk-run")) as $any_desk_run
     | (to_entries | map(select(.value.event=="start")) | last | .key) as $lsi
     | (if $lsi == null then null
        else (to_entries | map(select(.key > $lsi and .value.event=="end")) | last | .value)
@@ -112,13 +119,14 @@ EVENTS_REDUCE='
         transcript_path: ($s.transcript_path // ""),
         start_time: ($s.time // null),
         source: ($s.source // null),
+        any_desk_run_start: $any_desk_run,
         ended: ($e != null),
         end_reason: ($e.reason // null),
         close_failed: ($cf != null),
         close_failed_at: ($cf.time // null)
       }
 '
-EMPTY_EVENTS='{"has_start_event":false,"cwd":"","transcript_path":"","source":null,"ended":false,"end_reason":null,"start_time":null,"close_failed":false,"close_failed_at":null}'
+EMPTY_EVENTS='{"has_start_event":false,"cwd":"","transcript_path":"","source":null,"any_desk_run_start":false,"ended":false,"end_reason":null,"start_time":null,"close_failed":false,"close_failed_at":null}'
 
 events_by_id_fallback() {
     local f sid out result='{}'
@@ -451,7 +459,7 @@ entries_ndjson=$(jq -n -c \
     ( ($events | keys) + ($pidfiles | keys) + ($transcripts | keys) | unique ) as $ids
     | $ids[]
     | . as $id
-    | ($events[$id] // {has_start_event:false, cwd:"", transcript_path:"", source:null, ended:false, end_reason:null, start_time:null}) as $ev
+    | ($events[$id] // {has_start_event:false, cwd:"", transcript_path:"", source:null, any_desk_run_start:false, ended:false, end_reason:null, start_time:null}) as $ev
     | ($pidfiles[$id] // null) as $pf
     | ($live[$id] // false) as $is_live
     | ($titles[$id] // {custom_titles: [], ai_title: ""}) as $ti
@@ -495,6 +503,7 @@ entries_ndjson=$(jq -n -c \
         status: $status,
         last_activity: $last_activity,
         source: $ev.source,
+        any_desk_run_start: ($ev.any_desk_run_start // false),
         ended: $ev.ended,
         end_reason: $ev.end_reason,
         close_failed: $ev.close_failed,

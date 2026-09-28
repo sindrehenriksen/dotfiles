@@ -82,11 +82,13 @@ source "$LIB/validate.sh"
 # shellcheck source=../../claude/desk-lib/steps.sh
 source "$LIB/steps.sh"
 
-sess() { # id name name_source live has_start_event source ended end_reason
+sess() { # id name name_source live has_start_event source ended end_reason [any_desk_run] [cwd]
 	jq -cn --arg id "$1" --arg name "$2" --arg ns "$3" --argjson live "$4" \
-		--argjson hse "$5" --arg src "$6" --argjson ended "$7" --arg er "$8" '
+		--argjson hse "$5" --arg src "$6" --argjson ended "$7" --arg er "$8" \
+		--argjson adr "${9:-false}" --arg cwd "${10:-/home/him/somewhere}" '
 		{id:$id, name:$name, name_source:$ns, live:$live, has_start_event:$hse,
-		 source:$src, ended:$ended, end_reason:(if $er == "" then null else $er end)}
+		 source:$src, any_desk_run_start:$adr, cwd:$cwd,
+		 ended:$ended, end_reason:(if $er == "" then null else $er end)}
 	'
 }
 
@@ -97,8 +99,21 @@ sess() { # id name name_source live has_start_event source ended end_reason
 	sess "sess-dropped-never-ended" "Dropped Never Ended" "user" false true "startup" false ""
 	sess "sess-dropped-other" "Dropped Other" "user" false true "startup" true "other"
 	sess "sess-deliberate-end" "Deliberate End" "user" false true "startup" true "prompt_input_exit"
-	sess "sess-desk-run" "Scheduled Run" "user" true true "desk-run" false ""
+	sess "sess-desk-run" "Scheduled Run" "user" true true "desk-run" false "" true
 	sess "sess-no-start-event" "No Start Event" "user" true false "startup" false ""
+	# The last start event's own source is "resume" (he opened the follow-up
+	# tab and has been using it since) — the recorder's OWN
+	# any_desk_run_start still says this session started life under
+	# desk-run, so it must be excluded on that alone, never on the (now
+	# stale) last-event source (review item #1).
+	sess "sess-desk-run-then-resumed" "Later Resumed" "user" true true "resume" false "" true
+	# Excluded on its name alone (the runner's own visible-call naming
+	# convention), even with a plain "startup" source and any_desk_run_start
+	# unset — a defense-in-depth check, never relied on as the only one.
+	sess "sess-desk-named" "desk-morning-2026-09-28-F" "user" true true "startup" false ""
+	# Excluded on its cwd alone (under $DESK_RUNS_ROOT), even with a plain
+	# name and source — the third, independent defense.
+	sess "sess-runs-root-cwd" "Some Call" "user" true true "startup" false "" false "$DESK_RUNS_ROOT/morning-2026-09-28/F"
 } > "$SESSION_STATUS_FIXTURE"
 
 PASS_SCRATCH="$(mktemp -d)"
@@ -141,6 +156,15 @@ assert_true "source desk-run is excluded even though it's live" \
 
 assert_true "no recorder start event at all is excluded" \
 	"$([ -z "$(by_sid sess-no-start-event)" ] && echo true || echo false)"
+
+assert_true "a desk-run session later resumed (last source now 'resume') is still excluded" \
+	"$([ -z "$(by_sid sess-desk-run-then-resumed)" ] && echo true || echo false)"
+
+assert_true "a session named like a visible call (desk-...) is excluded on its name alone" \
+	"$([ -z "$(by_sid sess-desk-named)" ] && echo true || echo false)"
+
+assert_true "a session whose cwd sits under the runs root is excluded on that alone" \
+	"$([ -z "$(by_sid sess-runs-root-cwd)" ] && echo true || echo false)"
 
 echo
 echo "=== a second capture pass: already-ledgered captures never duplicate ==="
