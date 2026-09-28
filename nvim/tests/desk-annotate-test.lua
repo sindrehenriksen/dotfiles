@@ -203,5 +203,161 @@ do
 end
 
 print()
+print("=== D7 fix: several tokens on one line are each labeled by name ===")
+
+do
+	local ticket_cache_path = vim.fn.tempname()
+	local tfd = assert(io.open(ticket_cache_path, "w"))
+	tfd:write(vim.json.encode({
+		checked_at = now,
+		tickets = { ["TICKET-1"] = { status = "To Do" }, ["TICKET-2"] = { status = "Done" } },
+	}))
+	tfd:close()
+	local old_cache = vim.env.DESK_TICKET_CACHE
+	vim.env.DESK_TICKET_CACHE = ticket_cache_path
+
+	-- The line's other words ("blocks", "alone", "on", ...) all classify
+	-- as session-kind tokens too (the catch-all), so this still triggers
+	-- an async reader.all() call — a no-op stub, never the real
+	-- subprocess, same as every other test here that touches session
+	-- tokens.
+	local old_reader = vim.env.DESK_READER
+	vim.env.DESK_READER = vim.fn.tempname()
+	local rfd = assert(io.open(vim.env.DESK_READER, "w"))
+	rfd:write("#!/usr/bin/env bash\ntrue\n")
+	rfd:close()
+	vim.fn.setfperm(vim.env.DESK_READER, "rwxr-xr-x")
+
+	local buf = vim.api.nvim_create_buf(false, true)
+	vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "TICKET-1 blocks TICKET-2", "TICKET-1 alone on its own line" })
+	annotate.refresh(buf, { tokens = tokens_config })
+
+	local marks = vim.api.nvim_buf_get_extmarks(buf, annotate.ns, { 0, 0 }, { -1, -1 }, { details = true })
+	local texts = {}
+	for _, m in ipairs(marks) do
+		texts[#texts + 1] = m[4].virt_text[1][1]
+	end
+	table.sort(texts)
+	assert_eq(
+		"two tickets sharing a line are each prefixed with their own token; alone, no prefix",
+		{ "TICKET-1: To Do · status from last pass · 0 minutes ago", "TICKET-2: Done · status from last pass · 0 minutes ago", "To Do · status from last pass · 0 minutes ago" },
+		texts
+	)
+
+	vim.env.DESK_READER = old_reader
+	vim.env.DESK_TICKET_CACHE = old_cache
+	os.remove(ticket_cache_path)
+end
+
+print()
+print("=== D7 fix: no ticket cache yet still clears stale labels (no pile-up) ===")
+
+do
+	local tmp_dir = vim.fn.tempname()
+	vim.fn.mkdir(tmp_dir, "p")
+	local stub_reader = tmp_dir .. "/fake-session-status.sh"
+	local fd = assert(io.open(stub_reader, "w"))
+	fd:write(
+		"#!/usr/bin/env bash\n"
+			.. "echo "
+			.. vim.fn.shellescape(vim.json.encode({
+				id = "sess-1",
+				name = "Alpha",
+				live = true,
+				last_activity = now,
+				cwd = "",
+				older_names = {},
+				status = "busy",
+				ended = false,
+				end_reason = vim.NIL,
+				transcript_path = "",
+				has_start_event = true,
+				pid = 123,
+				tty = "ttys001",
+			}))
+			.. "\n"
+	)
+	fd:close()
+	vim.fn.setfperm(stub_reader, "rwxr-xr-x")
+
+	local old_reader, old_cache = vim.env.DESK_READER, vim.env.DESK_TICKET_CACHE
+	vim.env.DESK_READER = stub_reader
+	vim.env.DESK_TICKET_CACHE = "/nonexistent/desk-ticket-cache-fixture.json" -- no cache at all yet
+
+	local buf = vim.api.nvim_create_buf(false, true)
+	vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "Alpha Session: working" })
+
+	annotate.refresh(buf, { tokens = tokens_config })
+	vim.wait(500, function()
+		return #vim.api.nvim_buf_get_extmarks(buf, annotate.ns, 0, -1, {}) > 0
+	end, 10)
+	annotate.refresh(buf, { tokens = tokens_config }) -- a second refresh, no cache having appeared meanwhile
+	vim.wait(500, function()
+		return #vim.api.nvim_buf_get_extmarks(buf, annotate.ns, 0, -1, {}) > 0
+	end, 10)
+
+	local marks = vim.api.nvim_buf_get_extmarks(buf, annotate.ns, 0, -1, {})
+	assert_eq("exactly one label, not piled up across the two refreshes", 1, #marks)
+
+	vim.env.DESK_READER = old_reader
+	vim.env.DESK_TICKET_CACHE = old_cache
+end
+
+print()
+print("=== D7 fix: a BufEnter/FocusGained double-refresh never double-paints ===")
+
+do
+	local tmp_dir = vim.fn.tempname()
+	vim.fn.mkdir(tmp_dir, "p")
+	-- A slow stub: sleeps briefly before replying, so both refresh() calls
+	-- below are genuinely in flight together — the race this guards
+	-- against, rather than one always finishing before the second starts.
+	local stub_reader = tmp_dir .. "/fake-session-status.sh"
+	local fd = assert(io.open(stub_reader, "w"))
+	fd:write(
+		"#!/usr/bin/env bash\nsleep 0.1\necho "
+			.. vim.fn.shellescape(vim.json.encode({
+				id = "sess-1",
+				name = "Alpha",
+				live = true,
+				last_activity = now,
+				cwd = "",
+				older_names = {},
+				status = "busy",
+				ended = false,
+				end_reason = vim.NIL,
+				transcript_path = "",
+				has_start_event = true,
+				pid = 123,
+				tty = "ttys001",
+			}))
+			.. "\n"
+	)
+	fd:close()
+	vim.fn.setfperm(stub_reader, "rwxr-xr-x")
+
+	local old_reader, old_cache = vim.env.DESK_READER, vim.env.DESK_TICKET_CACHE
+	vim.env.DESK_READER = stub_reader
+	vim.env.DESK_TICKET_CACHE = "/nonexistent/desk-ticket-cache-fixture.json"
+
+	local buf = vim.api.nvim_create_buf(false, true)
+	vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "Alpha Session: working" })
+
+	-- Two refreshes back to back, like BufEnter immediately followed by
+	-- FocusGained, both still in flight.
+	annotate.refresh(buf, { tokens = tokens_config })
+	annotate.refresh(buf, { tokens = tokens_config })
+
+	vim.wait(2000, function()
+		return #vim.api.nvim_buf_get_extmarks(buf, annotate.ns, 0, -1, {}) > 0
+	end, 20)
+	local marks = vim.api.nvim_buf_get_extmarks(buf, annotate.ns, 0, -1, {})
+	assert_eq("exactly one label once both in-flight refreshes have settled", 1, #marks)
+
+	vim.env.DESK_READER = old_reader
+	vim.env.DESK_TICKET_CACHE = old_cache
+end
+
+print()
 print(string.format("=== summary: %d passed, %d failed ===", pass, fail))
 os.exit(fail == 0 and 0 or 1)

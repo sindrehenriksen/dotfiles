@@ -336,6 +336,33 @@ do
 end
 
 print()
+print("=== D7 fix: a session pattern's own capture resolves by short id ===")
+
+do
+	-- A config whose session pattern wraps a short id in decoration his
+	-- notes actually use — the reader indexes sessions by "42", never by
+	-- the decorated token "S-42" typed in the buffer.
+	local capture_config = {
+		tokens = {
+			{ pattern = "^S-(%w+)$", case_insensitive = false, handler = "session" },
+		},
+	}
+	local buf = new_buf({ "see S-42 for details" })
+	local win = vim.api.nvim_get_current_win()
+	vim.api.nvim_win_set_buf(win, buf)
+	vim.api.nvim_win_set_cursor(win, { 1, 4 }) -- inside "S-42"
+
+	local rec = new_recorder()
+	local entry = { id = "sess-42", name = "42", live = false, cwd = "/tmp/w" }
+	local deps = stub_deps(rec, { reader_resolve = { entry, nil }, open_tab = { true } })
+	hotkey.run(buf, win, capture_config, deps)
+	wait_for("resolve then open_tab complete", function()
+		return #rec.calls >= 1
+	end)
+	assert_eq("resolved by the captured short id, not the decorated token", { "reader_resolve", "42" }, rec.calls[1])
+end
+
+print()
 print("=== D7 fix: two sections sharing one head never ping-pong ===")
 
 do

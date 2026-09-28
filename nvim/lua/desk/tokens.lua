@@ -133,8 +133,18 @@ end
 --- Classifies `token` against `tokens_config` (a list of entries, as
 --- above), trying each in order and returning the first match:
 ---   { kind = "url", url = "..." }
----   { kind = "session" }
+---   { kind = "session", id = "..." }
 ---   { kind = "none" }   -- no entry matched at all
+---
+--- A session handler's `id` is its pattern's own first (unnamed —
+--- positional, `()`) capture when it has one, else the whole token: a
+--- config author can write a session pattern that pulls out just the
+--- canonical short id from a decorated token (a prefix/suffix around it),
+--- so callers that resolve a session (the hotkey, the annotations' by-name
+--- lookup) match against the id the reader actually indexes by, not
+--- whatever extra text surrounds it in his notes. Most session patterns
+--- (the plain catch-all `^.+$`, with no capture at all) leave `id` equal
+--- to `token`, so this is a no-op for them.
 function M.classify(token, tokens_config)
 	for _, entry in ipairs(tokens_config or {}) do
 		local matched, captures = full_match(token, entry.pattern or "", entry.case_insensitive)
@@ -142,7 +152,7 @@ function M.classify(token, tokens_config)
 			if entry.handler == "url" then
 				return { kind = "url", url = substitute(entry.template, captures) }
 			elseif entry.handler == "session" then
-				return { kind = "session" }
+				return { kind = "session", id = captures[1] or token }
 			end
 		end
 	end

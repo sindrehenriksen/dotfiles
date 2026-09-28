@@ -133,15 +133,19 @@ function M.tokens_in_line(line)
 	return out
 end
 
---- Every (line 1-indexed, token) pair in `lines` that classifies as
---- `wanted_kind` ("session" or "url") under `tokens_config`.
+--- Every (line 1-indexed, token, id) pair in `lines` that classifies as
+--- `wanted_kind` ("session" or "url") under `tokens_config` — `id` is the
+--- classification's own resolve key (desk.tokens.classify: a session
+--- pattern's captured short id when it has one, else the token text
+--- itself), which is what a caller should look a session up by, never the
+--- raw token text unconditionally.
 function M.scan(lines, tokens_config, wanted_kind)
 	local found = {}
 	for i, line in ipairs(lines) do
 		for _, t in ipairs(M.tokens_in_line(line)) do
 			local classification = tokens.classify(t.text, tokens_config)
 			if classification.kind == wanted_kind then
-				found[#found + 1] = { line = i, token = t }
+				found[#found + 1] = { line = i, token = t, id = classification.id }
 			end
 		end
 	end
@@ -159,6 +163,38 @@ local function set_extmark(bufnr, line, token, text, underline)
 	})
 end
 
+--- Paints every `hits` entry `resolve(hit)` finds real text for, prefixing
+--- the token's own text (`"token: state"`) whenever more than one hit on
+--- the SAME line actually resolves to something — with two tokens sharing
+--- a line, two bare "state · ..." labels next to each other are
+--- indistinguishable; naming which token each belongs to is the whole
+--- point of labeling by line rather than by token in the first place. A
+--- line with only one resolved hit keeps the plain, unprefixed text, same
+--- as before.
+local function paint(bufnr, hits, resolve, underline)
+	local resolved, counts = {}, {}
+	for _, hit in ipairs(hits) do
+		local text = resolve(hit)
+		if text then
+			resolved[#resolved + 1] = { hit = hit, text = text }
+			counts[hit.line] = (counts[hit.line] or 0) + 1
+		end
+	end
+	for _, r in ipairs(resolved) do
+		local text = (counts[r.hit.line] > 1) and (r.hit.token.text .. ": " .. r.text) or r.text
+		set_extmark(bufnr, r.hit.line, r.hit.token, text, underline)
+	end
+end
+
+-- Refreshes race against each other (BufEnter and FocusGained often fire
+-- back to back for the same buffer, e.g. switching windows while also
+-- regaining OS focus): each call clears the namespace up front and repaints
+-- async, so an earlier call's session lookup landing AFTER a later call's
+-- own clear would otherwise repaint stale/duplicate labels over the fresh
+-- ones. Guarded per buffer by a generation counter — a session result only
+-- gets painted if no newer M.refresh has started since it was requested.
+local refresh_generation = {}
+
 --- Redraws every session-name and ticket-like annotation in `bufnr` from
 --- scratch. Async end to end: the reader call never blocks, and nothing
 --- here is called from inside a fast-event context.
@@ -166,22 +202,28 @@ function M.refresh(bufnr, config)
 	if not vim.api.nvim_buf_is_valid(bufnr) then
 		return
 	end
+	refresh_generation[bufnr] = (refresh_generation[bufnr] or 0) + 1
+	local generation = refresh_generation[bufnr]
+
 	local tokens_config = tokens.tokens_from(config)
 	local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
 	local session_hits = M.scan(lines, tokens_config, "session")
 	local ticket_hits = M.scan(lines, tokens_config, "url")
 
+	-- Cleared unconditionally, before either kind paints: previously this
+	-- only happened inside "if cache then", so a refresh with no ticket
+	-- cache yet (a real, common startup state) never cleared at all, and
+	-- session labels from every past refresh piled up on top of each
+	-- other.
+	vim.api.nvim_buf_clear_namespace(bufnr, M.ns, 0, -1)
+
 	-- Tickets: synchronous (a local file, no external process) — paint
 	-- immediately rather than waiting on the (separate) session lookup.
 	local cache = M.read_ticket_cache()
 	if cache then
-		vim.api.nvim_buf_clear_namespace(bufnr, M.ns, 0, -1)
-		for _, hit in ipairs(ticket_hits) do
-			local text = M.ticket_text(cache, hit.token.text)
-			if text then
-				set_extmark(bufnr, hit.line, hit.token, text, false)
-			end
-		end
+		paint(bufnr, ticket_hits, function(hit)
+			return M.ticket_text(cache, hit.token.text)
+		end, false)
 	end
 
 	if #session_hits == 0 then
@@ -191,8 +233,8 @@ function M.refresh(bufnr, config)
 	-- Sessions: async via the reader, one call for the whole buffer rather
 	-- than one per token.
 	reader.all(function(ok, entries)
-		if not ok or not vim.api.nvim_buf_is_valid(bufnr) then
-			return
+		if not ok or not vim.api.nvim_buf_is_valid(bufnr) or refresh_generation[bufnr] ~= generation then
+			return -- stale: a newer refresh has already cleared and repainted
 		end
 		local by_name = {}
 		for _, e in ipairs(entries) do
@@ -200,12 +242,10 @@ function M.refresh(bufnr, config)
 				by_name[e.name] = e
 			end
 		end
-		for _, hit in ipairs(session_hits) do
-			local entry = by_name[hit.token.text]
-			if entry then
-				set_extmark(bufnr, hit.line, hit.token, M.session_text(entry), true)
-			end
-		end
+		paint(bufnr, session_hits, function(hit)
+			local entry = by_name[hit.id or hit.token.text]
+			return entry and M.session_text(entry)
+		end, true)
 	end)
 end
 

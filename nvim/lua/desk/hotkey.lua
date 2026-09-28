@@ -194,7 +194,11 @@ function M.run(bufnr, win, config, deps)
 		end
 	end
 
-	(deps.reader_resolve or function(_, cb) cb(nil, {}) end)(token, function(entry, candidates)
+	-- classification.id: the pattern's own captured short id when it has
+	-- one (desk.tokens.classify), the raw token otherwise — resolves
+	-- against whatever the reader actually indexes by, not a decorated
+	-- token some config wraps around it.
+	(deps.reader_resolve or function(_, cb) cb(nil, {}) end)(classification.id or token, function(entry, candidates)
 		if not entry then
 			if candidates and #candidates > 0 then
 				local names = {}
