@@ -1,0 +1,566 @@
+#!/usr/bin/env bash
+# The desk runner (design.md §10 D8, §9(c)): `desk-run <pass>`, the one
+# entry point the plists call (design's own "desk-run install path" note:
+# a symlink at ~/.local/bin/desk-run, installed onto this file). Reads
+# $DESK_CONFIG, runs the named pass's step list against the generic step
+# kinds in claude/desk-lib/steps.sh, and writes the status file every
+# other desk piece reads.
+#
+# What this file itself owns: argument/config parsing, the weekday filter,
+# the guard/lock/stale-running sequence, the step loop and its status
+# bookkeeping, and cleanup. Everything else (git/ledger/proposal writes,
+# the model-call wrapper, timeouts, locking, status I/O, step-kind bodies)
+# lives in claude/desk-lib/*.sh, sourced below — a test can source those
+# directly without going through this file at all.
+set -u
+
+# Resolve this file's own directory through any symlink (so
+# ~/.local/bin/desk-run -> this file still finds claude/desk-lib/*.sh),
+# same technique as claude/desk-lib/common.sh's own desk_lib_dir.
+_src="${BASH_SOURCE[0]}"
+while [ -h "$_src" ]; do
+	_dir="$(cd -P "$(dirname "$_src")" && pwd)"
+	_src="$(readlink "$_src")"
+	[[ "$_src" != /* ]] && _src="$_dir/$_src"
+done
+DESK_RUN_DIR="$(cd -P "$(dirname "$_src")" && pwd)"
+
+# shellcheck source=desk-lib/common.sh
+source "$DESK_RUN_DIR/desk-lib/common.sh"
+source "$DESK_RUN_DIR/desk-lib/lock.sh"
+source "$DESK_RUN_DIR/desk-lib/status.sh"
+source "$DESK_RUN_DIR/desk-lib/timeout.sh"
+source "$DESK_RUN_DIR/desk-lib/model-call.sh"
+source "$DESK_RUN_DIR/desk-lib/git-ops.sh"
+source "$DESK_RUN_DIR/desk-lib/tool-results.sh"
+source "$DESK_RUN_DIR/desk-lib/validate.sh"
+source "$DESK_RUN_DIR/desk-lib/ticket-cache.sh"
+source "$DESK_RUN_DIR/desk-lib/steps.sh"
+
+pass="${1:-}"
+if [ -z "$pass" ]; then
+	echo "usage: desk-run <pass>" >&2
+	exit 2
+fi
+
+DESK_CONFIG="${DESK_CONFIG:-}"
+if [ -z "$DESK_CONFIG" ]; then
+	desk_log "$pass" '$DESK_CONFIG is not set'
+	exit 2
+fi
+if [ ! -f "$DESK_CONFIG" ]; then
+	desk_log "$pass" "config file not found: $DESK_CONFIG"
+	exit 2
+fi
+config="$(cat "$DESK_CONFIG")"
+if ! jq -e . > /dev/null 2>&1 <<< "$config"; then
+	desk_log "$pass" "\$DESK_CONFIG is not valid JSON: $DESK_CONFIG"
+	exit 2
+fi
+
+pass_config="$(jq -c --arg p "$pass" '.passes[$p] // empty' <<< "$config")"
+if [ -z "$pass_config" ]; then
+	desk_log "$pass" "unknown pass (no .passes.$pass in \$DESK_CONFIG)"
+	exit 2
+fi
+
+# Weekdays only for morning/16:30's own MODEL steps (design.md §4's own
+# scheduling note, and the Interfaces brief: "weekdays filtered for
+# morning/16:30") — but commit-and-push runs every day, weekends included:
+# a weekend still deserves whatever his own text picked up committed (and
+# pushed, once push_enabled) even though nothing is calling a model.
+# Checked against the step loop below rather than a whole-pass early exit,
+# so a weekend invocation still takes the lock, runs the once-a-day guard,
+# and does the commit_push step; only the model-calling step kinds are
+# skipped.
+weekday_only_pass="false"
+[ "$pass" = "morning" ] || [ "$pass" = "1630" ] && weekday_only_pass="true"
+is_weekend="false"
+dow="$(date +%u)" # 1=Mon .. 7=Sun
+[ "$dow" -ge 6 ] && is_weekend="true"
+
+# One lock, shared across every pass (lock.sh's own DESK_LOCK_NAME): morning
+# and 16:30 both touch the same notes repo, ledger and status.json, so they
+# must never run at once regardless of which pass name invoked this — a
+# per-pass lock would let exactly that race happen. Taken before anything
+# else touches status.json, the once-a-day guard check included, so a
+# concurrent invocation waits (or gives up) rather than racing the guard's
+# own read against another invocation's write, or racing
+# desk_status_mark_stale_running's own read-modify-write.
+lockdir="$(desk_lock_acquire "$pass")"
+if [ -z "$lockdir" ]; then
+	desk_log "$pass" "gave up waiting for the lock"
+	desk_status_bump lockouts
+	exit 1
+fi
+
+PASS_SCRATCH=""
+cleanup() {
+	desk_lock_release
+	[ -n "$PASS_SCRATCH" ] && rm -rf "$PASS_SCRATCH" 2> /dev/null
+}
+trap cleanup EXIT
+
+# A previous invocation that never finished shows as failed rather than
+# silently vanishing under this one's fresh "running" (design's "'started,
+# never finished' older than N minutes shows as failed").
+desk_status_mark_stale_running "$pass"
+
+# The guard is keyed on (pass, the slot's scheduled date), not the date
+# desk-run happens to run on (design.md §4, §9(c)'s scheduled_date): a
+# pass's own `.trigger.start_calendar_interval` (the plist's own slot list,
+# mirrored into $DESK_CONFIG since desk-run never reads a plist directly)
+# says which slots exist; an unconfigured pass (no trigger, as every test
+# fixture and the weekly pass are) falls back to today's date, so this is a
+# no-op for anything not yet wired to a trigger.
+slots_json="$(jq -c '.trigger.start_calendar_interval // []' <<< "$pass_config")"
+scheduled_date="$(desk_scheduled_date_for "$slots_json")"
+
+# The once-a-day guard: a slot firing after this scheduled date's pass
+# already finished ok is a no-op (design's "later slots only retry").
+if desk_guard_already_ok_today "$pass" "$scheduled_date"; then
+	desk_log "$pass" "already ok today (scheduled $scheduled_date): no-op"
+	exit 0
+fi
+
+PASS_SCRATCH="$(desk_scratch_dir "$pass-pass")"
+
+# Visible run sessions (design.md's later "Runs he can open and continue"):
+# sweep any $DESK_RUNS_ROOT/<pass>-<date> directory (and its config-dir
+# project folder) more than 7 days old, before this run creates its own —
+# never after, which would sweep the one this same invocation is about to
+# use. `follow_up_step` (this pass's own config, absent for anything not
+# yet wired to it) is resolved into an actual tab once the pass is done,
+# below.
+desk_prune_old_runs
+follow_up_step="$(jq -r '.follow_up_step // empty' <<< "$pass_config")"
+
+# A fixed lookback window for F-private's Gmail queries (design's "epoch
+# after:/before: for windows"): since this pass's own last successful run,
+# or a config-configurable default when there's never been one. Computed
+# before desk_status_set_running overwrites that "ok" record with this
+# run's own "running" one, and before this pass ever runs a fetch step,
+# since W (later in the same pass) has to re-check the exact query
+# F-private actually ran against this same value — "the runner checks the
+# query it ran" (design.md §4) means checking it against what the runner
+# itself told F-private to run, not a value re-derived after the fact.
+gmail_window_end="$(desk_now)"
+gmail_window_lookback="$(jq -r '.gmail_window_lookback_secs // 172800' <<< "$config")"
+last_ok="$(desk_status_last_ok_run "$pass")"
+if [ -n "$last_ok" ]; then
+	gmail_window_start="$last_ok"
+else
+	gmail_window_start=$((gmail_window_end - gmail_window_lookback))
+fi
+# The digest label is instantiation-specific data (design.md §6: dotfiles
+# names no actual mailing-list/label), so it's a config field, never a
+# literal here — an instantiation with no digest source configured still
+# gets valid (if pointless) JQL-shaped Gmail syntax rather than an error.
+digest_label="$(jq -r '.digest_gmail_label // "Digest"' <<< "$config")"
+digest_query="label:\"${digest_label}\" after:${gmail_window_start} before:${gmail_window_end}"
+inbox_query="in:inbox after:${gmail_window_start} before:${gmail_window_end}"
+
+desk_status_set_running "$pass"
+
+repo="$(jq -r '.notes_repo' <<< "$config")"
+repo="${repo/#\~/$HOME}"
+mapfile -t files < <(jq -r '.files[]' <<< "$config")
+# NOT `.push_enabled // false`: see the dry_run/log_only comments
+# elsewhere in this file on why jq's `//` can't be used for a boolean
+# whose explicit "false" is meaningful — here that's moot (false already
+# is the default), but it's the same spelling everywhere a config boolean
+# is read, so a later "flip the default" edit never silently breaks this
+# one from having used the shorter form instead.
+push_enabled="$(jq -r 'if .push_enabled == true then "true" else "false" end' <<< "$config")"
+export DESK_CONFIG
+export CLAUDE_CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+
+# The scalar context every call gets a share of (prompts/README.md's own
+# placeholder table): a generous superset computed once per pass, never
+# gated per step — desk_render_prompt only ever substitutes a {{name}} a
+# prompt's own text actually references, so an unused key here costs
+# nothing ("the runner knows how to produce each kind"). `mode` uses
+# `last_ok` (this pass's own last "ok" run, already captured above, before
+# desk_status_set_running overwrote it) rather than re-reading it now.
+mode="$(desk_compute_mode "$last_ok")"
+today="$(date +%F)"
+window_start_iso="$(desk_iso8601_oslo "$gmail_window_start")"
+window_end_iso="$(desk_iso8601_oslo "$gmail_window_end")"
+# The morning pass's one source definition (prompts/README.md's own
+# placeholder table: the whole of a private source file, substituted
+# verbatim into F-private/F-web and copied into J's scratch dir as
+# sources.json). Its actual name is instantiation-specific data, same
+# reasoning as digest_gmail_label above — a config field, never a literal
+# here — so an instantiation with no `sources_file` configured still gets a
+# valid (if empty) sources placeholder rather than an error.
+sources_rel="$(jq -r '.sources_file // "sources.json"' <<< "$config")"
+sources_path="$(desk_prompt_path "$sources_rel")"
+sources_content="$(cat "$sources_path" 2> /dev/null)"
+[ -n "$sources_content" ] || sources_content='{}'
+common_placeholders="$(jq -n \
+	--arg mode "$mode" --arg today "$today" \
+	--arg window_start "$window_start_iso" --arg window_end "$window_end_iso" \
+	--arg digest_query "$digest_query" --arg inbox_query "$inbox_query" \
+	--arg slack_oldest "$gmail_window_start" --arg slack_latest "$gmail_window_end" \
+	--arg sources "$sources_content" '{
+		mode: $mode, today: $today, window_start: $window_start, window_end: $window_end,
+		digest_query: $digest_query, inbox_query: $inbox_query,
+		slack_oldest: $slack_oldest, slack_latest: $slack_latest, sources: $sources
+	}')"
+
+# The file-producing context (desk-lib/steps.sh's desk_seed_named_file):
+# `old_ticket_cache` is read now, before T's own fetch step (later in this
+# same pass's step list) overwrites $DESK_TICKET_CACHE — J's tickets.json
+# is a diff against exactly this snapshot, never a value re-derived after
+# the fact.
+old_ticket_cache="$(cat "$DESK_TICKET_CACHE" 2> /dev/null)"
+[ -n "$old_ticket_cache" ] || old_ticket_cache='{}'
+jq -e . > /dev/null 2>&1 <<< "$old_ticket_cache" || old_ticket_cache='{}'
+pass_ctx="$(jq -n --arg repo "$repo" --arg sources_path "$sources_path" --arg pass_scratch "$PASS_SCRATCH" \
+	--arg scheduled_date "$scheduled_date" --argjson old_ticket_cache "$old_ticket_cache" '{
+		repo: $repo, sources_path: $sources_path, pass_scratch: $pass_scratch,
+		scheduled_date: $scheduled_date, old_ticket_cache: $old_ticket_cache
+	}')"
+
+overall_result="ok"
+stopped_at=""
+# Source (fetch) steps get their own failure mode: recorded here, never
+# aborting the pass outright (design's own "later slots only retry the
+# missing sources" — see steps.sh's desk_fetch_cache_* for the same-day
+# cache that makes an already-succeeded source skip a redundant re-run
+# rather than this array growing to include it again).
+failed_sources=()
+# The judge branch below fills this in from its own {kept, overflow}
+# result; a pass with no judge step this run (a close-only 16:30, a
+# commit_push-only pass) reports no overflow, matching status.lua's own
+# "only shown when actually nonzero" gate.
+proposal_overflow_json='{"act": 0, "worth_knowing": 0, "wildcard": 0}'
+
+steps_len="$(jq '.steps | length' <<< "$pass_config")"
+for ((i = 0; i < steps_len; i++)); do
+	step_json="$(jq -c ".steps[$i]" <<< "$pass_config")"
+	id="$(jq -r '.id' <<< "$step_json")"
+	kind="$(jq -r '.kind' <<< "$step_json")"
+
+	if [ "$weekday_only_pass" = "true" ] && [ "$is_weekend" = "true" ] && [ "$kind" != "commit_push" ]; then
+		desk_log "$pass" "step $id ($kind): skipped (weekend — model steps run weekdays only)"
+		continue
+	fi
+
+	result="failed"
+	case "$kind" in
+		commit_push) result="$(desk_step_commit_push_kind "$repo" "$push_enabled" "${files[@]}")" ;;
+
+		fetch)
+			if desk_fetch_already_done "$pass" "$scheduled_date" "$id"; then
+				desk_fetch_cache_restore "$pass" "$scheduled_date" "$id"
+				result="ok"
+				desk_log "$pass" "fetch $id: already fetched today (cached) — reusing, no re-run"
+			else
+				placeholders="$common_placeholders"
+				if [ "$id" = "T" ]; then
+					notes_text=""
+					for f in "${files[@]}"; do
+						notes_text="$notes_text
+$(git -C "$repo" show "HEAD:$f" 2> /dev/null)"
+					done
+					tokens_json="$(jq -c '.tokens // []' <<< "$config")"
+					jql="$(desk_build_jql "$notes_text" "$tokens_json")"
+					placeholders="$(jq -c --arg jql "$jql" '. + {jql: $jql}' <<< "$common_placeholders")"
+				fi
+				result="$(desk_step_fetch "$pass" "$step_json" "" "$placeholders" "" "" "$scheduled_date")"
+				if [ "$result" = "ok" ]; then
+					desk_fetch_cache_save "$pass" "$scheduled_date" "$id"
+				fi
+			fi
+			if [ "$id" = "T" ] && [ "$result" = "ok" ]; then
+				desk_build_ticket_cache "$PASS_SCRATCH/${id}-tool-uses.jsonl" "$PASS_SCRATCH/${id}-tool-results.jsonl" \
+					> /dev/null || desk_log "$pass" "T: ticket cache parse failed, old cache kept"
+			fi
+			if [ "$result" != "ok" ]; then
+				# A source's own failure is never fatal to the pass (design's
+				# "partial proposals"): recorded, logged, and the loop carries
+				# on with whatever other sources/J/W/close still have to say —
+				# never marked done for this scheduled date, so a later slot
+				# retries exactly this (and only this) source.
+				failed_sources+=("$id")
+				desk_log "$pass" "step $id ($kind): $result (a source failure — pass continues, flagged partial)"
+				continue
+			fi
+			;;
+
+		judge)
+			caps_key="daily"
+			[ "$pass" = "weekly" ] && caps_key="weekly"
+			caps_json="$(jq -c --arg k "$caps_key" '.caps[$k] // {}' <<< "$config")"
+			caps_str="$(desk_caps_string "$caps_json")"
+			judge_placeholders="$(jq -c --arg caps "$caps_str" '. + {caps: $caps}' <<< "$common_placeholders")"
+			result="$(desk_step_judge "$pass" "$step_json" "$repo" "$judge_placeholders" "$pass_ctx" "${files[@]}")"
+			if [ "$result" = "ok" ]; then
+				final_text="$(desk_extract_final_text "$PASS_SCRATCH/${id}-stream.jsonl")"
+				items_json="$(jq -c 'if type == "object" and has("items") then .items else . end' \
+					<<< "$final_text" 2> /dev/null)"
+				# NOT just "is items_json valid JSON": a scalar reply (a bare
+				# string/number, or an object with no "items" key) passes
+				# `jq -e .` just fine while being nowhere near the pinned
+				# {"items": [...]} shape — the actual schema check is "is an
+				# array", the one shape every downstream step (validate/caps/
+				# staging) assumes without re-checking. An unparseable or
+				# schema-invalid reply here is a loud failure (not just a log
+				# line): no W runs after a J whose reply couldn't be trusted,
+				# and the pass is never marked done, so a retry slot re-runs it
+				# instead of silently treating "nothing staged" as success.
+				if [ -z "$items_json" ] || ! jq -e 'type == "array"' > /dev/null 2>&1 <<< "$items_json"; then
+					desk_log "$pass" "judge $id: reply wasn't the pinned {\"items\": [...]} shape — failing the pass"
+					result="failed"
+				else
+					# Only the FETCH steps' own raw tool-results ever seed
+					# the allowed-URL set — never a blanket glob over every
+					# *-tool-results.jsonl in the scratch dir, which would
+					# also sweep up J's own (this judge call's own tool
+					# calls, e.g. a Read of notes.md/f-private.json, can
+					# themselves surface a source's own quoted text or the
+					# model's own prose, never something a real fetch call
+					# actually retrieved). The whole point of this set is
+					# "verifiably came from a fetch", so it's built from
+					# exactly this pass's own fetch step ids, not from
+					# whatever files happen to sit in the scratch dir.
+					mapfile -t fetch_ids < <(jq -r '.steps[] | select(.kind == "fetch") | .id' <<< "$pass_config")
+					results_files=()
+					for fetch_id in "${fetch_ids[@]}"; do
+						f="$PASS_SCRATCH/${fetch_id}-tool-results.jsonl"
+						[ -f "$f" ] && results_files+=("$f")
+					done
+					workspace_url="$(jq -r '.slack_workspace_url // empty' <<< "$config")"
+					allowed_urls="$(desk_allowed_urls "$workspace_url" "${results_files[@]}")"
+					validated_json="$(desk_validate_items "$items_json" "$allowed_urls")"
+					capped="$(desk_apply_caps "$validated_json" "$caps_json" "$pass")"
+					kept_json="$(jq -c '.kept' <<< "$capped")"
+					# This judge call's own overflow-by-tier — status.json's
+					# `proposal.overflow` (nvim/lua/desk/status.lua's own
+					# reader) — captured here since `capped` (desk_apply_caps's
+					# own {kept, overflow} pair) only exists in this branch's
+					# own scope; the end-of-pass status write below reads it
+					# back out of this variable.
+					proposal_overflow_json="$(jq -c '
+						{act: 0, worth_knowing: 0, wildcard: 0}
+						+ ([.overflow[] | .tier] | group_by(.) | map({(.[0]): length}) | add // {})
+					' <<< "$capped")"
+					items_file="$PASS_SCRATCH/${id}-validated-items.json"
+					jq -n --argjson items "$kept_json" '{items: $items}' > "$items_file"
+					if ! desk_stage_and_write_proposal "$repo" "$pass" "$scheduled_date" "$items_file" "${files[@]}" > /dev/null; then
+						desk_log "$pass" "judge $id: staging the proposal failed"
+						result="failed"
+					fi
+				fi
+			fi
+			;;
+
+		write)
+			# The pinning below applies by step KIND (design's own "W: the
+			# ONE unattended external write" — one per pass, by
+			# construction), never by checking this step's own `id`
+			# against a hardcoded literal: an instantiation is free to
+			# call it whatever it likes, and a check keyed on a literal
+			# id would silently stop enforcing the pinned-args safety net
+			# the moment someone renamed the step in config, with nothing
+			# to say so.
+			pinned_args_json="null"
+			placeholders="$common_placeholders"
+			# This write step's own thread ids only ever come from
+			# F-private's own search (never re-derived, per the check
+			# below). If F-private itself is a failed source this pass,
+			# there's no real "fetched" set to unlabel against at all —
+			# proceeding would silently unlabel zero ids and report "ok",
+			# which reads as "nothing to do" rather than "the source it
+			# depends on never ran". Fail loudly instead (design's own
+			# "W asserts unlabelled = fetched").
+			fprivate_failed="false"
+			for fs in "${failed_sources[@]:-}"; do
+				[ "$fs" = "F-private" ] && fprivate_failed="true"
+			done
+			if [ "$fprivate_failed" = "true" ]; then
+				desk_log "$pass" "$id: F-private (the source it unlabels against) failed this pass — refusing to unlabel"
+				result="failed"
+			else
+				pairs="$(desk_tool_call_pairs "$PASS_SCRATCH/F-private-tool-uses.jsonl" \
+					"$PASS_SCRATCH/F-private-tool-results.jsonl" "mcp__claude_ai_Gmail__search_threads")"
+				matching_pair="$(jq -c --arg q "$digest_query" \
+					'[.[] | select(.input.query == $q)] | .[0] // empty' <<< "$pairs")"
+				ids_subjects="[]"
+				if [ -n "$matching_pair" ]; then
+					result_text="$(jq -r '.text' <<< "$matching_pair")"
+					if jq -e . > /dev/null 2>&1 <<< "$result_text"; then
+						ids_subjects="$(jq -c '[(.threads // [])[] | {id, subject: (.subject // .snippet // "unknown")}]' \
+							<<< "$result_text")"
+					fi
+				else
+					desk_log "$pass" "$id: F-private's digest search query doesn't match the configured one — no ids pinned"
+				fi
+				n_ids="$(jq 'length' <<< "$ids_subjects")"
+				while IFS=$'\t' read -r tid subj; do
+					[ -n "$tid" ] || continue
+					desk_log "$pass" "$id: would unlabel $tid ($subj)"
+				done < <(jq -r '.[] | .id + "\t" + .subject' <<< "$ids_subjects")
+
+				pinned_label="$(jq -r '.pinned_label // "UNREAD"' <<< "$step_json")"
+				pinned_args_json="$(jq -c --arg l "$pinned_label" \
+					'[.[] | {threadId: .id, labelIds: [$l]}]' <<< "$ids_subjects")"
+				thread_ids_text="$(jq -r '.[].id' <<< "$ids_subjects")"
+				placeholders="$(jq -c --arg t "$thread_ids_text" '. + {thread_ids: $t}' <<< "$common_placeholders")"
+
+				# NOT `.dry_run // true`: jq's `//` treats a real `false`
+				# as falsy too, so that spelling would silently ignore an
+				# explicit `"dry_run": false` and always come back "true".
+				dry_run="$(jq -r 'if .dry_run == null then true else .dry_run end' <<< "$config")"
+				if [ "$dry_run" = "true" ]; then
+					desk_log "$pass" "$id: dry_run — logged $n_ids id(s), no model call made"
+					result="ok"
+				else
+					result="$(desk_step_write "$pass" "$step_json" "$pinned_args_json" "$placeholders" "$scheduled_date")"
+				fi
+			fi
+			;;
+
+		capture) result="$(desk_step_capture_sessions "$pass" "$repo" "$scheduled_date" "${files[@]}")" ;;
+		close) result="$(desk_step_close "$pass" "$step_json" "$config" "$repo" "$scheduled_date" "${files[@]}")" ;;
+		open_tab) result="$(desk_step_open_tab "$step_json" "$repo" "${files[@]}")" ;;
+		*) desk_log "$pass" "unknown step kind: $kind (step $id)" ;;
+	esac
+	desk_log "$pass" "step $id ($kind): $result"
+
+	case "$result" in
+		failed | timeout | error)
+			overall_result="failed"
+			stopped_at="$id"
+			break
+			;;
+	esac
+done
+
+# A source failure never broke the loop above (it `continue`s instead),
+# so reaching here with the loop otherwise clean ("ok", not a harder
+# failed/break from a later non-source step) but with sources still
+# outstanding is exactly design's "partial": J still ran and staged
+# whatever it could, flagged partial, but this scheduled date isn't fully
+# done — a later slot retries the missing sources, per
+# desk_guard_already_ok_today only ever treating "ok" as done.
+failed_sources_json="[]"
+if [ "${#failed_sources[@]}" -gt 0 ]; then
+	failed_sources_json="$(printf '%s\n' "${failed_sources[@]}" | jq -R . | jq -s .)"
+	[ "$overall_result" = "ok" ] && overall_result="partial"
+else
+	# Nothing left to retry: the same-day fetch cache has done its job.
+	desk_fetch_cache_clear "$pass"
+fi
+
+desk_status_set_result "$pass" "$overall_result" "$stopped_at" "$failed_sources_json" "$scheduled_date"
+
+# Visible run sessions: opens once the pass is done, whatever its own
+# result — a failed pass still opens the tab on whatever visible calls did
+# get made (design.md's later "Runs he can open and continue").
+desk_open_follow_up_tab "$pass" "$scheduled_date" "$follow_up_step" > /dev/null
+
+# ---------------------------------------------------------------------------
+# The rest of status.json (design.md §9(f), nvim/lua/desk/status.lua's own
+# reader): proposal state/overflow/counts, the ledger-classify fields, the
+# ticket cache's own age, and this pass's total spend. All read-only
+# against the ledger/proposal refs and $DESK_TICKET_CACHE as they stand
+# right now — none of it gates overall_result, so a failure computing any
+# one of these never costs the pass its own already-decided result.
+# ---------------------------------------------------------------------------
+
+# proposal: state ("partial" if this pass leaves any source failed,
+# "pending"/"none" otherwise, from the CURRENT standing proposal — not
+# just what this pass itself staged, since a pass with no judge step
+# still has to report on whatever's already sitting there); overflow
+# (this pass's own judge call, above, or the zero default); counts (by
+# item kind and by tier, across the whole standing proposal); queued/
+# deferred (the ledger's own queued/postponed counts, across every
+# configured file).
+proposal_read_json="$(desk_nvim_cli proposal-read "$repo" 2> /dev/null)"
+proposal_items_n=0
+proposal_counts_by_kind_json='{}'
+proposal_counts_by_tier_json='{"act": 0, "worth_knowing": 0, "wildcard": 0}'
+if [ -n "$proposal_read_json" ] && jq -e . > /dev/null 2>&1 <<< "$proposal_read_json"; then
+	proposal_items_n="$(jq '.items | length' <<< "$proposal_read_json")"
+	proposal_counts_by_kind_json="$(jq -c '[.items[].kind] | group_by(.) | map({(.[0]): length}) | add // {}' \
+		<<< "$proposal_read_json")"
+	proposal_counts_by_tier_json="$(jq -c '
+		{act: 0, worth_knowing: 0, wildcard: 0}
+		+ ([.items[] | select(.tier) | .tier] | group_by(.) | map({(.[0]): length}) | add // {})
+	' <<< "$proposal_read_json")"
+fi
+proposal_partial="false"
+proposal_state="none"
+[ "$proposal_items_n" -gt 0 ] && proposal_state="pending"
+if [ "${#failed_sources[@]}" -gt 0 ]; then
+	proposal_partial="true"
+	proposal_state="partial"
+fi
+
+queued_count=0
+deferred_count=0
+for f in "${files[@]}"; do
+	derived_for_status="$(desk_nvim_cli ledger-derive "$repo" "$f" 2> /dev/null)"
+	jq -e . > /dev/null 2>&1 <<< "$derived_for_status" || continue
+	q="$(jq '[.states[] | select(. == "queued")] | length' <<< "$derived_for_status" 2> /dev/null || echo 0)"
+	d="$(jq '[.states[] | select(. == "postponed")] | length' <<< "$derived_for_status" 2> /dev/null || echo 0)"
+	queued_count=$((queued_count + q))
+	deferred_count=$((deferred_count + d))
+done
+
+proposal_json="$(jq -n \
+	--arg state "$proposal_state" --argjson partial "$proposal_partial" \
+	--argjson overflow "$proposal_overflow_json" \
+	--argjson by_kind "$proposal_counts_by_kind_json" --argjson by_tier "$proposal_counts_by_tier_json" \
+	--argjson queued "$queued_count" --argjson deferred "$deferred_count" '{
+		state: $state, partial: $partial, overflow: $overflow,
+		counts: {by_kind: $by_kind, by_tier: $by_tier},
+		queued: $queued, deferred: $deferred
+	}')"
+desk_status_set_field proposal "$proposal_json"
+
+# ledger-classify: merged across every configured file (each file's own
+# ledger items are independent; a status field here is the whole ledger's
+# picture, not one file's).
+accepted_by_accident_json='[]'
+resolved_without_key_json='[]'
+waiting_edits_json='[]'
+for f in "${files[@]}"; do
+	classify_out="$(desk_nvim_cli ledger-classify "$repo" "$f" 2> /dev/null)"
+	jq -e . > /dev/null 2>&1 <<< "$classify_out" || continue
+	accepted_by_accident_json="$(jq -cn --argjson a "$accepted_by_accident_json" \
+		--argjson b "$(jq -c '.accepted_by_accident // []' <<< "$classify_out")" '$a + $b')"
+	resolved_without_key_json="$(jq -cn --argjson a "$resolved_without_key_json" \
+		--argjson b "$(jq -c '.resolved_without_key // []' <<< "$classify_out")" '$a + $b')"
+	waiting_edits_json="$(jq -cn --argjson a "$waiting_edits_json" \
+		--argjson b "$(jq -c '.waiting_edits // []' <<< "$classify_out")" '$a + $b')"
+done
+desk_status_set_field accepted_by_accident "$accepted_by_accident_json"
+desk_status_set_field resolved_without_key "$resolved_without_key_json"
+desk_status_set_field waiting_edits "$waiting_edits_json"
+
+# ticket_cache_age: how stale $DESK_TICKET_CACHE is right now, in seconds
+# — never re-derived from whether T happened to run this particular pass,
+# since the field means "how old is what I'd read right now", not
+# "did this pass refresh it".
+ticket_cache_age_json="null"
+if [ -f "$DESK_TICKET_CACHE" ]; then
+	ticket_checked_at="$(jq -r '.checked_at // empty' "$DESK_TICKET_CACHE" 2> /dev/null)"
+	[ -n "$ticket_checked_at" ] && ticket_cache_age_json=$(($(desk_now) - ticket_checked_at))
+fi
+desk_status_set_field ticket_cache_age "$ticket_cache_age_json"
+
+# total_cost_usd: every call this pass made (desk_step_model_call's own
+# cost log, one number per line, fetch/judge/write/close-per-session
+# calls alike), summed.
+total_cost_usd_json="0"
+if [ -f "$PASS_SCRATCH/.costs.log" ]; then
+	total_cost_usd_json="$(jq -s 'add // 0' "$PASS_SCRATCH/.costs.log" 2> /dev/null || echo 0)"
+fi
+desk_status_update '.passes[$pass].total_cost_usd = $cost' --arg pass "$pass" --argjson cost "$total_cost_usd_json"
+
+desk_log "$pass" "done: $overall_result${stopped_at:+ (stopped at $stopped_at)}"
+
+[ "$overall_result" != "failed" ]
