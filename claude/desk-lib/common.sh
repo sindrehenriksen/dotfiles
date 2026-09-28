@@ -51,6 +51,15 @@ DESK_LOCK_MAX_WAIT_SECS="${DESK_LOCK_MAX_WAIT_SECS:-1800}"
 DESK_LOCK_POLL_SECS="${DESK_LOCK_POLL_SECS:-5}"
 DESK_STALE_RUNNING_MINUTES="${DESK_STALE_RUNNING_MINUTES:-60}"
 DESK_KILL_GRACE_SECS="${DESK_KILL_GRACE_SECS:-5}"
+# How long a waiter tolerates a lock dir with no meta.json yet before
+# treating it as a crash rather than another acquirer mid-publish (lock.sh's
+# desk_lock_acquire: "a lock with no meta held for a short grace period,
+# never as dead" straight away) — and the pid-reuse tolerance for comparing
+# a lock's recorded owner start time against the same pid's current one
+# (same idea as session-status.sh's own LIVENESS_TOLERANCE_SECS, duplicated
+# in lock.sh since it's sourced standalone, without that script loaded).
+DESK_LOCK_NO_META_GRACE_SECS="${DESK_LOCK_NO_META_GRACE_SECS:-10}"
+DESK_LOCK_LIVENESS_TOLERANCE_SECS="${DESK_LOCK_LIVENESS_TOLERANCE_SECS:-3}"
 
 # The per-call --max-budget-usd a step falls back to when it (and
 # $DESK_CONFIG's own top-level `default_max_budget_usd`) don't name one —
