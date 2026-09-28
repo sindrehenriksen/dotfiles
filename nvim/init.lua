@@ -11,6 +11,7 @@ if vim.g.vscode then
 end
 
 require("autocmds")
+require("desk").setup()
 
 -- Bootstrap lazy.nvim
 local lazypath = vim.fn.stdpath("data") .. "/lazy/lazy.nvim"
