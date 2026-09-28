@@ -606,24 +606,29 @@ function M.unowned_hunks(bufnr, st)
 	return hunks
 end
 
-local function is_qf_buf(bufnr)
-	return vim.bo[bufnr].filetype == "qf"
-end
-
-local function find_target_window()
-	for _, w in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
-		if not is_qf_buf(vim.api.nvim_win_get_buf(w)) then
-			return w
-		end
-	end
-	return nil
+--- True if `win` is showing a location list rather than a quickfix list —
+--- both share filetype "qf", so this is the only reliable way to tell them
+--- apart. Desk never opens a location list (M.overview/M.list_declined_recently
+--- both go through setqflist), so the override below has no business acting
+--- on one at all: LSP references, `:grep` piped to a loclist, or anything
+--- else's own loclist window must fall through to the ordinary default.
+local function is_loclist_win(win)
+	local info = vim.fn.getwininfo(win)[1]
+	return info ~= nil and info.loclist == 1
 end
 
 --- The quickfix `<CR>` handler for every quickfix buffer (installed once,
---- globally): falls through to the ordinary quickfix jump for any list that
---- isn't ours, and otherwise jumps in the target window with `m'` set
---- first, so Ctrl-O/Ctrl-I work there afterward.
+--- globally): a no-op override for a location list or any quickfix list
+--- that isn't desk's own (falls through to the ordinary jump), and
+--- otherwise jumps in the *previous* window (`wincmd p` — wherever he was
+--- before opening the overview, never just "the first non-quickfix window
+--- in the tab", which could be an unrelated split) with `m'` set first, so
+--- Ctrl-O/Ctrl-I work there afterward.
 function M.qf_jump()
+	if is_loclist_win(vim.api.nvim_get_current_win()) then
+		vim.cmd(vim.fn.line(".") .. "ll")
+		return
+	end
 	local title = vim.fn.getqflist({ title = 0 }).title
 	if title ~= M.OVERVIEW_TITLE then
 		vim.cmd(vim.fn.line(".") .. "cc")
@@ -634,8 +639,12 @@ function M.qf_jump()
 	if not item or not item.bufnr or item.bufnr == 0 then
 		return -- a header-only line (the deferred count): nothing to jump to
 	end
-	local target_win = find_target_window()
-	if not target_win then
+	local qf_win = vim.api.nvim_get_current_win()
+	vim.cmd("wincmd p")
+	local target_win = vim.api.nvim_get_current_win()
+	if target_win == qf_win then
+		-- No previous window to return to (the overview was opened as the
+		-- only window in the tab): make one, same fallback as before.
 		vim.cmd("botright vsplit")
 		target_win = vim.api.nvim_get_current_win()
 	end
@@ -731,10 +740,17 @@ function M.list_declined_recently(bufnr, days)
 end
 
 --- The quickfix "r" handler for every quickfix buffer (installed once,
---- globally, alongside M.qf_jump): a no-op for any list that isn't ours,
---- and otherwise restores the item under the cursor (M.restore) back into
---- the notes buffer the list was built from.
+--- globally, alongside M.qf_jump): a no-op for a location list or any
+--- quickfix list that isn't ours (checked by title, same as M.qf_jump —
+--- desk's own lists are never location lists, so a loclist window is
+--- rejected before even reading getqflist(), which would otherwise read
+--- the unrelated *global* quickfix list instead of whatever the current
+--- window is actually showing), and otherwise restores the item under the
+--- cursor (M.restore) back into the notes buffer the list was built from.
 function M.qf_restore()
+	if is_loclist_win(vim.api.nvim_get_current_win()) then
+		return
+	end
 	local qf = vim.fn.getqflist({ title = 0, context = 0 })
 	if qf.title ~= M.DECLINED_TITLE then
 		return

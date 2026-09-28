@@ -382,6 +382,47 @@ do
 end
 
 print()
+print("=== D6 fix: the quickfix <CR> override never touches a location list ===")
+do
+	vim.cmd("tabnew")
+	local repo = new_repo({ "GLOBAL TARGET", "LOCAL TARGET" })
+	local bufnr = open_notes(repo)
+	local win = vim.api.nvim_get_current_win()
+
+	-- The bug: getqflist() always reads the *global* quickfix list, so a
+	-- location list whose title happens to collide with desk's own
+	-- overview title would have its <CR> misread the global list's own
+	-- entries instead of its own.
+	vim.fn.setqflist({}, " ", { title = review.OVERVIEW_TITLE, items = { { bufnr = bufnr, lnum = 1, col = 1 } } })
+	vim.fn.setloclist(win, {}, " ", { title = review.OVERVIEW_TITLE, items = { { bufnr = bufnr, lnum = 2, col = 1 } } })
+	vim.cmd("lopen")
+	local loc_win = vim.api.nvim_get_current_win()
+	assert_true(
+		"this really is a location list window, not a quickfix one",
+		vim.fn.getloclist(loc_win, { filewinid = 0 }).filewinid ~= 0
+	)
+	vim.api.nvim_win_set_cursor(loc_win, { 1, 0 })
+
+	review.qf_jump()
+
+	local notes_win
+	for _, w in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+		if vim.api.nvim_win_get_buf(w) == bufnr then
+			notes_win = w
+		end
+	end
+	assert_true("a window is showing the notes buffer", notes_win ~= nil)
+	assert_eq(
+		"landed on the location list's own line, never the (title-colliding) global list's",
+		2,
+		notes_win and vim.api.nvim_win_get_cursor(notes_win)[1]
+	)
+
+	vim.fn.setqflist({}, "r", { title = "", items = {} })
+	vim.cmd("tabclose!")
+end
+
+print()
 print("=== D6: format-on-save leaves the notes buffer untouched ===")
 do
 	package.path = package.path -- (no-op; real autocmds.lua uses relative require paths already on rtp)
