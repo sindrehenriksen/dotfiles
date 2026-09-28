@@ -1,0 +1,237 @@
+-- Offline test for the D4/D7 Ghostty-tab pieces in hammerspoon/init.lua:
+-- loads the real file against a minimal hs.* stub (just enough that its
+-- top-level calls — hs.hotkey.modal.new, the eventtaps, the watchers, the
+-- closing hs.alert.show — don't error), then exercises the pure parts with
+-- plain Lua: DeskTab.pick_target (slot geometry) and the UUID validation
+-- gate on DeskOpenTab (D4), plus DeskTab.pick_tab_by_tty and DeskFocusTab's
+-- early-exit paths (D7). Never touches a real screen, window or osascript
+-- call — run with the system `lua`, not Hammerspoon.
+--
+-- Run: lua hammerspoon/tests/tab-function-test.lua
+local pass, fail = 0, 0
+local function ok(desc) pass = pass + 1; print("ok   - " .. desc) end
+local function bad(desc) fail = fail + 1; print("FAIL - " .. desc) end
+local function assert_eq(desc, expected, actual)
+  if expected == actual then
+    ok(desc)
+  else
+    bad(string.format("%s (expected [%s], got [%s])", desc, tostring(expected), tostring(actual)))
+  end
+end
+
+-- ---------------------------------------------------------------------------
+-- Minimal hs.* stub: just enough for init.lua's unconditional top-level
+-- calls to run without erroring. None of it models real window/screen
+-- behavior — the tests below never rely on it beyond "didn't crash".
+-- ---------------------------------------------------------------------------
+local inert = {}
+inert.__index = function(_, k)
+  if k == "start" or k == "stop" then return function(self) return self end end
+  return nil
+end
+
+package.preload["hs.ipc"] = function() return {} end
+
+local osascript_calls = 0
+
+hs = {
+  window = {
+    animationDuration = 0,
+    focusedWindow = function() return nil end,
+    frontmostWindow = function() return nil end,
+    get = function() return nil end,
+  },
+  hotkey = {
+    modal = {
+      new = function()
+        local m = {}
+        function m:bind() return m end
+        return m
+      end,
+    },
+    bind = function() end,
+  },
+  keycodes = {
+    map = setmetatable({}, { __index = function() return 0 end }),
+  },
+  eventtap = {
+    new = function() return setmetatable({}, inert) end,
+    event = { types = setmetatable({}, { __index = function(_, k) return k end }) },
+  },
+  usb = { watcher = { new = function() return setmetatable({}, inert) end } },
+  caffeinate = { watcher = { new = function() return setmetatable({}, inert) end } },
+  alert = { show = function() return "alert-uuid" end, closeSpecific = function() end },
+  timer = { doAfter = function() return setmetatable({}, inert) end },
+  screen = { allScreens = function() return {} end },
+  application = { get = function() return nil end },
+  osascript = {
+    applescript = function()
+      osascript_calls = osascript_calls + 1
+      return false, "stub: never actually run in tests"
+    end,
+  },
+}
+
+local here = (arg[0] or ""):match("^(.*)/[^/]+$") or "."
+local init_path = here .. "/../init.lua"
+
+local chunk, load_err = loadfile(init_path)
+if not chunk then
+  bad("could not load init.lua: " .. tostring(load_err))
+  os.exit(1)
+end
+
+local loaded_ok, run_err = pcall(chunk)
+if not loaded_ok then
+  bad("init.lua errored while loading under the stub: " .. tostring(run_err))
+  os.exit(1)
+end
+ok("init.lua loads under a stubbed hs.* runtime")
+
+if type(DeskTab) ~= "table" then
+  bad("DeskTab global not defined after loading init.lua")
+  os.exit(1)
+end
+if type(DeskOpenTab) ~= "function" then
+  bad("DeskOpenTab global not defined after loading init.lua")
+  os.exit(1)
+end
+
+-- ---------------------------------------------------------------------------
+-- DeskTab.point_in_frame / frame_center
+-- ---------------------------------------------------------------------------
+local slot = { x = 1000, y = 0, w = 600, h = 400 }
+assert_eq("centre of a frame that matches the slot exactly", true,
+  DeskTab.point_in_frame(DeskTab.frame_center(slot), slot))
+
+local nudged = { x = 1010, y = 20, w = 580, h = 360 } -- resized/nudged, centre still inside
+assert_eq("a nudged/resized window still counts as inside (loose match)", true,
+  DeskTab.point_in_frame(DeskTab.frame_center(nudged), slot))
+
+local elsewhere = { x = 0, y = 0, w = 300, h = 300 } -- centre at (150,150), well outside slot
+assert_eq("a window on the wrong part of the screen is outside the slot", false,
+  DeskTab.point_in_frame(DeskTab.frame_center(elsewhere), slot))
+
+-- ---------------------------------------------------------------------------
+-- DeskTab.pick_target
+-- ---------------------------------------------------------------------------
+local function slot_frame_of(_) return slot end
+
+-- Existing window whose centre sits in the upper_C slot on the wide screen.
+local screens = { { id = "wide", wide = true }, { id = "laptop", wide = false } }
+local windows = { { id = 42, screen_id = "wide", frame = nudged } }
+local d = DeskTab.pick_target(screens, windows, slot_frame_of, nil)
+assert_eq("a matching window on the ultrawide is picked", "existing_window", d.mode)
+assert_eq("its id is reported", 42, d.window_id)
+
+-- No matching window on the ultrawide: falls to a new, placed window.
+d = DeskTab.pick_target(screens, {}, slot_frame_of, nil)
+assert_eq("no match on the ultrawide opens a new window there", "new_window", d.mode)
+assert_eq("targets the wide screen", "wide", d.screen_id)
+
+-- A Ghostty window elsewhere on the ultrawide (outside the slot) still
+-- falls to new_window, not to that window.
+windows = { { id = 7, screen_id = "wide", frame = elsewhere } }
+d = DeskTab.pick_target(screens, windows, slot_frame_of, nil)
+assert_eq("a Ghostty window outside the slot doesn't count as a match", "new_window", d.mode)
+
+-- A window on a *different* screen, even inside an equivalent rect, must
+-- not match — screen_id has to agree too.
+windows = { { id = 9, screen_id = "laptop", frame = slot } }
+d = DeskTab.pick_target(screens, windows, slot_frame_of, nil)
+assert_eq("a same-shaped window on the wrong screen doesn't match", "new_window", d.mode)
+
+-- No ultrawide at all (laptop only): front window decides.
+local laptop_only = { { id = "laptop", wide = false } }
+d = DeskTab.pick_target(laptop_only, {}, slot_frame_of, { id = 3, app = "Ghostty" })
+assert_eq("laptop-only, front window is Ghostty: uses it", "front_window", d.mode)
+assert_eq("front window id reported", 3, d.window_id)
+
+d = DeskTab.pick_target(laptop_only, {}, slot_frame_of, { id = 3, app = "Safari" })
+assert_eq("laptop-only, front window isn't Ghostty: no target", "none", d.mode)
+
+d = DeskTab.pick_target(laptop_only, {}, slot_frame_of, nil)
+assert_eq("laptop-only, no front window at all: no target", "none", d.mode)
+
+-- ---------------------------------------------------------------------------
+-- DeskTab.looks_like_uuid
+-- ---------------------------------------------------------------------------
+assert_eq("a well-formed UUID passes", true,
+  DeskTab.looks_like_uuid("c3d1e2f4-5a6b-47c8-9d0e-1f2a3b4c5d6e"))
+assert_eq("uppercase hex is still a UUID shape", true,
+  DeskTab.looks_like_uuid("C3D1E2F4-5A6B-47C8-9D0E-1F2A3B4C5D6E"))
+assert_eq("missing dashes is rejected", false,
+  DeskTab.looks_like_uuid("c3d1e2f45a6b47c89d0e1f2a3b4c5d6e"))
+assert_eq("too short is rejected", false, DeskTab.looks_like_uuid("c3d1e2f4-5a6b"))
+assert_eq("a leading dash (option-injection shape) is rejected", false,
+  DeskTab.looks_like_uuid("--rf"))
+assert_eq("a quote-breaking string is rejected", false,
+  DeskTab.looks_like_uuid('"; do shell script "rm -rf ~"'))
+assert_eq("nil is rejected", false, DeskTab.looks_like_uuid(nil))
+assert_eq("a non-string is rejected", false, DeskTab.looks_like_uuid(42))
+
+-- ---------------------------------------------------------------------------
+-- DeskOpenTab: the UUID gate refuses before anything else runs, including
+-- an osascript call — and with no ultrawide and no frontmost window in this
+-- stub, the "none" branch also never reaches osascript.
+-- ---------------------------------------------------------------------------
+osascript_calls = 0
+local result = DeskOpenTab("echo hi", "not-a-uuid", nil)
+assert_eq("a non-UUID session id refuses outright", false, result)
+assert_eq("and never calls osascript", 0, osascript_calls)
+
+osascript_calls = 0
+result = DeskOpenTab("echo hi", nil, nil)
+assert_eq("no ultrawide, no frontmost Ghostty window (this stub): no target", false, result)
+assert_eq("and never calls osascript either", 0, osascript_calls)
+
+-- ---------------------------------------------------------------------------
+-- D7: DeskTab.pick_tab_by_tty
+-- ---------------------------------------------------------------------------
+if type(DeskTab.pick_tab_by_tty) ~= "function" then
+  bad("DeskTab.pick_tab_by_tty not defined after loading init.lua")
+  os.exit(1)
+end
+if type(DeskFocusTab) ~= "function" then
+  bad("DeskFocusTab global not defined after loading init.lua")
+  os.exit(1)
+end
+
+local tabs = {
+  { window_id = 1, tab_index = 1, tty = "ttys001" },
+  { window_id = 1, tab_index = 2, tty = "ttys003" },
+  { window_id = 2, tab_index = 1, tty = "ttys007" },
+}
+local found = DeskTab.pick_tab_by_tty(tabs, "ttys003")
+assert_eq("a matching tty is found", 1, found and found.window_id)
+assert_eq("...at its own tab index", 2, found and found.tab_index)
+
+found = DeskTab.pick_tab_by_tty(tabs, "ttys999")
+assert_eq("no matching tty returns nil", nil, found)
+
+found = DeskTab.pick_tab_by_tty({}, "ttys001")
+assert_eq("an empty tab list returns nil", nil, found)
+
+-- ---------------------------------------------------------------------------
+-- D7: DeskFocusTab's early-exit paths — never reach osascript for any of
+-- these, since the stub's hs.application.get always returns nil (as if
+-- Ghostty were never running) and DeskFocusTab must refuse before that.
+-- ---------------------------------------------------------------------------
+osascript_calls = 0
+result = DeskFocusTab(nil)
+assert_eq("no tty at all refuses outright", false, result)
+assert_eq("and never calls osascript", 0, osascript_calls)
+
+osascript_calls = 0
+result = DeskFocusTab("")
+assert_eq("an empty tty refuses outright", false, result)
+assert_eq("and never calls osascript", 0, osascript_calls)
+
+osascript_calls = 0
+result = DeskFocusTab("ttys003")
+assert_eq("Ghostty not running (this stub): refuses", false, result)
+assert_eq("and never calls osascript either", 0, osascript_calls)
+
+print()
+print(string.format("=== summary: %d passed, %d failed ===", pass, fail))
+os.exit(fail == 0 and 0 or 1)

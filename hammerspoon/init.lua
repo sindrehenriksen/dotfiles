@@ -273,6 +273,275 @@ for key, dir in pairs(directions) do
   hs.hotkey.bind({ "cmd", "ctrl" }, key, function() swap(dir) end)
 end
 
+-- ---------------------------------------------------------------------------
+-- Desk: open a command in a Ghostty tab, never typed into a terminal. Used
+-- from outside Hammerspoon (nvim, a shell wrapper) via `hs -c`, for the
+-- notes hotkey's session resume and the Wednesday weekly tab. Opens in the
+-- Ghostty window whose centre sits in the ultrawide's upper_C slot; with
+-- none there, opens a new window placed at that slot; with no ultrawide at
+-- all (laptop screen only), uses the frontmost window.
+--
+-- Pure decision/validation logic is exposed on the DeskTab global (same
+-- convention as caps_tap above: unprefixed globals so `hs -c` and a plain
+-- Lua process can reach in) so it can be exercised without the hs.* runtime
+-- — see hammerspoon/tests/tab-function-test.lua.
+-- ---------------------------------------------------------------------------
+
+DeskTab = {}
+
+-- A session id must look like a UUID before it is ever interpolated into an
+-- AppleScript string: it can arrive as a raw shell argument, and a token
+-- that starts with `-` or holds a quote must never reach osascript unchecked.
+function DeskTab.looks_like_uuid(s)
+  return type(s) == "string" and s:match(
+    "^%x%x%x%x%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%x%x%x%x%x%x%x%x$"
+  ) ~= nil
+end
+
+function DeskTab.frame_center(frame)
+  return { x = frame.x + frame.w / 2, y = frame.y + frame.h / 2 }
+end
+
+-- Loose match: the window's centre sits inside the slot's rectangle, not an
+-- exact frame match — he may have nudged or resized it, and re-placing it
+-- isn't this function's job.
+function DeskTab.point_in_frame(pt, frame)
+  return pt.x >= frame.x and pt.x <= frame.x + frame.w
+     and pt.y >= frame.y and pt.y <= frame.y + frame.h
+end
+
+-- Pure target selection, given plain data so it's testable without hs.*:
+--   screens: list of { id, wide }
+--   windows: list of { id, screen_id, frame = {x,y,w,h} } — Ghostty's own
+--            windows only; the caller has already filtered by app.
+--   slot_frame_of(screen_id): the upper_C slot's absolute frame on that
+--            screen, in the same coordinate space as window frames.
+--   front_window: { id, app } or nil.
+-- Returns one of:
+--   { mode = "existing_window", window_id = ... }
+--   { mode = "new_window", screen_id = ... }  -- no match; place a new one
+--   { mode = "front_window", window_id = ... } -- no ultrawide, front is Ghostty
+--   { mode = "none" }                          -- no ultrawide, no Ghostty in front
+function DeskTab.pick_target(screens, windows, slot_frame_of, front_window)
+  local wide_screen
+  for _, s in ipairs(screens) do
+    if s.wide then
+      wide_screen = s
+      break
+    end
+  end
+
+  if wide_screen then
+    local target = slot_frame_of(wide_screen.id)
+    for _, w in ipairs(windows) do
+      if w.screen_id == wide_screen.id
+          and DeskTab.point_in_frame(DeskTab.frame_center(w.frame), target) then
+        return { mode = "existing_window", window_id = w.id }
+      end
+    end
+    return { mode = "new_window", screen_id = wide_screen.id }
+  end
+
+  if front_window and front_window.app == "Ghostty" then
+    return { mode = "front_window", window_id = front_window.id }
+  end
+  return { mode = "none" }
+end
+
+local function as_string_literal(s)
+  return '"' .. tostring(s):gsub("\\", "\\\\"):gsub('"', '\\"') .. '"'
+end
+
+-- Ghostty's AppleScript dictionary takes the new tab's (or window's) shell
+-- command and cwd as a `configuration` record — never typed into a terminal.
+local function tab_configuration(cmd, cwd)
+  local fields = { "command:" .. as_string_literal(cmd) }
+  if cwd and cwd ~= "" then
+    fields[#fields + 1] = "initial working directory:" .. as_string_literal(cwd)
+  end
+  return "{" .. table.concat(fields, ", ") .. "}"
+end
+
+local function ghostty_app_windows()
+  local app = hs.application.get("Ghostty")
+  if not app then return {} end
+  local out = {}
+  for _, w in ipairs(app:allWindows()) do
+    out[#out + 1] = { id = w:id(), screen_id = w:screen():id(), frame = w:frame() }
+  end
+  return out
+end
+
+-- Opens `cmd` (with optional `cwd`) in a new Ghostty tab per the placement
+-- rule above. `session_id`, if given, must be UUID-shaped or nothing runs.
+-- An osascript failure is reported (print, so `hs -c` surfaces it) and
+-- nothing further is attempted — never falls back to typing the command.
+function DeskOpenTab(cmd, session_id, cwd)
+  if session_id ~= nil and not DeskTab.looks_like_uuid(session_id) then
+    print("DeskOpenTab: refusing non-UUID session id: " .. tostring(session_id))
+    return false
+  end
+
+  local screens, screens_by_id = {}, {}
+  for _, s in ipairs(hs.screen.allScreens()) do
+    local entry = { id = s:id(), wide = screen_kind(s) == "wide" }
+    screens[#screens + 1] = entry
+    screens_by_id[entry.id] = s
+  end
+  local windows = ghostty_app_windows()
+  local front = hs.window.frontmostWindow()
+  local front_plain = front and {
+    id = front:id(),
+    app = front:application() and front:application():name() or "",
+  }
+
+  local function slot_frame_of(screen_id)
+    return slot_frame(screens_by_id[screen_id], "upper_C")
+  end
+
+  local decision = DeskTab.pick_target(screens, windows, slot_frame_of, front_plain)
+
+  local script
+  if decision.mode == "existing_window" or decision.mode == "front_window" then
+    script = string.format(
+      'tell application "Ghostty" to tell window id %s to new tab with configuration %s',
+      decision.window_id, tab_configuration(cmd, cwd)
+    )
+  elseif decision.mode == "new_window" then
+    -- Unverified against real Ghostty (Phase-0, design.md §8): that "new
+    -- window with configuration" takes the same record and that its result
+    -- is the new window's id, usable below to place it.
+    script = string.format(
+      'tell application "Ghostty" to new window with configuration %s',
+      tab_configuration(cmd, cwd)
+    )
+  else
+    print("DeskOpenTab: no ultrawide screen and no frontmost Ghostty window")
+    return false
+  end
+
+  local ok, result = hs.osascript.applescript(script)
+  if not ok then
+    print("DeskOpenTab: osascript failed: " .. tostring(result))
+    return false
+  end
+
+  if decision.mode == "new_window" then
+    local win = tonumber(result) and hs.window.get(tonumber(result))
+    local scr = screens_by_id[decision.screen_id]
+    if win and scr then
+      win:setFrame(slot_frame(scr, "upper_C"))
+    else
+      print("DeskOpenTab: opened a new window but could not place it (id " .. tostring(result) .. ")")
+    end
+  end
+
+  return true
+end
+
+-- ---------------------------------------------------------------------------
+-- Desk: focus an existing Ghostty tab by the tty of the process running in
+-- it — the notes hotkey's live-session case (design.md §2/§3: "focuses the
+-- Ghostty tab by tty"), so it never opens a second tab against a session
+-- that's already live. Unverified against real Ghostty (Phase-0, design.md
+-- §8, "Ghostty tab focus by tty"): that its AppleScript dictionary actually
+-- exposes a per-tab `tty`, and that selecting a tab and activating its
+-- window raises the right one on screen. Pure selection logic is on
+-- DeskTab.pick_tab_by_tty so it's testable without osascript at all — see
+-- hammerspoon/tests/tab-function-test.lua; the AppleScript query and the
+-- actual focus are exercised only against real Ghostty, never in a test.
+-- ---------------------------------------------------------------------------
+
+--- Given a flat list of `{ window_id, tab_index, tty }` (every open Ghostty
+--- tab) and a target `tty`, returns the matching entry or nil. Exact string
+--- match only — a tty path either is or isn't the one the reader reported
+--- as this session's.
+function DeskTab.pick_tab_by_tty(tabs, tty)
+  for _, t in ipairs(tabs) do
+    if t.tty == tty then
+      return t
+    end
+  end
+  return nil
+end
+
+-- Asks Ghostty (via AppleScript, in one call) for every window/tab's tty:
+-- a list of "windowId,tabIndex,tty" lines, one per tab. `false` as the
+-- second return means the query itself failed (Ghostty not scriptable
+-- this way, or not running); an empty-but-successful list is a real "no
+-- tabs" answer, not a failure.
+local function ghostty_tabs_with_tty()
+  local script = [[
+    tell application "Ghostty"
+      set out to ""
+      repeat with w in windows
+        set wid to id of w
+        set tabIdx to 0
+        repeat with t in tabs of w
+          set tabIdx to tabIdx + 1
+          try
+            set out to out & wid & "," & tabIdx & "," & (tty of t) & "\n"
+          end try
+        end repeat
+      end repeat
+      return out
+    end tell
+  ]]
+  local ok, result = hs.osascript.applescript(script)
+  if not ok or type(result) ~= "string" then
+    return {}, false
+  end
+  local tabs = {}
+  for line in result:gmatch("[^\n]+") do
+    local wid, idx, tty = line:match("^(%d+),(%d+),(.+)$")
+    if wid then
+      tabs[#tabs + 1] = { window_id = tonumber(wid), tab_index = tonumber(idx), tty = tty }
+    end
+  end
+  return tabs, true
+end
+
+-- Focuses the Ghostty tab running `tty`: activates Ghostty and selects
+-- that tab in its window. Returns true on success; false (printed, so
+-- `hs -c` surfaces it) if Ghostty isn't running, the AppleScript query
+-- failed, or no open tab matches — callers (the notes hotkey) must treat
+-- false as "don't resume either": falling back to resuming a session this
+-- returned false for would risk a second process against a live
+-- transcript.
+function DeskFocusTab(tty)
+  if type(tty) ~= "string" or tty == "" then
+    print("DeskFocusTab: no tty given")
+    return false
+  end
+  if not hs.application.get("Ghostty") then
+    print("DeskFocusTab: Ghostty is not running")
+    return false
+  end
+  local tabs, query_ok = ghostty_tabs_with_tty()
+  if not query_ok then
+    print("DeskFocusTab: could not read Ghostty's tabs")
+    return false
+  end
+  local target = DeskTab.pick_tab_by_tty(tabs, tty)
+  if not target then
+    print("DeskFocusTab: no Ghostty tab is running " .. tty)
+    return false
+  end
+  local script = string.format(
+    'tell application "Ghostty"\n' ..
+    '  activate\n' ..
+    '  tell window id %d to set selected tab index to %d\n' ..
+    'end tell',
+    target.window_id, target.tab_index
+  )
+  local ok, result = hs.osascript.applescript(script)
+  if not ok then
+    print("DeskFocusTab: osascript failed: " .. tostring(result))
+    return false
+  end
+  return true
+end
+
 -- Dual-function Caps Lock (remapped to F18 at the HID level by
 -- macos/keyboard-remap.sh):
 --   Tap                  → Escape
