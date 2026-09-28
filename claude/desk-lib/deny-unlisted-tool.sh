@@ -24,14 +24,35 @@
 # one array entry exactly (jq object equality, so key order never
 # matters) — never trusting the model to only ask for the ids it was told
 # about.
+#
+# `--scratch <dir>` (a judge/close call's own second layer under its
+# scoped `Read(<dir>/**)` --allowedTools entry, steps.sh's
+# desk_step_allowed_tools): when given, a Read call is additionally
+# denied unless its own tool_input.file_path resolves (symlinks and
+# `..` included) under <dir> — never trusting the --allowedTools glob
+# alone, the same way --pinned never trusts a connector tool's own
+# claimed args.
 set -u
 
 pinned_file=""
-if [ "${1:-}" = "--pinned" ]; then
-	pinned_file="$2"
-	shift 2
-	[ "${1:-}" = "--" ] && shift
-fi
+scratch_dir=""
+while :; do
+	case "${1:-}" in
+		--pinned)
+			pinned_file="$2"
+			shift 2
+			;;
+		--scratch)
+			scratch_dir="$2"
+			shift 2
+			;;
+		--)
+			shift
+			break
+			;;
+		*) break ;;
+	esac
+done
 
 input="$(cat)"
 tool_name="$(printf '%s' "$input" | jq -r '.tool_name // empty' 2>/dev/null)"
@@ -70,6 +91,33 @@ if [ -n "$pinned_file" ]; then
 		echo "desk deny-hook: '$tool_name' tool_input isn't one of the pinned set ($pinned_file)" >&2
 		exit 2
 	fi
+fi
+
+if [ -n "$scratch_dir" ] && [ "$tool_name" = "Read" ]; then
+	file_path="$(printf '%s' "$input" | jq -r '.tool_input.file_path // empty' 2>/dev/null)"
+	if [ -z "$file_path" ]; then
+		echo "desk deny-hook: Read call has no tool_input.file_path — denying" >&2
+		exit 2
+	fi
+	# realpath resolves symlinks and `.`/`..` on both sides, so a string
+	# that merely starts with "$scratch_dir/" (e.g. one built from
+	# "$scratch_dir/../../etc/passwd") doesn't fool this. It also requires
+	# the path to actually exist (no GNU -m/--canonicalize-missing here),
+	# which fails closed on a Read of something that isn't there anyway —
+	# rather than trust a path this hook can't verify.
+	resolved_scratch="$(realpath -q "$scratch_dir" 2> /dev/null)"
+	resolved_path="$(realpath -q "$file_path" 2> /dev/null)"
+	if [ -z "$resolved_scratch" ] || [ -z "$resolved_path" ]; then
+		echo "desk deny-hook: couldn't resolve '$file_path' against the scratch dir ($scratch_dir) — denying" >&2
+		exit 2
+	fi
+	case "$resolved_path" in
+		"$resolved_scratch" | "$resolved_scratch"/*) : ;;
+		*)
+			echo "desk deny-hook: Read of '$file_path' is outside this call's scratch dir ($scratch_dir) — denying" >&2
+			exit 2
+			;;
+	esac
 fi
 
 exit 0

@@ -99,16 +99,19 @@ desk_prune_old_runs() {
 	done
 }
 
-# desk_write_deny_hook_settings <dir> <pinned-args-file-or-""> <tool>...
-# Writes the PreToolUse deny-hook settings file for a connector call's
-# exact allowlist (the remaining args, tool names) into $1 (a path this
-# call's own scratch dir owns), optionally also pinning tool_input itself
-# to a pre-computed exact set (design's W: "runner-pinned thread ids and
-# label") — see deny-unlisted-tool.sh's own `--pinned` doc. Prints the
-# settings file's path.
+# desk_write_deny_hook_settings <dir> <pinned-args-file-or-""> <scratch-dir-or-""> <tool>...
+# Writes the PreToolUse deny-hook settings file for a call's exact
+# allowlist (the remaining args, tool names) into $1 (a path this call's
+# own scratch dir owns), optionally also pinning tool_input itself to a
+# pre-computed exact set (design's W: "runner-pinned thread ids and
+# label" — see deny-unlisted-tool.sh's own `--pinned` doc) and/or scoping
+# a Read call to under a directory (a judge/close call's own
+# Read(<scratch>/**) --allowedTools entry, backed up here in case that
+# glob alone is ever not enough — see deny-unlisted-tool.sh's own
+# `--scratch` doc). Prints the settings file's path.
 desk_write_deny_hook_settings() {
-	local dir="$1" pinned_args_file="$2"
-	shift 2
+	local dir="$1" pinned_args_file="$2" scratch_dir="$3"
+	shift 3
 	# Built as a properly shell-quoted command LINE (desk_shq — the same
 	# helper desk_step_open_tab already uses for exactly this reason),
 	# never plain string concatenation: this is handed to Claude Code as
@@ -121,7 +124,13 @@ desk_write_deny_hook_settings() {
 	local hook_cmd path
 	hook_cmd="$(desk_shq "$DESK_LIB_DIR/deny-unlisted-tool.sh")"
 	if [ -n "$pinned_args_file" ]; then
-		hook_cmd="$hook_cmd --pinned $(desk_shq "$pinned_args_file") --"
+		hook_cmd="$hook_cmd --pinned $(desk_shq "$pinned_args_file")"
+	fi
+	if [ -n "$scratch_dir" ]; then
+		hook_cmd="$hook_cmd --scratch $(desk_shq "$scratch_dir")"
+	fi
+	if [ -n "$pinned_args_file" ] || [ -n "$scratch_dir" ]; then
+		hook_cmd="$hook_cmd --"
 	fi
 	local t
 	for t in "$@"; do

@@ -60,9 +60,23 @@ desk_prompt_path() {
 }
 
 # The exact --allowedTools value for a step: its own `tools` array, comma-
-# joined — design's "exact --allowedTools" per call.
+# joined — design's "exact --allowedTools" per call. A judge/close step
+# (the two kinds that only ever legitimately read their own seeded
+# scratch files, never anywhere else) whose tools include a bare "Read"
+# gets it scoped instead, to Read(<scratch>/**) — an absolute glob under
+# that call's own scratch dir, passed as $2. Any other step, or a call
+# with no scratch dir yet, gets the plain unscoped join it always had.
 desk_step_allowed_tools() {
-	jq -r '(.tools // []) | join(",")' <<< "$1"
+	local step_json="$1" scratch="${2:-}"
+	local kind
+	kind="$(jq -r '.kind // empty' <<< "$step_json")"
+	if [ -n "$scratch" ] && { [ "$kind" = "judge" ] || [ "$kind" = "close" ]; }; then
+		jq -r --arg scratch "$scratch" '
+			(.tools // []) | map(if . == "Read" then "Read(" + $scratch + "/**)" else . end) | join(",")
+		' <<< "$step_json"
+	else
+		jq -r '(.tools // []) | join(",")' <<< "$step_json"
+	fi
 }
 
 # ---------------------------------------------------------------------------
@@ -373,8 +387,8 @@ desk_step_model_call() {
 	local scheduled_date="${7:-$(date +%F)}"
 	local id kind prompt_rel tools_csv connector cap timeout max_budget_usd
 	id="$(jq -r '.id' <<< "$step_json")"
+	kind="$(jq -r '.kind // empty' <<< "$step_json")"
 	prompt_rel="$(jq -r '.prompt // empty' <<< "$step_json")"
-	tools_csv="$(desk_step_allowed_tools "$step_json")"
 	connector="$(jq -r '.connector // false' <<< "$step_json")"
 	timeout="$(jq -r '.timeout // 300' <<< "$step_json")"
 	# A step's own `max_budget_usd`, falling back to the generic default
@@ -399,14 +413,35 @@ desk_step_model_call() {
 		cp -R "$seed_dir"/. "$call_scratch"/ 2> /dev/null || true
 	fi
 
+	# The scratch dir a judge/close call's Read is scoped to: whatever its
+	# prompt's own {{scratch}} placeholder resolves to below, computed the
+	# same way — call_scratch, its actual cwd, UNLESS the caller already
+	# set its own (desk_step_close's own per-session seed dir, which
+	# persists past this call and is what its prompt is actually pointed
+	# at). These must always agree, or a scoped Read can't reach what the
+	# prompt just told the model to read.
+	local effective_scratch
+	effective_scratch="$(jq -r '.scratch // empty' <<< "$placeholders_json")"
+	[ -n "$effective_scratch" ] || effective_scratch="$call_scratch"
+	tools_csv="$(desk_step_allowed_tools "$step_json" "$effective_scratch")"
+
+	# The same judge/close-and-has-Read condition desk_step_allowed_tools
+	# checks, so the deny hook's own --scratch backstop (deny-unlisted-
+	# tool.sh) gets wired up for exactly the calls whose --allowedTools
+	# just got a Read(...) glob, never trusting that glob alone.
+	local hook_scratch=""
+	if { [ "$kind" = "judge" ] || [ "$kind" = "close" ]; } \
+		&& jq -e '(.tools // []) | index("Read")' > /dev/null 2>&1 <<< "$step_json"; then
+		hook_scratch="$effective_scratch"
+	fi
+
 	local prompt_file="$call_scratch/prompt.txt"
 	if [ -n "$prompt_rel" ]; then
 		# `scratch` is filled in here, generically, for any prompt that
 		# references it: call_scratch is exactly the cwd desk_call_model is
 		# about to run in (below), so it's the one universally-correct value
-		# — UNLESS the caller already set its own (desk_step_close's own
-		# per-session seed dir, which persists past this call and is what its
-		# prompt is actually pointed at; see that function's own comment).
+		# — UNLESS the caller already set its own (see effective_scratch
+		# just above).
 		local full_placeholders
 		full_placeholders="$(jq -c --arg scratch "$call_scratch" \
 			'if has("scratch") then . else . + {scratch: $scratch} end' <<< "$placeholders_json")"
@@ -425,7 +460,7 @@ desk_step_model_call() {
 			pinned_args_file="$call_scratch/pinned-args.json"
 			printf '%s' "$pinned_args_json" > "$pinned_args_file"
 		fi
-		settings_arg="$(desk_write_deny_hook_settings "$call_scratch" "$pinned_args_file" $tools_arr)"
+		settings_arg="$(desk_write_deny_hook_settings "$call_scratch" "$pinned_args_file" "$hook_scratch" $tools_arr)"
 	else
 		# A non-connector call whose tools need an MCP server (e.g. T's
 		# ticket search) supplies its own --mcp-config via the
@@ -438,6 +473,16 @@ desk_step_model_call() {
 		if [ -n "$mcp_config" ]; then
 			mcp_config="$(desk_prompt_path "$mcp_config")"
 			strict_mcp="true"
+		fi
+		# A restricted call otherwise gets no --settings at all (it needs
+		# none: --allowedTools plus --permission-mode dontAsk already do
+		# the job) — except a judge/close call whose Read is scoped above,
+		# which still gets this hook wired in as that scoping's own second
+		# layer.
+		if [ -n "$hook_scratch" ]; then
+			local tools_arr
+			tools_arr="$(jq -r '(.tools // [])[]' <<< "$step_json")"
+			settings_arg="$(desk_write_deny_hook_settings "$call_scratch" "" "$hook_scratch" $tools_arr)"
 		fi
 	fi
 

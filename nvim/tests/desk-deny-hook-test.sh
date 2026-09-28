@@ -37,6 +37,48 @@ echo '{"tool_name":"mcp__claude_ai_Gmail__unlabel_thread","tool_input":{"threadI
 assert_eq "denied (exit 2), not fail-open" "2" "$rc"
 
 echo
+echo "=== --scratch: a judge/close call's own second layer under its scoped Read(...) --allowedTools ==="
+scratch_dir="$ROOT/call-scratch"
+mkdir -p "$scratch_dir/sub"
+printf 'in scope\n' > "$scratch_dir/notes.md"
+printf 'in scope, nested\n' > "$scratch_dir/sub/nested.md"
+outside_dir="$ROOT/outside"
+mkdir -p "$outside_dir"
+printf 'out of scope\n' > "$outside_dir/secret.txt"
+
+rc=0
+jq -cn --arg fp "$scratch_dir/notes.md" '{tool_name:"Read",tool_input:{file_path:$fp}}' \
+	| "$HOOK" --scratch "$scratch_dir" -- Read > /dev/null 2>&1 || rc=$?
+assert_eq "a Read inside the scratch dir is allowed" "0" "$rc"
+
+rc=0
+jq -cn --arg fp "$scratch_dir/sub/nested.md" '{tool_name:"Read",tool_input:{file_path:$fp}}' \
+	| "$HOOK" --scratch "$scratch_dir" -- Read > /dev/null 2>&1 || rc=$?
+assert_eq "a Read of a nested file inside the scratch dir is allowed" "0" "$rc"
+
+rc=0
+out="$(jq -cn --arg fp "$outside_dir/secret.txt" '{tool_name:"Read",tool_input:{file_path:$fp}}' \
+	| "$HOOK" --scratch "$scratch_dir" -- Read 2>&1)" || rc=$?
+assert_eq "a Read outside the scratch dir is denied" "2" "$rc"
+printf '%s\n' "$out" | grep -q "outside this call's scratch dir" \
+	&& ok "the denial names why" || bad "denial message doesn't explain why (got: $out)"
+
+rc=0
+jq -cn --arg fp "$scratch_dir/../outside/secret.txt" '{tool_name:"Read",tool_input:{file_path:$fp}}' \
+	| "$HOOK" --scratch "$scratch_dir" -- Read > /dev/null 2>&1 || rc=$?
+assert_eq "a path only string-prefixed with the scratch dir (../ escape) is still denied" "2" "$rc"
+
+rc=0
+jq -cn '{tool_name:"Read",tool_input:{}}' \
+	| "$HOOK" --scratch "$scratch_dir" -- Read > /dev/null 2>&1 || rc=$?
+assert_eq "a Read with no file_path at all is denied, not silently allowed" "2" "$rc"
+
+rc=0
+echo '{"tool_name":"Bash","tool_input":{"command":"echo hi"}}' \
+	| "$HOOK" --scratch "$scratch_dir" -- Read Bash > /dev/null 2>&1 || rc=$?
+assert_eq "--scratch never restricts a non-Read tool that's on the allowlist" "0" "$rc"
+
+echo
 echo "=== desk_write_deny_hook_settings: a path with a space quotes correctly ==="
 export DESK_STATE_DIR="$ROOT/state"
 # shellcheck source=../../claude/desk-lib/common.sh
@@ -49,7 +91,7 @@ mkdir -p "$spacey_dir"
 pinned_file="$spacey_dir/pinned args.json"
 jq -n '[{threadId: "t1", labelIds: ["UNREAD"]}]' > "$pinned_file"
 
-settings_path="$(desk_write_deny_hook_settings "$spacey_dir" "$pinned_file" mcp__claude_ai_Gmail__unlabel_thread)"
+settings_path="$(desk_write_deny_hook_settings "$spacey_dir" "$pinned_file" "" mcp__claude_ai_Gmail__unlabel_thread)"
 hook_cmd="$(jq -r '.hooks.PreToolUse[0].hooks[0].command' "$settings_path")"
 
 denied_rc=0
@@ -65,6 +107,23 @@ mismatched_rc=0
 echo '{"tool_name":"mcp__claude_ai_Gmail__unlabel_thread","tool_input":{"threadId":"other","labelIds":["UNREAD"]}}' \
 	| bash -c "$hook_cmd" > /dev/null 2>&1 || mismatched_rc=$?
 assert_eq "a tool_input not in the pinned set is still denied despite the space in the path" "2" "$mismatched_rc"
+
+echo
+echo "=== desk_write_deny_hook_settings also quotes a spacey --scratch dir correctly ==="
+scratch_settings_path="$(desk_write_deny_hook_settings "$spacey_dir" "" "$spacey_dir" Read)"
+scratch_hook_cmd="$(jq -r '.hooks.PreToolUse[0].hooks[0].command' "$scratch_settings_path")"
+
+in_scope_rc=0
+jq -cn --arg fp "$spacey_dir/pinned args.json" '{tool_name:"Read",tool_input:{file_path:$fp}}' \
+	| bash -c "$scratch_hook_cmd" > /dev/null 2>&1 || in_scope_rc=$?
+assert_eq "a Read inside the spacey scratch dir is still allowed" "0" "$in_scope_rc"
+
+outside_file="$ROOT/elsewhere.txt"
+printf 'not in the spacey scratch dir\n' > "$outside_file"
+out_of_scope_rc=0
+jq -cn --arg fp "$outside_file" '{tool_name:"Read",tool_input:{file_path:$fp}}' \
+	| bash -c "$scratch_hook_cmd" > /dev/null 2>&1 || out_of_scope_rc=$?
+assert_eq "a Read outside the spacey scratch dir is still denied" "2" "$out_of_scope_rc"
 
 echo
 echo "=== desk_step_model_call: a connector call passes --tools, not just --allowedTools ==="
