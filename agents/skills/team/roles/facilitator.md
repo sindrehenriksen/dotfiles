@@ -111,7 +111,7 @@ and therefore defended rather than examined.
    what specifically blocks it.
 3. **Iterate shallow** until the direction holds from every side.
    Several fast round-trips beat one deep pass each.
-4. **Only then go deep.**
+4. **Only then, and once the owner has seen the shape, go deep.**
 
 Send back any deep artifact produced in steps 1–2.
 

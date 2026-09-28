@@ -74,7 +74,8 @@ reasonable, is theirs.
 When the ask names the shape, forward it as scope and hold it.
 Straying is a checkpoint, not a judgement call — especially when the
 reason is good. When the ask is open ("improve X"), the team finds its
-own way, and still shows the shape before building.
+own way, and shows the owner the shallow shape before going deep, not
+only before building.
 
 **Simplicity is a constraint, not a preference**, and it binds every
 role — product and UX as much as technical. A tier, a mode, a second
