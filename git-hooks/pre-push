@@ -3,6 +3,16 @@
 # Drop git's positional args (remote name + URL) — pre-commit doesn't
 # accept them and would error. Hooks needing ref context are uncommon;
 # use always_run: true on pre-push hooks that should fire regardless.
+#
+# Before any of that: the generic denylist check (desk-denylist-check.sh).
+# Git's pre-push protocol hands every updated ref's own line on stdin, and
+# stdin is a pipe (readable once), so it's slurped here and replayed to
+# both consumers rather than each trying to read it directly.
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+input="$(cat)"
+
+printf '%s\n' "$input" | "$here/desk-denylist-check.sh" || exit 1
+
 if [ -f .pre-commit-config.yaml ] && command -v pre-commit &>/dev/null; then
-    pre-commit run --hook-stage pre-push
+    printf '%s\n' "$input" | pre-commit run --hook-stage pre-push
 fi
