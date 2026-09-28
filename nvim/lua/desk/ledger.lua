@@ -10,9 +10,12 @@
 -- proposal's `target` (design.md §9(e) / the morning-J prompt): `"top"` |
 -- `{under=...}` | `{after=...}` | `{at=...}`, or — for `merge`/`move` — a
 -- two-element list of these. desk.block.parse_target turns it into this
--- module's internal anchor pair.
-local block = require("desk.block")
+-- module's internal anchor pair; only desk.apply and desk.round still
+-- resolve it (at lay-in, and via desk.round.remap_ranges on carry-forward)
+-- — a laid-in item's ONGOING state is never re-resolved from its anchor,
+-- per design.md's "Review rounds" section, below.
 local git = require("desk.git")
+local round = require("desk.round")
 local snippet = require("desk.snippet")
 
 local M = {}
@@ -134,186 +137,66 @@ end
 
 --- Derives every laid-in item's state ("pending" / "accepted" /
 --- "declined") plus every other item's ("queued" / "postponed") in one
---- pass.
+--- pass — by CONTENT, via desk.round, never by re-resolving an anchor
+--- against `head_lines` (design.md's "Review rounds" section, which
+--- replaced the positional approach this function used to take: his own
+--- editing elsewhere in the file could shift an anchor's resolved position
+--- without moving the item itself, misreading the result).
 ---
---- `head_lines` is his last commit (HEAD) for the target file — the one
---- stable reference every anchor is resolved against. It has to be HEAD
---- rather than the current index: an `edit`/`remove`/move-leaving anchor
---- quotes the item's own `before`, which is exactly the text that
---- disappears from the index once *that same item* gets accepted, so
---- resolving it against a possibly-already-mutated index would fail on
---- the one item whose state most needs telling apart from "unresolved".
+--- `file` selects which of the ledger's round records (desk.round.latest)
+--- to derive laid-in items against — a round is per file, never global.
 --- `index_lines` and `worktree_lines` are the current (possibly mutated)
---- content, used only for the presence checks.
+--- content; desk.round.derive maps each laid-in item's own round-recorded
+--- range into both independently via a content diff against the round's
+--- own snapshot text.
 ---
---- Not-laid-in items need no positional work. Laid-in items are resolved
---- into one or two *location events* — most kinds have a single location,
---- but `move`/`merge` have two (the leaving anchor, `before`-shaped, and
---- the landing anchor, `after`-shaped), each with its own presence check
---- and its own contribution to the running offsets. All events (across
---- every laid-in item) are processed in one position-sorted pass, tracking
---- two running line-count offsets — one for the index, one for the
---- worktree — since they diverge from `head_lines` differently: the
---- worktree carries every laid-in item's content inline, the index only
---- what's been accepted. This is the same reasoning as
---- desk.histext.compute, applied to two locations where a single item
---- needs it, and to every laid-in item at once.
+--- A resolved (frozen — desk.round.resolved_states, written at commit by
+--- desk.review.commit_his_text) item's state is trusted outright, never
+--- re-derived against content that may since have moved past what its
+--- round entry quotes.
 ---
 --- Returns id -> state, plus the items and last-key tables (so a caller
 --- doesn't have to re-read the ledger for those), plus id -> a list of
---- { line, count } worktree ranges (1-indexed; count 0 for a removal or a
---- move's leaving side — a gap, not a line) for every "pending" item only
---- — the ones a review key's whole-item action (accept/decline/not-now)
---- can actually land on. A move/merge's list has two entries.
-function M.derive_all(repo_dir, head_lines, index_lines, worktree_lines)
+--- { line, count, role } worktree ranges (1-indexed; count 0 for a removal
+--- or a move's leaving side — a gap, not a line) for every "pending" item
+--- only — the ones a review key's whole-item action (accept/decline/
+--- not-now) can actually land on. A move/merge's list has two entries.
+function M.derive_all(repo_dir, file, index_lines, worktree_lines)
 	local records = M.read(repo_dir)
 	local items = M.items_by_id(records)
 	local laid_in, last_key = M.laid_in_and_keys(records)
+	local resolved = round.resolved_states(records)
+	local current_round = round.latest(records, file)
 
 	local states = {}
-	local laid_in_items = {}
-	for id, item in pairs(items) do
+	for id in pairs(items) do
 		if not laid_in[id] then
 			states[id] = "queued" -- never laid in, whatever any key record says
-		else
-			laid_in_items[#laid_in_items + 1] = item
 		end
 	end
 
-	-- One event per single-location item; two (leave, land) for move/merge.
-	--
-	-- "land"/"edit" (after-shaped) events resolve via desk.block's
-	-- find_after_anchor, falling back to the top of the file the same way
-	-- desk.apply's own initial lay-in does when the anchor can't be
-	-- resolved at all — so an item apply.apply_file actually landed on top
-	-- (its anchor having gone missing) re-derives its state and range at
-	-- that SAME position on every later run, rather than going stuck
-	-- "pending" with no range (unreachable by the review keys, virtual
-	-- text included) forever after. "leave"/"removal" (before-shaped)
-	-- events deliberately keep the plain nil: their absence is a genuine
-	-- content conflict, not a landing case — see apply.lua's own
-	-- resolve_leave for the same split.
-	local events = {}
-	for _, item in ipairs(laid_in_items) do
-		local leave_anchor, land_anchor = block.parse_target(item.anchor)
-		if item.kind == "move" or item.kind == "merge" then
-			events[#events + 1] =
-				{ item = item, role = "leave", pos = leave_anchor and block.find_anchor(head_lines, leave_anchor) }
-			events[#events + 1] = { item = item, role = "land", pos = block.find_after_anchor(head_lines, land_anchor) }
-		elseif item.kind == "remove" then
-			events[#events + 1] =
-				{ item = item, role = "removal", pos = leave_anchor and block.find_anchor(head_lines, leave_anchor) }
-		else
-			events[#events + 1] = { item = item, role = "edit", pos = block.find_after_anchor(head_lines, land_anchor) }
-		end
-	end
-	table.sort(events, function(a, b)
-		return (a.pos or math.huge) < (b.pos or math.huge)
-	end)
-
-	-- Per-item-id partial results from each of its events, combined once
-	-- every event for that id has been seen. `ranges` records where a
-	-- still-pending event's content currently sits in the worktree (1-
-	-- indexed line, count of lines) — a zero-count entry for a removal or
-	-- a move's leaving side, since there's nothing left to select there,
-	-- only the gap where gitsigns' deleted-lines display renders it.
-	local partial = {}
-	local ranges = {}
-	local idx_offset, wt_offset = 0, 0
-
-	for _, e in ipairs(events) do
-		local item, pos, role = e.item, e.pos, e.role
-		partial[item.id] = partial[item.id] or {}
-		if pos == nil then
-			partial[item.id][role] = "pending" -- can't resolve; conservatively still needs review
-		else
-			local before_lines = snippet.split_lines(item.before)
-			local after_lines = snippet.split_lines(item.after)
-			local idx_pos, wt_pos = pos + idx_offset, pos + wt_offset
-
-			if role == "removal" then
-				-- Purely `before`-shaped: `after` is empty at this location.
-				local before_in_index = snippet.lines_match_at(index_lines, idx_pos + 1, before_lines)
-				local before_in_wt = snippet.lines_match_at(worktree_lines, wt_pos + 1, before_lines)
-				if before_in_index and not before_in_wt then
-					partial[item.id].removal = "pending"
-					ranges[item.id] = ranges[item.id] or {}
-					table.insert(ranges[item.id], { line = wt_pos + 1, count = 0 })
-					wt_offset = wt_offset - #before_lines
-				elseif (not before_in_index) and (not before_in_wt) then
-					partial[item.id].removal = "accepted"
-					idx_offset = idx_offset - #before_lines
-					wt_offset = wt_offset - #before_lines
-				else
-					partial[item.id].removal = "declined" -- reset: content's back, no length change
-				end
-			elseif role == "leave" then
-				-- A move/merge's leaving side: `before`-shaped, same as a
-				-- removal, but its own partial slot (combined with "land").
-				local before_in_index = snippet.lines_match_at(index_lines, idx_pos + 1, before_lines)
-				local before_in_wt = snippet.lines_match_at(worktree_lines, wt_pos + 1, before_lines)
-				if before_in_index and not before_in_wt then
-					partial[item.id].leave = "pending"
-					ranges[item.id] = ranges[item.id] or {}
-					table.insert(ranges[item.id], { line = wt_pos + 1, count = 0 })
-					wt_offset = wt_offset - #before_lines
-				elseif (not before_in_index) and (not before_in_wt) then
-					partial[item.id].leave = "accepted"
-					idx_offset = idx_offset - #before_lines
-					wt_offset = wt_offset - #before_lines
-				else
-					partial[item.id].leave = "declined"
-				end
-			else
-				-- "edit" (single-location add/edit/new/link) or a move/
-				-- merge's "land": `after`-shaped. A "land" position has
-				-- nothing of head's at that spot (a pure insertion point),
-				-- so only `after` contributes there; an "edit" replaces
-				-- `before` in place, so the net change is after-minus-
-				-- before (0 for add/new/link, whose `before` is empty).
-				local after_in_index = snippet.lines_match_at(index_lines, idx_pos + 1, after_lines)
-				local after_in_wt = snippet.lines_match_at(worktree_lines, wt_pos + 1, after_lines)
-				local head_len = (role == "edit") and #before_lines or 0
-				local state
-				if after_in_wt and not after_in_index then
-					state = "pending"
-					ranges[item.id] = ranges[item.id] or {}
-					table.insert(ranges[item.id], { line = wt_pos + 1, count = #after_lines })
-					wt_offset = wt_offset + (#after_lines - head_len)
-				elseif after_in_wt and after_in_index then
-					state = "accepted"
-					idx_offset = idx_offset + (#after_lines - head_len)
-					wt_offset = wt_offset + (#after_lines - head_len)
-				elseif (not after_in_wt) and (not after_in_index) then
-					state = "declined" -- reset: no net length change vs. head here
-				else
-					state = "pending" -- unresolved drift; still needs review
-				end
-				partial[item.id][role] = state
-			end
-		end
-	end
-
-	-- design.md §2 gives "postponed" no content signature of its own — a
-	-- "not now" resets an item's lines exactly like a decline does, so the
-	-- two are content-identical and only the key record (kept for exactly
-	-- this) tells them apart. A content-derived "declined" is the only
-	-- bucket a not_now key can override; pending/accepted never consult it.
-	for id, p in pairs(partial) do
-		local bucket
-		if p.removal then
-			bucket = p.removal
-		elseif p.leave and p.land then
-			bucket = (p.leave == p.land) and p.leave or "pending" -- disagreement: still needs review
-		else
-			bucket = p.edit
-		end
+	local content_states, ranges = round.derive(items, current_round, resolved, index_lines, worktree_lines)
+	for id, state in pairs(content_states) do
+		-- design.md §2 gives "postponed" no content signature of its own —
+		-- a "not now" resets an item's lines exactly like a decline does,
+		-- so the two are content-identical and only the key record (kept
+		-- for exactly this) tells them apart. A content-derived "declined"
+		-- is the only bucket a not_now key can override; pending/accepted
+		-- never consult it.
+		local bucket = state
 		if bucket == "declined" and last_key[id] and last_key[id].action == "not_now" then
 			bucket = "postponed"
 		end
 		states[id] = bucket
-		if bucket ~= "pending" then
-			ranges[id] = nil -- only pending items are actionable; drop stale/disagreeing ranges
+	end
+
+	-- A laid-in item with no round entry at all (a from-scratch ledger
+	-- predating this module, or one the round otherwise dropped) is treated
+	-- the same conservative way an unresolvable anchor used to be: still
+	-- needs review, never silently dropped.
+	for id in pairs(laid_in) do
+		if states[id] == nil then
+			states[id] = "pending"
 		end
 	end
 
@@ -412,9 +295,9 @@ end
 --- {item = <item record>, reason = "declined" | "resolved_without_key"},
 --- restorable as a pending suggestion again (design.md §2, "A 'declined
 --- recently' listing").
-function M.declined_recently(repo_dir, head_lines, index_lines, worktree_lines, days)
+function M.declined_recently(repo_dir, file, index_lines, worktree_lines, days)
 	local cutoff = os.time() - days * 86400
-	local states, items, last_key = M.derive_all(repo_dir, head_lines, index_lines, worktree_lines)
+	local states, items, last_key = M.derive_all(repo_dir, file, index_lines, worktree_lines)
 	local out = {}
 	for id, item in pairs(items) do
 		local state = states[id]

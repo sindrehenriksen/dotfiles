@@ -20,6 +20,7 @@ local git = require("desk.git")
 local ledger = require("desk.ledger")
 local review = require("desk.review")
 local histext = require("desk.histext")
+local round = require("desk.round")
 local tokens = require("desk.tokens")
 local annotate = require("desk.annotate")
 
@@ -102,30 +103,41 @@ elseif verb == "commit-his-text" then
 	local out = {}
 	for i = 3, #args do
 		local file = args[i]
-		local head = review.head_lines(repo, file)
 		local pending_ids = {}
+		local to_freeze = {}
 		local sha, results, err = histext.write_to_index(repo, file, function()
 			local index_lines = snippet.split_lines(git.index_content(repo, file) or "")
 			local worktree_lines = snippet.split_lines(read_file(repo .. "/" .. file))
-			local states, items = ledger.derive_all(repo, head, index_lines, worktree_lines)
+			local states, items, _, ranges = ledger.derive_all(repo, file, index_lines, worktree_lines)
+			local resolved = round.resolved_states(ledger.read(repo))
 			local pending_items = {}
 			pending_ids = {}
+			to_freeze = {}
 			for id, item in pairs(items) do
-				if states[id] == "pending" then
+				local state = states[id]
+				if state == "pending" then
 					table.insert(pending_items, item)
 					table.insert(pending_ids, id)
+				elseif (state == "accepted" or state == "declined") and not resolved[id] then
+					table.insert(to_freeze, { id = id, state = state })
 				end
 			end
 			return {
 				worktree_lines = worktree_lines,
-				index_lines = index_lines,
 				pending_items = pending_items,
-				head_lines = head,
+				pending_ranges = ranges,
 			}
 		end)
 		if not sha then
 			out[#out + 1] = { file = file, error = err }
 		else
+			if #to_freeze > 0 then
+				local freeze_records = {}
+				for _, f in ipairs(to_freeze) do
+					freeze_records[#freeze_records + 1] = round.build_resolved(f.id, f.state)
+				end
+				ledger.append_many(repo, freeze_records)
+			end
 			local head_blob_ok, head_blob = git.run(repo, { "rev-parse", "--verify", "--quiet", "HEAD:" .. file })
 			local changed = not (head_blob_ok and vim.trim(head_blob) == sha)
 			ledger.write_pending_snapshot(ledger.pending_snapshot_path(repo, file), head_sha, pending_ids)
@@ -149,10 +161,9 @@ elseif verb == "ledger-derive" then
 	if not repo or not file then
 		fail("usage: nvim -l nvim/lua/desk/cli.lua ledger-derive <repo> <file>")
 	end
-	local head = review.head_lines(repo, file)
 	local index_lines = snippet.split_lines(git.index_content(repo, file) or "")
 	local worktree_lines = snippet.split_lines(read_file(repo .. "/" .. file))
-	local states, items = ledger.derive_all(repo, head, index_lines, worktree_lines)
+	local states, items = ledger.derive_all(repo, file, index_lines, worktree_lines)
 	print_json({ states = states, items = items })
 	os.exit(0)
 elseif verb == "ledger-classify" then
@@ -183,10 +194,9 @@ elseif verb == "ledger-classify" then
 	if not repo or not file then
 		fail("usage: nvim -l nvim/lua/desk/cli.lua ledger-classify <repo> <file>")
 	end
-	local head = review.head_lines(repo, file)
 	local index_lines = snippet.split_lines(git.index_content(repo, file) or "")
 	local worktree_lines = snippet.split_lines(read_file(repo .. "/" .. file))
-	local states, items, last_key = ledger.derive_all(repo, head, index_lines, worktree_lines)
+	local states, items, last_key, ranges = ledger.derive_all(repo, file, index_lines, worktree_lines)
 
 	local snap = ledger.read_pending_snapshot(ledger.pending_snapshot_path(repo, file))
 	local prev_pending_ids = (snap and snap.items) or {}
@@ -198,7 +208,7 @@ elseif verb == "ledger-classify" then
 			table.insert(pending_items, item)
 		end
 	end
-	local _, histext_results = histext.compute(worktree_lines, index_lines, pending_items, head)
+	local _, histext_results = histext.compute(worktree_lines, pending_items, ranges)
 	local waiting_edits = {}
 	for id, result in pairs(histext_results) do
 		if result == "waiting_edit" then
@@ -335,10 +345,9 @@ elseif verb == "notes-diff" then
 		return content
 	end
 
-	local head_lines = review.head_lines(repo, file)
 	local index_lines = snippet.split_lines(git.index_content(repo, file) or "")
 	local worktree_lines = snippet.split_lines(read_worktree_or_empty(repo .. "/" .. file))
-	local states, items, last_key = ledger.derive_all(repo, head_lines, index_lines, worktree_lines)
+	local states, items, last_key = ledger.derive_all(repo, file, index_lines, worktree_lines)
 
 	local exclude_add, exclude_remove = {}, {}
 	for id, item in pairs(items) do

@@ -6,6 +6,7 @@
 local review = require("desk.review")
 local ledger = require("desk.ledger")
 local apply = require("desk.apply")
+local round = require("desk.round")
 local git = require("desk.git")
 local snippet = require("desk.snippet")
 local git_safety_here = debug.getinfo(1, "S").source:sub(2):match("^(.*)/[^/]+$") or "."
@@ -102,6 +103,30 @@ local function open_notes(repo)
 	return vim.api.nvim_get_current_buf()
 end
 
+--- Lays `items` into `bufnr` by hand — like desk.review.review() itself,
+--- but without the surrounding commit-his-text/proposal-read machinery —
+--- for a test that wants precise, deterministic control over exactly what
+--- is "already laid in" before it starts poking at accept/decline/not-now.
+--- Writes the buffer, a "laid_in" ledger record, and (what a hand-rolled
+--- desk.apply.apply_file call used to skip, before desk.round existed) the
+--- "round" record every read now derives state from — desk.round.build
+--- with the very ranges desk.apply.apply_file itself returns, so this is
+--- never a second, drifting implementation of what review() does.
+local function lay_in_by_hand(repo, bufnr, base_lines, items)
+	local new_lines, results, _, ranges = apply.apply_file(base_lines, items)
+	vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, new_lines)
+	vim.cmd("noautocmd write")
+	local laid_in_ids = {}
+	for _, item in ipairs(items) do
+		if results[item.id] == "applied" then
+			table.insert(laid_in_ids, item.id)
+		end
+	end
+	ledger.append(repo, round.build("notes.md", new_lines, items, ranges))
+	ledger.append(repo, { type = "laid_in", at = os.time(), proposal = "seed", items = laid_in_ids })
+	return new_lines
+end
+
 local function git_log_count(repo)
 	local ok_log, out = git.run(repo, { "rev-list", "--count", "HEAD" })
 	return ok_log and tonumber(vim.trim(out)) or 0
@@ -171,12 +196,8 @@ do
 		after = "  a pending add",
 	}
 	seed_proposal(repo, { move_item, add_item })
-	ledger.append(repo, { type = "laid_in", at = os.time(), proposal = "seed", items = { "mv1", "add1" } })
-
-	local laid = apply.apply_file(base, { move_item, add_item })
 	local bufnr = open_notes(repo)
-	vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, laid)
-	vim.cmd("noautocmd write")
+	lay_in_by_hand(repo, bufnr, base, { move_item, add_item })
 
 	-- His own edit, unrelated to either suggestion.
 	local edited = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
@@ -249,11 +270,8 @@ do
 	local repo = new_repo(base)
 	local item = { id = "nn1", file = "notes.md", kind = "add", target = { under = "Alpha" }, before = "", after = "  suggestion" }
 	seed_proposal(repo, { item })
-	ledger.append(repo, { type = "laid_in", at = os.time(), proposal = "seed", items = { "nn1" } })
-	local laid = apply.apply_file(base, { item })
 	local bufnr = open_notes(repo)
-	vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, laid)
-	vim.cmd("noautocmd write")
+	local laid = lay_in_by_hand(repo, bufnr, base, { item })
 
 	local target_line
 	for i, l in ipairs(laid) do
@@ -264,10 +282,9 @@ do
 	local nn_ok = review.not_now(bufnr, target_line)
 	assert_true("not_now succeeds", nn_ok)
 
-	local head = review.head_lines(repo, "notes.md")
 	local idx = snippet.split_lines(git.index_content(repo, "notes.md") or "")
 	local wt = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-	local states = ledger.derive_all(repo, head, idx, wt)
+	local states = ledger.derive_all(repo, "notes.md", idx, wt)
 	assert_eq("the item is postponed, not declined", "postponed", states["nn1"])
 end
 
@@ -281,16 +298,8 @@ do
 	local early_item = { id = "early1", file = "notes.md", kind = "add", target = { under = "Alpha" }, before = "", after = "  early add", headline = "early in-place" }
 	local postponed_item = { id = "post1", file = "notes.md", kind = "add", target = { under = "Beta" }, before = "", after = "  postponed add", headline = "postponed one" }
 	seed_proposal(repo, { news_item, late_item, early_item, postponed_item })
-	ledger.append(repo, {
-		type = "laid_in",
-		at = os.time(),
-		proposal = "seed",
-		items = { "news1", "late1", "early1", "post1" },
-	})
-	local laid = apply.apply_file(base, { news_item, late_item, early_item, postponed_item })
 	local bufnr = open_notes(repo)
-	vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, laid)
-	vim.cmd("noautocmd write")
+	lay_in_by_hand(repo, bufnr, base, { news_item, late_item, early_item, postponed_item })
 
 	-- Postpone one of the four before building the overview.
 	local post_line
@@ -327,13 +336,10 @@ do
 	local item1 = { id = "j1", file = "notes.md", kind = "add", target = { under = "Alpha" }, before = "", after = "  jump target one", headline = "one" }
 	local item2 = { id = "j2", file = "notes.md", kind = "add", target = { under = "Beta" }, before = "", after = "  jump target two", headline = "two" }
 	seed_proposal(repo, { item1, item2 })
-	ledger.append(repo, { type = "laid_in", at = os.time(), proposal = "seed", items = { "j1", "j2" } })
-	local laid = apply.apply_file(base, { item1, item2 })
 
 	vim.cmd("tabnew")
 	local notes_buf = open_notes(repo)
-	vim.api.nvim_buf_set_lines(notes_buf, 0, -1, false, laid)
-	vim.cmd("noautocmd write")
+	lay_in_by_hand(repo, notes_buf, base, { item1, item2 })
 	local notes_win = vim.api.nvim_get_current_win()
 	vim.api.nvim_win_set_cursor(notes_win, { 1, 0 }) -- a known starting position
 
@@ -507,8 +513,13 @@ do
 end
 
 print()
-print("=== D6 fix: a postponed item re-proposed by a newer pass IS laid in again ===")
+print("=== D6 fix: a postponed item is laid in again on its postponed state alone ===")
 do
+	-- design.md's "Review rounds" section: no `postponed_from` marker to
+	-- gate on any more — whether the runner re-proposed it because of a
+	-- newer pass is the runner's own call (git-ops.sh's supersede rule);
+	-- from review()'s own side, any item the current proposal still names
+	-- and the ledger derives as "postponed" is laid in again, full stop.
 	local repo = new_repo({ "Section A", "  detail" })
 	seed_proposal(repo, {
 		{
@@ -531,37 +542,36 @@ do
 			end
 		end
 	end
+	local not_now_at = os.time()
 	assert(review.not_now(bufnr, line_of("  postpone me")))
 
-	-- Re-pressing review right away must NOT bring it back: nothing new
-	-- proposed it, it's simply the same still-postponed item.
+	-- Re-pressing review right away, against the SAME still-standing
+	-- proposal (nothing new from the runner), lays it in again.
 	local ok_same, result_same = review.review(bufnr)
 	assert_true("review() succeeds against the unchanged proposal", ok_same)
-	assert_eq("the still-postponed item is not re-laid without a newer pass", 0, result_same and result_same.laid_in)
-	assert_eq(
-		"still absent from the buffer",
-		nil,
-		line_of("  postpone me")
-	)
-
-	-- A newer pass re-proposes the SAME id, marked as superseding the
-	-- earlier postponement.
-	seed_proposal(repo, {
-		{
-			id = "pp1",
-			file = "notes.md",
-			kind = "add",
-			target = { under = "Section A" },
-			before = "",
-			after = "  postpone me",
-			headline = "postpone me",
-			postponed_from = "yesterday",
-		},
-	})
-	local ok_reproposed, result_reproposed = review.review(bufnr)
-	assert_true("review() succeeds against the newer proposal", ok_reproposed)
-	assert_eq("the re-proposed item IS laid in", 1, result_reproposed and result_reproposed.laid_in)
+	assert_eq("the postponed item is laid in again", 1, result_same and result_same.laid_in)
 	assert_true("its content is back in the buffer", line_of("  postpone me") ~= nil)
+
+	local st = review.read_state(bufnr)
+	review.refresh_virtual_text(bufnr)
+	local marks = vim.api.nvim_buf_get_extmarks(bufnr, review.ns, 0, -1, { details = true })
+	local found_postponed_text
+	for _, m in ipairs(marks) do
+		local text = m[4].virt_text[1][1]
+		if text:find("postponed from ", 1, true) then
+			found_postponed_text = text
+		end
+	end
+	assert_true(
+		"its virtual text says 'postponed from <day>', read from the not_now key's own time (never a stored field)",
+		found_postponed_text ~= nil
+	)
+	assert_eq(
+		"that day matches the not_now key's own recorded time",
+		os.date("%A", not_now_at),
+		found_postponed_text and found_postponed_text:match("postponed from (%a+)")
+	)
+	assert_true("desk.round tracked it (not derived from any 'postponed_from' field)", st ~= nil)
 end
 
 print()
@@ -744,6 +754,174 @@ do
 	local qf2 = vim.fn.getqflist({ title = 0 })
 	assert_eq("the declined-recently title is set", review.DECLINED_TITLE, qf2.title)
 	vim.cmd("cclose")
+end
+
+print()
+print("=== D6 round fix: his own line added above a pending item, then a commit ===")
+do
+	-- The bug design.md names: his own line-count change above a pending
+	-- item used to shift its anchor's resolved position without moving the
+	-- item, misreading the result as "declined" — and the next commit then
+	-- kept his stray edit instead of reverting the still-pending item.
+	local repo = new_repo({ "Section A", "  detail" })
+	seed_proposal(repo, {
+		{ id = "p1", file = "notes.md", kind = "add", target = { under = "Section A" }, before = "", after = "  a suggestion" },
+	})
+	local bufnr = open_notes(repo)
+	assert(review.review(bufnr))
+
+	local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+	table.insert(lines, 1, "his own new line, added above everything")
+	vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
+	vim.cmd("noautocmd write")
+
+	local states = review.read_state(bufnr).states
+	assert_eq("still pending — his own edit above it never shifts it out of place", "pending", states["p1"])
+
+	assert(review.commit_his_text(bufnr))
+	local head_lines = review.head_lines(repo, "notes.md")
+	assert_true("his new line is committed", vim.tbl_contains(head_lines, "his own new line, added above everything"))
+	assert_true("the still-pending suggestion is reverted out of HEAD, not baked in", not vim.tbl_contains(head_lines, "  a suggestion"))
+end
+
+print()
+print("=== D6 round fix: accepting a news item, then committing with others still pending ===")
+do
+	local repo = new_repo({ "Section A", "  detail" })
+	seed_proposal(repo, {
+		{ id = "news1", file = "notes.md", kind = "new", target = "top", before = "", after = "NEWS ITEM", headline = "news" },
+		{ id = "add1", file = "notes.md", kind = "add", target = { under = "Section A" }, before = "", after = "  a pending add", headline = "add" },
+	})
+	local bufnr = open_notes(repo)
+	assert(review.review(bufnr))
+
+	local function line_of(text)
+		for i, l in ipairs(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)) do
+			if l == text then
+				return i
+			end
+		end
+	end
+	assert(review.accept(bufnr, line_of("NEWS ITEM")))
+	assert(review.commit_his_text(bufnr))
+
+	local head_lines = review.head_lines(repo, "notes.md")
+	assert_true("the accepted news item is committed", vim.tbl_contains(head_lines, "NEWS ITEM"))
+	assert_true("the still-pending add is reverted, not swept in with it", not vim.tbl_contains(head_lines, "  a pending add"))
+
+	local records = ledger.read(repo)
+	local resolved
+	for _, r in ipairs(records) do
+		if r.type == "resolved" and r.id == "news1" then
+			resolved = r
+		end
+	end
+	assert_true("the commit froze the accepted item's state", resolved ~= nil)
+	assert_eq("frozen as accepted", "accepted", resolved and resolved.state)
+end
+
+print()
+print("=== D6 round fix: an accepted item still reads accepted after HEAD moves further ===")
+do
+	-- design.md: "each commit freezes resolved items ... so they are never
+	-- re-derived against a moved HEAD." Once frozen, further commits (his
+	-- own continued editing) must never flip it back.
+	local repo = new_repo({ "Section A", "  detail" })
+	seed_proposal(repo, {
+		{ id = "acc1", file = "notes.md", kind = "add", target = { under = "Section A" }, before = "", after = "  will be accepted", headline = "acc" },
+	})
+	local bufnr = open_notes(repo)
+	assert(review.review(bufnr))
+	local function line_of(text)
+		for i, l in ipairs(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)) do
+			if l == text then
+				return i
+			end
+		end
+	end
+	assert(review.accept(bufnr, line_of("  will be accepted")))
+	assert(review.commit_his_text(bufnr))
+	assert_eq("accepted right after the freezing commit", "accepted", review.read_state(bufnr).states["acc1"])
+
+	-- HEAD moves further: several of his own unrelated edits, each its own
+	-- commit, right around the accepted item's own text.
+	for i = 1, 3 do
+		local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+		table.insert(lines, 1, "unrelated edit " .. i)
+		vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
+		vim.cmd("noautocmd write")
+		assert(review.commit_his_text(bufnr))
+	end
+
+	assert_eq(
+		"still accepted after HEAD moved three commits further — frozen, never re-derived",
+		"accepted",
+		review.read_state(bufnr).states["acc1"]
+	)
+end
+
+print()
+print("=== D6 round fix: a restart (a fresh nvim -l process) then pressing review again ===")
+do
+	-- Nothing this relies on may live only in this process's own Lua
+	-- state — a restart is exactly a second `nvim -l` process reading the
+	-- same repo. Simulated here by dropping every desk.* module from
+	-- package.loaded and re-require'ing them (a fresh interpreter would
+	-- start with an empty cache the same way), then working the SAME repo
+	-- through freshly-required modules end to end.
+	local repo = new_repo({ "Section A", "  detail" })
+	seed_proposal(repo, {
+		{ id = "pp1", file = "notes.md", kind = "add", target = { under = "Section A" }, before = "", after = "  postpone me", headline = "pp" },
+	})
+	local bufnr = open_notes(repo)
+	assert(review.review(bufnr))
+	local function line_of(bn, text)
+		for i, l in ipairs(vim.api.nvim_buf_get_lines(bn, 0, -1, false)) do
+			if l == text then
+				return i
+			end
+		end
+	end
+	assert(review.not_now(bufnr, line_of(bufnr, "  postpone me")))
+
+	for name in pairs(package.loaded) do
+		if name:match("^desk%.") then
+			package.loaded[name] = nil
+		end
+	end
+	local fresh_review = require("desk.review")
+	assert(fresh_review ~= review, "a genuinely fresh module table, not the cached one")
+
+	vim.cmd("bwipeout! " .. bufnr)
+	local bufnr2 = fresh_review.repo_context and open_notes(repo) or open_notes(repo)
+	local ok2, result2 = fresh_review.review(bufnr2)
+	assert_true("review() succeeds against a freshly-required module set", ok2)
+	assert_eq("the postponed item is laid in again, read entirely from the repo", 1, result2 and result2.laid_in)
+	assert_true("its content is back", line_of(bufnr2, "  postpone me") ~= nil)
+end
+
+print()
+print("=== D6 round fix: two passes land in the proposal before any review press ===")
+do
+	local repo = new_repo({ "Section A", "  detail" })
+	seed_proposal(repo, {
+		{ id = "j1", file = "notes.md", kind = "add", target = { under = "Section A" }, before = "", after = "  from the first pass", headline = "j1" },
+	})
+	-- A second pass's own write (the runner's own merge already carries the
+	-- first pass's item forward — desk_stage_and_write_proposal — so the
+	-- SECOND proposal blob names both, same as a real second pass would).
+	seed_proposal(repo, {
+		{ id = "j1", file = "notes.md", kind = "add", target = { under = "Section A" }, before = "", after = "  from the first pass", headline = "j1" },
+		{ id = "c1", file = "notes.md", kind = "new", target = "top", before = "", after = "  from the second pass", headline = "c1" },
+	})
+
+	local bufnr = open_notes(repo)
+	local ok, result = review.review(bufnr)
+	assert_true("review() succeeds", ok)
+	assert_eq("both passes' items are laid in together, in one round", 2, result and result.laid_in)
+	local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+	assert_true("the first pass's item is there", vim.tbl_contains(lines, "  from the first pass"))
+	assert_true("the second pass's item is there too", vim.tbl_contains(lines, "  from the second pass"))
 end
 
 print()

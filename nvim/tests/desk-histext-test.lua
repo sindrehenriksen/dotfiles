@@ -12,6 +12,7 @@ local git = require("desk.git")
 local ledger = require("desk.ledger")
 local histext = require("desk.histext")
 local apply = require("desk.apply")
+local round = require("desk.round")
 
 local pass, fail = 0, 0
 local function ok(desc)
@@ -250,6 +251,25 @@ do
 		vim.tbl_contains(new_lines, "- bullet (moved, orphaned leave)")
 	)
 	assert_true("it's reported as landed on top (its leave side was the bad anchor)", landed_on_top.mv2)
+
+	-- Two items at one anchor: design.md's "Review rounds" section --
+	-- "ties at one anchor are laid in input order" — the first-listed item
+	-- reads first, top to bottom, in the result.
+	local first_item = { id = "t1", file = "notes.md", kind = "add", target = { under = "Project Beta" }, before = "", after = "  first listed" }
+	local second_item = { id = "t2", file = "notes.md", kind = "add", target = { under = "Project Beta" }, before = "", after = "  second listed" }
+	local tie_lines, tie_results, _, tie_ranges = apply.apply_file(committed, { first_item, second_item })
+	local first_line, second_line
+	for i, l in ipairs(tie_lines) do
+		if l == "  first listed" then
+			first_line = i
+		elseif l == "  second listed" then
+			second_line = i
+		end
+	end
+	assert_eq("both tied items applied", "applied", tie_results.t1)
+	assert_eq("both tied items applied (2)", "applied", tie_results.t2)
+	assert_true("the first-listed item reads first (its line comes before the second's)", first_line and second_line and first_line < second_line)
+	assert_eq("apply_file's own ranges agree: t1's range starts earlier than t2's", true, tie_ranges.t1[1].line < tie_ranges.t2[1].line)
 end
 
 print()
@@ -402,6 +422,21 @@ local function as_proposal(it)
 	}
 end
 
+-- The round the review key itself would have recorded at lay-in
+-- (design.md's "Review rounds" section): every laid-in item applied
+-- together against `committed`, plus each one's own range in the result —
+-- the baseline every later read (desk.ledger.derive_all, via desk.round)
+-- maps into the current index/worktree by content, never by re-resolving
+-- `anchor` against `committed` a second time.
+local full_laid_in_items = {}
+for _, it in ipairs(all_items) do
+	if it.id ~= "queued-1" then
+		table.insert(full_laid_in_items, as_proposal(it))
+	end
+end
+local full_laid_in_text, _, _, full_laid_in_ranges = apply.apply_file(committed, full_laid_in_items)
+assert(ledger.append(repo, round.build("notes.md", full_laid_in_text, full_laid_in_items, full_laid_in_ranges)))
+
 -- The worktree shows every laid-in suggestion that hasn't been resolved
 -- away yet: pending, accepted, removal and move. declined-1 and notnow-1
 -- were laid in too, but pressing decline/not-now reset them, so their
@@ -431,11 +466,11 @@ assert(ledger.append(repo, { type = "key", id = "declined-1", at = os.time(), ac
 assert(ledger.append(repo, { type = "key", id = "notnow-1", at = os.time(), action = "not_now" }))
 
 local records = ledger.read(repo)
-assert_eq("every appended record round-trips through the ledger", #all_items + 1 + 3, #records)
+assert_eq("every appended record round-trips through the ledger", #all_items + 1 + 1 + 3, #records)
 
 local index_lines = snippet.split_lines(git.index_content(repo, "notes.md"))
 local worktree_lines = read_worktree("notes.md")
-local states, items_by_id, last_key = ledger.derive_all(repo, committed, index_lines, worktree_lines)
+local states, items_by_id, last_key, pending_ranges = ledger.derive_all(repo, "notes.md", index_lines, worktree_lines)
 
 assert_eq("queued item: never laid in", "queued", states["queued-1"])
 assert_eq("pending item: after in worktree, not index", "pending", states["pending-1"])
@@ -454,7 +489,7 @@ do
 			table.insert(pending_items, item)
 		end
 	end
-	local his_lines, results = histext.compute(worktree_lines, index_lines, pending_items)
+	local his_lines, results = histext.compute(worktree_lines, pending_items, pending_ranges)
 
 	-- His text isn't the *original* committed notes.md — accepted-1 is a
 	-- real, permanent accept (already in the index) and stays; only the
@@ -470,12 +505,14 @@ do
 	assert_eq("the move is reported reverted", "reverted", results["move-1"])
 
 	-- "after already in the index": a git add -A on the pending item's
-	-- region means his-text must NOT revert it — it's effectively accepted
-	-- even though no accept key was ever written.
+	-- region means desk.ledger.derive_all must reclassify it as accepted —
+	-- effectively accepted even though no accept key was ever written — so
+	-- it never even reaches histext.compute's own `pending_items` again
+	-- (that filtering is derive_all's job, upstream of compute).
 	local staged_pending = items_by_id["pending-1"]
 	local idx2 = apply.apply_file(index_lines, { as_proposal(staged_pending) })
-	local _, results2 = histext.compute(worktree_lines, idx2, { staged_pending }, committed)
-	assert_eq("an after already staged in the index is skipped, not reverted", "skipped_in_index", results2["pending-1"])
+	local states2 = ledger.derive_all(repo, "notes.md", idx2, worktree_lines)
+	assert_eq("an after already staged in the index reads as accepted, not pending", "accepted", states2["pending-1"])
 end
 
 print()
@@ -529,6 +566,12 @@ do
 	}
 	assert(ledger.append(r2, acc_item))
 	assert(ledger.append(r2, van_item))
+	local proposal_shaped = {
+		{ id = "acc-accident", file = "notes.md", kind = "add", target = acc_item.anchor, before = "", after = acc_item.after },
+		{ id = "vanished", file = "notes.md", kind = "add", target = van_item.anchor, before = "", after = van_item.after },
+	}
+	local laid_in_text, _, _, laid_in_ranges = apply.apply_file(base, proposal_shaped)
+	assert(ledger.append(r2, round.build("notes.md", laid_in_text, proposal_shaped, laid_in_ranges)))
 	assert(ledger.append(r2, { type = "laid_in", at = os.time(), proposal = "p1", items = { "acc-accident", "vanished" } }))
 
 	-- Snapshot: both are pending at this point (the worktree carries both
@@ -569,7 +612,7 @@ do
 		return (snippet.split_lines(c))
 	end)()
 
-	local states2, _, last_key2 = ledger.derive_all(r2, base, idx_final, wt_final)
+	local states2, _, last_key2 = ledger.derive_all(r2, "notes.md", idx_final, wt_final)
 	assert_eq("git-add -A'd item now shows as accepted", "accepted", states2["acc-accident"])
 	assert_eq("the other item is fully gone: declined-shaped", "declined", states2["vanished"])
 
@@ -605,7 +648,7 @@ do
 		before = "",
 		after = "  a pending line",
 	}
-	local wt3 = apply.apply_file(base3, { { id = "p1", file = "notes.md", kind = "add", target = pend.anchor, before = "", after = pend.after } })
+	local wt3, _, _, wt3_ranges = apply.apply_file(base3, { { id = "p1", file = "notes.md", kind = "add", target = pend.anchor, before = "", after = pend.after } })
 	local fd3 = assert(io.open(r3 .. "/notes.md", "w"))
 	fd3:write(snippet.join_lines(wt3, true))
 	fd3:close()
@@ -620,7 +663,6 @@ do
 			-- first read is set up to be used.
 			raced_once = true
 		end
-		local idx_content = git.index_content(r3, "notes.md") or ""
 		local wt_content
 		do
 			local f = assert(io.open(r3 .. "/notes.md", "r"))
@@ -639,9 +681,9 @@ do
 			vim.system({ "touch", "-A", "010000", r3 .. "/.git/index" }):wait()
 		end
 		return {
-			index_lines = snippet.split_lines(idx_content),
 			worktree_lines = (snippet.split_lines(wt_content)),
 			pending_items = { pend },
+			pending_ranges = wt3_ranges,
 		}
 	end
 
@@ -655,41 +697,72 @@ do
 end
 
 print()
-print("=== desk.histext: an edit beside a suggestion (waiting_edit) ===")
+print("=== desk.histext: a move whose two sides disagree (waiting_edit) ===")
 do
+	-- design.md §2's "an edit of his that waits on the suggestion beside
+	-- it" now surfaces through desk.round: a move/merge is only "pending"
+	-- overall when its two sides (leave, land) don't independently resolve
+	-- to the SAME state (desk.round.derive: disagreement forces "pending",
+	-- conservatively) — e.g. a partial `git add -p` that staged the
+	-- landing insertion without ever removing the leaving line. Only the
+	-- side that's genuinely still pending (leave) gets an entry in
+	-- desk.ledger.derive_all's own ranges, so the move's own kind (two
+	-- ranges expected) and what's actually there (one) disagree —
+	-- desk.histext.compute's own signal for "don't guess, flag it."
 	local r4 = vim.fn.tempname()
 	vim.fn.mkdir(r4, "p")
 	assert(git.run(r4, { "init", "-q" }))
 	assert(git.run(r4, { "config", "user.email", "test@example.invalid" }))
 	assert(git.run(r4, { "config", "user.name", "Desk Test" }))
 
-	local base4 = { "Alpha", "  original detail" }
+	local base4 = { "Alpha", "  original", "Beta" }
 	local fd4 = assert(io.open(r4 .. "/notes.md", "w"))
 	fd4:write(snippet.join_lines(base4, true))
 	fd4:close()
 	assert(git.run(r4, { "add", "notes.md" }))
 	assert(git.run(r4, { "commit", "-q", "-m", "notes" }))
 
-	local edit_item = {
-		id = "waiting-1",
+	local move_item = {
+		type = "item",
+		id = "mv1",
 		file = "notes.md",
-		kind = "edit",
-		anchor = { at = "  original detail" },
-		before = "  original detail",
-		after = "  suggested detail",
+		kind = "move",
+		anchor = { { at = "  original" }, { under = "Beta" } },
+		before = "  original",
+		after = "  original (moved)",
 	}
-	-- Instead of the suggestion landing cleanly, he has edited that same
-	-- line himself to something else entirely — the suggestion's `after`
-	-- is nowhere at that anchor, and neither is a clean `before`.
-	local wt4 = { "Alpha", "  his own different edit" }
-	local idx4 = snippet.split_lines(git.index_content(r4, "notes.md"))
-	local _, results4 = histext.compute(wt4, idx4, { edit_item })
-	assert_eq("an edit beside a suggestion is flagged waiting, not silently reverted", "waiting_edit", results4["waiting-1"])
+	local proposal_shaped4 = { id = "mv1", file = "notes.md", kind = "move", target = move_item.anchor, before = move_item.before, after = move_item.after }
+	local laid_in4, _, _, ranges4 = apply.apply_file(base4, { proposal_shaped4 })
+	assert(ledger.append(r4, move_item))
+	assert(ledger.append(r4, round.build("notes.md", laid_in4, { proposal_shaped4 }, ranges4)))
+	assert(ledger.append(r4, { type = "laid_in", at = os.time(), proposal = "p1", items = { "mv1" } }))
+
+	-- The worktree is the ordinary laid-in text (both sides applied). The
+	-- index is a partial, inconsistent stage: the landing insertion is
+	-- there, but the leaving line was never removed.
+	local index4 = { "Alpha", "  original", "Beta", "  original (moved)" }
+	local sha4 = assert(git.hash_object_write(r4, snippet.join_lines(index4, true)))
+	local entry4 = git.index_entry(r4, "notes.md")
+	assert(git.update_index_cacheinfo(r4, entry4.mode, sha4, "notes.md"))
+
+	local states4, items4, _, pending_ranges4 = ledger.derive_all(r4, "notes.md", index4, laid_in4)
+	assert_eq("disagreement between the two sides still reads as pending overall", "pending", states4["mv1"])
+	assert_eq("only the still-pending side (leave) has a range", 1, #pending_ranges4["mv1"])
+
+	local _, results4 = histext.compute(laid_in4, { items4["mv1"] }, pending_ranges4)
+	assert_eq("a move with only one of its two sides resolved is flagged waiting, not guessed at", "waiting_edit", results4["mv1"])
 end
 
 print()
-print("=== desk.histext: repeated snippet, occurrence-aware ===")
+print("=== desk.round: repeated identical lines near an item, occurrence-aware ===")
 do
+	-- design.md's own accepted residual: "repeated identical lines can
+	-- misalign (tested)" — a repeated bullet, then repeated blank lines
+	-- and "———" separators (his own conventions), all near the item's own
+	-- anchor. Built through the real pipeline (apply.apply_file lays it
+	-- in, desk.ledger.derive_all derives its state, desk.histext.compute
+	-- reverts it), never a hand-picked position that would paper over a
+	-- mapping bug.
 	local r5 = vim.fn.tempname()
 	vim.fn.mkdir(r5, "p")
 	assert(git.run(r5, { "init", "-q" }))
@@ -706,6 +779,7 @@ do
 	assert(git.run(r5, { "commit", "-q", "-m", "notes" }))
 
 	local rep_item = {
+		type = "item",
 		id = "rep-1",
 		file = "notes.md",
 		kind = "add",
@@ -713,11 +787,56 @@ do
 		before = "",
 		after = "- shared line",
 	}
-	local wt5 = { "Alpha", "- shared line", "Beta", "- shared line" }
+	local proposal_shaped5 = { id = "rep-1", file = "notes.md", kind = "add", target = rep_item.anchor, before = "", after = rep_item.after }
+	local laid_in5, _, _, ranges5 = apply.apply_file(base5, { proposal_shaped5 })
+	assert(ledger.append(r5, rep_item))
+	assert(ledger.append(r5, round.build("notes.md", laid_in5, { proposal_shaped5 }, ranges5)))
+	assert(ledger.append(r5, { type = "laid_in", at = os.time(), proposal = "p1", items = { "rep-1" } }))
+
 	local idx5 = snippet.split_lines(git.index_content(r5, "notes.md"))
-	local his5, results5 = histext.compute(wt5, idx5, { rep_item })
+	local states5, items5, _, pending_ranges5 = ledger.derive_all(r5, "notes.md", idx5, laid_in5)
+	assert_eq("still derives pending despite the repeated line", "pending", states5["rep-1"])
+
+	local his5, results5 = histext.compute(laid_in5, { items5["rep-1"] }, pending_ranges5)
 	assert_eq("the pre-existing occurrence is untouched, only the anchored one is reverted", base5, his5)
 	assert_eq("reverted at its own anchor, not mistaken for the pre-existing line", "reverted", results5["rep-1"])
+
+	-- Blank lines and "———" separators repeated near the item.
+	local r6 = vim.fn.tempname()
+	vim.fn.mkdir(r6, "p")
+	assert(git.run(r6, { "init", "-q" }))
+	assert(git.run(r6, { "config", "user.email", "test@example.invalid" }))
+	assert(git.run(r6, { "config", "user.name", "Desk Test" }))
+
+	local base6 = { "Alpha", "", "———", "", "———", "Beta", "  detail" }
+	local fd6 = assert(io.open(r6 .. "/notes.md", "w"))
+	fd6:write(snippet.join_lines(base6, true))
+	fd6:close()
+	assert(git.run(r6, { "add", "notes.md" }))
+	assert(git.run(r6, { "commit", "-q", "-m", "notes" }))
+
+	local sep_item = {
+		type = "item",
+		id = "sep-1",
+		file = "notes.md",
+		kind = "add",
+		anchor = { under = "Alpha" },
+		before = "",
+		after = "  a suggestion among blanks and separators",
+	}
+	local proposal_shaped6 = { id = "sep-1", file = "notes.md", kind = "add", target = sep_item.anchor, before = "", after = sep_item.after }
+	local laid_in6, _, _, ranges6 = apply.apply_file(base6, { proposal_shaped6 })
+	assert(ledger.append(r6, sep_item))
+	assert(ledger.append(r6, round.build("notes.md", laid_in6, { proposal_shaped6 }, ranges6)))
+	assert(ledger.append(r6, { type = "laid_in", at = os.time(), proposal = "p1", items = { "sep-1" } }))
+
+	local idx6 = snippet.split_lines(git.index_content(r6, "notes.md"))
+	local states6, items6, _, pending_ranges6 = ledger.derive_all(r6, "notes.md", idx6, laid_in6)
+	assert_eq("pending, unbothered by the repeated blanks/separators", "pending", states6["sep-1"])
+
+	local his6, results6 = histext.compute(laid_in6, { items6["sep-1"] }, pending_ranges6)
+	assert_eq("his text is exactly the original blanks/separators, nothing duplicated or dropped", base6, his6)
+	assert_eq("reverted cleanly", "reverted", results6["sep-1"])
 end
 
 print()
@@ -744,8 +863,8 @@ do
 			table.insert(pending_from_editor, item)
 		end
 	end
-	local result_editor = select(1, histext.compute(via_editor, index_lines, pending_from_editor))
-	local result_runner = select(1, histext.compute(via_runner, index_lines, pending_from_editor))
+	local result_editor = select(1, histext.compute(via_editor, pending_from_editor, pending_ranges))
+	local result_runner = select(1, histext.compute(via_runner, pending_from_editor, pending_ranges))
 	assert_eq("compute() gives byte-identical output from either reading path", result_editor, result_runner)
 end
 

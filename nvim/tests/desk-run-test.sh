@@ -294,6 +294,7 @@ write_commit_push_config "$cfg" "$repo"
 CLI="$HERE/../lua/desk/cli.lua"
 cat > "$ROOT/case7-recs.ndjson" <<EOF
 {"type":"item","id":"p1","file":"notes.md","kind":"add","anchor":{"under":"Section A"},"before":"","after":"  a laid-in suggestion","source":"test","headline":"h","pass":"morning","proposed_at":1}
+{"type":"round","file":"notes.md","at":1,"text":["Section A","  detail","  a laid-in suggestion"],"items":{"p1":{"kind":"add","ranges":[{"line":3,"count":1,"role":"edit"}]}}}
 {"type":"laid_in","at":1,"proposal":"x","items":["p1"]}
 EOF
 nvim -l "$CLI" ledger-append-batch "$repo" "$ROOT/case7-recs.ndjson" > /dev/null

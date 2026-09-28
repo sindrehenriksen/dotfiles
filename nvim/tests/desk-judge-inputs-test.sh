@@ -112,6 +112,7 @@ git -C "$repo" commit -q -m initial
 recs="$ROOT/ledger-recs.ndjson"
 cat > "$recs" <<EOF
 {"type":"item","id":"acc1","file":"notes.md","kind":"new","anchor":"top","before":"","after":"accepted line","source":"test","headline":"already accepted"}
+{"type":"round","file":"notes.md","at":1,"text":["accepted line","Section A","  detail"],"items":{"acc1":{"kind":"new","ranges":[{"line":1,"count":1,"role":"edit"}]}}}
 {"type":"laid_in","at":1,"proposal":"p1","items":["acc1"]}
 {"type":"item","id":"q1","file":"notes.md","kind":"add","anchor":{"under":"Section A"},"before":"","after":"  a queued suggestion","source":"notes","headline":"still open"}
 EOF

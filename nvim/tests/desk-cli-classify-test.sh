@@ -65,6 +65,7 @@ new_repo "$REPO1"
 records1="$TMP/records1.ndjson"
 cat > "$records1" <<'EOF'
 {"type":"item","id":"acc1","file":"notes.md","kind":"new","anchor":"top","before":"","after":"accidentally accepted","headline":"acc"}
+{"type":"round","file":"notes.md","at":0,"text":["accidentally accepted","Alpha"],"items":{"acc1":{"kind":"new","ranges":[{"line":1,"count":1,"role":"edit"}]}}}
 {"type":"laid_in","at":0,"proposal":"seed","items":["acc1"]}
 EOF
 nvim -l "$CLI" ledger-append-batch "$REPO1" "$records1" > /dev/null
@@ -89,6 +90,7 @@ new_repo "$REPO2"
 records2="$TMP/records2.ndjson"
 cat > "$records2" <<'EOF'
 {"type":"item","id":"dec1","file":"notes.md","kind":"new","anchor":"top","before":"","after":"silently resolved","headline":"dec"}
+{"type":"round","file":"notes.md","at":0,"text":["silently resolved","Alpha"],"items":{"dec1":{"kind":"new","ranges":[{"line":1,"count":1,"role":"edit"}]}}}
 {"type":"laid_in","at":0,"proposal":"seed","items":["dec1"]}
 EOF
 nvim -l "$CLI" ledger-append-batch "$REPO2" "$records2" > /dev/null

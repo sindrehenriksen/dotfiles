@@ -8,6 +8,7 @@
 --
 -- Run: nvim --headless -u nvim/tests/minimal_init.lua -l nvim/tests/desk-ledger-test.lua
 local ledger = require("desk.ledger")
+local round = require("desk.round")
 local git = require("desk.git")
 local git_safety_here = debug.getinfo(1, "S").source:sub(2):match("^(.*)/[^/]+$") or "."
 local git_safety = dofile(git_safety_here .. "/../../tests/lib/git-safety.lua")
@@ -146,15 +147,23 @@ do
 		proposed_at = item.proposed_at,
 	})
 	ledger.append(repo, { type = "laid_in", at = long_ago, proposal = "seed", items = { "p1" } })
+	-- A round record: what the review key itself would have appended at
+	-- lay-in (desk.round.build) — the full laid-in text plus the item's own
+	-- range in it. Without this, derive_all has no content baseline to map
+	-- the decline against at all (desk.round.derive: "nothing" -> the
+	-- conservative "still needs review" fallback), never mind derive the
+	-- right one.
+	local laid_in_text = { "Alpha", "  a declined suggestion" }
+	ledger.append(repo, round.build("notes.md", laid_in_text, { item }, { p1 = { { line = 2, count = 1, role = "edit" } } }))
 	ledger.append(repo, { type = "key", id = "p1", at = long_ago, action = "decline" })
 
 	-- After the decline, the content is gone from both index and worktree.
 	-- Its decline key is 30 days old: outside a 14-day window, inside a
 	-- 60-day one.
-	local outside_window = ledger.declined_recently(repo, head, head, head, 14)
+	local outside_window = ledger.declined_recently(repo, "notes.md", head, head, 14)
 	assert_eq("a 14-day window doesn't reach a 30-day-old decline", 0, #outside_window)
 
-	local inside_window = ledger.declined_recently(repo, head, head, head, 60)
+	local inside_window = ledger.declined_recently(repo, "notes.md", head, head, 60)
 	assert_eq("exactly one declined-recently item in a 60-day window", 1, #inside_window)
 	assert_eq("its id is p1", "p1", inside_window[1].item.id)
 	assert_eq("its reason is 'declined' (there IS a decline key)", "declined", inside_window[1].reason)

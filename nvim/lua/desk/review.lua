@@ -13,6 +13,7 @@ local apply = require("desk.apply")
 local git = require("desk.git")
 local histext = require("desk.histext")
 local ledger = require("desk.ledger")
+local round = require("desk.round")
 local snippet = require("desk.snippet")
 
 local M = {}
@@ -63,7 +64,7 @@ function M.read_state(bufnr)
 	local head = M.head_lines(repo, file)
 	local index_lines = snippet.split_lines(git.index_content(repo, file) or "")
 	local worktree_lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-	local states, items, last_key, ranges = ledger.derive_all(repo, head, index_lines, worktree_lines)
+	local states, items, last_key, ranges = ledger.derive_all(repo, file, index_lines, worktree_lines)
 	return {
 		repo = repo,
 		file = file,
@@ -117,7 +118,11 @@ local function live_after(bufnr, item, ranges)
 end
 
 --- Stages `item`'s current buffer content into the index and records an
---- `accept` key. Returns true, or false, an error message.
+--- `accept` key. Returns true, or false, an error message. The index write
+--- goes through desk.histext's own guard (design.md's own instruction:
+--- reuse the retry-on-drift check `write_to_index` already had here too),
+--- so a concurrent writer touching the index between the read and the
+--- write is retried rather than silently overwritten or clobbering.
 function M.accept(bufnr, line)
 	line = line or vim.api.nvim_win_get_cursor(0)[1]
 	local item, st = M.item_at_line(bufnr, line)
@@ -126,14 +131,14 @@ function M.accept(bufnr, line)
 	end
 	local after = live_after(bufnr, item, st.ranges[item.id])
 	local proposal_item = { id = item.id, file = st.file, kind = item.kind, target = item.anchor, before = item.before, after = after }
-	local new_index = apply.apply_file(st.index_lines, { proposal_item })
-	local sha = git.hash_object_write(st.repo, snippet.join_lines(new_index, true))
+	local sha, _, err = histext.write_index_guarded(st.repo, st.file, function()
+		return { index_lines = snippet.split_lines(git.index_content(st.repo, st.file) or "") }
+	end, function(state)
+		local new_index = apply.apply_file(state.index_lines, { proposal_item })
+		return snippet.join_lines(new_index, true)
+	end)
 	if not sha then
-		return false, "could not write the staged blob"
-	end
-	local entry = git.index_entry(st.repo, st.file) or { mode = "100644" }
-	if not git.update_index_cacheinfo(st.repo, entry.mode, sha, st.file) then
-		return false, "could not update the index"
+		return false, err or "could not write the staged blob"
 	end
 	local ok = ledger.append(st.repo, { type = "key", id = item.id, at = os.time(), action = "accept" })
 	if not ok then
@@ -211,12 +216,17 @@ function M.restore(bufnr, item)
 	local worktree_lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
 	local proposal_item =
 		{ id = item.id, file = file, kind = item.kind, target = item.anchor, before = item.before, after = item.after }
-	local new_lines, results = apply.apply_file(worktree_lines, { proposal_item })
+	local new_lines, results, _, ranges = apply.apply_file(worktree_lines, { proposal_item })
 	if results[item.id] ~= "applied" then
 		return false, "could not restore: its anchor no longer resolves cleanly"
 	end
 	vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, new_lines)
 	vim.cmd("silent! noautocmd write")
+	-- Extends the round (design.md: "restore ... uses the same extend
+	-- step") so the restored item — and every other still-pending item
+	-- from the round before it — is tracked from here, never re-derived
+	-- against a stale anchor.
+	M.extend_round(repo, file, worktree_lines, { item }, new_lines, ranges)
 	local ok = ledger.append(repo, { type = "key", id = item.id, at = os.time(), action = "restore" })
 	if not ok then
 		return false, "could not record the restore in the ledger"
@@ -229,9 +239,17 @@ end
 -- ---------------------------------------------------------------------------
 
 --- Commits his text (design.md §2): computes it (reverting only genuinely
---- pending items) and writes it to the index via desk.histext, then turns
---- that index state into a real commit — his own identity, nothing
---- special. A no-op (no commit) if his text already matches HEAD.
+--- pending items, at their own round-derived ranges) and writes it to the
+--- index via desk.histext, then turns that index state into a real commit
+--- — his own identity, nothing special. A no-op (no commit) if his text
+--- already matches HEAD.
+---
+--- Freezes every resolved (accepted/declined) laid-in item not already
+--- frozen (design.md's "Review rounds": "each commit freezes resolved
+--- items ... so they are never re-derived against a moved HEAD") — the
+--- commit is the one moment desk.ledger.derive_all's content-derived state
+--- is trusted as final for anything no longer pending; postponed/queued
+--- items are still active and are never frozen.
 ---
 --- Every run also (re)writes the pending-set snapshot (§9(g)): the ids
 --- this run derived as "pending", against the repo's resulting HEAD sha —
@@ -243,30 +261,42 @@ function M.commit_his_text(bufnr)
 	if not repo then
 		return false, file
 	end
-	local head = M.head_lines(repo, file)
 
 	local pending_ids = {}
+	local to_freeze = {}
 	local sha, results, err = histext.write_to_index(repo, file, function()
 		local index_lines = snippet.split_lines(git.index_content(repo, file) or "")
 		local worktree_lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-		local states, items = ledger.derive_all(repo, head, index_lines, worktree_lines)
+		local states, items, _, ranges = ledger.derive_all(repo, file, index_lines, worktree_lines)
+		local resolved = round.resolved_states(ledger.read(repo))
 		local pending_items = {}
 		pending_ids = {}
+		to_freeze = {}
 		for id, item in pairs(items) do
-			if states[id] == "pending" then
+			local state = states[id]
+			if state == "pending" then
 				table.insert(pending_items, item)
 				table.insert(pending_ids, id)
+			elseif (state == "accepted" or state == "declined") and not resolved[id] then
+				table.insert(to_freeze, { id = id, state = state })
 			end
 		end
 		return {
 			worktree_lines = worktree_lines,
-			index_lines = index_lines,
 			pending_items = pending_items,
-			head_lines = head,
+			pending_ranges = ranges,
 		}
 	end)
 	if not sha then
 		return false, err
+	end
+
+	if #to_freeze > 0 then
+		local freeze_records = {}
+		for _, f in ipairs(to_freeze) do
+			freeze_records[#freeze_records + 1] = round.build_resolved(f.id, f.state)
+		end
+		ledger.append_many(repo, freeze_records)
 	end
 
 	local diff_ok = git.run(repo, { "diff", "--cached", "--quiet", "HEAD", "--", file })
@@ -341,58 +371,104 @@ function M.write_proposal(repo, items)
 	end)
 end
 
---- The review key: commits his text, lays the currently queued slice of the
---- proposal into the buffer as unstaged hunks against the fresh commit,
---- records which items it laid in, and turns on review mode.
+--- Extends the round for `file` (design.md's "Review rounds": "a second
+--- review press extends the round ... it never rebuilds from HEAD" — also
+--- used by restore, "using the same extend step"). Appends a new "round"
+--- ledger record whose text is `new_lines` — the buffer after
+--- `added_items` were laid into `pre_lines` via desk.apply.apply_file,
+--- which also supplies `added_ranges` for them — plus every item still
+--- "pending" as of the round *before* this one (derived against
+--- `pre_lines`, i.e. the buffer as it stood just before `added_items` went
+--- in), carried forward with its ranges remapped from the OLD round's own
+--- text into `new_lines` via desk.round.remap_ranges — the same content-
+--- diff mapping every read already uses, never a fresh anchor resolution
+--- against head.
+function M.extend_round(repo, file, pre_lines, added_items, new_lines, added_ranges)
+	local records = ledger.read(repo)
+	local old_round = round.latest(records, file)
+	local items_by_id = ledger.items_by_id(records)
+
+	local round_items = {}
+	for _, item in ipairs(added_items) do
+		round_items[#round_items + 1] = item
+	end
+	local merged_ranges = vim.deepcopy(added_ranges)
+
+	if old_round then
+		local index_lines = snippet.split_lines(git.index_content(repo, file) or "")
+		local resolved = round.resolved_states(records)
+		local states = select(1, ledger.derive_all(repo, file, index_lines, pre_lines))
+		-- pairs() iterates old_round.items in an arbitrary order; carried
+		-- items are appended after the freshly-added ones, so ties at one
+		-- anchor between an OLD carried item and a brand-new one still
+		-- favor the new one's own (already-correct) lay-in-order tie-break
+		-- — a carried item was, by definition, already laid in before this
+		-- press, so it never competes for input order with what's new.
+		for id, entry in pairs(old_round.items) do
+			if states[id] == "pending" and not resolved[id] and not merged_ranges[id] then
+				merged_ranges[id] = round.remap_ranges(old_round.text, entry.ranges, new_lines)
+				round_items[#round_items + 1] = items_by_id[id]
+			end
+		end
+	end
+
+	return ledger.append(repo, round.build(file, new_lines, round_items, merged_ranges))
+end
+
+--- The review key: commits his text, lays the currently queued (or
+--- re-proposed postponed) slice of the proposal into the buffer against
+--- the CURRENT WORKTREE — never head — so whatever the round before this
+--- press is already carrying (every still-pending item, wherever his own
+--- editing has since left it) stays exactly where it is; this press only
+--- adds to it. Extends the round (M.extend_round), records which items it
+--- laid in, and turns on review mode.
 ---
---- Only an item the ledger derives as "queued" (never laid in before), or
---- "postponed" AND re-proposed by a newer pass (its own `postponed_from`
---- marker — this module's convention, see the virtual-text section below)
---- gets laid in. Without this filter, every press blindly re-applies the
---- WHOLE proposal blob against head regardless of what's already
---- accepted/declined/still pending in the buffer — a second press
---- duplicates whatever's already there (an accepted item's `after` is
---- still in the proposal, and head hasn't advanced to absorb it yet) and
---- resurrects a declined one (its content is gone from the buffer, but
---- nothing stopped it being re-inserted).
+--- Only an item the ledger derives as "queued" (never laid in before) or
+--- "postponed" (a "not now"'d item still present in the current proposal —
+--- design.md's "Review rounds": "a postponed item is laid in again on its
+--- postponed state alone") gets laid in. Without this filter, every press
+--- would blindly re-apply the WHOLE proposal regardless of what's already
+--- accepted/declined/still pending — duplicating what's already there and
+--- resurrecting a declined item whose content is gone from the buffer.
 ---
---- An item whose anchor doesn't apply cleanly (a real content conflict —
---- his edits sit where it expected to find its own `before`) is deferred
---- (left out, stays queued) — design.md §2. An item whose anchor doesn't
---- resolve AT ALL instead lands on top and counts as applied (see
---- desk.apply.apply_file); `landed_on_top` in the returned stats is how
---- many of this press's own lay-ins took that path.
+--- An item whose anchor doesn't apply cleanly against the current worktree
+--- (a real content conflict — his edits sit where it expected to find its
+--- own `before`) is deferred (left out, stays queued) — design.md §2. An
+--- item whose anchor doesn't resolve AT ALL instead lands on top and
+--- counts as applied (see desk.apply.apply_file); `landed_on_top` in the
+--- returned stats is how many of this press's own lay-ins took that path.
 function M.review(bufnr)
 	local ok, err = M.commit_his_text(bufnr)
 	if not ok then
 		return false, err
 	end
 	local repo, file = M.repo_context(bufnr)
-	local head = M.head_lines(repo, file)
 	local index_lines = snippet.split_lines(git.index_content(repo, file) or "")
 	local worktree_lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-	local states = ledger.derive_all(repo, head, index_lines, worktree_lines)
+	local states = ledger.derive_all(repo, file, index_lines, worktree_lines)
 
 	local proposal_items = M.read_proposal(repo)
 	local by_file = {}
 	for _, item in ipairs(proposal_items) do
 		if item.file == file then
 			local state = states[item.id]
-			if state == "queued" or (state == "postponed" and item.postponed_from) then
+			if state == "queued" or state == "postponed" then
 				table.insert(by_file, item)
 			end
 		end
 	end
-	local new_lines, results, landed_on_top = apply.apply_file(head, by_file)
+	local new_lines, results, landed_on_top, new_ranges = apply.apply_file(worktree_lines, by_file)
 	vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, new_lines)
 	vim.cmd("silent! noautocmd write")
 
 	local laid_in_ids = {}
+	local applied_items = {}
 	local deferred = 0
 	local landed_on_top_count = 0
 	for _, item in ipairs(by_file) do
 		if results[item.id] == "applied" then
 			table.insert(laid_in_ids, item.id)
+			table.insert(applied_items, item)
 			if landed_on_top[item.id] then
 				landed_on_top_count = landed_on_top_count + 1
 			end
@@ -400,6 +476,8 @@ function M.review(bufnr)
 			deferred = deferred + 1
 		end
 	end
+	M.extend_round(repo, file, worktree_lines, applied_items, new_lines, new_ranges)
+
 	local proposal_sha = git.ref_sha(repo, M.PROPOSAL_REF) or "unknown"
 	ledger.append(repo, { type = "laid_in", at = os.time(), proposal = proposal_sha, items = laid_in_ids })
 
@@ -438,10 +516,12 @@ function M.disable_review_mode()
 end
 
 -- ---------------------------------------------------------------------------
--- Virtual text: headline, source, "suggested · age", and (when the runner
--- marks a re-proposed item as superseding an earlier postponed one — its
--- own `postponed_from` field, this module's convention, since the runner
--- isn't built yet) "postponed from <day>".
+-- Virtual text: headline, source, "suggested · age", and — for an item
+-- laid in on its postponed state alone (design.md's "Review rounds": "a
+-- postponed item is laid in again on its postponed state alone
+-- ('postponed from <day>' comes from the not_now key's time)") —
+-- "postponed from <day>", read straight from that item's own last `key`
+-- record rather than a marker field on the item itself.
 -- ---------------------------------------------------------------------------
 
 M.ns = vim.api.nvim_create_namespace("desk_review")
@@ -477,8 +557,9 @@ function M.refresh_virtual_text(bufnr)
 			table.insert(parts, item.source)
 		end
 		table.insert(parts, "suggested · " .. format_age(item.proposed_at))
-		if item.postponed_from then
-			table.insert(parts, "postponed from " .. item.postponed_from)
+		local last_key = st.last_key[id]
+		if last_key and last_key.action == "not_now" and last_key.at then
+			table.insert(parts, "postponed from " .. os.date("%A", last_key.at))
 		end
 		vim.api.nvim_buf_set_extmark(bufnr, M.ns, math.max(line - 1, 0), 0, {
 			virt_text = { { table.concat(parts, "  ·  "), "Comment" } },
@@ -506,15 +587,13 @@ M.DECLINED_WINDOW_DAYS = 14
 --- for an edit that also inserts or deletes lines, which would need a real
 --- diff algorithm this module doesn't have.
 function M.unowned_hunks(bufnr, st)
-	local his_lines = (histext.compute(st.worktree_lines, st.index_lines, (function()
-		local pending = {}
-		for id, item in pairs(st.items) do
-			if st.states[id] == "pending" then
-				table.insert(pending, item)
-			end
+	local pending = {}
+	for id, item in pairs(st.items) do
+		if st.states[id] == "pending" then
+			table.insert(pending, item)
 		end
-		return pending
-	end)(), st.head_lines))
+	end
+	local his_lines = (histext.compute(st.worktree_lines, pending, st.ranges))
 	local hunks = {}
 	if #his_lines ~= #st.index_lines then
 		return hunks -- can't safely position-compare; leave detection to gitsigns' own display
@@ -630,7 +709,7 @@ function M.list_declined_recently(bufnr, days)
 	end
 	local entries = ledger.declined_recently(
 		st.repo,
-		st.head_lines,
+		st.file,
 		st.index_lines,
 		st.worktree_lines,
 		days or M.DECLINED_WINDOW_DAYS
