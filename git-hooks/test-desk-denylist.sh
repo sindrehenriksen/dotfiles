@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
-# Tests for git-hooks/pre-push chaining to desk-denylist-check.sh. A real
-# `git push`, but only ever against a local bare repo this test creates and
-# throws away — never a real remote.
+# Tests for desk-denylist-check.sh's two invocation forms: the hook form
+# (git-hooks/pre-push chaining to it with no args, git config desk.denylist)
+# via a real `git push` against a local bare repo this test creates and
+# throws away — never a real remote — and the CLI form
+# (<repo> <range> <list-file>, invoked directly, no git config involved)
+# another repo's own thin wrapper calls.
 # Run: bash git-hooks/test-desk-denylist.sh
 set -u
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
+DENYLIST_CHECK="$HERE/desk-denylist-check.sh"
 
 # This test's own pre-commit hook (git-hooks/pre-commit) runs it FROM
 # INSIDE a real `git commit`, which leaves GIT_DIR/GIT_WORK_TREE/
@@ -172,6 +176,58 @@ status=$?
 assert_eq "a clean new branch still pushes fine" "0" "$status"
 git -C "$bare" show-ref --verify -q refs/heads/feature && ok "the clean new branch landed on the remote" \
 	|| bad "the clean new branch never landed"
+
+echo
+echo "=== CLI form: <repo> <range> <list-file> — no git config, no stdin ==="
+cli_repo="$TMP/cli-repo"
+desk_test_assert_repo_under_root "$cli_repo" "$TMP"
+git init -q -b main "$cli_repo"
+git -C "$cli_repo" config user.email "test@example.com"
+git -C "$cli_repo" config user.name "Test"
+git -C "$cli_repo" config core.hooksPath "$HERE"
+git -C "$cli_repo" commit -q --allow-empty -m "root"
+printf 'hello world\n' >> "$cli_repo/file.txt"
+git -C "$cli_repo" add file.txt
+git -C "$cli_repo" commit -q -m "first commit"
+
+cli_deny="$TMP/cli-denylist.txt"
+printf 'invented-secret-marker\n' > "$cli_deny"
+
+status=0
+"$DENYLIST_CHECK" "$cli_repo" "HEAD~1..HEAD" "$cli_deny" > /dev/null 2>&1 || status=$?
+assert_eq "a non-matching range exits 0" "0" "$status"
+
+printf 'this line names invented-secret-marker in the clear\n' >> "$cli_repo/file.txt"
+git -C "$cli_repo" add file.txt
+git -C "$cli_repo" commit -q -m "leaky commit"
+status=0
+out="$("$DENYLIST_CHECK" "$cli_repo" "HEAD~1..HEAD" "$cli_deny" 2>&1)" || status=$?
+[ "$status" -ne 0 ] && ok "the CLI form catches a match and exits non-zero" || bad "the CLI form did NOT catch the match"
+printf '%s\n' "$out" | grep -q "invented-secret-marker" && ok "the CLI form's refusal names the matched pattern" \
+	|| bad "the CLI form's refusal doesn't name the pattern (got: $out)"
+
+status=0
+"$DENYLIST_CHECK" "$cli_repo" "not-a-real-ref..HEAD" "$cli_deny" > /dev/null 2>&1 || status=$?
+[ "$status" -ne 0 ] && ok "the CLI form fails closed on a bad ref" || bad "the CLI form did NOT fail closed on a bad ref"
+
+status=0
+"$DENYLIST_CHECK" "$cli_repo" "HEAD~1..HEAD" "$TMP/does-not-exist.txt" > /dev/null 2>&1 || status=$?
+[ "$status" -ne 0 ] && ok "the CLI form fails closed on a missing list file" \
+	|| bad "the CLI form did NOT fail closed on a missing list file"
+
+empty_deny="$TMP/empty-denylist.txt"
+: > "$empty_deny"
+status=0
+"$DENYLIST_CHECK" "$cli_repo" "HEAD~1..HEAD" "$empty_deny" > /dev/null 2>&1 || status=$?
+[ "$status" -ne 0 ] && ok "the CLI form fails closed on an empty list file" \
+	|| bad "the CLI form did NOT fail closed on an empty list file"
+
+comments_only_deny="$TMP/comments-only-denylist.txt"
+printf '# just a comment\n\n' > "$comments_only_deny"
+status=0
+"$DENYLIST_CHECK" "$cli_repo" "HEAD~1..HEAD" "$comments_only_deny" > /dev/null 2>&1 || status=$?
+[ "$status" -ne 0 ] && ok "the CLI form fails closed on a comments/blank-only list file" \
+	|| bad "the CLI form did NOT fail closed on a comments/blank-only list file"
 
 echo
 echo "=== summary: $pass passed, $fail failed ==="
