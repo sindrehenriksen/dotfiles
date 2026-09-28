@@ -174,7 +174,15 @@ desk_write_deny_hook_settings() {
 # in alongside its own --settings deny-hook file), so its own SessionStart/
 # SessionEnd fire on their own — recording it here too would double up, so
 # this only sets DESK_HEADLESS=1 in its environment instead (the hook's own
-# DESK_HEADLESS handling tags that event source "desk-run" itself).
+# DESK_HEADLESS handling tags that event source "desk-run" itself). This is
+# every non-restricted call, named or not: an EPHEMERAL connector call
+# (F-private, W — no --name, --no-session-persistence) still loads his
+# real settings and hooks exactly like a visible one does, so without
+# DESK_HEADLESS its own genuine SessionStart/SessionEnd would land
+# source "startup", reason "other" — indistinguishable from a session he
+# actually opened, and exactly what the 16:30 capture's own "dropped"
+# criteria matches. Gating this on --name (as the code used to) left every
+# ephemeral connector call unmarked.
 desk_call_model() {
 	local scratch="" prompt_file="" allowed_tools="" tools="" connector="false" restricted="false"
 	local mcp_config="" strict_mcp="false" settings="" max_budget_usd="" timeout_secs="" config_dir="" out="" name=""
@@ -246,7 +254,7 @@ desk_call_model() {
 	(
 		cd "$scratch" || exit 2
 		export CLAUDE_CONFIG_DIR="$config_dir"
-		[ -n "$name" ] && [ "$restricted" != "true" ] && export DESK_HEADLESS=1
+		[ "$restricted" != "true" ] && export DESK_HEADLESS=1
 		run_with_timeout "$timeout_secs" "$out" "${argv[@]}" "$prompt_text" < /dev/null
 	)
 	rc=$?
