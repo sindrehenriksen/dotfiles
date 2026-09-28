@@ -132,6 +132,27 @@ local function git_log_count(repo)
 	return ok_log and tonumber(vim.trim(out)) or 0
 end
 
+print("=== D7 fix: format_source — a short, honest label, never the raw field ===")
+
+assert_eq("nil source: notes", "notes", review.format_source(nil))
+assert_eq("empty source: notes", "notes", review.format_source(""))
+assert_eq("a URL: just its host", "github.com", review.format_source("https://github.com/foo/bar/pull/1"))
+assert_eq("a URL with a port: host includes it", "example.invalid:8443", review.format_source("https://example.invalid:8443/x"))
+
+local source_tokens = {
+	{ pattern = "^TICKET-([0-9]+)$", case_insensitive = false, handler = "url", template = "https://example.invalid/{1}" },
+	{ pattern = "^SESSION-(%w+)$", case_insensitive = false, handler = "session" },
+}
+assert_eq("a ticket-shaped token: 'ticket KEY'", "ticket TICKET-42", review.format_source("TICKET-42", source_tokens))
+assert_eq("a session-shaped token: 'session NAME'", "session SESSION-alpha", review.format_source("SESSION-alpha", source_tokens))
+assert_eq(
+	"unclassified text, even with a config: notes, never a guess",
+	"notes",
+	review.format_source("just some plain text", source_tokens)
+)
+assert_eq("no tokens config at all: notes, never a guess", "notes", review.format_source("TICKET-42"))
+
+print()
 print("=== D6: the review key lays in a proposal ===")
 do
 	local repo = new_repo({ "Section A", "  detail" })
@@ -670,6 +691,10 @@ do
 		found_postponed_text and found_postponed_text:match("postponed from (%a+)")
 	)
 	assert_true("desk.round tracked it (not derived from any 'postponed_from' field)", st ~= nil)
+	assert_true(
+		"one separator style throughout (single spaces around ·, never doubled)",
+		found_postponed_text ~= nil and not found_postponed_text:find("  ·  ", 1, true) and found_postponed_text:find(" · ", 1, true) ~= nil
+	)
 end
 
 print()

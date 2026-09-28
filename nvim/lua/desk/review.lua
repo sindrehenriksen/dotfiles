@@ -15,6 +15,7 @@ local histext = require("desk.histext")
 local ledger = require("desk.ledger")
 local round = require("desk.round")
 local snippet = require("desk.snippet")
+local tokens = require("desk.tokens")
 
 local M = {}
 
@@ -555,12 +556,40 @@ local function format_age(proposed_at)
 	return days .. " days"
 end
 
+--- A short, one-word-ish label for where a suggestion came from, never the
+--- raw `item.source` verbatim (which could be a full URL, a bare ticket key,
+--- a bare session name, or nothing at all): a URL's own host ("github.com"),
+--- a ticket-shaped token as "ticket KEY", a session-shaped one as "session
+--- NAME", and "notes" — never blank — for anything else, empty/absent
+--- included (found directly in his own notes, no external source at all).
+--- `tokens_config` (desk.tokens shape) is what tells a ticket key and a
+--- session name apart; without one (or with neither classifying it), the
+--- honest label is still "notes" rather than a guess.
+function M.format_source(source, tokens_config)
+	if not source or source == "" then
+		return "notes"
+	end
+	local host = source:match("^https?://([^/]+)")
+	if host then
+		return host
+	end
+	local classification = tokens.classify(source, tokens_config or {})
+	if classification.kind == "url" then
+		return "ticket " .. source
+	end
+	if classification.kind == "session" then
+		return "session " .. source
+	end
+	return "notes"
+end
+
 --- Redraws every pending item's virtual text in `bufnr` from scratch.
 function M.refresh_virtual_text(bufnr)
 	local st = M.read_state(bufnr)
 	if not st then
 		return
 	end
+	local tokens_config = tokens.tokens_from(select(1, tokens.load()))
 	vim.api.nvim_buf_clear_namespace(bufnr, M.ns, 0, -1)
 	for id, rs in pairs(st.ranges) do
 		local item = st.items[id]
@@ -569,16 +598,14 @@ function M.refresh_virtual_text(bufnr)
 		if item.headline and item.headline ~= "" then
 			table.insert(parts, item.headline)
 		end
-		if item.source and item.source ~= "" then
-			table.insert(parts, item.source)
-		end
+		table.insert(parts, M.format_source(item.source, tokens_config))
 		table.insert(parts, "suggested · " .. format_age(item.proposed_at))
 		local last_key = st.last_key[id]
 		if last_key and last_key.action == "not_now" and last_key.at then
 			table.insert(parts, "postponed from " .. os.date("%A", last_key.at))
 		end
 		vim.api.nvim_buf_set_extmark(bufnr, M.ns, math.max(line - 1, 0), 0, {
-			virt_text = { { table.concat(parts, "  ·  "), "Comment" } },
+			virt_text = { { table.concat(parts, " · "), "Comment" } },
 			virt_text_pos = "eol",
 		})
 	end
