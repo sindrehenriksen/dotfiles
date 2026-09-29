@@ -235,6 +235,23 @@ assert_eq "desk-run never fetched/pulled — no FETCH_HEAD written" "1" \
 
 echo
 echo "=== a dead lock owner: broken immediately, the run proceeds ==="
+# Deterministic by construction, never a real two-process race (same
+# reasoning as desk-lock-race-test.sh's own header comment, which is where
+# desk_lock_acquire's own "broke it immediately, never waited out the
+# grace/poll windows" timing proof already lives, tightly and reliably,
+# against the function directly): meta.json is hand-written naming a pid
+# guaranteed not to exist (never a real forked process to race against)
+# plus a deliberately mismatched owner_start, the same shape a dead
+# owner's pid later reused by an unrelated process would produce. What
+# this case adds on top, end to end through the real desk-run binary
+# rather than desk_lock_acquire alone, is that a stale lock never fails
+# the run: desk-run itself exits 1 without ever reaching a step
+# ("gave up waiting for the lock") whenever desk_lock_acquire gives up, so
+# rc==0 already is the proof the lock got broken rather than waited out —
+# a second, wall-clock proof over this whole run (git commit, git push,
+# the fake model call, ...) was dropped: nothing here bounds how long
+# those unrelated steps take, so a real machine under load could blow any
+# fixed bound without the lock itself ever having been waited on.
 rm -rf "$STATE"
 repo="$(new_notes_repo "$ROOT/case4")"
 cfg="$ROOT/case4/config.json"
@@ -245,15 +262,12 @@ mkdir -p "$STATE/lock"
 mkdir -p "$STATE/lock/runner.lock"
 dead_pid=$((70000 + RANDOM % 5000))
 while kill -0 "$dead_pid" 2> /dev/null; do dead_pid=$((dead_pid + 1)); done
-jq -n --argjson pid "$dead_pid" --argjson t 1 '{pid: $pid, started_at: $t}' \
+jq -n --argjson pid "$dead_pid" --argjson t 1 --argjson owner_start 1 \
+	'{pid: $pid, started_at: $t, owner_start: $owner_start}' \
 	> "$STATE/lock/runner.lock/meta.json"
-t0=$(date +%s)
 run_desk "$cfg" > "$ROOT/case4.out" 2>&1
 rc=$?
-t1=$(date +%s)
-assert_eq "the run succeeds despite the stale lock" "0" "$rc"
-assert_true "it broke the dead lock rather than waiting out DESK_LOCK_MAX_WAIT_SECS" \
-	"$([ $((t1 - t0)) -lt "$DESK_LOCK_MAX_WAIT_SECS" ] && echo true || echo false)"
+assert_eq "the run succeeds despite the stale lock (never gave up waiting for it)" "0" "$rc"
 assert_true "the lock is released again afterward" "$([ ! -d "$STATE/lock/runner.lock" ] && echo true || echo false)"
 
 echo
