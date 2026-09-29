@@ -159,5 +159,23 @@ assert_true "--tools was passed, scoped to this call's own allowlist" \
 	"$(printf '%s' "$argv" | grep -A1 -- '^--tools$' | tail -1 | grep -qx 'mcp__claude_ai_Gmail__unlabel_thread' && echo true || echo false)"
 
 echo
+echo "=== desk_write_deny_hook_settings: a missing hook script fails closed, never writes a broken settings file ==="
+export DESK_DENY_HOOK_SCRIPT="$ROOT/does-not-exist-hook.sh"
+missing_hook_rc=0
+missing_hook_out="$(desk_write_deny_hook_settings "$ROOT" "" "" Read 2> /dev/null)" || missing_hook_rc=$?
+assert_true "reports failure (non-zero), rather than silently succeeding" "$([ "$missing_hook_rc" -ne 0 ] && echo true || echo false)"
+assert_eq "no settings path is printed at all" "" "$missing_hook_out"
+
+echo
+echo "=== desk_step_write: a missing deny-hook script fails the whole call closed, never runs unenforced ==="
+rm -f "$ARGV_LOG"
+step_json2='{"id":"W2","kind":"write","tools":["mcp__claude_ai_Gmail__unlabel_thread"],"connector":true,"timeout":30}'
+result2="$(desk_step_write "testpass" "$step_json2" "null" '{}')"
+assert_eq "the step reports failed, not ok" "failed" "$result2"
+assert_true "the model was never actually invoked (no unenforced call happened)" \
+	"$([ ! -f "$ARGV_LOG" ] && echo true || echo false)"
+unset DESK_DENY_HOOK_SCRIPT
+
+echo
 echo "=== summary: $pass passed, $fail failed ==="
 [ "$fail" -eq 0 ]

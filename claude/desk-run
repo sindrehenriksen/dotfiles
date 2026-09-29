@@ -144,6 +144,25 @@ fi
 
 PASS_SCRATCH="$(desk_scratch_dir "$pass-pass")"
 
+# The deny hook every connector/scoped-Read call this pass makes is wired
+# to (model-call.sh's own desk_write_deny_hook_settings) points at THIS
+# copy, never straight at $DESK_LIB_DIR/deny-unlisted-tool.sh — a long
+# pass shouldn't have its own safety net depend on that repo file staying
+# exactly as it is (or staying present at all) for the pass's own
+# duration; a mid-run `git pull` of this repo, or anything else that
+# touches it, must never leave an in-flight call's already-written hook
+# `command` pointing at something changed out from under it. Refusing the
+# whole pass when the copy itself fails is the same "fails closed" the
+# hook script's own missing-file paths already apply to a *call*, one
+# level up: no copy means no pass, never a pass whose every call quietly
+# ran without this layer.
+DESK_DENY_HOOK_SCRIPT="$PASS_SCRATCH/deny-unlisted-tool.sh"
+if ! cp "$DESK_LIB_DIR/deny-unlisted-tool.sh" "$DESK_DENY_HOOK_SCRIPT" 2> /dev/null; then
+	desk_log "$pass" "couldn't copy deny-unlisted-tool.sh into this pass's own scratch — refusing (a missing hook script must fail closed)"
+	exit 2
+fi
+export DESK_DENY_HOOK_SCRIPT
+
 # Visible run sessions (design.md's later "Runs he can open and continue"):
 # sweep any $DESK_RUNS_ROOT/<pass>-<date> directory (and its config-dir
 # project folder) more than 7 days old, before this run creates its own —

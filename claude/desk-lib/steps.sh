@@ -482,7 +482,12 @@ desk_step_model_call() {
 			pinned_args_file="$call_scratch/pinned-args.json"
 			printf '%s' "$pinned_args_json" > "$pinned_args_file"
 		fi
-		settings_arg="$(desk_write_deny_hook_settings "$call_scratch" "$pinned_args_file" "$hook_scratch" $tools_arr)"
+		if ! settings_arg="$(desk_write_deny_hook_settings "$call_scratch" "$pinned_args_file" "$hook_scratch" $tools_arr)"; then
+			desk_log "$pass" "$id: couldn't write the deny-hook settings — refusing rather than making an unenforced connector call"
+			[ -n "$session_name" ] || rm -rf "$call_scratch"
+			echo "failed"
+			return
+		fi
 	else
 		# A non-connector call whose tools need an MCP server (e.g. T's
 		# ticket search) supplies its own --mcp-config via the
@@ -504,7 +509,12 @@ desk_step_model_call() {
 		if [ -n "$hook_scratch" ]; then
 			local tools_arr
 			tools_arr="$(jq -r '(.tools // [])[]' <<< "$step_json")"
-			settings_arg="$(desk_write_deny_hook_settings "$call_scratch" "" "$hook_scratch" $tools_arr)"
+			if ! settings_arg="$(desk_write_deny_hook_settings "$call_scratch" "" "$hook_scratch" $tools_arr)"; then
+				desk_log "$pass" "$id: couldn't write the deny-hook settings — refusing rather than making an unenforced call"
+				[ -n "$session_name" ] || rm -rf "$call_scratch"
+				echo "failed"
+				return
+			fi
 		fi
 	fi
 

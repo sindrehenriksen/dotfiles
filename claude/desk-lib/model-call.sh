@@ -112,6 +112,19 @@ desk_prune_old_runs() {
 desk_write_deny_hook_settings() {
 	local dir="$1" pinned_args_file="$2" scratch_dir="$3"
 	shift 3
+	# The hook script itself: desk-run's own $DESK_DENY_HOOK_SCRIPT (a copy
+	# into this pass's own scratch, made once at pass start — see
+	# claude/desk-run's own comment on why) when set, falling back to the
+	# repo's own live copy for a caller with no full pass context (a direct
+	# test, the D8 canary). Either way, missing at the moment this settings
+	# file is written is a hard refusal, never a settings file whose own
+	# `command` points at nothing: that would be a broken, silently
+	# unenforced hook, not a working one.
+	local hook_script="${DESK_DENY_HOOK_SCRIPT:-$DESK_LIB_DIR/deny-unlisted-tool.sh}"
+	if [ ! -f "$hook_script" ]; then
+		desk_log - "desk_write_deny_hook_settings: hook script is missing ($hook_script) — refusing to write settings for an unenforceable hook"
+		return 1
+	fi
 	# Built as a properly shell-quoted command LINE (desk_shq — the same
 	# helper desk_step_open_tab already uses for exactly this reason),
 	# never plain string concatenation: this is handed to Claude Code as
@@ -122,7 +135,7 @@ desk_write_deny_hook_settings() {
 	# wrong thing as `$pinned_file`, is a broken safety check, not merely
 	# a cosmetic bug.
 	local hook_cmd path
-	hook_cmd="$(desk_shq "$DESK_LIB_DIR/deny-unlisted-tool.sh")"
+	hook_cmd="$(desk_shq "$hook_script")"
 	if [ -n "$pinned_args_file" ]; then
 		hook_cmd="$hook_cmd --pinned $(desk_shq "$pinned_args_file")"
 	fi

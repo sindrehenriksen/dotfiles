@@ -37,12 +37,24 @@ FAKEBIN="$ROOT/fakebin"
 mkdir -p "$FAKEBIN"
 W_LOG="$ROOT/w-calls.log"
 : > "$W_LOG"
+# J is a judge step with a "Read" tool, so it gets the deny hook's own
+# --scratch backstop wired in (steps.sh's hook_scratch) — its own
+# --settings file's `command` is captured here, while the fake claude is
+# still running and nothing has been cleaned up yet, to check desk-run's
+# own pass-start copy (claude/desk-run's own DESK_DENY_HOOK_SCRIPT): it
+# must be a real, non-empty file distinct from the repo's own live
+# deny-unlisted-tool.sh, living under this pass's own scratch tree.
+J_HOOK_SCRIPT_PATH_LOG="$ROOT/j-hook-script-path.log"
+J_HOOK_SCRIPT_COPY="$ROOT/j-hook-script-copy.sh"
 cat > "$FAKEBIN/claude" <<FAKE
 #!/usr/bin/env bash
-# \$W_LOG is baked in below (a fixed path in \$ROOT), the rest reads only
-# its own scratch cwd (prompt.txt) — nothing here depends on shell
-# expansion at write-time except that one path.
+# \$W_LOG/\$J_HOOK_SCRIPT_PATH_LOG/\$J_HOOK_SCRIPT_COPY are baked in below
+# (fixed paths in \$ROOT), the rest reads only its own scratch cwd
+# (prompt.txt) — nothing here depends on shell expansion at write-time
+# except those paths.
 W_LOG="$W_LOG"
+J_HOOK_SCRIPT_PATH_LOG="$J_HOOK_SCRIPT_PATH_LOG"
+J_HOOK_SCRIPT_COPY="$J_HOOK_SCRIPT_COPY"
 FAKE
 cat >> "$FAKEBIN/claude" <<'FAKE'
 cwd="$(pwd -P)"
@@ -59,6 +71,18 @@ case "$cwd" in
 		echo '{"type":"result","subtype":"success"}'
 		;;
 	*-J-*)
+		settings_path=""
+		prev=""
+		for a in "$@"; do
+			[ "$prev" = "--settings" ] && settings_path="$a"
+			prev="$a"
+		done
+		if [ -n "$settings_path" ] && [ -f "$settings_path" ]; then
+			hook_cmd="$(jq -r '.hooks.PreToolUse[0].hooks[0].command' "$settings_path" 2> /dev/null)"
+			hook_script_path="$(printf '%s' "$hook_cmd" | sed -n "s/^'\([^']*\)'.*/\1/p")"
+			printf '%s\n' "$hook_script_path" > "$J_HOOK_SCRIPT_PATH_LOG"
+			[ -f "$hook_script_path" ] && cp "$hook_script_path" "$J_HOOK_SCRIPT_COPY" 2> /dev/null
+		fi
 		echo '{"type":"assistant","message":{"content":[{"type":"text","text":"{\"items\":[{\"id\":\"j1\",\"file\":\"notes.md\",\"kind\":\"new\",\"target\":\"top\",\"before\":\"\",\"after\":\"a validated item\",\"source\":\"notes\",\"headline\":\"h1\",\"tier\":\"act\"}]}"}]}}'
 		echo '{"type":"result","subtype":"success"}'
 		;;
@@ -169,6 +193,20 @@ echo "=== W ran dry (logged, never actually called) ==="
 assert_true "W never made a model call" "$([ ! -s "$W_LOG" ] && echo true || echo false)"
 assert_true "the log names the thread id and subject" \
 	"$(grep -q 'thread-1' "$ROOT/run.out" && grep -q 'Daily Digest' "$ROOT/run.out" && echo true || echo false)"
+
+echo
+echo "=== J's deny hook was copied into this pass's own scratch, never pointed at the live repo file ==="
+j_hook_script_path="$(cat "$J_HOOK_SCRIPT_PATH_LOG" 2> /dev/null)"
+real_hook_script="$HERE/../../claude/desk-lib/deny-unlisted-tool.sh"
+assert_true "a hook script path was actually captured" "$([ -n "$j_hook_script_path" ] && echo true || echo false)"
+assert_true "it's under this pass's own scratch tree (\$DESK_SCRATCH_ROOT), not the repo" \
+	"$([[ "$j_hook_script_path" == "$STATE/scratch"/* ]] && echo true || echo false)"
+assert_true "it's distinct from the repo's own live deny-unlisted-tool.sh" \
+	"$([ "$j_hook_script_path" != "$real_hook_script" ] && echo true || echo false)"
+assert_true "the copy is a real, non-empty file (captured while it still existed)" \
+	"$([ -s "$J_HOOK_SCRIPT_COPY" ] && echo true || echo false)"
+assert_eq "the copy's own content matches the real script exactly" \
+	"$(cat "$real_hook_script")" "$(cat "$J_HOOK_SCRIPT_COPY" 2> /dev/null)"
 
 echo
 echo "=== summary: $pass passed, $fail failed ==="
