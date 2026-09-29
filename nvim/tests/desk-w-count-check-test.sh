@@ -41,7 +41,15 @@ cat > "$FAKEBIN/claude" <<'FAKE'
 cwd="$(pwd -P)"
 case "$cwd" in
 	*-F-private-*)
-		q="$(sed -n 's/^digest_query=//p' prompt.txt)"
+		# Every scenario but "mismatch" echoes back exactly the
+		# digest_query desk-run itself rendered into this call's own
+		# prompt (so it's guaranteed to match later) — "mismatch"
+		# deliberately answers with some other query instead, standing
+		# in for whatever timing/config drift produces a real one live.
+		case "$cwd" in
+			*/mismatch-*) q="a-deliberately-different-query" ;;
+			*) q="$(sed -n 's/^digest_query=//p' prompt.txt)" ;;
+		esac
 		jq -nc --arg q "$q" '{type:"assistant",message:{content:[{type:"tool_use",id:"u1",name:"mcp__claude_ai_Gmail__search_threads",input:{query:$q}}]}}'
 		echo '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"u1","content":[{"type":"text","text":"{\"threads\":[{\"id\":\"thread-1\",\"subject\":\"Daily Digest 1\"},{\"id\":\"thread-2\",\"subject\":\"Daily Digest 2\"}]}"}]}]}}'
 		echo '{"type":"result","subtype":"success"}'
@@ -124,7 +132,7 @@ def w_steps: {
 	mail_fetch_step_id: "F-private",
 	files: ["notes.md", "reading.md"],
 	dry_run: false,
-	passes: { full: w_steps, partial: w_steps }
+	passes: { full: w_steps, partial: w_steps, mismatch: w_steps }
 }' > "$cfg"
 
 echo "=== W unlabels every pinned id: the pass succeeds ==="
@@ -142,6 +150,18 @@ assert_eq "status shows failed" "failed" "$(jq -r '.passes.partial.result' "$DES
 assert_eq "status names W as where it stopped" "W" "$(jq -r '.passes.partial.stopped_at' "$DESK_STATUS_FILE")"
 assert_true "the mismatch is named explicitly in the log" \
 	"$(grep -q 'W count mismatch' "$ROOT/partial.out" && echo true || echo false)"
+
+echo
+echo "=== F-private's own digest query never matches: refused, never treated as \"nothing to unlabel\" ==="
+DESK_CONFIG="$cfg" "$DESK_RUN" mismatch > "$ROOT/mismatch.out" 2>&1
+rc_mismatch=$?
+assert_eq "the pass exits non-zero" "1" "$rc_mismatch"
+assert_eq "status shows failed" "failed" "$(jq -r '.passes.mismatch.result' "$DESK_STATUS_FILE")"
+assert_eq "status names W as where it stopped" "W" "$(jq -r '.passes.mismatch.stopped_at' "$DESK_STATUS_FILE")"
+assert_true "the log says why: the query never matched" \
+	"$(grep -q 'the digest query never matched' "$ROOT/mismatch.out" && echo true || echo false)"
+assert_true "W's own model call never actually ran (refused before it, not after)" \
+	"$(grep -q 'model call: W' "$ROOT/mismatch.out" && echo false || echo true)"
 
 echo
 echo "=== summary: $pass passed, $fail failed ==="

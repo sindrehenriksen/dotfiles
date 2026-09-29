@@ -341,6 +341,19 @@ for ((i = 0; i < steps_len; i++)); do
 				desk_fetch_cache_restore "$pass" "$scheduled_date" "$id"
 				result="ok"
 				desk_log "$pass" "fetch $id: already fetched today (cached) — reusing, no re-run"
+				# The cached call ran with an EARLIER slot's own
+				# gmail_window_end, baked into the digest_query its own
+				# prompt actually used — never this run's freshly computed
+				# one. W's own later match (below) is against exactly what
+				# that call's tool_use asked for, so digest_query has to
+				# track the cached call, not "now", for the rest of this
+				# run. Empty (an older cache entry, saved before this
+				# existed) leaves digest_query as this run's own value,
+				# same as before.
+				if [ "$id" = "$mail_fetch_step_id" ]; then
+					cached_digest_query="$(desk_fetch_cache_digest_query "$pass" "$scheduled_date" "$id")"
+					[ -n "$cached_digest_query" ] && digest_query="$cached_digest_query"
+				fi
 			else
 				placeholders="$common_placeholders"
 				if [ "$id" = "$ticket_status_step_id" ]; then
@@ -355,7 +368,7 @@ $(git -C "$repo" show "HEAD:$f" 2> /dev/null)"
 				fi
 				result="$(desk_step_fetch "$pass" "$step_json" "" "$placeholders" "" "" "$scheduled_date")"
 				if [ "$result" = "ok" ]; then
-					desk_fetch_cache_save "$pass" "$scheduled_date" "$id"
+					desk_fetch_cache_save "$pass" "$scheduled_date" "$id" "$digest_query"
 				fi
 			fi
 			if [ "$id" = "$ticket_status_step_id" ] && [ "$result" = "ok" ]; then
@@ -474,6 +487,7 @@ $(git -C "$repo" show "HEAD:$f" 2> /dev/null)"
 				matching_pair="$(jq -c --arg q "$digest_query" \
 					'[.[] | select(.input.query == $q)] | .[0] // empty' <<< "$pairs")"
 				ids_subjects="[]"
+				query_mismatch="false"
 				if [ -n "$matching_pair" ]; then
 					result_text="$(jq -r '.text' <<< "$matching_pair")"
 					if jq -e . > /dev/null 2>&1 <<< "$result_text"; then
@@ -481,6 +495,7 @@ $(git -C "$repo" show "HEAD:$f" 2> /dev/null)"
 							<<< "$result_text")"
 					fi
 				else
+					query_mismatch="true"
 					desk_log "$pass" "$id: $mail_fetch_step_id's digest search query doesn't match the configured one — no ids pinned"
 				fi
 				n_ids="$(jq 'length' <<< "$ids_subjects")"
@@ -499,7 +514,21 @@ $(git -C "$repo" show "HEAD:$f" 2> /dev/null)"
 				# as falsy too, so that spelling would silently ignore an
 				# explicit `"dry_run": false` and always come back "true".
 				dry_run="$(jq -r 'if .dry_run == null then true else .dry_run end' <<< "$config")"
-				if [ "$dry_run" = "true" ]; then
+				if [ "$query_mismatch" = "true" ]; then
+					# An empty pinned set here means "the query never
+					# matched anything to check", never "the query matched
+					# and genuinely found nothing" — the two look identical
+					# downstream (both hand W a `[]` pinned set) unless this
+					# is called out on its own, and silently treating the
+					# former as the latter would have W (or, in dry_run,
+					# desk-run itself) report zero threads unlabelled on a
+					# day $mail_fetch_step_id may well have had real ones,
+					# with nothing else ever surfacing that. Fails the pass
+					# regardless of dry_run — dry_run only ever skips the
+					# model call, never this pass's own correctness check.
+					desk_log "$pass" "$id: refusing — the digest query never matched, so an empty pinned set can't be trusted as \"genuinely nothing to unlabel\""
+					result="failed"
+				elif [ "$dry_run" = "true" ]; then
 					desk_log "$pass" "$id: dry_run — logged $n_ids id(s), no model call made"
 					result="ok"
 				else
@@ -557,8 +586,17 @@ failed_sources_json="[]"
 if [ "${#failed_sources[@]}" -gt 0 ]; then
 	failed_sources_json="$(printf '%s\n' "${failed_sources[@]}" | jq -R . | jq -s .)"
 	[ "$overall_result" = "ok" ] && overall_result="partial"
-else
+elif [ "$overall_result" != "failed" ]; then
 	# Nothing left to retry: the same-day fetch cache has done its job.
+	# Gated on the PASS's own overall_result, not just on failed_sources
+	# being empty: a later, non-source step (judge/write/close) can still
+	# hard-fail and `break` the loop with every fetch itself having
+	# succeeded — failed_sources stays empty in that case too, but the
+	# pass as a whole did not finish, so clearing the cache here would
+	# throw away a retry slot's one reason to skip re-running fetches that
+	# already succeeded, and advancing last_fetch_ok would silently narrow
+	# the next window past content this failed pass never actually got to
+	# use.
 	desk_fetch_cache_clear "$pass"
 	# Every fetch step this pass actually ran (if any) succeeded: the
 	# window is now covered through gmail_window_end (captured before any

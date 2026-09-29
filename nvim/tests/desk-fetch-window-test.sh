@@ -122,6 +122,16 @@ jq -n --arg repo "$repo" --arg prompt "$prompt" '{
 		"1630": { steps: [
 			{ id: "commit-push", kind: "commit_push" },
 			{ id: "F-test", kind: "fetch", prompt: $prompt, tools: ["Read"], connector: false, timeout: 30 }
+		] },
+		failtest: { steps: [
+			{ id: "commit-push", kind: "commit_push" },
+			{ id: "F-fail-then", kind: "fetch", prompt: $prompt, tools: ["Read"], connector: false, timeout: 30 },
+			{ id: "J-always-fail", kind: "judge", prompt: $prompt, tools: ["Read"], connector: false, timeout: 30 }
+		] },
+		cachehit: { steps: [
+			{ id: "commit-push", kind: "commit_push" },
+			{ id: "F-private", kind: "fetch", prompt: $prompt, tools: ["mcp__claude_ai_Gmail__search_threads"], connector: true, timeout: 30 },
+			{ id: "W", kind: "write", prompt: $prompt, tools: ["mcp__claude_ai_Gmail__unlabel_thread"], connector: true, pinned_label: "UNREAD", timeout: 30 }
 		] }
 	}
 }' > "$cfg"
@@ -148,6 +158,46 @@ fetch_ok_1630="$(jq -r 'has("passes") and (.passes | has("1630")) and (.passes["
 assert_eq "1630's own last_fetch_ok field was never even created" "false" "$fetch_ok_1630"
 assert_eq "morning's own last_fetch_ok (a different pass) is untouched by 1630's run" \
 	"$last_fetch_ok" "$(jq -r '.passes.morning.last_fetch_ok' "$DESK_STATUS_FILE")"
+
+echo
+echo "=== a later step's own hard failure never advances last_fetch_ok or clears the fetch cache, even though the fetch itself succeeded ==="
+DESK_CONFIG="$cfg" "$DESK_RUN" failtest > "$ROOT/failtest.out" 2>&1
+rc_failtest=$?
+assert_eq "the pass exits non-zero (a later step hard-failed)" "1" "$rc_failtest"
+assert_eq "status shows failed" "failed" "$(jq -r '.passes.failtest.result' "$DESK_STATUS_FILE")"
+failtest_has_fetch_ok="$(jq -r 'has("passes") and (.passes | has("failtest")) and (.passes.failtest | has("last_fetch_ok"))' "$DESK_STATUS_FILE")"
+assert_eq "failtest's own last_fetch_ok was never set" "false" "$failtest_has_fetch_ok"
+failtest_scheduled_date="$(date +%F)"
+assert_true "the fetch cache for the fetch step that DID succeed is still there (cleared only once the whole pass is ok)" \
+	"$([ -f "$STATE/fetch-cache/failtest-$failtest_scheduled_date-F-fail-then/done" ] && echo true || echo false)"
+
+echo
+echo "=== a retry that restores a cached fetch uses THAT source's own cached digest_query, never a freshly recomputed one ==="
+cachehit_scheduled_date="$(date +%F)"
+cache_dir="$STATE/fetch-cache/cachehit-$cachehit_scheduled_date-F-private"
+mkdir -p "$cache_dir"
+: > "$cache_dir/done"
+# Deliberately not JQL/query-shaped at all — a freshly computed digest_query
+# (label:"..." after:N before:N) could never coincidentally equal this, so
+# W only ever matches it if desk-run actually substituted the CACHED value
+# back in for this run, rather than using its own freshly computed one.
+printf 'a-fixed-cached-query-never-recomputed' > "$cache_dir/digest_query"
+cat > "$cache_dir/F-private-tool-uses.jsonl" << 'JSONL'
+{"type":"tool_use","id":"u1","name":"mcp__claude_ai_Gmail__search_threads","input":{"query":"a-fixed-cached-query-never-recomputed"}}
+JSONL
+cat > "$cache_dir/F-private-tool-results.jsonl" << 'JSONL'
+{"type":"tool_result","tool_use_id":"u1","content":[{"type":"text","text":"{\"threads\":[{\"id\":\"cached-thread-1\",\"subject\":\"Cached Digest\"}]}"}]}
+JSONL
+DESK_CONFIG="$cfg" "$DESK_RUN" cachehit > "$ROOT/cachehit.out" 2>&1
+rc_cachehit=$?
+assert_eq "the pass exits ok" "0" "$rc_cachehit"
+assert_eq "status shows ok" "ok" "$(jq -r '.passes.cachehit.result' "$DESK_STATUS_FILE")"
+assert_true "F-private was reused from cache, never re-run" \
+	"$(grep -q 'F-private: already fetched today (cached)' "$ROOT/cachehit.out" && echo true || echo false)"
+assert_true "W's own match found the cached thread (proving digest_query tracked the cached call, not a fresh one)" \
+	"$(grep -q 'would unlabel cached-thread-1' "$ROOT/cachehit.out" && echo true || echo false)"
+assert_true "never logged as a query mismatch" \
+	"$(grep -q 'digest search query doesn.t match' "$ROOT/cachehit.out" && echo false || echo true)"
 
 echo
 echo "=== summary: $pass passed, $fail failed ==="

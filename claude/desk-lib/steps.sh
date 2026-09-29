@@ -339,13 +339,23 @@ desk_fetch_already_done() {
 # Persists $3's own scratch-jsonl outputs (desk_step_model_call's own
 # "$PASS_SCRATCH/${id}-*.jsonl" naming) so a later retry slot the same day
 # can skip re-running this source entirely and still hand J the same
-# inputs it would have gotten from a fresh run.
+# inputs it would have gotten from a fresh run. Also persists the exact
+# digest_query (desk-run's own, computed fresh once per invocation from
+# THIS run's own gmail_window_end) this source's own call actually ran
+# with, whatever id it is — cheap to save unconditionally, and it's the
+# one piece a later retry slot can't otherwise recover: that slot computes
+# its OWN, different digest_query (a new gmail_window_end), but W's later
+# match is against what the CACHED call's own tool_use actually asked for,
+# never against a value re-derived after the fact from a different clock
+# read (see desk_fetch_cache_digest_query below, and desk-run's own use of
+# it).
 desk_fetch_cache_save() {
-	local pass="$1" scheduled_date="$2" id="$3"
+	local pass="$1" scheduled_date="$2" id="$3" digest_query="${4:-}"
 	local dir
 	dir="$(desk_fetch_cache_dir "$pass" "$scheduled_date" "$id")"
 	mkdir -p "$dir" 2> /dev/null
 	cp -f "$PASS_SCRATCH/$id"-*.jsonl "$dir/" 2> /dev/null
+	printf '%s' "$digest_query" > "$dir/digest_query"
 	: > "$dir/done"
 }
 
@@ -357,6 +367,19 @@ desk_fetch_cache_restore() {
 	local dir
 	dir="$(desk_fetch_cache_dir "$pass" "$scheduled_date" "$id")"
 	cp -f "$dir/$id"-*.jsonl "$PASS_SCRATCH/" 2> /dev/null
+}
+
+# The digest_query a cached source's own call actually ran with (see
+# desk_fetch_cache_save above), or "" if none was ever saved for it (an
+# older cache entry from before this existed, or a source this was never
+# called for). Empty is a legitimate "don't know" — desk-run's own caller
+# falls back to its freshly computed value rather than treating this as
+# an error.
+desk_fetch_cache_digest_query() {
+	local pass="$1" scheduled_date="$2" id="$3"
+	local dir
+	dir="$(desk_fetch_cache_dir "$pass" "$scheduled_date" "$id")"
+	cat "$dir/digest_query" 2> /dev/null
 }
 
 # Clears every cached source for $1 (pass) — called once the pass finishes
