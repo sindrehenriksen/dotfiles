@@ -4,14 +4,53 @@
 # accept them and would error. Hooks needing ref context are uncommon;
 # use always_run: true on pre-push hooks that should fire regardless.
 #
-# Before any of that: the generic denylist check (desk-denylist-check.sh).
-# Git's pre-push protocol hands every updated ref's own line on stdin, and
-# stdin is a pipe (readable once), so it's slurped here and replayed to
-# both consumers rather than each trying to read it directly.
-here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Before any of that: the generic denylist check (desk-denylist-check.sh)
+# — but ONLY when the repo actually being pushed IS this repo. His own
+# `core.hooksPath` points every repo on the machine at this hooks dir (one
+# shared hooks dir, not one per repo), so this same script runs on every
+# `git push` anywhere, not just here. A repo that never configured
+# `desk.denylist` (every repo but this one) must never be told to refuse
+# for that, and a brand-new branch pushed from a repo with no `origin/main`
+# yet must never reach desk-denylist-check.sh's own origin/main fallback at
+# all — both are exactly what happens if the check runs unconditionally.
+#
+# Compared by each side's own `git-common-dir`, never a path string (so a
+# worktree of this repo still matches): GIT_DIR/friends are cleared before
+# resolving $here's own repo, since git already points those at the repo
+# being PUSHED for this hook's own environment (the same pitfall
+# tests/lib/git-safety.sh guards its own tests against) — an unresolved
+# `-C` would otherwise silently pick that up instead of $here's real repo,
+# making every repo look like a match. Both sides are resolved through
+# `cd -P` (physical path, symlinks and all followed) rather than left as
+# whatever string git-common-dir printed or `$here` happened to be spelled
+# with — git itself invokes a hook with cwd already resolved to the
+# physical path (e.g. macOS's /var -> /private/var), so comparing against
+# an unresolved `$here` would silently never match on a machine where any
+# ancestor of either path is a symlink.
+here="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 input="$(cat)"
 
-printf '%s\n' "$input" | "$here/desk-denylist-check.sh" || exit 1
+resolve_common_dir() { # <dir> -> that dir's own repo's physical git-common-dir, or nothing
+    local dir="$1" common_dir
+    common_dir="$(
+        unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY \
+            GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_CEILING_DIRECTORIES GIT_PREFIX
+        git -C "$dir" rev-parse --git-common-dir 2>/dev/null
+    )" || return 1
+    [ -n "$common_dir" ] || return 1
+    case "$common_dir" in
+        /*) : ;;
+        *) common_dir="$dir/$common_dir" ;;
+    esac
+    (cd -P "$common_dir" 2>/dev/null && pwd -P)
+}
+
+this_repo_common_dir="$(resolve_common_dir "$here")"
+pushed_common_dir="$(resolve_common_dir .)"
+
+if [ -n "$this_repo_common_dir" ] && [ "$pushed_common_dir" = "$this_repo_common_dir" ]; then
+    printf '%s\n' "$input" | "$here/desk-denylist-check.sh" || exit 1
+fi
 
 if [ -f .pre-commit-config.yaml ] && command -v pre-commit &>/dev/null; then
     printf '%s\n' "$input" | pre-commit run --hook-stage pre-push
