@@ -53,7 +53,18 @@ what's being tested:
 After attempting both, stop. Do not attempt any other tool.
 PROMPT
 
-SETTINGS_FILE="$(desk_write_deny_hook_settings "$SCRATCH" Read)"
+# desk_write_deny_hook_settings <dir> <pinned-args-file-or-""> <scratch-dir-or-""> <tool>...
+# — neither pinning nor Read-scoping applies to this call, so both go
+# through as "". Passing "Read" as the second positional (as this used to)
+# lands in <pinned-args-file> instead of the tool list: under this script's
+# own `set -u`, the function's unset $3 (scratch_dir) then aborts the
+# subshell before it ever writes the settings file, so $SETTINGS_FILE comes
+# back empty, --settings is silently dropped from the call below (model-
+# call.sh only adds it when non-empty), and the canary ends up making its
+# one live call with NO deny hook installed at all — "passing" only because
+# --allowedTools' own enforcement happened to catch both refusals, never
+# actually exercising the layer this canary exists to check.
+SETTINGS_FILE="$(desk_write_deny_hook_settings "$SCRATCH" "" "" Read)"
 STREAM_OUT="$SCRATCH/stream.jsonl"
 
 echo "=== the one live call ==="
