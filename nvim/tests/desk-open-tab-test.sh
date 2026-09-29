@@ -60,6 +60,11 @@ export PATH="$FAKEBIN:$PATH"
 export DESK_CONFIG="$ROOT/workspace/desk/config.json"
 mkdir -p "$ROOT/workspace/desk"
 
+# Without this, common.sh's own `mkdir -p "$DESK_STATE_DIR" ...` (sourced
+# next) falls through to its real $HOME-based default and creates empty
+# dirs under the real ~/.local/state/desk/ the moment it's sourced.
+export DESK_STATE_DIR="$ROOT/state"
+
 # shellcheck source=../../claude/desk-lib/common.sh
 source "$LIB/common.sh"
 # shellcheck source=../../claude/desk-lib/lock.sh

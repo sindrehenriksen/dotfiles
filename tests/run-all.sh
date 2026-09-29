@@ -29,6 +29,15 @@ fi
 GUARD_DIR="$(mktemp -d)"
 trap 'rm -rf "$GUARD_DIR"' EXIT
 desk_test_config_guard_snapshot "$GUARD_DIR" before
+desk_test_state_guard_snapshot "$GUARD_DIR" before
+
+# Safe, temp-scoped defaults for every suite below (see git-safety.sh's own
+# desk_test_safe_env_init): a suite that forgets to override one of these
+# itself now falls through to a refusing stub or a throwaway dir, never the
+# real ~/.local/state/{claude,desk} or a live `claude` invocation. Exported
+# here, once, before the first suite runs; any suite's own explicit export
+# still wins inside its own subshell.
+desk_test_safe_env_init "$GUARD_DIR/safe-env"
 
 # --- explicit suite lists (never a glob — a new file here doesn't run
 # until it's named below, and desk-run-canary.sh is never named at all) --
@@ -125,6 +134,7 @@ for rel in "${PLAIN_LUA_SUITES[@]}"; do
 done
 
 desk_test_config_guard_snapshot "$GUARD_DIR" after
+desk_test_state_guard_snapshot "$GUARD_DIR" after
 
 echo
 echo "=== run-all summary: $pass_suites suite(s) passed, $fail_suites failed ==="
@@ -136,6 +146,10 @@ guard_status=0
 if ! desk_test_config_guard_check "$GUARD_DIR" before after; then
 	guard_status=1
 	echo "=== run-all: CONFIG GUARD TRIPPED — a test changed a guarded repo's local git config ===" >&2
+fi
+if ! desk_test_state_guard_check "$GUARD_DIR" before after; then
+	guard_status=1
+	echo "=== run-all: STATE GUARD TRIPPED — a test touched real ~/.local/state/claude or ~/.local/state/desk ===" >&2
 fi
 
 [ "$fail_suites" -eq 0 ] && [ "$guard_status" -eq 0 ]

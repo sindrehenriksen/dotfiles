@@ -185,3 +185,87 @@ desk_test_guard_not_real_repo() {
 		exit 1
 	fi
 }
+
+#
+# Real state guard (used by tests/run-all.sh and git-hooks/pre-commit,
+# alongside the config guard above): every desk-lib/*.sh path (DESK_STATE_DIR,
+# CLAUDE_SESSION_STORE, DESK_TICKET_CACHE, ...) already resolves through an
+# env var override first, so a well-behaved test never touches real state at
+# all — but a test that forgets one still silently falls through to the real
+# $HOME-based default, exactly how a prior desk-scoped-read-test.sh run wrote
+# a fake session record into the real ~/.local/state/claude/session-events/
+# and left empty dirs under ~/.local/state/desk/ (both cleaned up by hand).
+# desk_test_safe_env_init below is the actual fix (safe, temp-scoped
+# defaults so forgetting an override is harmless); this is only the
+# belt-and-suspenders check that nothing slipped past it regardless — same
+# relationship the config guard has to each test's own isolation.
+#
+# A plain sorted `find` listing (paths only, never mtimes/content) is the
+# comparison basis — unlike the config guard's own `git config --local
+# --list` diff, a plain `ls -la` here would flag on totally unrelated
+# activity (a real, legitimate session-recorder hook touching its own
+# directory's mtime) that never actually changed what's IN these
+# directories.
+DESK_TEST_STATE_GUARD_DIRS=("$HOME/.local/state/claude" "$HOME/.local/state/desk")
+
+# desk_test_state_guard_snapshot <dest_dir> <suffix>: writes each guarded
+# real directory's own recursive path listing to <dest_dir>/state-<n>.<suffix>.
+desk_test_state_guard_snapshot() {
+	local dest="$1" suffix="$2" i=0 dir
+	mkdir -p "$dest"
+	for dir in "${DESK_TEST_STATE_GUARD_DIRS[@]}"; do
+		find "$dir" 2> /dev/null | LC_ALL=C sort > "$dest/state-$i.$suffix"
+		i=$((i + 1))
+	done
+}
+
+# desk_test_state_guard_check <dest_dir> <before_suffix> <after_suffix>:
+# compares each guarded directory's before/after listing, printing a diff
+# for and naming any that changed. Returns non-zero if anything did.
+desk_test_state_guard_check() {
+	local dest="$1" before_suffix="$2" after_suffix="$3" i=0 dir changed=0
+	for dir in "${DESK_TEST_STATE_GUARD_DIRS[@]}"; do
+		if ! diff -u "$dest/state-$i.$before_suffix" "$dest/state-$i.$after_suffix" > "$dest/state-$i.diff" 2>&1; then
+			printf 'STATE GUARD FAILED: real state under %s changed\n' "$dir" >&2
+			cat "$dest/state-$i.diff" >&2
+			changed=1
+		fi
+		i=$((i + 1))
+	done
+	return "$changed"
+}
+
+# desk_test_safe_env_init <dest_dir>: the actual fix, not just the check —
+# exports temp-scoped defaults for every real path a desk-lib test can
+# forget to override (DESK_STATE_DIR and everything common.sh derives from
+# it, CLAUDE_SESSION_STORE, CLAUDE_SESSION_RECORDER_LOG, DESK_TICKET_CACHE,
+# DESK_STATUS_FILE, CLAUDE_CONFIG_DIR), plus refusing stubs for the three
+# executables a forgotten override would otherwise let a test actually run
+# for real (DESK_CLAUDE_BIN — a live model call; DESK_OPEN_TAB_BIN/
+# DESK_OPEN_URL — a real tab/URL opened). Call once, before the first
+# suite/test runs; every value here is still just a default; a suite that
+# sets its own (as most already do) overrides it the ordinary way.
+desk_test_safe_env_init() {
+	local dest="$1"
+	mkdir -p "$dest/state" "$dest/claude-config" "$dest/bin"
+
+	local stub
+	for stub in claude desk-open-tab.sh open-url; do
+		{
+			printf '#!/usr/bin/env bash\n'
+			printf 'echo "refusing stub ($0): this test never overrode the env var pointing at it — refusing to run for real" >&2\n'
+			printf 'exit 1\n'
+		} > "$dest/bin/$stub"
+		chmod +x "$dest/bin/$stub"
+	done
+
+	export DESK_STATE_DIR="$dest/state"
+	export CLAUDE_SESSION_STORE="$dest/state/session-events"
+	export CLAUDE_SESSION_RECORDER_LOG="$dest/state/session-recorder.log"
+	export DESK_TICKET_CACHE="$dest/state/ticket-status.json"
+	export DESK_STATUS_FILE="$dest/state/status.json"
+	export CLAUDE_CONFIG_DIR="$dest/claude-config"
+	export DESK_CLAUDE_BIN="$dest/bin/claude"
+	export DESK_OPEN_TAB_BIN="$dest/bin/desk-open-tab.sh"
+	export DESK_OPEN_URL="$dest/bin/open-url"
+}

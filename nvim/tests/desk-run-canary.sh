@@ -21,6 +21,15 @@ fi
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LIB="$HERE/../../claude/desk-lib"
+# Without this, common.sh's own `mkdir -p "$DESK_STATE_DIR" ...` (sourced
+# next) falls through to its real $HOME-based default and creates empty
+# dirs under the real ~/.local/state/desk/ the moment it's sourced — this
+# canary makes one deliberate live call against real config
+# ($CLAUDE_CONFIG_DIR below), but has no reason to touch real desk state at
+# all.
+CANARY_STATE_DIR="$(mktemp -d)"
+trap 'rm -rf "$CANARY_STATE_DIR"' EXIT
+export DESK_STATE_DIR="$CANARY_STATE_DIR"
 source "$LIB/common.sh"
 source "$LIB/timeout.sh"
 source "$LIB/model-call.sh"

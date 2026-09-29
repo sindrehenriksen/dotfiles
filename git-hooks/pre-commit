@@ -23,6 +23,13 @@ if [ -n "$repo_root" ]; then
             guard_active=1
             guard_dir="$(mktemp -d)"
             desk_test_config_guard_snapshot "$guard_dir" before
+            desk_test_state_guard_snapshot "$guard_dir" before
+            # Same safe, temp-scoped defaults tests/run-all.sh exports before
+            # its own suites (git-safety.sh's own desk_test_safe_env_init):
+            # none of these test-*.sh files touch desk-lib today, but a
+            # future one that does gets the same net, not a second copy of
+            # it to keep in step.
+            desk_test_safe_env_init "$guard_dir/safe-env"
         fi
         for test in "$hook_dir"/test-*.sh; do
             [ -f "$test" ] || continue
@@ -37,12 +44,18 @@ if [ -n "$repo_root" ]; then
         done
         if [ "$guard_active" -eq 1 ]; then
             desk_test_config_guard_snapshot "$guard_dir" after
+            desk_test_state_guard_snapshot "$guard_dir" after
+            guard_tripped=0
             if ! desk_test_config_guard_check "$guard_dir" before after; then
                 echo "pre-commit: a test-*.sh run changed a guarded repo's local git config — aborting the commit"
-                rm -rf "$guard_dir"
-                exit 1
+                guard_tripped=1
+            fi
+            if ! desk_test_state_guard_check "$guard_dir" before after; then
+                echo "pre-commit: a test-*.sh run touched real ~/.local/state/claude or ~/.local/state/desk — aborting the commit"
+                guard_tripped=1
             fi
             rm -rf "$guard_dir"
+            [ "$guard_tripped" -eq 0 ] || exit 1
         fi
     fi
 fi

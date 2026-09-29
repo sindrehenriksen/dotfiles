@@ -83,6 +83,15 @@ export DESK_LOG_DIR="$STATE/logs"
 export CLAUDE_CONFIG_DIR="$ROOT/claude-config"
 export DESK_CONFIG="$ROOT/config.json"
 echo '{}' > "$DESK_CONFIG"
+# The VISIBLE close call below (case "C2") makes desk_step_model_call call
+# $DESK_SESSION_RECORDER_BIN directly (model-call.sh's own start/end, never
+# through a real claude process — the fake claude above never touches this
+# at all) — without these two, that real session-recorder.sh would fall
+# through to its own $HOME-based defaults and write a session record into
+# the real ~/.local/state/claude/session-events/ (exactly what happened
+# before this line existed).
+export CLAUDE_SESSION_STORE="$STATE/session-events"
+export CLAUDE_SESSION_RECORDER_LOG="$STATE/session-recorder.log"
 
 # shellcheck source=../../claude/desk-lib/common.sh
 source "$LIB/common.sh"
