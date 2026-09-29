@@ -210,6 +210,37 @@ desk_status_set_running "$pass"
 
 repo="$(jq -r '.notes_repo' <<< "$config")"
 repo="${repo/#\~/$HOME}"
+# notes_repo must be an absolute path that IS some repo's own toplevel —
+# never a relative path (which would resolve against whatever cwd launchd
+# or a shell happened to invoke desk-run from, not $DESK_CONFIG's own
+# intent), a subdirectory of a repo, or a string that isn't a git repo at
+# all: every step below runs `git -C "$repo" ...` trusting this points at
+# exactly the repo whose HEAD/branch/notes files it's about to commit to
+# and push. A worktree's own root still passes (--show-toplevel names the
+# CURRENT worktree, never the main checkout's), so this only refuses a
+# strict subdirectory or a non-repo path. Compared as physically resolved
+# paths (symlinks and all followed) on both sides, never the raw config
+# string against git's own (always-resolved) answer — a config path that
+# happens to cross a symlink (e.g. a home directory itself mounted through
+# one) would otherwise refuse a perfectly legitimate toplevel.
+case "$repo" in
+	/*) : ;;
+	*)
+		desk_log "$pass" "notes_repo must be an absolute path: $repo"
+		exit 2
+		;;
+esac
+repo_resolved="$(cd -P "$repo" 2> /dev/null && pwd -P)"
+if [ -z "$repo_resolved" ]; then
+	desk_log "$pass" "notes_repo ($repo) doesn't exist — refusing"
+	exit 2
+fi
+repo_toplevel="$(git -C "$repo_resolved" rev-parse --show-toplevel 2> /dev/null)"
+if [ "$repo_toplevel" != "$repo_resolved" ]; then
+	desk_log "$pass" "notes_repo ($repo) is not a git repo's own toplevel (got: ${repo_toplevel:-<not a git repo>}) — refusing"
+	exit 2
+fi
+repo="$repo_resolved"
 mapfile -t files < <(jq -r '.files[]' <<< "$config")
 # NOT `.push_enabled // false`: see the dry_run/log_only comments
 # elsewhere in this file on why jq's `//` can't be used for a boolean

@@ -28,6 +28,10 @@ assert_true() {
 ROOT="$(mktemp -d)"
 trap 'rm -rf "$ROOT"' EXIT
 
+# shellcheck source=../../tests/lib/git-safety.sh
+source "$HERE/../../tests/lib/git-safety.sh"
+desk_test_git_safety_init "$ROOT"
+
 STATE="$ROOT/state"
 export DESK_STATE_DIR="$STATE"
 export DESK_STATUS_FILE="$STATE/status.json"
@@ -37,11 +41,21 @@ export DESK_SCRATCH_ROOT="$STATE/scratch"
 export DESK_LOG_DIR="$STATE/logs"
 export CLAUDE_CONFIG_DIR="$ROOT/claude-config"
 
+# A real (if empty) repo — desk-run's own notes_repo validation now
+# requires an absolute path that's actually some repo's own toplevel, even
+# for a pass with no steps to ever touch it (see nvim/tests/desk-run-test.sh
+# for that validation's own dedicated cases; this file stays focused on
+# the generic-config checks its own name promises).
+repo="$ROOT/notes"
+desk_test_assert_repo_under_root "$repo" "$ROOT"
+mkdir -p "$repo"
+git -C "$repo" init -q
+
 # A config that's otherwise complete (a bare commit_push-only pass, no
 # model call needed) except for whichever one field this case omits.
 full_config() {
-	jq -n '{
-		notes_repo: "/nonexistent",
+	jq -n --arg repo "$repo" '{
+		notes_repo: $repo,
 		files: ["notes.md"],
 		timezone: "UTC",
 		ticket_search_tool: "mcp__example-tickets__search",

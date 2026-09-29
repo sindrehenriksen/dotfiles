@@ -376,5 +376,38 @@ assert_true "the later slot did not treat it as already-done" \
 	"$([ "$(grep -c 'already ok today' "$ROOT/case8b.out")" -eq 0 ] && echo true || echo false)"
 
 echo
+echo "=== notes_repo validation: must be absolute and its own git toplevel ==="
+rm -rf "$STATE"
+repo="$(new_notes_repo "$ROOT/case10")"
+# A relative "notes_repo" resolving (via cwd) to this exact real repo would
+# still be refused — the check is on the config value being relative at
+# all, never on whether it happens to land somewhere real.
+relative_cfg="$ROOT/case10/relative-config.json"
+write_commit_push_config "$relative_cfg" "notes"
+( cd "$ROOT/case10" && DESK_CONFIG="$relative_cfg" "$DESK_RUN" testpass > "$ROOT/case10-relative.out" 2>&1 )
+relative_rc=$?
+assert_eq "a relative notes_repo is refused" "2" "$relative_rc"
+assert_true "it says so in the log" \
+	"$([ "$(grep -c 'notes_repo must be an absolute path' "$ROOT/case10-relative.out")" -ge 1 ] && echo true || echo false)"
+assert_true "the lock isn't left stuck behind a refusal this early" "$([ ! -d "$STATE/lock/runner.lock" ] && echo true || echo false)"
+
+subdir_cfg="$ROOT/case10/subdir-config.json"
+mkdir -p "$repo/subdir"
+write_commit_push_config "$subdir_cfg" "$repo/subdir"
+run_desk "$subdir_cfg" > "$ROOT/case10-subdir.out" 2>&1
+subdir_rc=$?
+assert_eq "a subdirectory of a repo (not the repo's own toplevel) is refused" "2" "$subdir_rc"
+assert_true "it says so in the log" \
+	"$([ "$(grep -c "is not a git repo's own toplevel" "$ROOT/case10-subdir.out")" -ge 1 ] && echo true || echo false)"
+
+missing_cfg="$ROOT/case10/missing-config.json"
+write_commit_push_config "$missing_cfg" "$ROOT/case10/does-not-exist"
+run_desk "$missing_cfg" > "$ROOT/case10-missing.out" 2>&1
+missing_rc=$?
+assert_eq "a non-existent notes_repo path is refused" "2" "$missing_rc"
+assert_true "it says the path doesn't exist" \
+	"$([ "$(grep -c "doesn't exist" "$ROOT/case10-missing.out")" -ge 1 ] && echo true || echo false)"
+
+echo
 echo "=== summary: $pass passed, $fail failed ==="
 [ "$fail" -eq 0 ]
