@@ -91,6 +91,7 @@ is written.
 
 - Don't give up quickly when hitting obstacles — try alternative approaches before concluding something can't be done
 - When a tool/approach fails, consider alternatives or ask the owner for the missing context directly
+- **Usage and spend limits are the owner's to manage.** When one cuts work off, resume from where it stopped once it clears. Don't halt, trim scope, suggest cheaper models, or raise limits and credits with him.
 - Don't make assumptions — ask for input when uncertain rather than guessing
 - When asking a question, write it as plain text in your reply. Don't use the `AskUserQuestion` tool — the owner prefers freeform replies, not multiple-choice prompts.
 - Think critically about suggestions before offering them — challenge your own ideas
