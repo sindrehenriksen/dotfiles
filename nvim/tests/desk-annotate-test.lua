@@ -67,6 +67,40 @@ local days_cache = { checked_at = now - 2 * DAY, tickets = { ["T-1"] = { status 
 assert_eq("age in days once past 24 hours", "Done · status from last pass · 2 days ago", annotate.ticket_text(days_cache, "T-1", now))
 
 print()
+print("=== ticket_cache_path: follows $DESK_STATE_DIR, never a bare $HOME, when $DESK_TICKET_CACHE is unset ===")
+
+do
+	local old_cache, old_state = vim.env.DESK_TICKET_CACHE, vim.env.DESK_STATE_DIR
+
+	vim.env.DESK_TICKET_CACHE = "/explicit/override.json"
+	vim.env.DESK_STATE_DIR = "/should-be-ignored"
+	assert_eq(
+		"an explicit $DESK_TICKET_CACHE always wins",
+		"/explicit/override.json",
+		annotate.ticket_cache_path()
+	)
+
+	vim.env.DESK_TICKET_CACHE = nil
+	vim.env.DESK_STATE_DIR = "/tmp/desk-annotate-test-state"
+	assert_eq(
+		"no $DESK_TICKET_CACHE: derives from $DESK_STATE_DIR rather than a bare ~/.local/state/desk",
+		"/tmp/desk-annotate-test-state/ticket-status.json",
+		annotate.ticket_cache_path()
+	)
+
+	vim.env.DESK_TICKET_CACHE = nil
+	vim.env.DESK_STATE_DIR = nil
+	assert_eq(
+		"neither set: falls back to the real default",
+		vim.fn.expand("~/.local/state/desk/ticket-status.json"),
+		annotate.ticket_cache_path()
+	)
+
+	vim.env.DESK_TICKET_CACHE = old_cache
+	vim.env.DESK_STATE_DIR = old_state
+end
+
+print()
 print("=== scan: finds tokens by classified kind, at their own positions ===")
 
 local tokens_config = {

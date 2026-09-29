@@ -23,6 +23,24 @@ assert_true() {
 	if [ "$cond" = "true" ]; then ok "$desc"; else bad "$desc (got [$cond])"; fi
 }
 
+echo "=== DESK_TICKET_CACHE's own default follows \$DESK_STATE_DIR, never a bare \$HOME ==="
+default_state_root="$(mktemp -d)"
+# A fresh subshell, deliberately NOT exporting DESK_TICKET_CACHE — this is
+# the exact shape of the bug this default guards against: a caller (a test,
+# an instantiation) that only points DESK_STATE_DIR somewhere throwaway must
+# never fall through to the real ~/.local/state/desk/ticket-status.json.
+derived="$(
+	unset DESK_TICKET_CACHE
+	export DESK_STATE_DIR="$default_state_root/state"
+	source "$LIB/common.sh"
+	source "$LIB/ticket-cache.sh"
+	printf '%s' "$DESK_TICKET_CACHE"
+)"
+assert_eq "derives from \$DESK_STATE_DIR when \$DESK_TICKET_CACHE is unset" \
+	"$default_state_root/state/ticket-status.json" "$derived"
+rm -rf "$default_state_root"
+
+echo
 ROOT="$(mktemp -d)"
 trap 'rm -rf "$ROOT"' EXIT
 export DESK_STATE_DIR="$ROOT/state"

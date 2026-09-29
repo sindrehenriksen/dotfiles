@@ -22,10 +22,21 @@ local M = {}
 M.ns = vim.api.nvim_create_namespace("desk_annotate")
 
 --- The ticket cache path, overridable (`$DESK_TICKET_CACHE`) the same way
---- every other desk path is.
+--- every other desk path is — and, absent that, following `$DESK_STATE_DIR`
+--- (same reasoning as claude/desk-lib/ticket-cache.sh's own default): a
+--- caller that points DESK_STATE_DIR at a throwaway dir without separately
+--- overriding DESK_TICKET_CACHE still reads/writes under that same dir,
+--- never a bare ~/.local/state/desk regardless of DESK_STATE_DIR.
 function M.ticket_cache_path()
 	local override = vim.env.DESK_TICKET_CACHE
-	return vim.fn.expand((override and override ~= "") and override or "~/.local/state/desk/ticket-status.json")
+	if override and override ~= "" then
+		return vim.fn.expand(override)
+	end
+	local state_dir = vim.env.DESK_STATE_DIR
+	if state_dir and state_dir ~= "" then
+		return vim.fn.expand(state_dir .. "/ticket-status.json")
+	end
+	return vim.fn.expand("~/.local/state/desk/ticket-status.json")
 end
 
 --- Reads and parses the ticket cache, or nil if it's absent/invalid — an

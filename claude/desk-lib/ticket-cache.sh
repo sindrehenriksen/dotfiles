@@ -8,7 +8,15 @@
 # else, precisely so there's no prose to parse.
 set -u
 
-DESK_TICKET_CACHE="${DESK_TICKET_CACHE:-$HOME/.local/state/desk/ticket-status.json}"
+# Default follows $DESK_STATE_DIR (never a bare $HOME literal): common.sh's
+# own DESK_STATE_DIR is already override-aware by the time this file is
+# sourced, so a caller that points DESK_STATE_DIR at a throwaway dir (a
+# test, or a differently-configured instantiation) gets its ticket cache
+# under that same dir without having to separately override this one too —
+# a bare $HOME default here is exactly how a test that only remembered to
+# override DESK_STATE_DIR still wrote into the real
+# ~/.local/state/desk/ticket-status.json.
+DESK_TICKET_CACHE="${DESK_TICKET_CACHE:-${DESK_STATE_DIR:-$HOME/.local/state/desk}/ticket-status.json}"
 
 # desk_ticket_keys_from_text <text> <tokens-config-json>
 # Every distinct ticket key found in <text>, matched against every
