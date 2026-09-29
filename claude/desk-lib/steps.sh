@@ -376,8 +376,15 @@ desk_fetch_cache_clear() {
 # ---------------------------------------------------------------------------
 
 # desk_step_model_call <pass> <step_json> <label> <placeholders_json>
-#   [<extra-files-dir-to-copy-into-scratch>] [<pinned_args_json>] [<scheduled_date>]
+#   [<seed_dir>] [<pinned_args_json>] [<scheduled_date>]
 # Runs one model call for a fetch/judge/ticket_status/write-shaped step.
+# `seed_dir`, when given (only judge/close ever pass one), is where the
+# caller already seeded this call's own input files — copied INTO
+# call_scratch (below), this call's own actual cwd, never adopted as the
+# cwd directly: call_scratch's own naming ("$pass-$id", or the kept-runs
+# dir when visible) is relied on elsewhere too, so the directory a
+# judge/close call's own scoped Read (and its prompt's {{scratch}}
+# placeholder) point at is always call_scratch, never seed_dir itself.
 # Writes the raw stream-json to $PASS_SCRATCH/<id>-stream.jsonl and the
 # generic tool_results/tool_uses extraction beside it — downstream, pass-
 # specific parsing reads those, never the model's prose. `pinned_args_json`
@@ -416,6 +423,18 @@ desk_step_model_call() {
 	[ "$visible" = "true" ] && session_name="desk-$pass-$scheduled_date-$id"
 
 	desk_log "$pass" "model call: $id${label:+ ($label)}"
+	# call_scratch is this call's own actual cwd — the one thing a
+	# `--restricted` call's Read is really confined to (a live 16:30 close
+	# call's own failure: --allowedTools naming Read(<seed dir>/**) and the
+	# prompt's own {{scratch}} placeholder pointing at that same seed dir
+	# meant nothing once the process itself ran from a DIFFERENT cwd, so
+	# every Read got refused). Always this function's own properly-named
+	# dir — visible or not, its "$pass-$id"/kept-runs naming is itself
+	# relied on elsewhere (log lines, a fake-claude test harness routing
+	# by cwd basename) — never the caller's own seed_dir standing in for
+	# it directly: a seed_dir is instead copied INTO call_scratch, so the
+	# directory a scoped Read/prompt point at (below) is always this exact
+	# same cwd, never a separate path that merely names it.
 	local call_scratch
 	if [ -n "$session_name" ]; then
 		call_scratch="$(desk_pass_scratch_dir "$pass" "$scheduled_date" "$id")"
@@ -426,17 +445,7 @@ desk_step_model_call() {
 		cp -R "$seed_dir"/. "$call_scratch"/ 2> /dev/null || true
 	fi
 
-	# The scratch dir a judge/close call's Read is scoped to: whatever its
-	# prompt's own {{scratch}} placeholder resolves to below, computed the
-	# same way — call_scratch, its actual cwd, UNLESS the caller already
-	# set its own (desk_step_close's own per-session seed dir, which
-	# persists past this call and is what its prompt is actually pointed
-	# at). These must always agree, or a scoped Read can't reach what the
-	# prompt just told the model to read.
-	local effective_scratch
-	effective_scratch="$(jq -r '.scratch // empty' <<< "$placeholders_json")"
-	[ -n "$effective_scratch" ] || effective_scratch="$call_scratch"
-	tools_csv="$(desk_step_allowed_tools "$step_json" "$effective_scratch")"
+	tools_csv="$(desk_step_allowed_tools "$step_json" "$call_scratch")"
 
 	# The same judge/close-and-has-Read condition desk_step_allowed_tools
 	# checks, so the deny hook's own --scratch backstop (deny-unlisted-
@@ -445,16 +454,16 @@ desk_step_model_call() {
 	local hook_scratch=""
 	if { [ "$kind" = "judge" ] || [ "$kind" = "close" ]; } \
 		&& jq -e '(.tools // []) | index("Read")' > /dev/null 2>&1 <<< "$step_json"; then
-		hook_scratch="$effective_scratch"
+		hook_scratch="$call_scratch"
 	fi
 
 	local prompt_file="$call_scratch/prompt.txt"
 	if [ -n "$prompt_rel" ]; then
 		# `scratch` is filled in here, generically, for any prompt that
 		# references it: call_scratch is exactly the cwd desk_call_model is
-		# about to run in (below), so it's the one universally-correct value
-		# — UNLESS the caller already set its own (see effective_scratch
-		# just above).
+		# about to run in (above), so it's the one universally-correct
+		# value — UNLESS the caller already set its own "scratch" in
+		# placeholders_json (none currently do; kept as an escape hatch).
 		local full_placeholders
 		full_placeholders="$(jq -c --arg scratch "$call_scratch" \
 			'if has("scratch") then . else . + {scratch: $scratch} end' <<< "$placeholders_json")"
@@ -950,6 +959,12 @@ desk_step_close() {
 		name="$(jq -r '.name // .id' <<< "$sess")"
 		transcript_path="$(jq -r '.transcript_path // empty' <<< "$sess")"
 
+		# This call's own seed dir — desk_step_model_call copies its
+		# content into whatever it computes as this call's own actual cwd
+		# (call_scratch), never a separate location: nothing here needs to
+		# point the prompt at this seed dir manually (unlike the design
+		# this once had), since call_scratch is always the one directory a
+		# scoped Read can actually reach.
 		local seed
 		seed="$PASS_SCRATCH/close-seed-$id"
 		mkdir -p "$seed"
@@ -966,8 +981,8 @@ desk_step_close() {
 		local per_session_step
 		per_session_step="$(jq -c --arg id "$id" '.id = ("close-" + $id)' <<< "$step_json")"
 		local placeholders
-		placeholders="$(jq -n --arg sn "$name" --arg sid "$id" --arg scratch "$seed" --arg today "$(date +%F)" \
-			'{session_name: $sn, session_id: $sid, scratch: $scratch, today: $today}')"
+		placeholders="$(jq -n --arg sn "$name" --arg sid "$id" --arg today "$(date +%F)" \
+			'{session_name: $sn, session_id: $sid, today: $today}')"
 		local call_result
 		call_result="$(desk_step_model_call "$pass" "$per_session_step" "close:$name" "$placeholders" "$seed" "" "$scheduled_date")"
 		desk_log "$pass" "close: session $name call -> $call_result"
