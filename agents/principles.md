@@ -194,7 +194,10 @@ runnable beside the new, or a fallback to a second mechanism for
 when the first cannot run, is a second implementation — one that
 nothing exercises until the day it is needed, which is the day it
 turns out stale. Where a mechanism can lose its input, let it do
-the default thing rather than switch to a copy of itself.
+the default thing rather than switch to a copy of itself. That
+makes a switch or fallback a cost to justify rather than a free
+safety net: keep one where the reason outweighs it, and say what
+the reason is.
 
 A design handed over as a picture is that second copy by another
 route. The mockup holds a chosen type scale, letter-spacing,
