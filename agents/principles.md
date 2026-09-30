@@ -189,6 +189,13 @@ head now reliably rots. When the same concept appears twice,
 unifying it is not tidiness — it is the only way the second copy
 ever gets the next fix.
 
+It holds at runtime too. A switch that keeps the old behaviour
+runnable beside the new, or a fallback to a second mechanism for
+when the first cannot run, is a second implementation — one that
+nothing exercises until the day it is needed, which is the day it
+turns out stale. Where a mechanism can lose its input, let it do
+the default thing rather than switch to a copy of itself.
+
 A design handed over as a picture is that second copy by another
 route. The mockup holds a chosen type scale, letter-spacing,
 colour and spacing rhythm, and re-deriving all of it by eye,
