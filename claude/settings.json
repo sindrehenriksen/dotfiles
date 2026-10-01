@@ -266,14 +266,18 @@
       "Bash(git -C * branch -d --force *)",
       "Bash(git -C * worktree remove * -f *)",
       "Bash(git -C * worktree remove * --force *)",
-      "Bash(gh api * -X POST *)",
       "Bash(gh api * -X PUT *)",
       "Bash(gh api * -X DELETE *)",
       "Bash(gh api * -X PATCH *)",
-      "Bash(gh api * --method POST *)",
       "Bash(gh api * --method PUT *)",
       "Bash(gh api * --method DELETE *)",
-      "Bash(gh api * --method PATCH *)"
+      "Bash(gh api * --method PATCH *)",
+      "Bash(gh api -X PUT *)",
+      "Bash(gh api -X DELETE *)",
+      "Bash(gh api -X PATCH *)",
+      "Bash(gh api --method PUT *)",
+      "Bash(gh api --method DELETE *)",
+      "Bash(gh api --method PATCH *)"
     ],
     "defaultMode": "auto",
     "additionalDirectories": [
