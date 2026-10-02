@@ -215,12 +215,34 @@ __gh-run() {
     local account=$1; shift
     GH_CONFIG_DIR=~/.config/gh-"$account" __gh-exec "$@"
 }
-# Bare `gh`: honor an explicitly-set GH_CONFIG_DIR (so claude-* exports and
-# `GH_CONFIG_DIR=... gh ...` command-line prefixes win), otherwise pick by
-# $GH_DEFAULT_ACCOUNT, then the shared $DEFAULT_ACCOUNT. The explicit forms
-# below always force their account.
+# Inside a repo, the SSH host alias of its origin picks the account, where
+# $GH_ACCOUNT_BY_HOST (space-separated `alias=account` pairs, machine-local in
+# ~/.shellrc.early) maps it. The alias already picks git's key, so this keeps
+# gh on the same account as the push instead of on whichever account the
+# session happened to start as.
+__gh-repo-account() {
+    local url host account
+    [ -n "$GH_ACCOUNT_BY_HOST" ] || return 1
+    url=$(command git remote get-url origin 2>/dev/null) || return 1
+    case "$url" in
+        ssh://*) host=${url#ssh://}; host=${host#*@}; host=${host%%[:/]*} ;;
+        *@*:*)   host=${url#*@}; host=${host%%:*} ;;
+        *)       return 1 ;;
+    esac
+    case " $GH_ACCOUNT_BY_HOST " in
+        *" $host="*) account=${GH_ACCOUNT_BY_HOST#*"$host="}; echo "${account%% *}" ;;
+        *) return 1 ;;
+    esac
+}
+# Bare `gh`: the repo's account first, then an explicitly-set GH_CONFIG_DIR (so
+# claude-* exports and `GH_CONFIG_DIR=... gh ...` prefixes win outside a mapped
+# repo), then $GH_DEFAULT_ACCOUNT, then the shared $DEFAULT_ACCOUNT. The
+# explicit forms below always force their account.
 gh() {
-    if [ -n "$GH_CONFIG_DIR" ]; then
+    local account
+    if account=$(__gh-repo-account); then
+        __gh-run "$account" "$@"
+    elif [ -n "$GH_CONFIG_DIR" ]; then
         __gh-exec "$@"
     else
         __gh-run "${GH_DEFAULT_ACCOUNT:-${DEFAULT_ACCOUNT:-personal}}" "$@"
