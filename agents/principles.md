@@ -267,6 +267,22 @@ giving it an expiry nothing will ever trigger.
 One project does this as a `COMPAT:` convention: one bridge per
 problem, tests carrying the marker they die with.
 
+## Ask for comment early, where the work already lives
+
+A decision other people will live with is put to them before it is
+taken, as early as its shape is visible; by the time a pull request
+carries the change, the shape is chosen and comments can only adjust
+it. The asking happens where the work already lives, not in a
+separate document tool, whose comments never meet the change. For
+something still to be built, that place is the ticket and its
+assessment or planning step; for a record or document that is itself
+the proposal, it is the open pull request carrying it. Where the
+shape is easier seen than read, a plain HTML page carries it,
+attached as a file or committed beside the text; a page hosted in one
+tool's account reaches only that tool's users, and is a second copy
+that drifts. A decision never
+open for comment is one only its author agreed to.
+
 ## A fixture is not the world
 
 Before tuning a prompt, a threshold or a check against something a
