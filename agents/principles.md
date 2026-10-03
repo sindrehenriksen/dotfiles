@@ -101,6 +101,16 @@ judgement on a real device — so every bit of fanciness converts
 automatable verification into a manual testing round. Restraint
 here isn't only taste; it's what keeps the review loop cheap.
 
+## A wait shows that it is working
+
+A wait the user started shows that it is live, in the place the
+result will land, and goes the moment the result arrives. A spinner is
+often enough; a few words naming the step help when the wait is long
+or has stages worth seeing, never a percentage the work cannot honestly
+compute. This is the exception to "Motion has to earn its place": the
+user's tap started the work, so the sign is a consequence of their
+gesture.
+
 ## Log for the debugging you will actually do
 
 Diagnostics get written once and read months later, in the dark,
