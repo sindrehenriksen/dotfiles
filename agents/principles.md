@@ -152,6 +152,14 @@ Python form is a broad `except Exception` returning the benign value,
 and ruff's `BLE001` catches that one — so enable it where such
 guards live rather than leaving it to review.
 
+The limit on all of this is what a log may hold about a person.
+Generous context means the system's state, not the user's: anything
+about a person is recorded only when a debugging question we
+actually ask needs it, in the coarsest form that answers it, and
+for no longer than such questions reach back. Decide that when the
+row is designed, and remember a kept value travels wherever the log
+is copied.
+
 ## Where a thing appears is part of what it says
 
 Screen position carries meaning before anyone reads a word. The
