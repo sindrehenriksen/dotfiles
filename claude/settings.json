@@ -224,6 +224,8 @@
       "WebFetch(domain:docs.github.com)"
     ],
     "deny": [
+      "Bash(mise env)",
+      "Bash(mise env *)",
       "Bash(curl * -X DELETE *)",
       "Bash(curl * --request DELETE *)",
       "Bash(git push --force)",
