@@ -431,5 +431,43 @@ do
 end
 
 print()
+print("=== the tab helpers are found by either env var name ===")
+do
+	local dir = vim.fn.tempname()
+	vim.fn.mkdir(dir, "p")
+	local function stub(name)
+		local path = dir .. "/" .. name
+		local fh = io.open(path, "w")
+		fh:write("#!/bin/sh\necho " .. name .. " > " .. dir .. "/called\n")
+		fh:close()
+		vim.fn.system({ "chmod", "+x", path })
+		return path
+	end
+	local function called_after(var, name)
+		vim.fn.delete(dir .. "/called")
+		vim.env[var] = stub(name)
+		local done = false
+		hotkey.default_deps().open_tab("cmd", "", dir, function()
+			done = true
+		end)
+		vim.wait(5000, function()
+			return done
+		end, 20)
+		vim.env[var] = nil
+		local fh = io.open(dir .. "/called", "r")
+		local got = fh and vim.trim(fh:read("*a")) or nil
+		if fh then
+			fh:close()
+		end
+		return got
+	end
+	assert_eq("DESK_OPEN_TAB_BIN is used", "by-bin", called_after("DESK_OPEN_TAB_BIN", "by-bin"))
+	assert_eq("the older DESK_OPEN_TAB still works", "by-alias", called_after("DESK_OPEN_TAB", "by-alias"))
+	vim.env.DESK_OPEN_TAB = stub("alias-loses")
+	assert_eq("the shared name wins when both are set", "by-bin2", called_after("DESK_OPEN_TAB_BIN", "by-bin2"))
+	vim.env.DESK_OPEN_TAB = nil
+end
+
+print()
 print(string.format("=== summary: %d passed, %d failed ===", pass, fail))
 os.exit(fail == 0 and 0 or 1)

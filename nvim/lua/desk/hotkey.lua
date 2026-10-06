@@ -1,4 +1,4 @@
--- D7: the hotkey (design.md §2 "The hotkey", §10 D7's done-check). Acts on
+-- D7: the hotkey. Acts on
 -- the token under the cursor (letters, digits, `_`, `-`):
 --   - a url-handler token (e.g. a ticket key) opens its templated URL;
 --   - a session-handler token that's a plain in-notes mention of a section
@@ -52,9 +52,7 @@ function M.token_under_cursor(line, col)
 	return line:sub(s, e), s - 1, e - 1
 end
 
--- Strips a leading heading/list/checkbox marker (design.md §2's "section"
--- rule: "after list, heading and checkbox markers; the token stops at
--- `:`"), a best-effort local re-implementation for this one purpose — it
+-- Strips a leading heading/list/checkbox marker, a best-effort local re-implementation for this one purpose — it
 -- doesn't need desk.block's full block/section semantics, only "does this
 -- line's own text start by naming this token".
 local function line_names_token(line, token)
@@ -87,8 +85,7 @@ function M.find_section_head_line(lines, token)
 end
 
 --- The command a resumed session's tab runs — built from the reader's own
---- resolved id, never from the raw cursor token (design.md §2: "never by
---- token (a token can start with `-`)").
+--- resolved id, never from the raw cursor token.
 function M.resume_command(session_id)
 	return "claude --resume " .. session_id
 end
@@ -101,13 +98,22 @@ end
 function M.default_deps()
 	local reader = require("desk.reader")
 
-	local function shell_dep(env_var, default_cmd)
+	-- `env_vars` is tried in order: the name shared with the runner first,
+	-- then the older nvim-only alias.
+	local function shell_dep(env_vars, default_cmd)
 		return function(...)
 			local args = { ... }
 			local cb = args[#args]
 			args[#args] = nil
-			local cmd = vim.env[env_var]
-			cmd = (cmd and cmd ~= "") and cmd or default_cmd
+			local cmd
+			for _, env_var in ipairs(env_vars) do
+				local v = vim.env[env_var]
+				if v and v ~= "" then
+					cmd = v
+					break
+				end
+			end
+			cmd = cmd or default_cmd
 			local argv = { cmd }
 			for _, a in ipairs(args) do
 				argv[#argv + 1] = a
@@ -131,9 +137,9 @@ function M.default_deps()
 		reader_resolve = function(token, cb)
 			reader.resolve(token, cb)
 		end,
-		focus_tty = shell_dep("DESK_FOCUS_TAB", "desk-focus-tab.sh"),
-		open_tab = shell_dep("DESK_OPEN_TAB", "desk-open-tab.sh"),
-		open_url = shell_dep("DESK_OPEN_URL", "open"),
+		focus_tty = shell_dep({ "DESK_FOCUS_TAB_BIN", "DESK_FOCUS_TAB" }, "desk-focus-tab.sh"),
+		open_tab = shell_dep({ "DESK_OPEN_TAB_BIN", "DESK_OPEN_TAB" }, "desk-open-tab.sh"),
+		open_url = shell_dep({ "DESK_OPEN_URL" }, "open"),
 	}
 end
 

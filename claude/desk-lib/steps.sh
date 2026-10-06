@@ -1219,7 +1219,7 @@ desk_open_follow_up_tab() {
 			echo "ok"
 			return
 		fi
-		local focus_helper="${DESK_FOCUS_TAB_BIN:-desk-focus-tab.sh}"
+		local focus_helper="${DESK_FOCUS_TAB_BIN:-${DESK_FOCUS_TAB:-desk-focus-tab.sh}}"
 		if "$focus_helper" "$tty" > /dev/null 2>&1; then
 			desk_log "$pass" "follow-up tab: $follow_up_step's session ($id) is already live — focused its tab instead of opening a second one"
 			desk_write_atomic "$guard_marker" ""
@@ -1233,7 +1233,7 @@ desk_open_follow_up_tab() {
 
 	local command
 	command="claude --resume $(desk_shq "$id")"
-	local helper="${DESK_OPEN_TAB_BIN:-desk-open-tab.sh}"
+	local helper="${DESK_OPEN_TAB_BIN:-${DESK_OPEN_TAB:-desk-open-tab.sh}}"
 	if "$helper" "$command" "$id" "$cwd" > /dev/null 2>&1; then
 		desk_log "$pass" "follow-up tab: opened $follow_up_step ($id) in $cwd"
 		desk_write_atomic "$guard_marker" ""
@@ -1489,7 +1489,7 @@ desk_step_open_tab() {
 	# process can set its own env on).
 	[ "$restricted" != "true" ] && command="DESK_HEADLESS=1 $command"
 
-	local helper="${DESK_OPEN_TAB_BIN:-desk-open-tab.sh}"
+	local helper="${DESK_OPEN_TAB_BIN:-${DESK_OPEN_TAB:-desk-open-tab.sh}}"
 	if "$helper" "$command" "" "$cwd" > /dev/null 2>&1; then
 		echo "ok"
 	else
