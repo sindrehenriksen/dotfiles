@@ -1254,14 +1254,29 @@ desk_open_follow_up_tab() {
 # logs and returns non-zero, which desk_write_notes_diff treats as "diff
 # against the empty tree" rather than failing the step.
 desk_notes_diff_since_epoch() {
-	local kind="$1"
-	case "$kind" in
-		last_wednesday) desk_last_weekday_epoch "$(desk_now)" 3 8 0 ;;
-		*)
-			desk_log - "notes-diff: unknown notes_diff_since '$kind'"
-			return 1
-			;;
-	esac
+	local kind="$1" wd="" tm=""
+	if [ "$kind" = "last_wednesday" ]; then
+		wd=3 tm="08:00"
+	elif jq -e 'type == "object"' > /dev/null 2>&1 <<< "$kind"; then
+		wd="$(jq -r '.weekday // empty | tostring | ascii_downcase' <<< "$kind")"
+		tm="$(jq -r '.time // "00:00"' <<< "$kind")"
+		case "$wd" in
+			1 | mon*) wd=1 ;;
+			2 | tue*) wd=2 ;;
+			3 | wed*) wd=3 ;;
+			4 | thu*) wd=4 ;;
+			5 | fri*) wd=5 ;;
+			6 | sat*) wd=6 ;;
+			7 | sun*) wd=7 ;;
+			*) wd="" ;;
+		esac
+		[[ "$tm" =~ ^([01]?[0-9]|2[0-3]):([0-5][0-9])$ ]] || wd=""
+	fi
+	if [ -z "$wd" ]; then
+		desk_log - "notes-diff: unknown notes_diff_since '$kind'"
+		return 1
+	fi
+	desk_last_weekday_epoch "$(desk_now)" "$wd" "$((10#${tm%%:*}))" "$((10#${tm##*:}))"
 }
 
 # The well-known empty-tree object: every path diffs as newly added against
@@ -1409,7 +1424,7 @@ desk_step_open_tab() {
 	session_name="$(jq -r '.session_name // empty' <<< "$step_json")"
 	scratch_root="$(jq -r '.scratch_dir // empty' <<< "$step_json")"
 	notes_diff_file="$(jq -r '.notes_diff_file // empty' <<< "$step_json")"
-	notes_diff_since="$(jq -r '.notes_diff_since // empty' <<< "$step_json")"
+	notes_diff_since="$(jq -c '.notes_diff_since // empty' <<< "$step_json" | sed -E 's/^"(.*)"$/\1/')"
 
 	if [ -z "$cwd" ] || [ -z "$prompt_text" ]; then
 		desk_log - "open_tab step: missing cwd_outside or prompt_text"

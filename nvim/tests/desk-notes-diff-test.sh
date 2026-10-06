@@ -153,6 +153,21 @@ assert_true "reading.md (untouched, no changes) says so" "$(grep -q '(no changes
 assert_true "the whole diff body is fenced" "$(grep -c '^```$' "$out_file" | grep -qx 2 && echo true || echo false)"
 
 echo
+echo "=== desk_notes_diff_since_epoch: configurable weekday and time ==="
+fmt() { date -j -r "$1" '+%u %H:%M' 2> /dev/null || date -d "@$1" '+%u %H:%M'; }
+desk_now() { echo "$now_wed"; }
+assert_eq "last_wednesday is an alias for wed 08:00" "3 08:00" "$(fmt "$(desk_notes_diff_since_epoch last_wednesday)")"
+assert_eq "object with a short weekday name" "3 08:00" "$(fmt "$(desk_notes_diff_since_epoch '{"weekday":"wed","time":"08:00"}')")"
+assert_eq "object with another weekday and time" "5 17:30" "$(fmt "$(desk_notes_diff_since_epoch '{"weekday":"friday","time":"17:30"}')")"
+assert_eq "a numeric weekday works" "1 09:05" "$(fmt "$(desk_notes_diff_since_epoch '{"weekday":1,"time":"09:05"}')")"
+assert_eq "the object and the alias agree" "$(desk_notes_diff_since_epoch last_wednesday)" "$(desk_notes_diff_since_epoch '{"weekday":"wed","time":"08:00"}')"
+assert_true "a bad weekday is rejected" "$(desk_notes_diff_since_epoch '{"weekday":"someday","time":"08:00"}' > /dev/null 2>&1 && echo false || echo true)"
+assert_true "a bad time is rejected" "$(desk_notes_diff_since_epoch '{"weekday":"wed","time":"8am"}' > /dev/null 2>&1 && echo false || echo true)"
+out_obj="$ROOT/notes-diff-obj.md"
+desk_write_notes_diff "$repo" "$out_obj" '{"weekday":"wed","time":"08:00"}' notes.md 2> /dev/null
+assert_true "the object form drives a real diff" "$(grep -qF '+ His own new line' "$out_obj" && echo true || echo false)"
+
+echo
 echo "=== desk_write_notes_diff: an unknown notes_diff_since falls back to the empty tree, never fails ==="
 out_file2="$ROOT/notes-diff-bogus.md"
 desk_write_notes_diff "$repo" "$out_file2" "bogus_kind" notes.md 2> /dev/null
