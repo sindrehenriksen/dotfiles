@@ -811,8 +811,7 @@ desk_capture_already_ledgered() {
 #
 # `$4..` are the pass's configured files, which the proposal builder
 # applies items onto; every capture item itself lands in the captures
-# file ($DESK_CAPTURES_FILE, default notes.md — the same file
-# desk_apply_caps's overflow summary uses).
+# file ($DESK_CAPTURES_FILE, default notes.md).
 #
 # Prints "ok" once every candidate is processed (nothing here is ever a
 # per-candidate step failure), "failed" only if the mechanism itself

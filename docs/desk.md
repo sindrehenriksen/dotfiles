@@ -8,7 +8,7 @@ macOS only: tabs open in Ghostty through Hammerspoon, and passes run from launch
 
 ## How it works
 
-**The notes repo.** A private git repo holding `notes.md` and `reading.md` at its root, on branch `main`, with an empty `.desk-notes` marker file. The marker, not a path, is what tells nvim a buffer is a desk notes file, so this repo never names where the notes live. nvim attaches to the config's `files` (default those two names), and session captures and a capped tier's overflow summary land in `captures_file` (default the first entry of `files`).
+**The notes repo.** A private git repo holding `notes.md` and `reading.md` at its root, on branch `main`, with an empty `.desk-notes` marker file. The marker, not a path, is what tells nvim a buffer is a desk notes file, so this repo never names where the notes live. nvim attaches to the config's `files` (default those two names), and session captures land in `captures_file` (default the first entry of `files`).
 
 **Passes.** `desk-run <pass>` runs one pass from the config: an ordered list of steps, each of one kind (below). Every model call is a headless `claude -p` with an exact tool allowlist, from a scratch directory outside any repo, under a timeout and a spend cap. A pass ends by writing `~/.local/state/desk/status.json`, which the status line reads. One lock is shared by every pass, since they all write the same repo and status file; a run that cannot get it waits up to 30 minutes, then gives up and says so in status.
 
@@ -53,7 +53,7 @@ macOS only: tabs open in Ghostty through Hammerspoon, and passes run from launch
 |---|---|---|
 | `notes_repo` | required | Absolute path (a leading `~` is expanded) that is a repo's own toplevel. Anything else refuses the pass. |
 | `files` | required | The files a pass commits and suggests into, e.g. `["notes.md", "reading.md"]`. nvim attaches to these names (default `notes.md`, `reading.md` when no config is readable). A judge's `input_files` may name any of them, and each is seeded as its committed copy. |
-| `captures_file` | first entry of `files` | Where session captures and the `+N more` overflow items go. Also the file a close call is seeded with. |
+| `captures_file` | first entry of `files` | Where session captures go. Also the file a close call is seeded with. |
 | `timezone` | required | IANA zone name; `{{window_start}}`/`{{window_end}}` render in it. |
 | `ticket_search_tool` | required | Tool name whose results build the ticket cache. |
 | `mail_search_tool` | required | Tool name whose digest search the write step pins thread ids from. |
@@ -180,7 +180,7 @@ A close call's cwd holds `session.json` (its reader entry), `transcript-tail.jso
 | `also_sources` | optional: other URLs for the same story |
 | `supersedes` | optional: the id of an open item this replaces |
 
-An anchor whose quoted line has gone lands the item on top; an `edit` or `remove` whose `before` no longer sits at its anchor is deferred and retried next pass. A capped tier's overflow goes to `~/.local/state/desk/briefs/<date>.md`, replaced in the proposal by one `+N more <tier> → brief` item. A new item replaces an open one that it names in `supersedes`, that shares a URL with it, or that is an `edit`, `remove`, `move` or `merge` of the same existing line (same kind, same `at` target). Insertions never replace each other by place: two `add`s under one heading are two suggestions.
+An anchor whose quoted line has gone lands the item on top; an `edit` or `remove` whose `before` no longer sits at its anchor is deferred and retried next pass. A capped tier's overflow goes to `~/.local/state/desk/briefs/<date>.md`; the per-tier count is reported in the status file (and shown as `+N more <tier> → brief` on the status line), never as a proposal item. A new item replaces an open one that it names in `supersedes`, that shares a URL with it, or that is an `edit`, `remove`, `move` or `merge` of the same existing line (same kind, same `at` target). Insertions never replace each other by place: two `add`s under one heading are two suggestions.
 
 **What the runner enforces on a reply**: an item whose URL `source` is not in the allowed set is dropped; an `also_sources` URL not in it is dropped from the list; any other URL in the item's text becomes `[url removed]`; control characters, ANSI sequences, vim modelines and `<<agent-suggested>>` markers are stripped. A close call allows no URLs at all, and each of its bullets must cite a transcript turn as `[turn <first 8 chars of that entry's uuid>]`: an item citing a turn that is not in the tail it was given is dropped, and the markers are removed from what is kept.
 

@@ -108,8 +108,8 @@ echo "=== proposal ==="
 assert_eq "state: pending" "pending" "$(jq -r '.proposal.state' <<< "$status")"
 assert_eq "partial: false (no failed source this pass)" "false" "$(jq -r '.proposal.partial' <<< "$status")"
 assert_eq "overflow.act: 1 (cap of 1, two ACT items)" "1" "$(jq -r '.proposal.overflow.act' <<< "$status")"
-# The overflow-summary item carries no text of its own, so a review cannot
-# show it: counts and untaken cover only what a review would show.
+# Overflow is counted in the status file only; the proposal holds just the
+# showable items.
 assert_eq "counts.by_kind.new counts the one showable item" "1" "$(jq -r '.proposal.counts.by_kind.new' <<< "$status")"
 assert_eq "untaken: the one showable item still waits on him" "1" "$(jq -r '.proposal.untaken' <<< "$status")"
 assert_true "the retired queue/classify fields are gone" \

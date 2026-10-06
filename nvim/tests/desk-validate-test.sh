@@ -127,7 +127,7 @@ assert_true "a URL the agent added to after is still stripped" \
 	"$([[ "$(jq -r '.[0].after' <<< "$validated")" != *evil.example* ]] && echo true || echo false)"
 
 echo
-echo "=== desk_apply_caps: overflow goes to the dated brief with a summary line ==="
+echo "=== desk_apply_caps: overflow goes to the dated brief, never into the proposal ==="
 five_act='[
   {"id":"a1","tier":"act","headline":"one","source":"notes"},
   {"id":"a2","tier":"act","headline":"two","source":"notes"},
@@ -139,10 +139,10 @@ caps='{"act": 3, "worth_knowing": 3, "wildcard": 1}'
 result="$(desk_apply_caps "$five_act" "$caps" "morning")"
 kept_n="$(jq '.kept | length' <<< "$result")"
 overflow_n="$(jq '.overflow | length' <<< "$result")"
-assert_eq "3 kept + 1 overflow-summary item = 4" "4" "$kept_n"
+assert_eq "exactly the 3 capped items are kept, no summary item" "3" "$kept_n"
 assert_eq "2 items overflowed" "2" "$overflow_n"
-assert_true "the summary item names the overflow count" \
-	"$(jq -e '[.kept[].headline] | any(test("\\+2 more act"))' > /dev/null 2>&1 <<< "$result" && echo true || echo false)"
+assert_true "no kept item is an overflow summary" \
+	"$(jq -e '[.kept[].headline] | any(test("more act")) | not' > /dev/null 2>&1 <<< "$result" && echo true || echo false)"
 brief_file="$DESK_BRIEF_DIR/$(date +%F).md"
 assert_true "the dated brief file was written" "$([ -f "$brief_file" ] && echo true || echo false)"
 assert_true "the brief holds the overflowing items' headlines" \

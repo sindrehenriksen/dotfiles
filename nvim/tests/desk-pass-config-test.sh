@@ -4,7 +4,7 @@
 #   - a pass's `weekdays_only` decides the weekend skip, whatever its name;
 #   - a pass's `caps` picks which top-level caps entry its judge uses;
 #   - the config's `files` are the notes files (any names), and
-#     `captures_file` is where the caps overflow summary lands;
+#     `captures_file` is where session captures land;
 #   - the tab-helper env var accepts both of its names.
 # Today's weekday is faked as Saturday through a `date` wrapper, so the
 # weekend case does not depend on when the test runs.
@@ -168,12 +168,9 @@ echo
 echo "=== the pass's own caps entry is used ==="
 assert_true "the judge prompt shows the tight cap" "$(grep -qF 'ACT ≤1' "$judge_rec/prompt.txt" && echo true || echo false)"
 proposal="$(git -C "$notes" show refs/desk/proposal:proposal.json 2> /dev/null)"
-assert_true "the second act item overflowed into a summary item" \
-	"$(jq -e '.items[] | select(.headline | test("^\\+1 more act"))' > /dev/null 2>&1 <<< "$proposal" && echo true || echo false)"
-
-echo
-echo "=== the overflow summary lands in captures_file ==="
-assert_eq "its file is b.md" "b.md" "$(jq -r '.items[] | select(.headline | test("^\\+1 more act")) | .file' <<< "$proposal")"
+assert_eq "the second act item overflowed: counted in the status file" "1" "$(jq -r '.proposal.overflow.act' "$FAKE_HOME/.local/state/desk/status.json")"
+assert_true "and no overflow summary item is in the proposal" \
+	"$(jq -e '[.items[] | select(.headline | test("more act"))] | length == 0' > /dev/null 2>&1 <<< "$proposal" && echo true || echo false)"
 
 echo
 echo "=== the tab helper is found by its alias name ==="

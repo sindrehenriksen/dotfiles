@@ -225,8 +225,9 @@ desk_verify_and_strip_turn_citations() {
 # desk_apply_caps <items-json> <caps-json> <pass>
 # caps-json: {"act": N, "worth_knowing": N, "wildcard": N}. Prints
 # {"kept": [...], "overflow": [...]}. An overflowing tier's dropped items
-# are appended to today's dated brief ($DESK_BRIEF_DIR/<date>.md) and
-# replaced in `kept` by one "+N more <tier> → brief" item landing on top.
+# are appended to today's dated brief ($DESK_BRIEF_DIR/<date>.md). The count
+# per tier is reported by the runner in the status file ("overflow"), never
+# as a proposal item: such an item has no text a review could show.
 desk_apply_caps() {
 	local items_json="$1" caps_json="$2" pass="$3"
 	local today brief_file
@@ -274,23 +275,6 @@ desk_apply_caps() {
 			printf '\n## %s overflow (%s)\n\n' "$pass" "$today"
 			jq -r '.[] | "- [" + (.tier // "?") + "] " + (.headline // "(no headline)") + " — " + (.source // "")' <<< "$overflow"
 		} >> "$brief_file"
-
-		local per_tier pt_n pi
-		per_tier="$(jq -c '[.[] | .tier] | group_by(.) | map({tier: .[0], n: length})' <<< "$overflow")"
-		pt_n="$(jq 'length' <<< "$per_tier")"
-		for ((pi = 0; pi < pt_n; pi++)); do
-			local pt tier_name tier_count summary_item
-			pt="$(jq -c ".[$pi]" <<< "$per_tier")"
-			tier_name="$(jq -r '.tier' <<< "$pt")"
-			tier_count="$(jq -r '.n' <<< "$pt")"
-			summary_item="$(jq -n --arg cf "${DESK_CAPTURES_FILE:-notes.md}" --arg id "${pass}-overflow-${tier_name}-${today}" \
-				--arg headline "+${tier_count} more ${tier_name} → brief" \
-				--arg source "brief:$brief_file" '{
-					id: $id, file: $cf, kind: "new", target: "top",
-					before: "", after: "", source: $source, headline: $headline
-				}')"
-			kept="$(jq -c --argjson it "$summary_item" '. + [$it]' <<< "$kept")"
-		done
 	fi
 	jq -n --argjson kept "$kept" --argjson overflow "$overflow" '{kept: $kept, overflow: $overflow}'
 }

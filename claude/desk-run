@@ -246,7 +246,7 @@ if [ "$repo_toplevel" != "$repo_resolved" ]; then
 fi
 repo="$repo_resolved"
 mapfile -t files < <(jq -r '.files[]' <<< "$config")
-# Where capture items and the caps overflow summary land: `captures_file`,
+# Where capture items land: `captures_file`,
 # default the first configured file.
 DESK_CAPTURES_FILE="$(jq -r --arg d "${files[0]:-notes.md}" '.captures_file // $d' <<< "$config")"
 export DESK_CAPTURES_FILE
