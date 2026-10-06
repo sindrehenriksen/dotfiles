@@ -21,6 +21,8 @@ Read these files in {{scratch}}:
 - `open-items.json`: suggestions already waiting on him. Do not repeat one;
   replace one only when you have something clearly better, and then name it
   in `supersedes`.
+- `declined.json`: suggestions he recently turned down. Do not propose them
+  again, in any wording.
 
 Reply with exactly one JSON object and nothing else:
 

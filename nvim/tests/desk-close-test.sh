@@ -70,6 +70,7 @@ chmod +x "$FAKEBIN/session-status.sh"
 FAKE_CLAUDE_ITEMS_FILE="$ROOT/fake-claude-items.json"
 cat > "$FAKEBIN/claude" <<'FAKE'
 #!/usr/bin/env bash
+echo call >> "$FAKE_CLAUDE_CALLS"
 cat "$FAKE_CLAUDE_ITEMS_FILE"
 echo '{"type":"result","subtype":"success"}'
 exit 0
@@ -77,7 +78,9 @@ FAKE
 chmod +x "$FAKEBIN/claude"
 export PATH="$FAKEBIN:$PATH"
 export DESK_CLAUDE_BIN=claude
-export FAKE_CLAUDE_ITEMS_FILE
+FAKE_CLAUDE_CALLS="$ROOT/fake-claude-calls.log"
+: > "$FAKE_CLAUDE_CALLS"
+export FAKE_CLAUDE_ITEMS_FILE FAKE_CLAUDE_CALLS
 
 repo="$ROOT/notes"
 desk_test_assert_repo_under_root "$repo" "$ROOT"
@@ -186,6 +189,21 @@ assert_eq "the step reports ok" "ok" "$result"
 assert_true "the throwaway process is still alive (never signaled)" "$(kill -0 "$pid2" 2> /dev/null && echo true || echo false)"
 assert_true "session-recorder was never called" "$([ ! -s "$RECORDER_LOG" ] && echo true || echo false)"
 kill "$pid2" 2> /dev/null
+rm -rf "$PASS_SCRATCH"
+
+echo
+echo "=== log_only: a session already ledgered for its kind costs no second call or note ==="
+: > "$FAKE_CLAUDE_CALLS"
+PASS_SCRATCH="$(mktemp -d)"
+pid2b="$(spawn_throwaway)"
+jq -n --argjson pid "$pid2b" \
+	'{id:"sess-2", name:"b-session", live:true, has_start_event:true, last_activity:0, pid:$pid, transcript_path:""}' \
+	> "$SESSION_STATUS_FIXTURE"
+result="$(desk_step_close "testpass" "$step_json" "$log_only_config" "$repo" "2026-09-29" "${files[@]}")"
+assert_eq "the repeat pass reports ok" "ok" "$result"
+assert_eq "no model call was made for the already-captured session" "0" "$(wc -l < "$FAKE_CLAUDE_CALLS" | tr -d ' ')"
+assert_eq "still exactly one would_close note" "1" "$(git -C "$repo" show refs/desk/proposal:proposal.json | jq '[.items[] | select(.session_id == "sess-2")] | length')"
+kill "$pid2b" 2> /dev/null
 rm -rf "$PASS_SCRATCH"
 
 echo

@@ -121,6 +121,45 @@ function M.content_hash(item)
 	return vim.fn.sha256(text)
 end
 
+--- Sorted-key JSON, so two targets built in a different key order compare equal.
+function M.canon(v)
+	if type(v) ~= "table" then
+		return vim.json.encode(v)
+	end
+	if vim.islist(v) then
+		local parts = {}
+		for _, x in ipairs(v) do
+			parts[#parts + 1] = M.canon(x)
+		end
+		return "[" .. table.concat(parts, ",") .. "]"
+	end
+	local keys = vim.tbl_keys(v)
+	table.sort(keys)
+	local parts = {}
+	for _, k in ipairs(keys) do
+		parts[#parts + 1] = vim.json.encode(k) .. ":" .. M.canon(v[k])
+	end
+	return "{" .. table.concat(parts, ",") .. "}"
+end
+
+local function norm_text(t)
+	return ((t or ""):gsub("%s+", " "):gsub("^ ", ""):gsub(" $", ""))
+end
+
+--- What an item says, independent of its id: file, kind, target and the
+--- normalised before/after. A declined item is blocked by this as well as by
+--- id, so a model that regenerates it under a fresh id (and has no URL source
+--- to match on) does not bring it back.
+function M.content_key(item)
+	return table.concat({
+		item.file or "",
+		item.kind or "",
+		M.canon(item.target == nil and "" or item.target),
+		norm_text(item.before),
+		norm_text(item.after),
+	}, "\31")
+end
+
 --- Per id, the latest decision among decline / restore / restore_applied
 --- (append order is chronological, last wins). Returns id -> record.
 function M.decisions(records)
@@ -168,12 +207,15 @@ function M.any_url_in(set, item)
 end
 
 --- Currently declined: { ids = {id -> record}, sources = {source -> true},
---- list = ordered records }.
+--- keys = {content key -> true}, list = ordered records }.
 function M.declined(records)
-	local ids, sources, list = {}, {}, {}
+	local ids, sources, list, keys = {}, {}, {}, {}
 	for id, rec in pairs(M.decisions(records)) do
 		if rec.type == "decline" then
 			ids[id] = rec
+			if type(rec.item) == "table" then
+				keys[M.content_key(rec.item)] = true
+			end
 			for _, u in ipairs(M.item_urls(rec)) do
 				sources[u] = true
 			end
@@ -184,7 +226,7 @@ function M.declined(records)
 			list[#list + 1] = rec
 		end
 	end
-	return { ids = ids, sources = sources, list = list }
+	return { ids = ids, sources = sources, keys = keys, list = list }
 end
 
 --- Items he restored that no pass has re-proposed yet.

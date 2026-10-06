@@ -338,31 +338,28 @@ function M.open_items(repo)
 	return out
 end
 
--- Sorted-key JSON, so two targets built in a different key order compare equal.
-local function canon(v)
-	if type(v) ~= "table" then
-		return vim.json.encode(v)
+local canon = ledger.canon
+
+local in_place_kind = { edit = true, remove = true, move = true, merge = true }
+
+--- Whether `target` anchors on an existing line (`{at = line}`, or the
+--- `at` first element of a move/merge pair). An insertion under a shared
+--- heading or at the top never makes two items the same suggestion.
+local function at_anchored(target)
+	if type(target) ~= "table" then
+		return false
 	end
-	if vim.islist(v) then
-		local parts = {}
-		for _, x in ipairs(v) do
-			parts[#parts + 1] = canon(x)
-		end
-		return "[" .. table.concat(parts, ",") .. "]"
+	if target.at ~= nil then
+		return true
 	end
-	local keys = vim.tbl_keys(v)
-	table.sort(keys)
-	local parts = {}
-	for _, k in ipairs(keys) do
-		parts[#parts + 1] = vim.json.encode(k) .. ":" .. canon(v[k])
-	end
-	return "{" .. table.concat(parts, ",") .. "}"
+	return vim.islist(target) and type(target[1]) == "table" and target[1].at ~= nil
 end
 
 --- Whether new item `n` replaces carried item `e`: it names it
 --- (`supersedes`), shares its URL source (one story, one item; `notes`,
---- tickets and sessions each cover many unrelated items), or targets the
---- same place with the same kind (never "top": every news item lands there).
+--- tickets and sessions each cover many unrelated items), or is an in-place
+--- edit/remove/move/merge of the same existing line (never an insertion: two
+--- `add`s under one heading are two suggestions).
 local function supersedes(n, e)
 	if n.supersedes ~= nil and n.supersedes == e.id then
 		return true
@@ -406,7 +403,7 @@ function M.build(repo, pass, scheduled_date, new_items, files)
 		-- then items he restored that no pass has re-proposed yet.
 		local carried, carried_ids = {}, {}
 		local function carry(item, base)
-			if carried_ids[item.id] or taken[item.id] or declined.ids[item.id] then
+			if carried_ids[item.id] or taken[item.id] or declined.ids[item.id] or declined.keys[ledger.content_key(item)] then
 				return
 			end
 			if ledger.any_url_in(declined.sources, item) or ledger.any_url_in(taken_sources, item) then
@@ -440,7 +437,9 @@ function M.build(repo, pass, scheduled_date, new_items, files)
 		local named = ledger.namespace_ids(repo, pass, scheduled_date, new_items, used)
 		local fresh = {}
 		for _, item in ipairs(named) do
-			local blocked = ledger.any_url_in(declined.sources, item) or ledger.any_url_in(taken_sources, item)
+			local blocked = ledger.any_url_in(declined.sources, item)
+				or ledger.any_url_in(taken_sources, item)
+				or declined.keys[ledger.content_key(item)]
 			local known = item.file and head_lines[item.file] and M.proposed_in(item, head_lines[item.file])
 			if not blocked and not known then
 				fresh[#fresh + 1] = item

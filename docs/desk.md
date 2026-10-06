@@ -160,6 +160,7 @@ A close prompt gets only `scratch`, `today`, `session_name` and `session_id`.
 | `tickets.json` | `[{key, summary, status, previous_status}]` for tickets whose status changed since the last check |
 | `sessions.json` | `[{name, status}]` from the reader |
 | `open-items.json` | suggestions still waiting on him, in the item shape below, with their runner-assigned ids |
+| `declined.json` | the 50 suggestions he most recently declined, same shape; a declined suggestion is also blocked by content (file, kind, target, normalised before/after), so a regenerated copy under a new id is dropped even without a URL source |
 
 A close call's cwd holds `session.json` (its reader entry), `transcript-tail.jsonl` and the captures file (`notes.md` by default).
 

@@ -116,6 +116,23 @@ elseif verb == "proposal-open" then
 	end
 	print_json({ items = proposal.open_items(repo) })
 	os.exit(0)
+elseif verb == "declined-recent" then
+	-- Usage: declined-recent <repo> [limit]
+	-- The most recent currently-declined items (newest first, default 50), so
+	-- a judge is told what he already turned down.
+	local repo, limit = args[2], tonumber(args[3] or "") or 50
+	if not repo then
+		fail("usage: nvim -l nvim/lua/desk/cli.lua declined-recent <repo> [limit]")
+	end
+	local list = ledger.declined(ledger.read(repo)).list
+	local items = {}
+	for i = #list, math.max(#list - limit + 1, 1), -1 do
+		if type(list[i].item) == "table" then
+			items[#items + 1] = list[i].item
+		end
+	end
+	print_json({ items = items })
+	os.exit(0)
 elseif verb == "taken-sync" then
 	-- Usage: taken-sync <repo>
 	-- Records, as taken, every tip-proposal item whose `after` is now in his

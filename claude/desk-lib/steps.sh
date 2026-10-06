@@ -222,6 +222,21 @@ desk_write_open_items() {
 	[ -s "$out" ] || printf '[]' > "$out"
 }
 
+# desk_write_declined_items <repo> <files-json-array> <out>
+# J's optional `declined.json`: the suggestions he most recently turned
+# down, same shape as open-items.json, so a judge does not regenerate them.
+desk_write_declined_items() {
+	local repo="$1" files_json="$2" out="$3"
+	local recent
+	recent="$(desk_nvim_cli declined-recent "$repo" 2> /dev/null)"
+	jq -e . > /dev/null 2>&1 <<< "$recent" || recent='{}'
+	jq -c --argjson files "$files_json" '
+		[ (.items // [])[] | select(.file as $f | $files | index($f))
+		  | {id, file, kind, target, before, after, source, headline} ]
+	' <<< "$recent" > "$out" 2> /dev/null || printf '[]' > "$out"
+	[ -s "$out" ] || printf '[]' > "$out"
+}
+
 # desk_seed_named_file <name> <dest_dir> <ctx_json>
 # Writes one named scratch-dir input file
 # into $2. `ctx_json` carries whatever the producer needs: `repo`,
@@ -257,6 +272,9 @@ desk_seed_named_file() {
 			;;
 		open-items.json)
 			desk_write_open_items "$repo" "$(jq -c '.files // []' <<< "$ctx_json")" "$dest_dir/open-items.json"
+			;;
+		declined.json)
+			desk_write_declined_items "$repo" "$(jq -c '.files // []' <<< "$ctx_json")" "$dest_dir/declined.json"
 			;;
 		*.json)
 			# A fetch step's reply is seeded as <lowercased step id>.json.
@@ -621,7 +639,7 @@ desk_step_judge() {
 	local input_files_json
 	input_files_json="$(jq -c --argjson files "$files_json" '.input_files // (
 		$files + ["sources.json", "f-private.json", "f-web.json",
-		"tickets.json", "sessions.json", "open-items.json"]
+		"tickets.json", "sessions.json", "open-items.json", "declined.json"]
 	)' <<< "$step_json")"
 	local n name i
 	n="$(jq 'length' <<< "$input_files_json" 2> /dev/null || echo 0)"
@@ -969,6 +987,13 @@ desk_step_close() {
 		return
 	}
 
+	local ledger_state
+	ledger_state="$(desk_nvim_cli ledger-state "$repo")" || {
+		desk_log "$pass" "close: ledger-state failed"
+		echo "failed"
+		return
+	}
+
 	local n closes_this_pass=0
 	n="$(jq 'length' <<< "$candidates")"
 	desk_log "$pass" "close: $n candidate(s) idle >= $close_after working days"
@@ -980,6 +1005,25 @@ desk_step_close() {
 		id="$(jq -r '.id' <<< "$sess")"
 		name="$(jq -r '.name // .id' <<< "$sess")"
 		transcript_path="$(jq -r '.transcript_path // empty' <<< "$sess")"
+
+		# Real closing needs BOTH log_only off and this pass still under
+		# its K cap; either one missing means queue the capture (as a
+		# dry-run "would_close") without ever signaling the session.
+		local would_close="true"
+		if [ "$log_only" != "true" ] && [ "$closes_this_pass" -lt "$max_closes" ]; then
+			would_close="false"
+		fi
+		local capture_kind="closed"
+		[ "$would_close" = "true" ] && capture_kind="would_close"
+
+		# A session whose note for this kind is already in the standing
+		# proposal, taken or declined gets no second call: without this a
+		# log-only week would make a fresh model call and a fresh note for
+		# the same idle session every pass.
+		if desk_capture_already_ledgered "$ledger_state" "$id" "$capture_kind"; then
+			desk_log "$pass" "close: session $name ($capture_kind) — already captured, skipping"
+			continue
+		fi
 
 		# This call's own seed dir — desk_step_model_call copies its
 		# content into whatever it computes as this call's own actual cwd
@@ -1023,15 +1067,6 @@ desk_step_close() {
 			continue
 		fi
 
-		# Real closing needs BOTH log_only off and this pass still under
-		# its K cap; either one missing means queue the capture (as a
-		# dry-run "would_close") without ever signaling the session.
-		local would_close="true"
-		if [ "$log_only" != "true" ] && [ "$closes_this_pass" -lt "$max_closes" ]; then
-			would_close="false"
-		fi
-		local capture_kind="closed"
-		[ "$would_close" = "true" ] && capture_kind="would_close"
 		items_json="$(jq -c --arg sid "$id" --arg ck "$capture_kind" \
 			'map(.session_id = $sid | .capture_kind = $ck)' <<< "$items_json")"
 

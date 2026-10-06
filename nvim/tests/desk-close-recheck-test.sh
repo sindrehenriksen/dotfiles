@@ -153,6 +153,7 @@ rm -rf "$PASS_SCRATCH"
 echo
 echo "=== two pid files sharing a session id on re-check: refused, never guessed ==="
 rm -rf "$STATE"
+git -C "$repo" update-ref -d refs/desk/proposal 2> /dev/null
 : > "$RECORDER_LOG"
 PASS_SCRATCH="$(mktemp -d)"
 pid2="$(spawn_throwaway)"
@@ -184,6 +185,7 @@ rm -rf "$PASS_SCRATCH"
 echo
 echo "=== duplicate_pids appears only by re-check time: refused, never guessed (review item #6) ==="
 rm -rf "$STATE"
+git -C "$repo" update-ref -d refs/desk/proposal 2> /dev/null
 : > "$RECORDER_LOG"
 PASS_SCRATCH="$(mktemp -d)"
 pid3="$(spawn_throwaway)"
@@ -236,6 +238,7 @@ FAKE
 printf '{"uuid":"aaaaaaaa-0000-0000-0000-000000000000","type":"assistant"}\n' > "$ROOT/transcript4.jsonl"
 
 rm -rf "$STATE"
+git -C "$repo" update-ref -d refs/desk/proposal 2> /dev/null
 : > "$RECORDER_LOG"
 PASS_SCRATCH="$(mktemp -d)"
 pid4="$(spawn_throwaway)"
@@ -251,6 +254,7 @@ kill "$pid4" 2> /dev/null
 rm -rf "$PASS_SCRATCH"
 
 rm -rf "$STATE"
+git -C "$repo" update-ref -d refs/desk/proposal 2> /dev/null
 : > "$RECORDER_LOG"
 PASS_SCRATCH="$(mktemp -d)"
 pid5="$(spawn_throwaway)"

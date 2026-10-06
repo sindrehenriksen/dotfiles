@@ -248,6 +248,23 @@ do
 	assert_eq("a later close capture and a later ticket item are still proposed", { "capture closed", "t two" }, hs)
 end
 
+print("\n=== a declined non-URL item is blocked by content under a fresh id, restore frees it ===")
+do
+	local r = new_repo({ "Section A", "  existing" })
+	local ticket = item("t1", { kind = "add", target = { under = "Section A" }, after = "  - follow up ABC-12", source = "ticket:ABC-12", headline = "follow up" })
+	proposal.build(r, "1630", "2026-10-01", { ticket }, FILES)
+	local declined_item = proposal.read(r).items[1]
+	ledger.record_declines(r, { declined_item })
+	proposal.build(r, "1630", "2026-10-02", {
+		item("t9", { kind = "add", target = { under = "Section A" }, after = "  -  follow up   ABC-12 ", source = "ticket:ABC-12", headline = "regenerated" }),
+		item("t10", { kind = "add", target = { under = "Section A" }, after = "  - something else", source = "ticket:ABC-12", headline = "different" }),
+	}, FILES)
+	local hs = vim.tbl_map(function(it) return it.headline end, proposal.read(r).items)
+	assert_eq("the regenerated copy is not proposed, a different item is", { "different" }, hs)
+	assert_true("restore succeeds", ledger.restore_declined(r, declined_item.id))
+	assert_eq("restoring unblocks the content key", nil, next(ledger.declined(ledger.read(r)).keys))
+end
+
 print("\n=== a postponed non-URL item is not superseded by an unrelated one sharing its source ===")
 do
 	local r = new_repo({ "Section A", "  existing", "Section B", "  other" })

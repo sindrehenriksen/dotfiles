@@ -43,7 +43,7 @@ cat > "$FAKEBIN/claude" <<FAKE
 # built) — capture every file J's own prompt says it can expect there,
 # for this test's own inspection, since that scratch dir is gone (rm -rf'd)
 # by the time desk_step_judge itself returns.
-for f in prompt.txt notes.md sources.json f-private.json f-web.json tickets.json sessions.json open-items.json; do
+for f in prompt.txt notes.md sources.json f-private.json f-web.json tickets.json sessions.json open-items.json declined.json; do
 	cp -f "\$f" "$CAPTURE/\$f" 2>/dev/null
 done
 echo '{"type":"assistant","message":{"content":[{"type":"text","text":"{\"items\":[]}"}]}}'
@@ -126,6 +126,24 @@ cat > "$q_items" <<'EOF'
 {"items":[{"id":"q1","file":"notes.md","kind":"add","target":{"under":"Section A"},"before":"","after":"  a queued suggestion","source":"notes","also_sources":["https://example.invalid/also"],"headline":"still open"}]}
 EOF
 nvim -l "$CLI" proposal-build "$repo" morning 2026-10-02 "$q_items" notes.md reading.md > /dev/null
+
+# A suggestion he declined.
+d_items="$ROOT/d-items.json"
+cat > "$d_items" << 'EOF'
+{"items":[{"id":"d1","file":"notes.md","kind":"new","target":"top","before":"","after":"  a declined suggestion","source":"notes","headline":"turned down"}]}
+EOF
+nvim -l "$CLI" proposal-build "$repo" morning 2026-10-03 "$d_items" notes.md reading.md > /dev/null
+cat > "$ROOT/decline.lua" << EOF
+package.path = "$HERE/../lua/?.lua;$HERE/../lua/?/init.lua;" .. package.path
+local ledger = require("desk.ledger")
+local proposal = require("desk.proposal")
+for _, it in ipairs(proposal.read("$repo").items) do
+	if it.headline == "turned down" then
+		ledger.record_declines("$repo", { it })
+	end
+end
+EOF
+nvim -l "$ROOT/decline.lua"
 
 # --- sources.json's own source file ---
 sources_path="$ROOT/sources.json"
@@ -218,6 +236,13 @@ assert_true "open-items.json carries also_sources" \
 	"$(jq -e '[.[] | select(.headline == "still open")][0].also_sources == ["https://example.invalid/also"]' > /dev/null 2>&1 "$CAPTURE/open-items.json" && echo true || echo false)"
 assert_true "acc1 (already taken) is absent" \
 	"$(jq -e '[.[] | select(.headline == "already accepted")] | length == 0' > /dev/null 2>&1 "$CAPTURE/open-items.json" && echo true || echo false)"
+
+echo
+echo "=== declined.json: what he turned down, so the judge does not regenerate it ==="
+assert_true "the declined suggestion is listed" \
+	"$(jq -e '[.[] | select(.headline == "turned down")] | length == 1' > /dev/null 2>&1 "$CAPTURE/declined.json" && echo true || echo false)"
+assert_true "a still-open suggestion is not" \
+	"$(jq -e '[.[] | select(.headline == "still open")] | length == 0' > /dev/null 2>&1 "$CAPTURE/declined.json" && echo true || echo false)"
 
 echo
 echo "=== summary: $pass passed, $fail failed ==="

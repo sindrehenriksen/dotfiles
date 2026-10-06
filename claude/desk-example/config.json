@@ -65,7 +65,7 @@
           "tools": ["Read"],
           "connector": false,
           "visible": true,
-          "input_files": ["notes.md", "reading.md", "sources.json", "f-web.json", "open-items.json"],
+          "input_files": ["notes.md", "reading.md", "sources.json", "f-web.json", "open-items.json", "declined.json"],
           "timeout": 600,
           "max_budget_usd": 2
         }
