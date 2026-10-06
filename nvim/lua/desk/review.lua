@@ -370,6 +370,12 @@ local function open_file_buf(repo, file)
 	return b
 end
 
+--- Asks a question with choices; the number picked, 0 when cancelled or
+--- when nothing can answer. Replaceable, so a headless run can answer.
+function M.confirm(msg, choices)
+	return vim.fn.confirm(msg, choices, 3)
+end
+
 --- The review key: opens the merged view in a stacked split (or focuses
 --- the one already open for this proposal). Returns true, or false, why.
 function M.open_review(notes_buf)
@@ -388,6 +394,22 @@ function M.open_review(notes_buf)
 			if win ~= -1 then
 				vim.api.nvim_set_current_win(win)
 				return true
+			end
+		end
+		if vim.bo[existing.review_buf].modified then
+			-- Unsaved declines would be lost with the old split.
+			local choice = M.confirm("The review split has unsaved declines.", "&Save them\n&Discard them\n&Cancel")
+			if choice == 1 then
+				local saved, why = M.save_review(existing)
+				if not saved then
+					return false, why
+				end
+			elseif choice ~= 2 then
+				local win = vim.fn.bufwinid(existing.review_buf)
+				if win ~= -1 then
+					vim.api.nvim_set_current_win(win)
+				end
+				return false, "kept the review split: it has unsaved declines"
 			end
 		end
 		close_session(existing)

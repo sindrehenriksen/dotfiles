@@ -682,6 +682,38 @@ do
 	assert_eq("pending_elsewhere agrees", 1, (review.pending_elsewhere(r2, "reading.md"))[1].count)
 end
 
+print("\n=== the review key asks before discarding unsaved declines ===")
+do
+	local function setup()
+		local r = new_repo(BASE)
+		build(r, "2026-10-01", { item("n1"), item("n2") })
+		local nb = open_notes(r)
+		review.attach(nb)
+		assert_true("review opens", review.open_review(nb))
+		local rb = review_buf_of(nb)
+		go_to(vim.fn.bufwinid(rb), rb, "NEWS n1")
+		review.decline(rb)
+		build(r, "2026-10-01", { item("n3") }) -- a new pass lands: the review is stale
+		return r, nb, rb
+	end
+	local orig = review.confirm
+	local asked = 0
+	review.confirm = function() asked = asked + 1; return 3 end
+	local r, nb, rb = setup()
+	local ok1 = review.open_review(nb)
+	assert_true("asked once", asked == 1)
+	assert_true("cancel keeps the split and its unsaved decline", not ok1 and vim.api.nvim_buf_is_valid(rb) and line_of(rb, "NEWS n1") == nil)
+	assert_eq("nothing recorded", {}, declined_ids(r))
+	review.confirm = function() return 1 end
+	assert_true("save-then-reopen works", review.open_review(nb))
+	assert_eq("the decline was saved first", 1, #declined_ids(r))
+	local r2, nb2 = setup()
+	review.confirm = function() return 2 end
+	assert_true("discard reopens", review.open_review(nb2))
+	assert_eq("and records nothing", {}, declined_ids(r2))
+	review.confirm = orig
+end
+
 print(string.format("\n=== summary: %d passed, %d failed ===", pass, fail))
 if fail > 0 then
 	os.exit(1)
