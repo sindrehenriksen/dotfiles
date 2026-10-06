@@ -257,6 +257,39 @@ do
 	assert_eq("replacing a carried item at the same place is counted", 1, st2.superseded)
 end
 
+print("\n=== presence is judged at the anchored occurrence, not anywhere in the file ===")
+do
+	-- an add whose line exists elsewhere is still proposed
+	local r = new_repo({ "Section A", "  existing", "Section B", "  - link: design doc" })
+	proposal.build(r, "morning", "2026-10-01", { item("a1", { kind = "add", target = { under = "Section A" }, after = "  - link: design doc", source = "notes", headline = "add A" }) }, FILES)
+	assert_eq("an add whose line exists under another section is proposed", { "add A" }, vim.tbl_map(function(it) return it.headline end, proposal.read(r).items))
+	assert_eq("and is open", 1, #proposal.open_items(r))
+	assert_eq("and the proposal text has it under Section A", { "Section A", "  existing", "  - link: design doc", "Section B", "  - link: design doc" }, tip_lines(r, "notes.md"))
+
+	-- a move whose `after` equals its `before` at another place is evaluated at the landing anchor
+	local r2 = new_repo({ "Section A", "  - ping Kari", "Section B", "  - other" })
+	proposal.build(r2, "morning", "2026-10-01", { item("mv", { kind = "move", target = { { at = "  - ping Kari" }, { under = "Section B" } }, before = "  - ping Kari", after = "  - ping Kari", source = "notes", headline = "move ping" }) }, FILES)
+	assert_eq("a move is proposed although its text sits at the leaving place", 1, #proposal.open_items(r2))
+	assert_eq("applied at the landing place, gone from the leaving one", { "Section A", "Section B", "  - other", "  - ping Kari" }, tip_lines(r2, "notes.md"))
+	write(r2, "notes.md", { "Section A", "  - ping Kari", "Section B", "  - other", "  - ping Kari" })
+	commit_all(r2, "he copied it down only")
+	assert_eq("landing alone counts as taken", 1, #proposal.sync_taken(r2))
+
+	-- a removal of a repeated line targets the anchored occurrence
+	local rep = { "Section A", "  - ping Kari", "Section B", "  - ping Kari" }
+	local r3 = new_repo(rep)
+	proposal.build(r3, "morning", "2026-10-01", { item("rm", { kind = "remove", target = { at = "  - ping Kari" }, before = "  - ping Kari", after = "", source = "notes", headline = "drop ping" }) }, FILES)
+	write(r3, "notes.md", { "Section A", "  - ping Kari", "Section B" })
+	commit_all(r3, "he removed the second copy")
+	assert_eq("removing the other copy does not take it", 0, #proposal.sync_taken(r3))
+	assert_eq("it is still open", 1, #proposal.open_items(r3))
+	local r4 = new_repo(rep)
+	proposal.build(r4, "morning", "2026-10-01", { item("rm", { kind = "remove", target = { at = "  - ping Kari" }, before = "  - ping Kari", after = "", source = "notes", headline = "drop ping" }) }, FILES)
+	write(r4, "notes.md", { "Section A", "Section B", "  - ping Kari" })
+	commit_all(r4, "he removed the first copy")
+	assert_eq("removing the anchored copy takes it although another copy remains", 1, #proposal.sync_taken(r4))
+end
+
 print(string.format("\n=== summary: %d passed, %d failed ===", pass, fail))
 if fail > 0 then
 	os.exit(1)

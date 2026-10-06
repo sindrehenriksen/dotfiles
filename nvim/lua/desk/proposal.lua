@@ -9,6 +9,7 @@
 -- proposal's untaken, undeclined items plus the new ones — an untaken item
 -- coming back is "not now".
 local apply = require("desk.apply")
+local block = require("desk.block")
 local git = require("desk.git")
 local ledger = require("desk.ledger")
 local snippet = require("desk.snippet")
@@ -39,16 +40,110 @@ function M.contains(lines, block)
 	return false
 end
 
---- Whether `item`'s proposed change is present in `lines`: its `after` is
---- there, or — for a removal — its `before` is gone.
-function M.proposed_in(item, lines)
+-- The candidate start positions for an insertion's `after` lines under a
+-- landing anchor, in `lines`: where apply would put them, widened to the
+-- whole block they extend. nil when the anchor says nothing (then the whole
+-- file is the region).
+local function landing_window(lines, anchor)
+	if anchor == nil then
+		return nil
+	end
+	if anchor.kind == "at" then
+		return nil
+	end
+	local first_blank = #lines + 1
+	if anchor.kind ~= "top" then
+		local idx = block.find_line(lines, anchor.quote)
+		if idx then
+			local e = anchor.kind == "under" and block.block_end(lines, idx) or select(2, block.block_containing(lines, idx))
+			return idx + 1, e + 1
+		end
+	end
+	-- "top", or an anchor whose quote is gone (apply lands it on top too).
+	for i, l in ipairs(lines) do
+		if l:match("^%s*$") then
+			first_blank = i
+			break
+		end
+	end
+	return 1, math.max(1, first_blank)
+end
+
+local function contains_within(lines, block_lines, first, last)
+	for pos = first, last do
+		if snippet.lines_match_at(lines, pos, block_lines) then
+			return true
+		end
+	end
+	return false
+end
+
+-- Whether the removal `item` is done in `lines`. With `base` (his text when
+-- the proposal was built) the anchored occurrence is the one whose base
+-- lines his edits since then deleted — so removing the other copy of a
+-- repeated line doesn't count, and removing this one does even though a
+-- copy remains. Without it, the occurrence the anchor resolves to must no
+-- longer hold `before`.
+local function removal_done(item, lines, base, before)
+	local leave = block.parse_target(item.target)
+	if base and leave and leave.kind == "at" then
+		local at = block.find_anchor(base, leave)
+		if at and snippet.lines_match_at(base, at + 1, before) then
+			local hunks = vim.diff(
+				snippet.join_lines(base, true),
+				snippet.join_lines(lines, true),
+				{ result_type = "indices" }
+			)
+			for l = at + 1, at + #before do
+				local covered = false
+				for _, h in ipairs(hunks) do
+					if h[2] > 0 and l >= h[1] and l <= h[1] + h[2] - 1 then
+						covered = true
+						break
+					end
+				end
+				if not covered then
+					return false
+				end
+			end
+			return true
+		end
+	end
+	if leave and leave.kind == "at" then
+		local at = block.find_anchor(lines, leave)
+		if at == nil then
+			return true
+		end
+		if snippet.lines_match_at(lines, at + 1, before) then
+			return false
+		end
+	end
+	return not M.contains(lines, before)
+end
+
+--- Whether `item`'s proposed change is present in `lines`, judged at the
+--- place it applies to rather than anywhere in the file (design.md §2's
+--- occurrence rule): an insertion's `after` within the block of its landing
+--- anchor (a move or merge at its landing side, not where its `before`
+--- sits), a removal's anchored occurrence of `before` gone (`base`, his text
+--- at the proposal's pass time, pins which occurrence), an edit's `after`
+--- present.
+function M.proposed_in(item, lines, base)
 	local after = snippet.split_lines(item.after)
 	if #after > 0 then
-		return M.contains(lines, after)
+		if item.kind == "edit" then
+			return M.contains(lines, after)
+		end
+		local _, land = block.parse_target(item.target)
+		local first, last = landing_window(lines, land)
+		if first == nil then
+			return M.contains(lines, after)
+		end
+		return contains_within(lines, after, first, last)
 	end
 	local before = snippet.split_lines(item.before)
 	if #before > 0 then
-		return not M.contains(lines, before)
+		return removal_done(item, lines, base, before)
 	end
 	return false
 end
@@ -78,6 +173,11 @@ function M.read_items(repo)
 	return p and p.items or {}
 end
 
+--- The text of `file` the proposal `p` was built on (his HEAD at pass time).
+function M.base_lines(repo, p, file)
+	return p.parent and M.lines_at(repo, p.parent, file) or nil
+end
+
 local function head_sha(repo)
 	local ok, out = git.run(repo, { "rev-parse", "--verify", "--quiet", "HEAD" })
 	return ok and vim.trim(out) or nil
@@ -95,7 +195,7 @@ function M.sync_taken(repo)
 	for _, item in ipairs(p.items) do
 		if not item.deferred and not have[item.id] then
 			head_cache[item.file] = head_cache[item.file] or M.lines_at(repo, "HEAD", item.file)
-			if M.proposed_in(item, head_cache[item.file]) then
+			if M.proposed_in(item, head_cache[item.file], M.base_lines(repo, p, item.file)) then
 				new[#new + 1] = item
 			end
 		end
@@ -120,7 +220,7 @@ function M.open_items(repo)
 	for _, item in ipairs(p.items) do
 		if not item.deferred and not have[item.id] and not declined.ids[item.id] then
 			head_cache[item.file] = head_cache[item.file] or M.lines_at(repo, "HEAD", item.file)
-			if not M.proposed_in(item, head_cache[item.file]) then
+			if not M.proposed_in(item, head_cache[item.file], M.base_lines(repo, p, item.file)) then
 				out[#out + 1] = item
 			end
 		end
@@ -190,14 +290,14 @@ function M.build(repo, pass, scheduled_date, new_items, files)
 		-- Carried: last proposal's items that are neither taken nor declined,
 		-- then items he restored that no pass has re-proposed yet.
 		local carried, carried_ids = {}, {}
-		local function carry(item)
+		local function carry(item, base)
 			if carried_ids[item.id] or taken[item.id] or declined.ids[item.id] then
 				return
 			end
 			if (item.source or "") ~= "" and declined.sources[item.source] then
 				return
 			end
-			if item.file and head_lines[item.file] and not item.deferred and M.proposed_in(item, head_lines[item.file]) then
+			if item.file and head_lines[item.file] and not item.deferred and M.proposed_in(item, head_lines[item.file], base) then
 				return -- taken since the last sync
 			end
 			item = vim.deepcopy(item)
@@ -207,7 +307,7 @@ function M.build(repo, pass, scheduled_date, new_items, files)
 		end
 		local restored_ids = {}
 		for _, item in ipairs(prev.items) do
-			carry(item)
+			carry(item, prev.parent and M.base_lines(repo, prev, item.file))
 		end
 		for _, item in ipairs(ledger.restored(records)) do
 			if not carried_ids[item.id] then

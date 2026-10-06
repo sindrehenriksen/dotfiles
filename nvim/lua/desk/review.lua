@@ -95,7 +95,7 @@ end
 --- The suggestions of `file` the merged view actually shows as hunks: not
 --- deferred, not already taken or declined, proposed in the merged text but
 --- not yet in his own.
-local function shown_items(repo, p, file, ours, merged)
+local function shown_items(repo, p, file, ours, merged, base)
 	local records = ledger.read(repo)
 	local declined = ledger.declined(records)
 	local taken = ledger.taken_by_id(records)
@@ -106,8 +106,8 @@ local function shown_items(repo, p, file, ours, merged)
 			and not item.deferred
 			and not taken[item.id]
 			and not declined.ids[item.id]
-			and proposal.proposed_in(item, merged)
-			and not proposal.proposed_in(item, ours)
+			and proposal.proposed_in(item, merged, base)
+			and not proposal.proposed_in(item, ours, base)
 		then
 			shown[item.id] = item
 		end
@@ -145,7 +145,7 @@ function M.save_review(s)
 	end
 	local gone = {}
 	for _, item in pairs(s.shown) do
-		if not proposal.proposed_in(item, review_lines) and not proposal.proposed_in(item, notes_lines) then
+		if not proposal.proposed_in(item, review_lines, s.base) and not proposal.proposed_in(item, notes_lines, s.base) then
 			gone[#gone + 1] = item
 		end
 	end
@@ -187,7 +187,8 @@ function M.open_review(notes_buf)
 	if not merged then
 		return false, err
 	end
-	local shown = shown_items(repo, p, file, ours, merged)
+	local base = proposal.base_lines(repo, p, file)
+	local shown = shown_items(repo, p, file, ours, merged, base)
 	if next(shown) == nil then
 		return false, "no suggestions to review"
 	end
@@ -218,6 +219,7 @@ function M.open_review(notes_buf)
 		file = file,
 		sha = p.sha,
 		shown = shown,
+		base = base,
 	}
 	sessions[notes_buf] = s
 
@@ -383,7 +385,7 @@ function M.remaining(s)
 	)
 	local out = {}
 	for _, item in pairs(s.shown) do
-		if proposal.proposed_in(item, review_lines) and not proposal.proposed_in(item, notes_lines) then
+		if proposal.proposed_in(item, review_lines, s.base) and not proposal.proposed_in(item, notes_lines, s.base) then
 			local lnum = 1
 			local after = snippet.split_lines(item.after)
 			if #after > 0 then
