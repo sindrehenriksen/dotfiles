@@ -451,6 +451,67 @@ do
 	assert_true("every overview entry was takeable by do from where it landed", vim.tbl_contains(got, "  added under B") and vim.tbl_contains(got, "  added under C") and got[1]:match("^NEWS"))
 end
 
+print("\n=== taken by decision: an edited taken suggestion is still taken, never re-proposed or declined ===")
+do
+	local function taken_headlines(r)
+		local t = {}
+		for _, rec in pairs(ledger.taken_by_id(ledger.read(r))) do
+			t[#t + 1] = rec.headline
+		end
+		table.sort(t)
+		return t
+	end
+	-- do in notes, edit the taken line, commit
+	local r = new_repo(BASE)
+	build(r, "2026-10-01", { item("a1", { kind = "add", target = { under = "Section A" }, after = "  - follow up with Ola", source = "notes", headline = "follow up" }) })
+	local nb = open_notes(r)
+	review.attach(nb)
+	assert_true("review opens", review.open_review(nb))
+	local nw = vim.fn.bufwinid(nb)
+	go_to(nw, nb, "Section B")
+	vim.cmd("diffupdate")
+	vim.cmd("normal do")
+	local n = assert(line_of(nb, "  - follow up with Ola"))
+	vim.api.nvim_buf_set_lines(nb, n - 1, n, false, { "  - follow up with Ola (Thu)" })
+	review.commit(nb)
+	assert_eq("taken by id although the text was edited", { "follow up" }, taken_headlines(r))
+	build(r, "2026-10-02", {})
+	assert_eq("the edited taken suggestion is not proposed again", 0, #proposal.read_items(r))
+
+	-- edit in the split first, take with the take key, save the split
+	local r2 = new_repo(BASE)
+	build(r2, "2026-10-01", { item("a1", { kind = "add", target = { under = "Section A" }, after = "  - read RFC", source = "https://example.invalid/rfc", headline = "read rfc" }) })
+	local nb2 = open_notes(r2)
+	review.attach(nb2)
+	assert_true("review opens", review.open_review(nb2))
+	local rb2 = review_buf_of(nb2)
+	local rw2 = vim.fn.bufwinid(rb2)
+	local k = line_of(rb2, "  - read RFC")
+	vim.api.nvim_buf_set_text(rb2, k - 1, #"  - read RFC", k - 1, #"  - read RFC", { " (skim)" })
+	vim.api.nvim_set_current_win(rw2)
+	vim.api.nvim_win_set_cursor(rw2, { k, 0 })
+	vim.cmd("diffupdate")
+	review.take(rb2)
+	vim.cmd("write")
+	assert_eq("saving the split does not decline a suggestion he took edited", {}, declined_ids(r2))
+	assert_eq("it is recorded taken at that save", { "read rfc" }, taken_headlines(r2))
+
+	-- take then undo, then save: not taken
+	local r3 = new_repo(BASE)
+	build(r3, "2026-10-01", { item("n1") })
+	local nb3 = open_notes(r3)
+	review.attach(nb3)
+	assert_true("review opens", review.open_review(nb3))
+	local nw3 = vim.fn.bufwinid(nb3)
+	vim.api.nvim_set_current_win(nw3)
+	vim.api.nvim_win_set_cursor(nw3, { 1, 0 })
+	vim.cmd("diffupdate")
+	vim.cmd("normal do")
+	vim.cmd("normal u")
+	vim.cmd("write")
+	assert_eq("an undone take is not recorded", {}, taken_headlines(r3))
+end
+
 print(string.format("\n=== summary: %d passed, %d failed ===", pass, fail))
 if fail > 0 then
 	os.exit(1)

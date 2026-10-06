@@ -92,6 +92,106 @@ local function session_for_review_buf(buf)
 	end
 end
 
+-- ---------------------------------------------------------------------------
+-- Taken by decision: when he takes a suggestion (`do` in his notes, or the
+-- take key in the review split) its id is remembered, and the next save of
+-- either buffer records it as taken by that id — so a suggestion he edits
+-- after taking it is still taken, not re-proposed, and not declined by the
+-- review split's save.
+-- ---------------------------------------------------------------------------
+
+-- Each shown suggestion that adds lines is tracked in the review buffer by
+-- an extmark over its lines, so editing a suggestion's text in the split
+-- doesn't lose which suggestion it is.
+local MARK_NS = vim.api.nvim_create_namespace("desk_review_items")
+
+--- The lines (first, last, text) the live mark of `item` covers in the
+--- review buffer, or nil when it has none or has collapsed.
+local function mark_range(s, item)
+	local id = s.marks and s.marks[item.id]
+	if not id then
+		return nil
+	end
+	local m = vim.api.nvim_buf_get_extmark_by_id(s.review_buf, MARK_NS, id, { details = true })
+	if not m or not m[1] or not m[3] or m[3].invalid then
+		return nil
+	end
+	local first, last = m[1] + 1, m[3].end_row
+	if m[3].end_col and m[3].end_col > 0 then
+		last = last + 1
+	end
+	if last < first or last > vim.api.nvim_buf_line_count(s.review_buf) then
+		return nil
+	end
+	return first, last, vim.api.nvim_buf_get_lines(s.review_buf, first - 1, last, false)
+end
+
+local pending_taken = {} -- notes bufnr -> { repo, ids = id -> { item, base, seq, pre } }
+
+local function undo_seq(buf)
+	return vim.api.nvim_buf_call(buf, function()
+		return vim.fn.undotree().seq_cur
+	end)
+end
+
+local function remember_taken(s, item, pre)
+	local pend = pending_taken[s.notes_buf] or { repo = s.repo, ids = {} }
+	pending_taken[s.notes_buf] = pend
+	pend.ids[item.id] = { item = item, base = s.base, seq = undo_seq(s.notes_buf), pre = pre }
+end
+
+--- Remembers every shown suggestion whose text reached his notes buffer
+--- since `pre` (the buffer's lines before the take), plus `known` (the
+--- item the take key acted on, whatever its edited text).
+local function note_takes(s, pre, known)
+	local now = buf_lines(s.notes_buf)
+	if vim.deep_equal(pre, now) then
+		return
+	end
+	for _, item in pairs(s.shown) do
+		local _, _, text = mark_range(s, item)
+		local edited_in = text and #text > 0 and proposal.contains(now, text) and not proposal.contains(pre, text)
+		if
+			(known and known.id == item.id)
+			or edited_in
+			or (not proposal.proposed_in(item, pre, s.base) and proposal.proposed_in(item, now, s.base))
+		then
+			remember_taken(s, item, pre)
+		end
+	end
+end
+
+--- Records, as taken, the suggestions he took since the last flush. One
+--- whose take he has undone (the text is not there, and the buffer is back
+--- before the take) is dropped. Returns how many were recorded.
+function M.flush_taken(notes_buf)
+	local pend = pending_taken[notes_buf]
+	if not pend then
+		return 0
+	end
+	pending_taken[notes_buf] = nil
+	if not vim.api.nvim_buf_is_valid(notes_buf) then
+		return 0
+	end
+	local lines, seq = buf_lines(notes_buf), undo_seq(notes_buf)
+	local items = {}
+	for _, t in pairs(pend.ids) do
+		if proposal.proposed_in(t.item, lines, t.base) or (seq >= t.seq and not vim.deep_equal(lines, t.pre)) then
+			items[#items + 1] = t.item
+		end
+	end
+	table.sort(items, function(a, b)
+		return a.id < b.id
+	end)
+	ledger.record_taken(pend.repo, items)
+	return #items
+end
+
+local function pending_ids(notes_buf)
+	local pend = pending_taken[notes_buf]
+	return pend and pend.ids or {}
+end
+
 --- The suggestions of `file` the merged view actually shows as hunks: not
 --- deferred, not already taken or declined, proposed in the merged text but
 --- not yet in his own.
@@ -143,9 +243,12 @@ function M.save_review(s)
 	else
 		notes_lines = proposal.lines_at(s.repo, "HEAD", s.file)
 	end
+	local taking = pending_ids(s.notes_buf)
 	local gone = {}
 	for _, item in pairs(s.shown) do
-		if not proposal.proposed_in(item, review_lines, s.base) and not proposal.proposed_in(item, notes_lines, s.base) then
+		if taking[item.id] then
+			-- taken by decision: edited text is no reason to call it declined
+		elseif not proposal.proposed_in(item, review_lines, s.base) and not proposal.proposed_in(item, notes_lines, s.base) then
 			gone[#gone + 1] = item
 		end
 	end
@@ -155,6 +258,7 @@ function M.save_review(s)
 	if not ledger.record_declines(s.repo, gone) then
 		return false, "could not record the declines in the ledger"
 	end
+	M.flush_taken(s.notes_buf)
 	vim.bo[s.review_buf].modified = false
 	return true, #gone
 end
@@ -222,6 +326,7 @@ function M.open_review(notes_buf)
 		base = base,
 	}
 	sessions[notes_buf] = s
+	M.place_marks(s, ours)
 
 	vim.api.nvim_win_call(review_win, function()
 		vim.cmd("diffthis")
@@ -229,6 +334,14 @@ function M.open_review(notes_buf)
 	vim.api.nvim_win_call(notes_win, function()
 		vim.cmd("diffthis")
 	end)
+
+	vim.api.nvim_create_autocmd("BufWritePost", {
+		group = vim.api.nvim_create_augroup("desk_taken_" .. notes_buf, { clear = true }),
+		buffer = notes_buf,
+		callback = function()
+			M.flush_taken(notes_buf)
+		end,
+	})
 
 	local group = vim.api.nvim_create_augroup("desk_review_" .. review_buf, { clear = true })
 	vim.api.nvim_create_autocmd("BufWriteCmd", {
@@ -264,12 +377,14 @@ function M.open_review(notes_buf)
 	-- back to it when `do` changed nothing there.
 	vim.keymap.set("n", "do", function()
 		local tick = vim.api.nvim_buf_get_changedtick(notes_buf)
+		local pre = buf_lines(notes_buf)
 		local count = vim.v.count > 0 and tostring(vim.v.count) or ""
 		pcall(vim.cmd, "normal! " .. count .. "do")
 		local line = vim.api.nvim_win_get_cursor(0)[1]
 		if vim.api.nvim_buf_get_changedtick(notes_buf) == tick and count == "" and line == vim.api.nvim_buf_line_count(notes_buf) then
 			pcall(vim.cmd, string.format("%d,%ddiffget", line, line + 1))
 		end
+		note_takes(s, pre)
 	end, { buffer = notes_buf, desc = "Take the hunk under the cursor (also at the end of the file)" })
 	vim.keymap.set("n", "<leader>gD", function()
 		local ok, why = M.decline(review_buf)
@@ -305,11 +420,45 @@ local function find_all(lines, block)
 	return out
 end
 
+--- Puts an extmark over each shown adding suggestion's lines in the review
+--- buffer — the occurrence that sits in a diff hunk against `ours`.
+function M.place_marks(s, ours)
+	s.marks = {}
+	local review_lines = buf_lines(s.review_buf)
+	local hunks = vim.diff(snippet.join_lines(ours, true), snippet.join_lines(review_lines, true), { result_type = "indices" })
+	for _, item in pairs(s.shown) do
+		local after = snippet.split_lines(item.after)
+		if #after > 0 then
+			for _, pos in ipairs(find_all(review_lines, after)) do
+				local inside = false
+				for _, h in ipairs(hunks) do
+					inside = inside or (h[4] > 0 and pos >= h[3] and pos <= h[3] + h[4] - 1)
+				end
+				if inside then
+					s.marks[item.id] = vim.api.nvim_buf_set_extmark(s.review_buf, MARK_NS, pos - 1, 0, {
+						end_row = pos - 1 + #after,
+						end_col = 0,
+						right_gravity = false,
+						end_right_gravity = false,
+					})
+					break
+				end
+			end
+		end
+	end
+end
+
 --- The review-buffer line range of the suggestion whose lines contain
 --- `line`, or nil (a removal has no lines of its own there, and plain text
 --- of his own is no suggestion). Adjacent suggestions form ONE diff hunk, so
 --- acting on a single suggestion means acting on this range, not the hunk.
 function M.item_range(s, line)
+	for _, item in pairs(s.shown) do
+		local first, last = mark_range(s, item)
+		if first and line >= first and line <= last then
+			return first, last, item
+		end
+	end
 	local review_lines = buf_lines(s.review_buf)
 	for _, item in pairs(s.shown) do
 		local after = snippet.split_lines(item.after)
@@ -331,8 +480,10 @@ local function diff_act(s, verb)
 		return false, "review buffer has no window"
 	end
 	local before_review, before_notes = buf_lines(s.review_buf), buf_lines(s.notes_buf)
+	local acted
 	vim.api.nvim_win_call(win, function()
-		local first, last = M.item_range(s, vim.api.nvim_win_get_cursor(win)[1])
+		local first, last, item = M.item_range(s, vim.api.nvim_win_get_cursor(win)[1])
+		acted = item
 		if first then
 			pcall(vim.cmd, string.format("%d,%d%s", first, last, verb))
 		else
@@ -341,6 +492,9 @@ local function diff_act(s, verb)
 	end)
 	if vim.deep_equal(before_review, buf_lines(s.review_buf)) and vim.deep_equal(before_notes, buf_lines(s.notes_buf)) then
 		return false, "no suggestion under the cursor"
+	end
+	if verb == "diffput" then
+		note_takes(s, before_notes, acted)
 	end
 	return true
 end
@@ -632,6 +786,7 @@ function M.commit(bufnr)
 			return false, "git commit failed: " .. err
 		end
 	end
+	M.flush_taken(bufnr)
 	local taken = proposal.sync_taken(repo)
 	return true, { taken = #taken }
 end
