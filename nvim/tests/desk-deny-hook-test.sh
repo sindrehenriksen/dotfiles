@@ -37,6 +37,39 @@ echo '{"tool_name":"mcp__claude_ai_Gmail__unlabel_thread","tool_input":{"threadI
 assert_eq "denied (exit 2), not fail-open" "2" "$rc"
 
 echo
+echo "=== any other way out of the hook is a deny, never a non-blocking error ==="
+rc=0
+echo '{"tool_name":"Read","tool_input":{}}' | "$HOOK" --scratch > /dev/null 2>&1 || rc=$?
+assert_eq "a --scratch with no dir argument denies" "2" "$rc"
+rc=0
+echo '{"tool_name":"Read","tool_input":{}}' | "$HOOK" --pinned > /dev/null 2>&1 || rc=$?
+assert_eq "an option missing its argument (before the allowlist) denies" "2" "$rc"
+
+NOJQ="$ROOT/nojq-bin"
+mkdir -p "$NOJQ"
+for t in cat bash env dirname; do ln -sf "$(command -v "$t")" "$NOJQ/$t"; done
+rc=0
+echo '{"tool_name":"Read","tool_input":{"file_path":"/etc/hosts"}}' | PATH="$NOJQ" "$HOOK" Read > /dev/null 2>&1 || rc=$?
+assert_eq "no jq on PATH denies an otherwise allowed tool" "2" "$rc"
+rc=0
+echo '{"tool_name":"Read","tool_input":{"file_path":"/etc/hosts"}}' | PATH="$NOJQ:$(dirname "$(command -v jq)")" "$HOOK" --scratch /etc Read > /dev/null 2>&1 || rc=$?
+assert_eq "no realpath on PATH denies a scoped Read" "2" "$rc"
+rc=0
+echo '{"tool_name":"Read","tool_input":{"file_path":"/etc/hosts"}}' | "$HOOK" --scratch /etc Read > /dev/null 2>&1 || rc=$?
+assert_eq "control: the same Read is allowed when everything is present" "0" "$rc"
+
+echo
+echo "=== the runner refuses to start without the tools the hook needs ==="
+RUNBIN="$ROOT/runner-bin"
+mkdir -p "$RUNBIN"
+for t in bash env dirname readlink mkdir jq nvim git date cat uname sed tr rm mv head tail grep sort uuidgen find; do
+	if p="$(command -v "$t")"; then ln -sf "$p" "$RUNBIN/$t"; fi
+done
+run_out="$(PATH="$RUNBIN" DESK_CONFIG="$ROOT/none.json" DESK_STATE_DIR="$ROOT/runner-state" /bin/bash "$HERE/../../claude/desk-run" morning 2>&1)" && run_rc=0 || run_rc=$?
+assert_eq "no realpath: exits 2" "2" "$run_rc"
+assert_true "and says which tool is missing" "$(grep -q 'required tool not found on PATH: realpath' <<< "$run_out" && echo true || echo false)"
+
+echo
 echo "=== --scratch: a judge/close call's own second layer under its scoped Read(...) --allowedTools ==="
 scratch_dir="$ROOT/call-scratch"
 mkdir -p "$scratch_dir/sub"

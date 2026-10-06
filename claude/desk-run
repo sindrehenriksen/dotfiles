@@ -45,6 +45,16 @@ if [ -z "$pass" ]; then
 	exit 2
 fi
 
+# The deny hook every connector call runs under needs jq and realpath; without
+# them it could only deny everything, so a pass that would make such a call
+# refuses to start rather than fail halfway.
+for _tool in jq realpath nvim git; do
+	if ! command -v "$_tool" > /dev/null 2>&1; then
+		desk_log "$pass" "required tool not found on PATH: $_tool"
+		exit 2
+	fi
+done
+
 DESK_CONFIG="${DESK_CONFIG:-}"
 if [ -z "$DESK_CONFIG" ]; then
 	desk_log "$pass" '$DESK_CONFIG is not set'

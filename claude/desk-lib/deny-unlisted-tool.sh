@@ -27,17 +27,29 @@
 # `..` included) under <dir> — never trusting the --allowedTools glob
 # alone, the same way --pinned never trusts a connector tool's own
 # claimed args.
-set -u
+#
+# Fails closed: a hook that exits 1 (or crashes) is only a non-blocking
+# error to Claude Code, so the call would go through. Every path out of this
+# script that is not the one explicit allow at the bottom exits 2, whatever
+# went wrong (a missing jq or realpath, a missing option argument, an
+# unbound variable, a failing command).
+set -u -E
+
+allowed="false"
+trap '[ "$allowed" = "true" ] || exit 2' EXIT
+trap 'exit 2' ERR
 
 pinned_file=""
 scratch_dir=""
 while :; do
 	case "${1:-}" in
 		--pinned)
+			[ $# -ge 2 ] || { echo "desk deny-hook: --pinned needs a file — denying" >&2; exit 2; }
 			pinned_file="$2"
 			shift 2
 			;;
 		--scratch)
+			[ $# -ge 2 ] || { echo "desk deny-hook: --scratch needs a dir — denying" >&2; exit 2; }
 			scratch_dir="$2"
 			shift 2
 			;;
@@ -58,8 +70,8 @@ if [ -z "$tool_name" ]; then
 fi
 
 allowed_name="false"
-for allowed in "$@"; do
-	if [ "$tool_name" = "$allowed" ]; then
+for candidate in "$@"; do
+	if [ "$tool_name" = "$candidate" ]; then
 		allowed_name="true"
 		break
 	fi
@@ -115,4 +127,5 @@ if [ -n "$scratch_dir" ] && [ "$tool_name" = "Read" ]; then
 	esac
 fi
 
+allowed="true"
 exit 0
