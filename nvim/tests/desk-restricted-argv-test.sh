@@ -74,6 +74,7 @@ check() { # <label> <step-json> <expected --tools> <mcp content kind: empty|file
 	assert_eq "$1: --restricted" true "$(has_flag --restricted)"
 	assert_eq "$1: --tools is exactly the step's built-ins" "$3" "$(value_after --tools)"
 	assert_eq "$1: --strict-mcp-config" true "$(has_flag --strict-mcp-config)"
+	assert_eq "$1: the prompt follows --, out of reach of any variadic flag" "--" "$(tail -2 "$ARGV_LOG" | head -1)"
 	if [ "$4" = empty ]; then
 		assert_eq "$1: --mcp-config is an empty server set" '{"mcpServers":{}}' "$(jq -c . "$MCP_LOG")"
 	else

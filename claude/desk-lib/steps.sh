@@ -1521,7 +1521,10 @@ desk_step_open_tab() {
 	[ -n "$mcp_config_rel" ] && argv+=(--mcp-config "$(desk_prompt_path "$mcp_config_rel")")
 	[ -n "$settings_rel" ] && argv+=(--settings "$(desk_prompt_path "$settings_rel")")
 	[ -n "$skill_rel" ] && argv+=(--append-system-prompt-file "$(desk_prompt_path "$skill_rel")")
-	argv+=("$prompt_text")
+	# `--` ends option parsing: --tools, --mcp-config and the like take any
+	# number of values, so a prompt placed after one of them would be read as
+	# one more value instead of as the prompt.
+	argv+=(-- "$prompt_text")
 
 	local command="" a
 	for a in "${argv[@]}"; do

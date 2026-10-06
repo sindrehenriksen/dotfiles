@@ -113,6 +113,8 @@ assert_true "--settings resolves the same way" \
 	"$(grep -qE -- "--settings' '$ROOT/workspace/desk/weekly/settings.json'" <<< "$command_line" && echo true || echo false)"
 assert_true "the skill is passed in explicitly via --append-system-prompt-file" \
 	"$(grep -qE -- "--append-system-prompt-file' '$ROOT/workspace/desk/../agents/skills/weekly-update/SKILL.md'" <<< "$command_line" && echo true || echo false)"
+assert_true "the prompt follows --, so no variadic flag (--tools, --mcp-config) can swallow it" \
+	"$(grep -qF "'--' 'Run the weekly update. The notes diff is ./notes-diff.md.'" <<< "$command_line" && echo true || echo false)"
 assert_true "the fixed prompt_text is the final argument, single-quoted" \
 	"$(grep -qF "'Run the weekly update. The notes diff is ./notes-diff.md.'" <<< "$command_line" && echo true || echo false)"
 

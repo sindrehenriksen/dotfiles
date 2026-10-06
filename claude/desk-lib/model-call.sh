@@ -259,7 +259,7 @@ desk_call_model() {
 		cd "$scratch" || exit 2
 		export CLAUDE_CONFIG_DIR="$config_dir"
 		[ "$restricted" != "true" ] && export DESK_HEADLESS=1
-		run_with_timeout "$timeout_secs" "$out" "${argv[@]}" "$prompt_text" < /dev/null
+		run_with_timeout "$timeout_secs" "$out" "${argv[@]}" -- "$prompt_text" < /dev/null
 	)
 	rc=$?
 
