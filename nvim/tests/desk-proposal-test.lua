@@ -290,6 +290,30 @@ do
 	assert_eq("removing the anchored copy takes it although another copy remains", 1, #proposal.sync_taken(r4))
 end
 
+print("\n=== a news URL already taken or declined is never proposed again ===")
+do
+	local r = new_repo({ "Section A", "  existing" })
+	proposal.build(r, "morning", "2026-10-01", {
+		item("t", { source = "https://example.invalid/taken-story", after = "NEWS taken story", headline = "taken story" }),
+		item("d", { source = "https://example.invalid/declined-story", after = "NEWS declined story", headline = "declined story" }),
+	}, FILES)
+	write(r, "notes.md", { "NEWS taken story", "Section A", "  existing" })
+	commit_all(r, "he took it")
+	proposal.sync_taken(r)
+	for _, it in ipairs(proposal.read(r).items) do
+		if it.headline == "declined story" then
+			ledger.record_declines(r, { it })
+		end
+	end
+	local _, st = proposal.build(r, "morning", "2026-10-02", {
+		item("t2", { source = "https://example.invalid/taken-story", after = "NEWS taken story again", headline = "taken again" }),
+		item("d2", { source = "https://example.invalid/declined-story", after = "NEWS declined again", headline = "declined again" }),
+		item("f", { source = "https://example.invalid/fresh", after = "NEWS fresh", headline = "fresh story" }),
+	}, FILES)
+	assert_eq("only the unseen story is proposed", { "fresh story" }, vim.tbl_map(function(it) return it.headline end, proposal.read(r).items))
+	assert_eq("the two dropped are counted", 2, st.skipped)
+end
+
 print(string.format("\n=== summary: %d passed, %d failed ===", pass, fail))
 if fail > 0 then
 	os.exit(1)

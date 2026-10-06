@@ -370,6 +370,7 @@ function M.build(repo, pass, scheduled_date, new_items, files)
 	local records = ledger.read(repo)
 	local declined = ledger.declined(records)
 	local taken = ledger.taken_by_id(records)
+	local taken_sources = ledger.taken_sources(records)
 
 	local stats = {}
 	local sha, err = git.cas_retry(repo, M.REF, function(old_sha)
@@ -386,7 +387,7 @@ function M.build(repo, pass, scheduled_date, new_items, files)
 			if carried_ids[item.id] or taken[item.id] or declined.ids[item.id] then
 				return
 			end
-			if (item.source or "") ~= "" and declined.sources[item.source] then
+			if declined.sources[item.source or ""] or taken_sources[item.source or ""] then
 				return
 			end
 			if item.file and head_lines[item.file] and not item.deferred and M.proposed_in(item, head_lines[item.file], base) then
@@ -417,7 +418,7 @@ function M.build(repo, pass, scheduled_date, new_items, files)
 		local named = ledger.namespace_ids(repo, pass, scheduled_date, new_items, used)
 		local fresh = {}
 		for _, item in ipairs(named) do
-			local blocked = (item.source or "") ~= "" and declined.sources[item.source]
+			local blocked = declined.sources[item.source or ""] or taken_sources[item.source or ""]
 			local known = item.file and head_lines[item.file] and M.proposed_in(item, head_lines[item.file])
 			if not blocked and not known then
 				fresh[#fresh + 1] = item

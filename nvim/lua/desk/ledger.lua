@@ -183,6 +183,18 @@ function M.taken_by_id(records)
 	return out
 end
 
+--- The URL sources of everything ever taken: a story he has already taken
+--- is not offered again under a new id.
+function M.taken_sources(records)
+	local out = {}
+	for _, rec in ipairs(records) do
+		if rec.type == "taken" and M.is_url_source(rec.source) then
+			out[rec.source] = true
+		end
+	end
+	return out
+end
+
 --- Records `items` as declined. Items already declined are skipped.
 function M.record_declines(repo_dir, items)
 	local declined = M.declined(M.read(repo_dir)).ids
