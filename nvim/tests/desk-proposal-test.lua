@@ -318,6 +318,37 @@ do
 	assert_eq("the two dropped are counted", 2, st.skipped)
 end
 
+print("\n=== also_sources: carried, recorded in the ledger, and any URL blocks a new item ===")
+do
+	local r = new_repo({ "Section A", "  existing" })
+	proposal.build(r, "morning", "2026-10-01", {
+		item("t", { source = "https://example.invalid/t-main", also_sources = { "https://example.invalid/t-other" }, after = "NEWS multi taken", headline = "multi taken" }),
+		item("d", { source = "https://example.invalid/d-main", also_sources = { "https://example.invalid/d-other" }, after = "NEWS multi declined", headline = "multi declined" }),
+	}, FILES)
+	local built = proposal.read(r).items
+	assert_eq("also_sources is carried in proposal.json", { "https://example.invalid/t-other" }, built[1].also_sources or built[2].also_sources)
+	write(r, "notes.md", { "NEWS multi taken", "Section A", "  existing" })
+	commit_all(r, "he took it")
+	proposal.sync_taken(r)
+	for _, it in ipairs(proposal.read(r).items) do
+		if it.headline == "multi declined" then
+			ledger.record_declines(r, { it })
+		end
+	end
+	local recs = ledger.read(r)
+	local taken, declined = ledger.taken_sources(recs), ledger.declined(recs).sources
+	assert_true("taken records every URL", taken["https://example.invalid/t-main"] and taken["https://example.invalid/t-other"])
+	assert_true("declined records every URL", declined["https://example.invalid/d-main"] and declined["https://example.invalid/d-other"])
+	proposal.build(r, "morning", "2026-10-02", {
+		item("t2", { source = "https://example.invalid/new-primary", also_sources = { "https://example.invalid/t-other" }, after = "NEWS t again", headline = "t again" }),
+		item("d2", { source = "https://example.invalid/d-other", after = "NEWS d again", headline = "d again" }),
+		item("f", { source = "https://example.invalid/fresh", also_sources = { "https://example.invalid/fresh-2" }, after = "NEWS fresh", headline = "fresh story" }),
+	}, FILES)
+	local items = proposal.read(r).items
+	assert_eq("a new item sharing any taken or declined URL is dropped", { "fresh story" }, vim.tbl_map(function(it) return it.headline end, items))
+	assert_eq("also_sources survives the rebuild", { "https://example.invalid/fresh-2" }, items[1].also_sources)
+end
+
 print("\n=== morning news sits above the 16:30 captures on top, whichever pass landed last ===")
 do
 	local r = new_repo({ "Section A" })

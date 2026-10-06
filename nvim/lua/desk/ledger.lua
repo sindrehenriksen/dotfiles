@@ -140,6 +140,33 @@ function M.is_url_source(source)
 	return type(source) == "string" and (source:match("^https?://") ~= nil)
 end
 
+--- Every URL an item or ledger record stands for: its `source` plus any
+--- `also_sources` (one story arriving from several fetchers), URLs only.
+function M.item_urls(rec)
+	local out = {}
+	if M.is_url_source(rec.source) then
+		out[#out + 1] = rec.source
+	end
+	if type(rec.also_sources) == "table" then
+		for _, u in ipairs(rec.also_sources) do
+			if M.is_url_source(u) then
+				out[#out + 1] = u
+			end
+		end
+	end
+	return out
+end
+
+--- Whether any URL of `item` is in `set` (url -> true).
+function M.any_url_in(set, item)
+	for _, u in ipairs(M.item_urls(item)) do
+		if set[u] then
+			return true
+		end
+	end
+	return false
+end
+
 --- Currently declined: { ids = {id -> record}, sources = {source -> true},
 --- list = ordered records }.
 function M.declined(records)
@@ -147,8 +174,8 @@ function M.declined(records)
 	for id, rec in pairs(M.decisions(records)) do
 		if rec.type == "decline" then
 			ids[id] = rec
-			if M.is_url_source(rec.source) then
-				sources[rec.source] = true
+			for _, u in ipairs(M.item_urls(rec)) do
+				sources[u] = true
 			end
 		end
 	end
@@ -188,8 +215,10 @@ end
 function M.taken_sources(records)
 	local out = {}
 	for _, rec in ipairs(records) do
-		if rec.type == "taken" and M.is_url_source(rec.source) then
-			out[rec.source] = true
+		if rec.type == "taken" then
+			for _, u in ipairs(M.item_urls(rec)) do
+				out[u] = true
+			end
 		end
 	end
 	return out
@@ -206,6 +235,7 @@ function M.record_declines(repo_dir, items)
 				id = item.id,
 				file = item.file,
 				source = item.source,
+				also_sources = item.also_sources,
 				headline = item.headline,
 				at = os.time(),
 				item = item,
@@ -243,6 +273,7 @@ function M.record_taken(repo_dir, items)
 				before = item.before,
 				after = item.after,
 				source = item.source,
+				also_sources = item.also_sources,
 				headline = item.headline,
 				session_id = item.session_id,
 				capture_kind = item.capture_kind,

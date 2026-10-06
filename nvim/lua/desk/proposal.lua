@@ -368,7 +368,11 @@ local function supersedes(n, e)
 	if n.supersedes ~= nil and n.supersedes == e.id then
 		return true
 	end
-	if ledger.is_url_source(n.source) and n.source == e.source then
+	local have = {}
+	for _, u in ipairs(ledger.item_urls(e)) do
+		have[u] = true
+	end
+	if ledger.any_url_in(have, n) then
 		return true
 	end
 	if e.target ~= nil and canon(e.target) ~= canon("top") and n.kind == e.kind and canon(n.target) == canon(e.target) then
@@ -406,7 +410,7 @@ function M.build(repo, pass, scheduled_date, new_items, files)
 			if carried_ids[item.id] or taken[item.id] or declined.ids[item.id] then
 				return
 			end
-			if declined.sources[item.source or ""] or taken_sources[item.source or ""] then
+			if ledger.any_url_in(declined.sources, item) or ledger.any_url_in(taken_sources, item) then
 				return
 			end
 			if item.file and head_lines[item.file] and not item.deferred and M.proposed_in(item, head_lines[item.file], base) then
@@ -437,7 +441,7 @@ function M.build(repo, pass, scheduled_date, new_items, files)
 		local named = ledger.namespace_ids(repo, pass, scheduled_date, new_items, used)
 		local fresh = {}
 		for _, item in ipairs(named) do
-			local blocked = declined.sources[item.source or ""] or taken_sources[item.source or ""]
+			local blocked = ledger.any_url_in(declined.sources, item) or ledger.any_url_in(taken_sources, item)
 			local known = item.file and head_lines[item.file] and M.proposed_in(item, head_lines[item.file])
 			if not blocked and not known then
 				fresh[#fresh + 1] = item

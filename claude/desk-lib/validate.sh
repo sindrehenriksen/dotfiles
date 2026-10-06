@@ -106,6 +106,31 @@ desk_source_allowed() {
 	grep -qxF "$source" <<< "$allowed_urls" 2> /dev/null
 }
 
+# Validates `also_sources` (one story arriving from several fetchers: the
+# other URLs beside `source`). Each entry must be a string URL present
+# verbatim in $2; an invalid one, or one repeating `source` or an earlier
+# entry, is dropped rather than the item. Prints the item with a cleaned
+# array (absent if the item had none). Counting the drops is
+# desk_validate_items's job: this runs in a command substitution, where a
+# counter could not reach the caller.
+desk_validate_also_sources() {
+	local item_json="$1" allowed_urls="$2"
+	if ! jq -e 'has("also_sources")' > /dev/null 2>&1 <<< "$item_json"; then
+		printf '%s' "$item_json"
+		return
+	fi
+	local source kept="[]" u
+	source="$(jq -r '.source // ""' <<< "$item_json")"
+	while IFS= read -r u; do
+		[ -n "$u" ] || continue
+		[ "$u" != "$source" ] || continue
+		grep -qxF "$u" <<< "$allowed_urls" 2> /dev/null || continue
+		jq -e --arg u "$u" 'index($u) != null' > /dev/null 2>&1 <<< "$kept" && continue
+		kept="$(jq -c --arg u "$u" '. + [$u]' <<< "$kept")"
+	done < <(jq -r 'if (.also_sources | type) == "array" then .also_sources[] | strings else empty end' <<< "$item_json")
+	jq -c --argjson k "$kept" 'if ($k | length) > 0 then .also_sources = $k else del(.also_sources) end' <<< "$item_json"
+}
+
 # ---------------------------------------------------------------------------
 # The full validation pass for a set of proposal-shaped items (design.md
 # §9(e)): drops an item whose URL source isn't verifiably from this call's
@@ -116,17 +141,23 @@ desk_source_allowed() {
 # ---------------------------------------------------------------------------
 desk_validate_items() {
 	local items_json="$1" allowed_urls="$2"
-	local n out
+	local n out dropped=0
 	out="[]"
 	n="$(jq 'length' <<< "$items_json" 2> /dev/null || echo 0)"
 	local i
 	for ((i = 0; i < n; i++)); do
-		local item
+		local item before_n after_n
 		item="$(jq -c ".[$i]" <<< "$items_json")"
 		desk_source_allowed "$item" "$allowed_urls" || continue
+		before_n="$(jq -r 'if (.also_sources | type) == "array" then (.also_sources | length) elif has("also_sources") then 1 else 0 end' <<< "$item")"
+		item="$(desk_validate_also_sources "$item" "$allowed_urls")"
+		after_n="$(jq -r '(.also_sources // []) | length' <<< "$item")"
+		dropped=$((dropped + before_n - after_n))
 		item="$(desk_sanitize_item_text "$item" "$allowed_urls")"
 		out="$(jq -c --argjson it "$item" '. + [$it]' <<< "$out")"
 	done
+	[ "$dropped" -eq 0 ] || echo "desk: dropped $dropped invalid also_sources URL(s)" >&2
+	DESK_ALSO_SOURCES_DROPPED="$dropped"
 	printf '%s' "$out"
 }
 

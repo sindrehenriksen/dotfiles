@@ -97,6 +97,25 @@ assert_true "the non-url source item survives untouched" \
 	"$(jq -e '[.[].id] | index("i3")' > /dev/null 2>&1 <<< "$validated" && echo true || echo false)"
 
 echo
+echo "=== also_sources: invalid entries dropped, the item and valid entries kept ==="
+slack_ok="https://example.slack.com/archives/CEXAMPLEID/p1700000000123456"
+mail_ok="https://mail.google.com/mail/u/0/#thread/th1"
+items="$(jq -n --arg s "$slack_ok" --arg m "$mail_ok" '[
+  {id:"m1",file:"notes.md",kind:"new",target:"top",before:"",after:("see " + $m + " and https://evil.example/x"),
+   source:$s, also_sources:[$m, "https://evil.example/fake", $s, $m], headline:"h"},
+  {id:"m2",file:"notes.md",kind:"new",target:"top",before:"",after:"x",source:$s,also_sources:["https://evil.example/only"],headline:"h"},
+  {id:"m3",file:"notes.md",kind:"new",target:"top",before:"",after:"x",source:$s,headline:"h"}
+]')"
+validated="$(desk_validate_items "$items" "$allowed_urls" 2> /dev/null)"
+assert_eq "no item is dropped for a bad also_sources entry" "3" "$(jq 'length' <<< "$validated")"
+assert_eq "only the verbatim fetched URL stays, deduped, source excluded" "[\"$mail_ok\"]" "$(jq -c '.[0].also_sources' <<< "$validated")"
+assert_eq "an all-invalid also_sources is removed" "false" "$(jq '.[1] | has("also_sources")' <<< "$validated")"
+assert_eq "an item without also_sources stays without" "false" "$(jq '.[2] | has("also_sources")' <<< "$validated")"
+assert_contains "other URLs in item text are still stripped" "$(jq -r '.[0].after' <<< "$validated")" "[url removed]"
+desk_validate_items "$items" "$allowed_urls" > /dev/null 2> "$ROOT/drop.err"
+assert_contains "the drop count is reported" "$(cat "$ROOT/drop.err")" "dropped 4 invalid also_sources"
+
+echo
 echo "=== desk_apply_caps: overflow goes to the dated brief with a summary line ==="
 five_act='[
   {"id":"a1","tier":"act","headline":"one","source":"notes"},
