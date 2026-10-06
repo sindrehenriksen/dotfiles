@@ -134,6 +134,7 @@ A change on one machine should be mirrored on the other, unless there is a reaso
 - **`Super+D` is freed on Linux** so `Cmd+D` bookmarking works. Nothing to mirror: show-desktop on macOS is F11 and Mission Control, not Cmd+D.
 - **Caps hold** is a software layer on macOS (Hammerspoon) and lives in the input remapper on Linux, but the bindings match.
 - **The modifier taps cost `Ctrl+click` and `Shift+click` on Linux**, and are kept regardless. See the section above.
+- **Desk (the notes review and its scheduled passes, `docs/desk.md`) is macOS-only.** Tabs open in Ghostty through Hammerspoon and passes run from launchd; there is no Linux counterpart.
 - **Super is on both sides of the space bar on macOS, only the left on Linux.** The right-hand key there has to stay AltGr for the Norwegian letters, and the key that would otherwise take AltGr is a Copilot key that cannot be remapped at all.
 - **`caps`+`b` is exempted inside Ghostty on Linux**, for the reason under the app jump keys above. macOS needs no exemption, since release order tells the roll from the hold.
 - **The Caps layer engages by hold time on Linux, by release order on macOS.** Hammerspoon waits to see which key comes up first and replays what it buffered, so a `caps`→`b` roll yields Escape then b with no delay. xremap cannot reorder, so it needs a hold threshold instead, and the layer costs a real wait before it engages.
