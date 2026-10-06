@@ -150,13 +150,14 @@ local function canon(v)
 end
 
 --- Whether new item `n` replaces carried item `e`: it names it
---- (`supersedes`), shares its source, or targets the same place with the
---- same kind (never "top": every news item lands there).
+--- (`supersedes`), shares its URL source (one story, one item; `notes`,
+--- tickets and sessions each cover many unrelated items), or targets the
+--- same place with the same kind (never "top": every news item lands there).
 local function supersedes(n, e)
 	if n.supersedes ~= nil and n.supersedes == e.id then
 		return true
 	end
-	if (n.source or "") ~= "" and n.source == e.source then
+	if ledger.is_url_source(n.source) and n.source == e.source then
 		return true
 	end
 	if e.target ~= nil and canon(e.target) ~= canon("top") and n.kind == e.kind and canon(n.target) == canon(e.target) then
@@ -230,7 +231,7 @@ function M.build(repo, pass, scheduled_date, new_items, files)
 				fresh[#fresh + 1] = item
 			end
 		end
-		local kept = {}
+		local kept, superseded = {}, 0
 		for _, e in ipairs(carried) do
 			local replaced = false
 			for _, n in ipairs(fresh) do
@@ -239,7 +240,9 @@ function M.build(repo, pass, scheduled_date, new_items, files)
 					break
 				end
 			end
-			if not replaced then
+			if replaced then
+				superseded = superseded + 1
+			else
 				kept[#kept + 1] = e
 			end
 		end
@@ -303,7 +306,7 @@ function M.build(repo, pass, scheduled_date, new_items, files)
 		if not c_ok then
 			return nil, "commit-tree failed"
 		end
-		stats = { new = #fresh, carried = #kept, applied = applied_n, deferred = deferred_n, restored = restored_ids }
+		stats = { new = #fresh, carried = #kept, applied = applied_n, deferred = deferred_n, restored = restored_ids, superseded = superseded, skipped = #named - #fresh }
 		return vim.trim(commit)
 	end)
 	if not sha then

@@ -244,6 +244,19 @@ do
 	assert_eq("a later close capture and a later ticket item are still proposed", { "capture closed", "t two" }, hs)
 end
 
+print("\n=== a postponed non-URL item is not superseded by an unrelated one sharing its source ===")
+do
+	local r = new_repo({ "Section A", "  existing", "Section B", "  other" })
+	proposal.build(r, "morning", "2026-10-01", { item("m1", { kind = "add", target = { under = "Section A" }, after = "  - link: design doc", source = "notes", headline = "postponed add A" }) }, FILES)
+	local _, st = proposal.build(r, "morning", "2026-10-02", { item("m2", { kind = "add", target = { under = "Section B" }, after = "  - link: runbook", source = "notes", headline = "new add B" }) }, FILES)
+	local hs = vim.tbl_map(function(it) return it.headline end, proposal.read(r).items)
+	table.sort(hs)
+	assert_eq("both items are in the proposal", { "new add B", "postponed add A" }, hs)
+	assert_eq("nothing was superseded", 0, st.superseded)
+	local _, st2 = proposal.build(r, "morning", "2026-10-03", { item("m3", { kind = "add", target = { under = "Section A" }, after = "  - link: newer doc", source = "notes", headline = "newer add A" }) }, FILES)
+	assert_eq("replacing a carried item at the same place is counted", 1, st2.superseded)
+end
+
 print(string.format("\n=== summary: %d passed, %d failed ===", pass, fail))
 if fail > 0 then
 	os.exit(1)
