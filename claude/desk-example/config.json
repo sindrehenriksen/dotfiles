@@ -1,6 +1,7 @@
 {
   "notes_repo": "~/notes",
   "files": ["notes.md", "reading.md"],
+  "captures_file": "notes.md",
   "timezone": "Europe/London",
 
   "ticket_search_tool": "mcp__example-tickets__search",
@@ -22,6 +23,7 @@
     "weekly": { "act": 5, "worth_knowing": 8, "wildcard": 1 }
   },
 
+  "default_max_budget_usd": 2,
   "sources_file": "sources.json",
 
   "tokens": [
@@ -36,6 +38,8 @@
 
   "passes": {
     "morning": {
+      "weekdays_only": true,
+      "caps": "daily",
       "trigger": {
         "start_calendar_interval": [
           { "hour": 8, "minute": 30 },
@@ -69,6 +73,8 @@
     },
 
     "1630": {
+      "weekdays_only": true,
+      "caps": "daily",
       "trigger": { "start_calendar_interval": [{ "hour": 16, "minute": 30 }] },
       "steps": [
         { "id": "commit-push", "kind": "commit_push" },
@@ -77,6 +83,8 @@
     },
 
     "weekly": {
+      "weekdays_only": false,
+      "caps": "weekly",
       "trigger": { "start_calendar_interval": [{ "hour": 9, "minute": 0, "weekday": 3 }] },
       "steps": [
         {
@@ -87,7 +95,7 @@
           "session_name": "weekly-review",
           "scratch_dir": "~/.local/state/desk/weekly",
           "notes_diff_file": "notes-diff.md",
-          "notes_diff_since": "last_wednesday",
+          "notes_diff_since": { "weekday": "wed", "time": "08:00" },
           "prompt_text": "Read notes-diff.md in this directory: it is what I wrote in my notes this past week. Help me review the week and pick what carries into the next one."
         }
       ]

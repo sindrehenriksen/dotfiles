@@ -109,13 +109,13 @@ git -C "$notes" add notes.md reading.md .desk-notes
 git -C "$notes" commit -q -m initial
 git -C "$notes" branch -M main
 
-# A copy, so the pass names can be changed: `morning` and `1630` skip their
-# model steps at weekends, which would leave this test with nothing to
-# check on a Saturday. Only the names change; every step, prompt and
-# relative path is the example's own.
+# A copy with weekdays_only switched off, so the model steps run at
+# weekends too and the test has something to check on a Saturday. The pass
+# names are prefixed only to show nothing depends on them; every step,
+# prompt and relative path is the example's own.
 INSTANCE="$ROOT/instance"
 cp -R "$EXAMPLE" "$INSTANCE"
-jq '.passes |= with_entries(.key = "example-" + .key)' "$EXAMPLE/config.json" > "$INSTANCE/config.json"
+jq '.passes |= with_entries(.key = "example-" + .key | .value.weekdays_only = false)' "$EXAMPLE/config.json" > "$INSTANCE/config.json"
 export DESK_CONFIG="$INSTANCE/config.json"
 
 echo "=== every step names a prompt file that exists ==="

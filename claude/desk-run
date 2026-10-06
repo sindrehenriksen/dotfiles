@@ -92,8 +92,13 @@ done
 # so a weekend invocation still takes the lock, runs the once-a-day guard,
 # and does the commit_push step; only the model-calling step kinds are
 # skipped.
-weekday_only_pass="false"
-[ "$pass" = "morning" ] || [ "$pass" = "1630" ] && weekday_only_pass="true"
+# The pass's own `weekdays_only` says so; absent, the names `morning` and
+# `1630` keep their historical default of true, every other name false.
+case "$pass" in
+	morning | 1630) weekday_default="true" ;;
+	*) weekday_default="false" ;;
+esac
+weekday_only_pass="$(jq -r --arg d "$weekday_default" 'if .weekdays_only == null then $d else (.weekdays_only | tostring) end' <<< "$pass_config")"
 is_weekend="false"
 dow="$(date +%u)" # 1=Mon .. 7=Sun
 [ "$dow" -ge 6 ] && is_weekend="true"
@@ -241,6 +246,10 @@ if [ "$repo_toplevel" != "$repo_resolved" ]; then
 fi
 repo="$repo_resolved"
 mapfile -t files < <(jq -r '.files[]' <<< "$config")
+# Where capture items and the caps overflow summary land: `captures_file`,
+# default the first configured file.
+DESK_CAPTURES_FILE="$(jq -r --arg d "${files[0]:-notes.md}" '.captures_file // $d' <<< "$config")"
+export DESK_CAPTURES_FILE
 # NOT `.push_enabled // false`: see the dry_run/log_only comments
 # elsewhere in this file on why jq's `//` can't be used for a boolean
 # whose explicit "false" is meaningful — here that's moot (false already
@@ -384,8 +393,12 @@ $(git -C "$repo" show "HEAD:$f" 2> /dev/null)"
 			;;
 
 		judge)
-			caps_key="daily"
-			[ "$pass" = "weekly" ] && caps_key="weekly"
+			# The pass's own `caps` names which entry of the top-level `caps`
+			# table it uses; absent, a pass named `weekly` uses "weekly",
+			# every other pass "daily".
+			caps_default="daily"
+			[ "$pass" = "weekly" ] && caps_default="weekly"
+			caps_key="$(jq -r --arg d "$caps_default" '.caps // $d' <<< "$pass_config")"
 			caps_json="$(jq -c --arg k "$caps_key" '.caps[$k] // {}' <<< "$config")"
 			caps_str="$(desk_caps_string "$caps_json")"
 			judge_placeholders="$(jq -c --arg caps "$caps_str" '. + {caps: $caps}' <<< "$common_placeholders")"

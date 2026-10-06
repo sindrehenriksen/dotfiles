@@ -62,6 +62,7 @@ BASH_SUITES=(
 	nvim/tests/desk-max-budget-test.sh
 	nvim/tests/desk-notes-diff-test.sh
 	nvim/tests/desk-open-tab-test.sh
+	nvim/tests/desk-pass-config-test.sh
 	nvim/tests/desk-partial-proposal-test.sh
 	nvim/tests/desk-push-test.sh
 	nvim/tests/desk-render-prompt-test.sh

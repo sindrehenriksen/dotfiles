@@ -58,7 +58,7 @@ assert_eq "missing arg (default \"[]\") does the same" "2026-01-05" \
 	"$(desk_scheduled_date_for "" "$now")"
 
 echo
-echo "=== desk_scheduled_date_for: the wake-next-morning case (Interfaces brief) ==="
+echo "=== desk_scheduled_date_for: the wake-next-morning case ==="
 slots='[{"hour":16,"minute":30}]'
 # Day 1's 16:30 slot never actually ran (machine asleep); the pass instead
 # runs on Day 2's morning wake, well before Day 2's own 16:30.

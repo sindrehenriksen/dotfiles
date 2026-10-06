@@ -234,36 +234,17 @@ desk_seed_named_file() {
 	local name="$1" dest_dir="$2" ctx_json="$3"
 	local repo
 	repo="$(jq -r '.repo // empty' <<< "$ctx_json")"
+	# A configured file is seeded as its marked HEAD copy, whatever its name.
+	if jq -e --arg n "$name" '(.files // []) | index($n) != null' > /dev/null 2>&1 <<< "$ctx_json"; then
+		desk_write_marked_head_copy "$repo" "$name" "$dest_dir/$name"
+		return
+	fi
 	case "$name" in
-		notes.md | reading.md)
-			desk_write_marked_head_copy "$repo" "$name" "$dest_dir/$name"
-			;;
 		sources.json)
 			local sp
 			sp="$(jq -r '.sources_path // empty' <<< "$ctx_json")"
 			if [ -n "$sp" ] && cp -f "$sp" "$dest_dir/sources.json" 2> /dev/null; then :; else
 				echo '{}' > "$dest_dir/sources.json"
-			fi
-			;;
-		f-private.json | f-web.json)
-			# f-private.json's own producing step id is desk-run's own
-			# required "mail_fetch_step_id" config field (threaded through
-			# ctx_json), never a hardcoded literal — the same id the write
-			# (W) step's own tool-results lookup already keys off. f-web.json
-			# has no such config-driven mapping (no work-specific tool or
-			# fact is tied to it), so it keeps its own generic literal.
-			local step_id pass_scratch text
-			if [ "$name" = "f-web.json" ]; then
-				step_id="F-web"
-			else
-				step_id="$(jq -r '.mail_fetch_step_id // empty' <<< "$ctx_json")"
-			fi
-			pass_scratch="$(jq -r '.pass_scratch // empty' <<< "$ctx_json")"
-			text="$(desk_extract_final_text "$pass_scratch/${step_id}-stream.jsonl" 2> /dev/null)"
-			if [ -n "$text" ] && jq -e . > /dev/null 2>&1 <<< "$text"; then
-				printf '%s' "$text" > "$dest_dir/$name"
-			else
-				echo '{}' > "$dest_dir/$name"
 			fi
 			;;
 		tickets.json)
@@ -276,6 +257,36 @@ desk_seed_named_file() {
 			;;
 		open-items.json)
 			desk_write_open_items "$repo" "$(jq -c '.files // []' <<< "$ctx_json")" "$dest_dir/open-items.json"
+			;;
+		*.json)
+			# A fetch step's reply is seeded as <lowercased step id>.json.
+			# The mail step additionally answers to f-private.json (its id
+			# is the required `mail_fetch_step_id` config field).
+			local step_id pass_scratch text sf
+			pass_scratch="$(jq -r '.pass_scratch // empty' <<< "$ctx_json")"
+			step_id=""
+			if [ "$name" = "f-private.json" ]; then
+				step_id="$(jq -r '.mail_fetch_step_id // empty' <<< "$ctx_json")"
+			else
+				for sf in "$pass_scratch"/*-stream.jsonl; do
+					[ -e "$sf" ] || continue
+					sf="$(basename "$sf" -stream.jsonl)"
+					if [ "$(tr '[:upper:]' '[:lower:]' <<< "$sf").json" = "$name" ]; then
+						step_id="$sf"
+						break
+					fi
+				done
+			fi
+			text=""
+			[ -n "$step_id" ] && text="$(desk_extract_final_text "$pass_scratch/${step_id}-stream.jsonl" 2> /dev/null)"
+			if [ -n "$text" ] && jq -e . > /dev/null 2>&1 <<< "$text"; then
+				printf '%s' "$text" > "$dest_dir/$name"
+			else
+				case "$name" in
+					f-*.json) echo '{}' > "$dest_dir/$name" ;;
+					*) desk_log - "desk_seed_named_file: unknown file kind: $name (skipped)" ;;
+				esac
+			fi
 			;;
 		*)
 			desk_log - "desk_seed_named_file: unknown file kind: $name (skipped)"
@@ -411,6 +422,7 @@ desk_step_model_call() {
 	# real spend cap, never an unbounded one, whether or not its own step
 	# config ever names one.
 	max_budget_usd="$(jq -r '.max_budget_usd // empty' <<< "$step_json")"
+	[ -n "$max_budget_usd" ] || max_budget_usd="$(jq -r '.default_max_budget_usd // empty' "$DESK_CONFIG" 2> /dev/null)"
 	[ -n "$max_budget_usd" ] || max_budget_usd="$DESK_DEFAULT_MAX_BUDGET_USD"
 
 	local visible session_name=""
@@ -422,7 +434,6 @@ desk_step_model_call() {
 	# `--restricted` call's Read is really confined to (a live 16:30 close
 	# call's own failure: --allowedTools naming Read(<seed dir>/**) and the
 	# prompt's own {{scratch}} placeholder pointing at that same seed dir
-	[ -n "$max_budget_usd" ] || max_budget_usd="$(jq -r '.default_max_budget_usd // empty' "$DESK_CONFIG" 2> /dev/null)"
 	# meant nothing once the process itself ran from a DIFFERENT cwd, so
 	# every Read got refused). Always this function's own properly-named
 	# dir — visible or not, its "$pass-$id"/kept-runs naming is itself
@@ -608,10 +619,10 @@ desk_step_judge() {
 	ctx="$(jq -c --argjson files "$files_json" '. + {files: $files}' <<< "$pass_ctx_json")"
 
 	local input_files_json
-	input_files_json="$(jq -c '.input_files // [
-		"notes.md", "reading.md", "sources.json", "f-private.json", "f-web.json",
-		"tickets.json", "sessions.json", "open-items.json"
-	]' <<< "$step_json")"
+	input_files_json="$(jq -c --argjson files "$files_json" '.input_files // (
+		$files + ["sources.json", "f-private.json", "f-web.json",
+		"tickets.json", "sessions.json", "open-items.json"]
+	)' <<< "$step_json")"
 	local n name i
 	n="$(jq 'length' <<< "$input_files_json" 2> /dev/null || echo 0)"
 	for ((i = 0; i < n; i++)); do
@@ -781,9 +792,9 @@ desk_capture_already_ledgered() {
 # flood the top.
 #
 # `$4..` are the pass's configured files, which the proposal builder
-# applies items onto; every capture item itself always lands in notes.md
-# (design's own convention for a suggestion with no clearer home — the
-# same literal desk_apply_caps's own overflow summary already uses).
+# applies items onto; every capture item itself lands in the captures
+# file ($DESK_CAPTURES_FILE, default notes.md — the same file
+# desk_apply_caps's overflow summary uses).
 #
 # Prints "ok" once every candidate is processed (nothing here is ever a
 # per-candidate step failure), "failed" only if the mechanism itself
@@ -801,7 +812,7 @@ desk_step_capture_sessions() {
 	}
 
 	local head_content
-	head_content="$(git -C "$repo" show HEAD:notes.md 2> /dev/null || true)"
+	head_content="$(git -C "$repo" show "HEAD:${DESK_CAPTURES_FILE:-notes.md}" 2> /dev/null || true)"
 
 	local ledger_state
 	ledger_state="$(desk_nvim_cli ledger-state "$repo")" || {
@@ -861,8 +872,8 @@ desk_step_capture_sessions() {
 			continue
 		fi
 
-		items_json="$(jq -c --arg h "$headline" --arg sid "$id" --arg ck "$capture_kind" '
-			. + [{file: "notes.md", kind: "add", target: "top", before: "", after: $h,
+		items_json="$(jq -c --arg cf "${DESK_CAPTURES_FILE:-notes.md}" --arg h "$headline" --arg sid "$id" --arg ck "$capture_kind" '
+			. + [{file: $cf, kind: "add", target: "top", before: "", after: $h,
 			      source: ("session:" + $sid), headline: $h, session_id: $sid, capture_kind: $ck}]
 		' <<< "$items_json")"
 	done
@@ -985,7 +996,7 @@ desk_step_close() {
 		# 1630 call never anchors an *edit* on a marked line the way J's own
 		# in-place suggestions might, only ever placing new bullets under or
 		# after one.
-		desk_write_marked_head_copy "$repo" "notes.md" "$seed/notes.md"
+		desk_write_marked_head_copy "$repo" "${DESK_CAPTURES_FILE:-notes.md}" "$seed/${DESK_CAPTURES_FILE:-notes.md}"
 
 		local per_session_step
 		per_session_step="$(jq -c --arg id "$id" '.id = ("close-" + $id)' <<< "$step_json")"

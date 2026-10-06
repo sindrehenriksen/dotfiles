@@ -10,6 +10,17 @@ function M.setup()
 	local hotkey = require("desk.hotkey")
 	local tokens = require("desk.tokens")
 
+	-- The notes files are the config's `files` (default notes.md and
+	-- reading.md); the marker file still decides whether a buffer is one.
+	local patterns = { "notes.md", "reading.md" }
+	local cfg = select(1, tokens.load())
+	if cfg and type(cfg.files) == "table" and #cfg.files > 0 then
+		patterns = {}
+		for _, f in ipairs(cfg.files) do
+			patterns[#patterns + 1] = f
+		end
+	end
+
 	-- nomodeline, buffer-local, before the file is even read: a notes file
 	-- routinely holds pasted/captured text (a session transcript, a
 	-- fetched page) nobody wrote by hand to be safe vim config, so it
@@ -17,7 +28,7 @@ function M.setup()
 	-- BufEnter (below) — modelines are processed once, while the file is
 	-- read, which is already over by the time BufEnter fires.
 	vim.api.nvim_create_autocmd({ "BufReadPre", "BufNewFile" }, {
-		pattern = { "notes.md", "reading.md" },
+		pattern = patterns,
 		callback = function(args)
 			local dir = vim.fn.fnamemodify(args.file, ":p:h")
 			if not review.has_marker(dir) then
@@ -28,7 +39,7 @@ function M.setup()
 	})
 
 	vim.api.nvim_create_autocmd("BufEnter", {
-		pattern = { "notes.md", "reading.md" },
+		pattern = patterns,
 		callback = function(args)
 			local dir = vim.fn.fnamemodify(args.file, ":p:h")
 			if not review.has_marker(dir) then

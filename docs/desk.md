@@ -8,7 +8,7 @@ macOS only: tabs open in Ghostty through Hammerspoon, and passes run from launch
 
 ## How it works
 
-**The notes repo.** A private git repo holding `notes.md` and `reading.md` at its root, on branch `main`, with an empty `.desk-notes` marker file. The marker, not a path, is what tells nvim a buffer is a desk notes file, so this repo never names where the notes live. The file names themselves are fixed: nvim attaches only to those two, and session captures always land in `notes.md`.
+**The notes repo.** A private git repo holding `notes.md` and `reading.md` at its root, on branch `main`, with an empty `.desk-notes` marker file. The marker, not a path, is what tells nvim a buffer is a desk notes file, so this repo never names where the notes live. nvim attaches to the config's `files` (default those two names), and session captures and a capped tier's overflow summary land in `captures_file` (default the first entry of `files`).
 
 **Passes.** `desk-run <pass>` runs one pass from the config: an ordered list of steps, each of one kind (below). Every model call is a headless `claude -p` with an exact tool allowlist, from a scratch directory outside any repo, under a timeout and a spend cap. A pass ends by writing `~/.local/state/desk/status.json`, which the status line reads. One lock is shared by every pass, since they all write the same repo and status file; a run that cannot get it waits up to 30 minutes, then gives up and says so in status.
 
@@ -52,12 +52,13 @@ macOS only: tabs open in Ghostty through Hammerspoon, and passes run from launch
 | Key | Default | Meaning |
 |---|---|---|
 | `notes_repo` | required | Absolute path (a leading `~` is expanded) that is a repo's own toplevel. Anything else refuses the pass. |
-| `files` | required | The files a pass commits and suggests into: `["notes.md", "reading.md"]`, or a subset. |
+| `files` | required | The files a pass commits and suggests into, e.g. `["notes.md", "reading.md"]`. nvim attaches to these names (default `notes.md`, `reading.md` when no config is readable). A judge's `input_files` may name any of them, and each is seeded as its committed copy. |
+| `captures_file` | first entry of `files` | Where session captures and the `+N more` overflow items go. Also the file a close call is seeded with. |
 | `timezone` | required | IANA zone name; `{{window_start}}`/`{{window_end}}` render in it. |
 | `ticket_search_tool` | required | Tool name whose results build the ticket cache. |
 | `mail_search_tool` | required | Tool name whose digest search the write step pins thread ids from. |
 | `ticket_status_step_id` | required | Id of the fetch step that checks ticket status. |
-| `mail_fetch_step_id` | required | Id of the fetch step that searches mail; its reply becomes `f-private.json`. |
+| `mail_fetch_step_id` | required | Id of the fetch step that searches mail; its reply becomes `f-private.json` (besides the generic `<id>.json` below). |
 | `passes` | required | Pass name → pass object. |
 | `push_enabled` | `false` | Push the notes repo after committing. Off: status reads `push: disabled`. |
 | `dry_run` | `true` | The write step logs the ids it would act on and makes no call. |
@@ -66,7 +67,8 @@ macOS only: tabs open in Ghostty through Hammerspoon, and passes run from launch
 | `keep_open` | `[]` | Session names never closed. |
 | `max_closes` | `3` | Real closes per pass. |
 | `away_days` | `5` | A pass more than this many days after the pass's last ok run closes nothing. |
-| `caps.daily`, `caps.weekly` | none | `{act, worth_knowing, wildcard}`: how many tiered items a judge may keep. A pass named `weekly` uses `caps.weekly`, every other pass `caps.daily`. |
+| `caps.<name>` | none | `{act, worth_knowing, wildcard}`: how many tiered items a judge may keep. Which entry a pass uses is its `caps` key; absent, `weekly` for a pass named `weekly` and `daily` for every other. |
+| `default_max_budget_usd` | `$DESK_DEFAULT_MAX_BUDGET_USD`, `2` | Spend cap for a model call whose step has no `max_budget_usd`. |
 | `tokens` | `[]` | The token table, below. |
 | `sources_file` | `sources.json` | Relative to the config's directory. Substituted whole into `{{sources}}` and copied to the judge as `sources.json`. |
 | `digest_gmail_label` | `Digest` | Label in `{{digest_query}}`. |
@@ -81,9 +83,11 @@ The five required tool and step-id fields have no defaults on purpose: this repo
 |---|---|
 | `steps` | Ordered list of step objects. A step that fails (other than a fetch) stops the pass. |
 | `trigger.start_calendar_interval` | `[{hour, minute, weekday?}]`, `weekday` 1 = Monday … 7 = Sunday. The runner never reads a plist, so this mirrors the plist's schedule and decides which slot a run belongs to: the once-a-day guard is keyed on that slot's date, so a 16:30 slot that only fires at next morning's wake still counts as yesterday's, and a later slot for a date that already finished ok is a no-op. Without it, the run's own date is used. |
+| `weekdays_only` | Boolean. `true`: on Saturdays and Sundays every step but `commit_push` is skipped (notes are still committed, with no model calls). Absent: `true` for passes named `morning` or `1630`, `false` for any other name. |
+| `caps` | Name of the top-level `caps` entry this pass's judge uses. Absent: `weekly` for a pass named `weekly`, else `daily`. |
 | `follow_up_step` | A step id. After the pass, whatever its result, the most recent `visible` call of that step opens in a tab with `claude --resume` (or its live tab is focused), at most once per scheduled date. |
 
-Two pass names carry behaviour: `morning` and `1630` skip every step but `commit_push` on Saturdays and Sundays, so notes are still committed at weekends with no model calls.
+The pass names `morning`, `1630` and `weekly` only supply the defaults of `weekdays_only` and `caps` above; nothing else about a pass depends on its name.
 
 ### Steps
 
@@ -106,8 +110,8 @@ A judge or close step whose `tools` include `Read` gets it narrowed to its own s
 | `commit_push` | Commits the configured files exactly as they are on disk, only when `HEAD` is `main` with no rebase or merge in progress; records suggestions now in `HEAD` as taken; pushes if `push_enabled`. Never pulls, merges, rebases or force-pushes. | none |
 | `fetch` | One model call. A failure flags the pass `partial` instead of stopping it; a later slot the same scheduled date reruns only the fetches that failed, reusing the ones that succeeded. If its id is `ticket_status_step_id`, it gets `{{jql}}` and its `ticket_search_tool` results become the ticket cache. | none |
 | `judge` | Seeds its input files, makes one call, validates the reply, caps tiered items and builds the proposal. A reply that is not the items shape fails the pass. | `input_files` (default: all eight names listed below) |
-| `write` | The one unattended external write: removes `pinned_label` from exactly the threads the `mail_fetch_step_id` step's digest search returned. The deny hook refuses any call whose arguments are not one of those pinned `{threadId, labelIds}` pairs, and the runner fails the pass if the ids acted on differ from the pinned set. Refuses outright if that fetch failed or its search query was not exactly `{{digest_query}}`. | `pinned_label` (default `UNREAD`); `tools`: exactly one |
-| `capture` | No model call. Adds a line on top of `notes.md` for each recorded session that is live (`running`) or ended without a clean exit (`dropped`), once per session and kind. A session he named that is already mentioned in his notes is skipped; an unnamed one is labelled `<auto title> · <first 8 chars of its id>`. | none |
+| `write` | A pinned single-tool write, currently built around one case: removing a label (`pinned_label`) from mail threads. It removes the label from exactly the threads the `mail_fetch_step_id` step's digest search returned. The deny hook refuses any call whose arguments are not one of those pinned `{threadId, labelIds}` pairs, and the runner fails the pass if the ids acted on differ from the pinned set. Refuses outright if that fetch failed or its search query was not exactly `{{digest_query}}`. | `pinned_label` (default `UNREAD`); `tools`: exactly one |
+| `capture` | No model call. Adds a line on top of the captures file (`captures_file`) for each recorded session that is live (`running`) or ended without a clean exit (`dropped`), once per session and kind. A session he named that is already mentioned in his notes is skipped; an unnamed one is labelled `<auto title> · <first 8 chars of its id>`. | none |
 | `close` | For each live session idle at least `close_after_working_days` and not in `keep_open`: one call over the end of its transcript, whose closure note goes into the proposal; then, unless `log_only` or past `max_closes`, a fresh re-check that it is still live and idle, and `SIGTERM`. A survivor is recorded as a failed close and not retried. | `cap`: transcript lines (default `200`) |
 | `open_tab` | Opens an interactive `claude` in a Ghostty tab. Skipped when a session named `session_name` is already live. | below |
 
@@ -144,20 +148,20 @@ A prompt is plain text with `{{name}}` placeholders, filled in one pass; a place
 
 A close prompt gets only `scratch`, `today`, `session_name` and `session_id`.
 
-**Fetch steps.** What counts is the raw tool results, never the reply's prose: every URL that appears verbatim in any fetch step's tool *results* is what a judge may cite, and a URL that only appears in a call's arguments (the address passed to WebFetch) does not count unless a result repeats it. The reply matters for two steps only: the `mail_fetch_step_id` step's becomes `f-private.json` and a step with id `F-web` becomes `f-web.json`, each only if it is valid JSON. The ticket step must call `ticket_search_tool` with `{{jql}}`; its results are read in either Jira search shape, `{"issues": [...]}` or `{"issues": {"nodes": [...]}}`, and its reply is ignored. The mail step must search with `{{digest_query}}` exactly, and the write step reads `threads[].id` from that result.
+**Fetch steps.** What counts is the raw tool results, never the reply's prose: every URL that appears verbatim in any fetch step's tool *results* is what a judge may cite, and a URL that only appears in a call's arguments (the address passed to WebFetch) does not count unless a result repeats it. Any fetch step's reply becomes `<its id, lowercased>.json` (id `F-web` gives `f-web.json`), and the `mail_fetch_step_id` step's also becomes `f-private.json`, each only if it is valid JSON; a judge reads them by listing those names in `input_files`. The ticket step must call `ticket_search_tool` with `{{jql}}`; its results are read in either Jira search shape, `{"issues": [...]}` or `{"issues": {"nodes": [...]}}`, and its reply is ignored. The mail step must search with `{{digest_query}}` exactly, and the write step reads `threads[].id` from that result.
 
 **Judge input files**, chosen by `input_files`:
 
 | File | Contents |
 |---|---|
-| `notes.md`, `reading.md` | the committed file, with each line he took from a suggestion suffixed `  <<agent-suggested>>` |
+| each name in `files` (`notes.md`, `reading.md`) | the committed file, with each line he took from a suggestion suffixed `  <<agent-suggested>>` |
 | `sources.json` | the sources file |
-| `f-private.json`, `f-web.json` | those fetch replies, `{}` when absent or invalid |
+| `f-private.json`, `<id>.json` (e.g. `f-web.json`) | those fetch replies, `{}` when absent or invalid (`f-` names) |
 | `tickets.json` | `[{key, summary, status, previous_status}]` for tickets whose status changed since the last check |
 | `sessions.json` | `[{name, status}]` from the reader |
 | `open-items.json` | suggestions still waiting on him, in the item shape below, with their runner-assigned ids |
 
-A close call's cwd holds `session.json` (its reader entry), `transcript-tail.jsonl` and `notes.md`.
+A close call's cwd holds `session.json` (its reader entry), `transcript-tail.jsonl` and the captures file (`notes.md` by default).
 
 **The reply** of a judge or close call is its final message: one JSON object `{"items": [...]}` (a bare array is accepted too), nothing else.
 

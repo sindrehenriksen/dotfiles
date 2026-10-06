@@ -273,10 +273,10 @@ desk_apply_caps() {
 			pt="$(jq -c ".[$pi]" <<< "$per_tier")"
 			tier_name="$(jq -r '.tier' <<< "$pt")"
 			tier_count="$(jq -r '.n' <<< "$pt")"
-			summary_item="$(jq -n --arg id "${pass}-overflow-${tier_name}-${today}" \
+			summary_item="$(jq -n --arg cf "${DESK_CAPTURES_FILE:-notes.md}" --arg id "${pass}-overflow-${tier_name}-${today}" \
 				--arg headline "+${tier_count} more ${tier_name} → brief" \
 				--arg source "brief:$brief_file" '{
-					id: $id, file: "notes.md", kind: "new", target: "top",
+					id: $id, file: $cf, kind: "new", target: "top",
 					before: "", after: "", source: $source, headline: $headline
 				}')"
 			kept="$(jq -c --argjson it "$summary_item" '. + [$it]' <<< "$kept")"
