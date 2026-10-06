@@ -206,22 +206,114 @@ function M.sync_taken(repo)
 	return new
 end
 
---- The tip proposal's items still waiting on him: not deferred, not taken,
---- not declined.
+--- `git merge-file` of `ours` (his current text) with the proposal: base is
+--- the proposal's parent version, theirs the proposal's version. Returns
+--- the `--ours` merge (his text winning any conflict), the `--union` merge
+--- (both sides kept where they conflict), or nil, err.
+function M.merged_lines(repo, p, file, ours_lines)
+	local base = p.parent and M.lines_at(repo, p.parent, file) or {}
+	local theirs = M.lines_at(repo, p.sha, file)
+	local dir = vim.fn.tempname()
+	vim.fn.mkdir(dir, "p")
+	local function put(name, lines)
+		local path = dir .. "/" .. name
+		local fd = assert(io.open(path, "w"))
+		fd:write(snippet.join_lines(lines, true))
+		fd:close()
+		return path
+	end
+	local ours_path, base_path, theirs_path = put("ours", ours_lines), put("base", base), put("theirs", theirs)
+	local out = {}
+	for _, mode in ipairs({ "--ours", "--union" }) do
+		local ok, text, err = git.run(repo, { "merge-file", "-p", mode, ours_path, base_path, theirs_path })
+		if not ok then
+			vim.fn.delete(dir, "rf")
+			return nil, "git merge-file failed: " .. err
+		end
+		out[#out + 1] = (snippet.split_lines(text))
+	end
+	vim.fn.delete(dir, "rf")
+	return out[1], out[2]
+end
+
+--- The suggestions of `file` a review can actually show against `ours`
+--- (his text): not deferred, not taken or declined, in the merged view but
+--- not yet in his text. A suggestion his own edit conflicts with is still
+--- shown, in the union view, and listed in `conflicts` with the line of his
+--- text it sits next to. Returns { shown = id -> item, conflicts = id ->
+--- line, merged = lines }, or nil, err.
+function M.reviewable(repo, p, file, ours)
+	local clean, merged = M.merged_lines(repo, p, file, ours)
+	if not clean then
+		return nil, merged
+	end
+	local base = M.base_lines(repo, p, file)
+	local records = ledger.read(repo)
+	local declined = ledger.declined(records)
+	local taken = ledger.taken_by_id(records)
+	local hunks
+	local shown, conflicts = {}, {}
+	for _, item in ipairs(p.items) do
+		if
+			item.file == file
+			and not item.deferred
+			and not taken[item.id]
+			and not declined.ids[item.id]
+			and M.proposed_in(item, merged, base)
+			and not M.proposed_in(item, ours, base)
+		then
+			shown[item.id] = item
+			if not M.proposed_in(item, clean, base) then
+				hunks = hunks or vim.diff(snippet.join_lines(ours, true), snippet.join_lines(merged, true), { result_type = "indices" })
+				local after = snippet.split_lines(item.after)
+				local line = 1
+				for _, pos in ipairs(M.positions(merged, after)) do
+					for _, h in ipairs(hunks) do
+						if pos >= h[3] and pos <= h[3] + math.max(h[4], 1) - 1 then
+							line = h[2] > 0 and h[1] or h[1] + 1
+						end
+					end
+				end
+				conflicts[item.id] = math.max(1, math.min(line, math.max(#ours, 1)))
+			end
+		end
+	end
+	return { shown = shown, conflicts = conflicts, merged = merged }
+end
+
+--- Every 1-indexed position at which `block_lines` occurs in `lines`.
+function M.positions(lines, block_lines)
+	local out = {}
+	for pos = 1, #lines - #block_lines + 1 do
+		if #block_lines > 0 and snippet.lines_match_at(lines, pos, block_lines) then
+			out[#out + 1] = pos
+		end
+	end
+	return out
+end
+
+--- The tip proposal's items still waiting on him: exactly the ones a review
+--- of his HEAD would show.
 function M.open_items(repo)
 	local p = M.read(repo)
 	if not p then
 		return {}
 	end
-	local records = ledger.read(repo)
-	local declined = ledger.declined(records)
-	local have = ledger.taken_by_id(records)
-	local head_cache, out = {}, {}
+	local by_file, files = {}, {}
 	for _, item in ipairs(p.items) do
-		if not item.deferred and not have[item.id] and not declined.ids[item.id] then
-			head_cache[item.file] = head_cache[item.file] or M.lines_at(repo, "HEAD", item.file)
-			if not M.proposed_in(item, head_cache[item.file], M.base_lines(repo, p, item.file)) then
-				out[#out + 1] = item
+		if item.file and not by_file[item.file] then
+			by_file[item.file] = true
+			files[#files + 1] = item.file
+		end
+	end
+	local out = {}
+	for _, f in ipairs(files) do
+		local r = M.reviewable(repo, p, f, M.lines_at(repo, "HEAD", f))
+		if r then
+			for _, item in ipairs(p.items) do
+				if r.shown[item.id] then
+					out[#out + 1] = item
+				end
 			end
 		end
 	end

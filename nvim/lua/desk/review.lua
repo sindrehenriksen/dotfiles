@@ -54,28 +54,15 @@ end
 -- The merged view
 -- ---------------------------------------------------------------------------
 
---- `git merge-file` of `ours` (his current text) with the proposal: base is
---- the proposal's parent version, theirs the proposal's version, his text
---- winning conflicts. Returns the merged lines, or nil, err.
+--- The merged view of his current text with the proposal (see
+--- desk.proposal.merged_lines): the union merge, which keeps a suggestion
+--- his own nearby edit conflicts with instead of dropping it.
 function M.merged_lines(repo, p, file, ours_lines)
-	local base = p.parent and proposal.lines_at(repo, p.parent, file) or {}
-	local theirs = proposal.lines_at(repo, p.sha, file)
-	local dir = vim.fn.tempname()
-	vim.fn.mkdir(dir, "p")
-	local function put(name, lines)
-		local path = dir .. "/" .. name
-		local fd = assert(io.open(path, "w"))
-		fd:write(snippet.join_lines(lines, true))
-		fd:close()
-		return path
+	local clean, union = proposal.merged_lines(repo, p, file, ours_lines)
+	if not clean then
+		return nil, union
 	end
-	local ours_path, base_path, theirs_path = put("ours", ours_lines), put("base", base), put("theirs", theirs)
-	local ok, out, err = git.run(repo, { "merge-file", "-p", "--ours", ours_path, base_path, theirs_path })
-	vim.fn.delete(dir, "rf")
-	if not ok then
-		return nil, "git merge-file failed: " .. err
-	end
-	return (snippet.split_lines(out))
+	return union
 end
 
 -- ---------------------------------------------------------------------------
@@ -192,29 +179,6 @@ local function pending_ids(notes_buf)
 	return pend and pend.ids or {}
 end
 
---- The suggestions of `file` the merged view actually shows as hunks: not
---- deferred, not already taken or declined, proposed in the merged text but
---- not yet in his own.
-local function shown_items(repo, p, file, ours, merged, base)
-	local records = ledger.read(repo)
-	local declined = ledger.declined(records)
-	local taken = ledger.taken_by_id(records)
-	local shown = {}
-	for _, item in ipairs(p.items) do
-		if
-			item.file == file
-			and not item.deferred
-			and not taken[item.id]
-			and not declined.ids[item.id]
-			and proposal.proposed_in(item, merged, base)
-			and not proposal.proposed_in(item, ours, base)
-		then
-			shown[item.id] = item
-		end
-	end
-	return shown
-end
-
 local function first_hunk(win)
 	vim.api.nvim_win_call(win, function()
 		vim.cmd("diffupdate")
@@ -287,12 +251,12 @@ function M.open_review(notes_buf)
 	end
 
 	local ours = buf_lines(notes_buf)
-	local merged, err = M.merged_lines(repo, p, file, ours)
-	if not merged then
+	local r, err = proposal.reviewable(repo, p, file, ours)
+	if not r then
 		return false, err
 	end
+	local merged, shown, conflicts = r.merged, r.shown, r.conflicts
 	local base = proposal.base_lines(repo, p, file)
-	local shown = shown_items(repo, p, file, ours, merged, base)
 	if next(shown) == nil then
 		return false, "no suggestions to review"
 	end
@@ -323,6 +287,7 @@ function M.open_review(notes_buf)
 		file = file,
 		sha = p.sha,
 		shown = shown,
+		conflicts = conflicts,
 		base = base,
 	}
 	sessions[notes_buf] = s
@@ -579,6 +544,7 @@ function M.remaining(s)
 			end
 			out[#out + 1] = {
 				item = item,
+				conflict = s.conflicts and s.conflicts[item.id],
 				lnum = math.min(lnum, math.max(#review_lines, 1)),
 				notes_lnum = math.max(1, math.min(notes_lnum, #notes_lines)),
 			}
@@ -596,7 +562,11 @@ end
 local function overview_items(s)
 	local qf = {}
 	for _, r in ipairs(M.remaining(s)) do
-		qf[#qf + 1] = { bufnr = s.notes_buf, lnum = r.notes_lnum, col = 1, text = r.item.headline or r.item.id }
+		local text = r.item.headline or r.item.id
+		if r.conflict then
+			text = string.format("%s (near your edit at line %d)", text, r.conflict)
+		end
+		qf[#qf + 1] = { bufnr = s.notes_buf, lnum = r.notes_lnum, col = 1, text = text }
 	end
 	return qf
 end

@@ -275,7 +275,7 @@ assert_eq("the two adjacent suggestions form one hunk", 1, #hunks)
 local hunk_text = table.concat(vim.list_slice(lines_of(rb), hunks[1][3], hunks[1][3] + hunks[1][4] - 1), "\n")
 assert_true("the hunk is the suggestions, not his edit", hunk_text:match("^NEWS [^\n]*\nNEWS [^\n]*$") ~= nil)
 
-print("\n=== a suggestion conflicting with his edit: his text wins, no hunk for it ===")
+print("\n=== a suggestion conflicting with his edit is still shown, marked as near his edit ===")
 local repo4 = new_repo({ "Section A", "  keep this" })
 build(repo4, "2026-10-01", {
 	item("e1", { kind = "edit", target = { at = "  keep this" }, before = "  keep this", after = "  agent rewrite", source = "" }),
@@ -284,8 +284,15 @@ local nb5 = open_notes(repo4)
 review.attach(nb5)
 vim.api.nvim_buf_set_lines(nb5, 1, 2, false, { "  his rewrite" })
 local cok2, why = review.open_review(nb5)
-assert_eq("nothing to review: his text won the conflict", false, cok2)
-assert_eq("and it says so", "no suggestions to review", why)
+assert_true("the conflicting suggestion is still reviewable", cok2)
+local rb5 = review_buf_of(nb5)
+assert_true("his edit is in the review buffer", line_of(rb5, "  his rewrite") ~= nil)
+assert_true("and so is the suggestion", line_of(rb5, "  agent rewrite") ~= nil)
+assert_eq("it counts as open", 1, #proposal.open_items(repo4))
+review.overview(nb5)
+assert_eq("the overview marks it", { "headline e1 (near your edit at line 2)" }, vim.tbl_map(function(e)
+	return e.text
+end, vim.fn.getqflist()))
 
 print("\n=== adjacent suggestions are one hunk: decline and take act on the one under the cursor ===")
 vim.cmd("silent! %bwipeout!")
@@ -510,6 +517,18 @@ do
 	vim.cmd("normal u")
 	vim.cmd("write")
 	assert_eq("an undone take is not recorded", {}, taken_headlines(r3))
+end
+
+print("\n=== his line appended where an add lands never makes the suggestion vanish ===")
+do
+	local r = new_repo({ "Section A", "  existing", "Section B", "  other" })
+	build(r, "2026-10-01", { item("a1", { kind = "add", target = { under = "Section B" }, after = "  added under B", source = "", headline = "add under B" }) })
+	local nb = open_notes(r)
+	review.attach(nb)
+	vim.api.nvim_buf_set_lines(nb, 4, 4, false, { "  his line at the end of B" })
+	assert_true("the review still opens", review.open_review(nb))
+	assert_true("with the suggestion in it", line_of(review_buf_of(nb), "  added under B") ~= nil)
+	assert_eq("and the committed state counts it as open", 1, #proposal.open_items(r))
 end
 
 print(string.format("\n=== summary: %d passed, %d failed ===", pass, fail))
