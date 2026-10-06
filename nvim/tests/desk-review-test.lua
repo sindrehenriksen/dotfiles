@@ -531,6 +531,30 @@ do
 	assert_eq("and the committed state counts it as open", 1, #proposal.open_items(r))
 end
 
+print("\n=== undo after a save: the next save of the split takes the decline back ===")
+do
+	local r = new_repo(BASE)
+	build(r, "2026-10-01", { item("n1") })
+	local nb = open_notes(r)
+	review.attach(nb)
+	assert_true("review opens", review.open_review(nb))
+	local rb = review_buf_of(nb)
+	local rw = vim.fn.bufwinid(rb)
+	go_to(rw, rb, "NEWS n1")
+	review.decline(rb)
+	vim.cmd("write")
+	assert_eq("declined at the first save", 1, #declined_ids(r))
+	vim.cmd("normal! u")
+	assert_true("the lines are back after u", line_of(rb, "NEWS n1") ~= nil)
+	vim.cmd("write")
+	assert_eq("no longer declined after u and :w", {}, declined_ids(r))
+	build(r, "2026-10-02", {})
+	assert_eq("and still proposed by the next pass", 1, #proposal.read_items(r))
+	review.decline(rb)
+	vim.cmd("write")
+	assert_eq("declining again works", 1, #declined_ids(r))
+end
+
 print(string.format("\n=== summary: %d passed, %d failed ===", pass, fail))
 if fail > 0 then
 	os.exit(1)

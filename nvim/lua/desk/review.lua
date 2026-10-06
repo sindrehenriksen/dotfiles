@@ -219,8 +219,21 @@ function M.save_review(s)
 	table.sort(gone, function(a, b)
 		return a.id < b.id
 	end)
+	-- Undo after a save: a suggestion this session declined whose lines are
+	-- back in the review buffer or his notes is no longer declined.
+	s.declined_here = s.declined_here or {}
+	for id in pairs(s.declined_here) do
+		local item = s.shown[id]
+		if item and (proposal.proposed_in(item, review_lines, s.base) or proposal.proposed_in(item, notes_lines, s.base)) then
+			ledger.restore_declined(s.repo, id)
+			s.declined_here[id] = nil
+		end
+	end
 	if not ledger.record_declines(s.repo, gone) then
 		return false, "could not record the declines in the ledger"
+	end
+	for _, item in ipairs(gone) do
+		s.declined_here[item.id] = true
 	end
 	M.flush_taken(s.notes_buf)
 	vim.bo[s.review_buf].modified = false
