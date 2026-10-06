@@ -14,6 +14,7 @@ Personal dev environment: zsh, Neovim, Ghostty, Git, AI agent configs. Cross-pla
 | `ghostty/config` | Ghostty terminal config (Fira Code, Gruvbox Dark Hard, split nav on Dvorak home row) |
 | `hammerspoon/init.lua` | macOS window layout (picker on `Opt+Cmd+T`, three-column + one-off placement) — see `docs/window-layout.md` |
 | `claude/` | Claude Code global config (`settings.json`, `statusline.sh`, `keybindings.json`), symlinked into `~/.claude/` |
+| `claude/desk-run`, `claude/desk-lib/`, `nvim/lua/desk/` | Desk: scheduled passes that propose edits to a notes file, reviewed as a diff in nvim; `claude/desk-example/` is a starting instance — see `docs/desk.md` |
 | `agents/skills/` | Agent skills — single source, symlinked to `~/.agents/skills/` and `~/.claude/skills/` (global) plus `~/dotfiles/.claude/skills/` for repo-only skills |
 | `secrets/` | Example secrets templates (real secrets live in `~/.secrets.env`, untracked) |
 | `macos/` | macOS-only: keyboard remapping (Caps Lock, fn/Ctrl swap) via `hidutil` and a login agent — see `macos/README.md` |

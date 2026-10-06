@@ -12,6 +12,8 @@
 # the model-call wrapper, timeouts, locking, status I/O, step-kind bodies)
 # lives in claude/desk-lib/*.sh, sourced below — a test can source those
 # directly without going through this file at all.
+#
+# Setup, the config schema and the prompt contract: docs/desk.md.
 set -u
 
 # Resolve this file's own directory through any symlink (so
