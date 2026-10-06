@@ -73,6 +73,13 @@ CACHE_VERSION=2
 
 mkdir -p "$CACHE_DIR" 2>/dev/null
 
+# The cache and the per-session title tables run to hundreds of kilobytes on
+# a machine with a long history — past what a command-line argument can
+# carry (one argument tops out at 128 KB on Linux, the whole line at 1 MB on
+# macOS) — so the big tables reach jq as files (--slurpfile), never --argjson.
+WORK_DIR=$(mktemp -d)
+trap 'rm -rf "$WORK_DIR"' EXIT
+
 is_linux() { [ -r /proc/stat ]; }
 
 # procStart in a pid file is UTC (verified on this machine: parsing it with
@@ -389,10 +396,13 @@ fi
 # runs over every transcript on the machine, not just the changed ones.
 changed_paths=()
 if [ "${#transcript_paths[@]}" -gt 0 ]; then
+    printf '%s' "$cache_json" > "$WORK_DIR/cache.json"
+    printf '%s' "$sizes_mtimes_json" > "$WORK_DIR/cur.json"
     while IFS= read -r p; do
         [ -n "$p" ] && changed_paths+=("$p")
-    done < <(jq -r --argjson ver "$CACHE_VERSION" --argjson cache "$cache_json" --argjson cur "$sizes_mtimes_json" '
-        $cur | to_entries[]
+    done < <(jq -r --argjson ver "$CACHE_VERSION" --slurpfile cachef "$WORK_DIR/cache.json" --slurpfile curf "$WORK_DIR/cur.json" '
+        $cachef[0] as $cache | $curf[0] as $cur
+        | $cur | to_entries[]
         | select(($cache[.key].size // -1) != .value.size or ($cache[.key].mtime // -1) != .value.mtime
                  or ($cache[.key].v // 0) != $ver)
         | .key
@@ -404,14 +414,19 @@ if [ "${#changed_paths[@]}" -gt 0 ]; then
     if [ "${#changed_paths[@]}" -gt "$BATCH_RESCAN_THRESHOLD" ]; then
         # First-ever run, or the cache was cleared: one rg pass over every
         # changed file rather than one per file.
-        titles_raw=$(rg -N --with-filename '"type":"(custom-title|ai-title)"' "${changed_paths[@]}" 2>/dev/null || true)
-        # The path list comes in over stdin (-s slurps it); rg's matches, one
-        # "path:{...json...}" per line, come in as a single --arg since jq
-        # only slurps one stream.
-        new_entries_json=$(printf '%s\n' "${changed_paths[@]}" | jq -R -s -c --arg raw "$titles_raw" \
-            --argjson sizes "$sizes_mtimes_json" --argjson ver "$CACHE_VERSION" '
-            (split("\n") | map(select(length>0))) as $paths
-            | ($raw | split("\n") | map(select(length>0))) as $lines
+        # rg's matches (one "path:{...json...}" per line — megabytes on a
+        # real machine, far past what an argument can carry) come in over
+        # stdin; the path list and the stat table go in as files for the
+        # same reason.
+        batch_tmp=$(mktemp -d)
+        printf '%s\n' "${changed_paths[@]}" > "$batch_tmp/paths"
+        printf '%s' "$sizes_mtimes_json" > "$batch_tmp/sizes.json"
+        new_entries_json=$(rg -N --with-filename '"type":"(custom-title|ai-title)"' "${changed_paths[@]}" 2>/dev/null \
+            | jq -R -s -c --rawfile pathlist "$batch_tmp/paths" --slurpfile sz "$batch_tmp/sizes.json" \
+            --argjson ver "$CACHE_VERSION" '
+            $sz[0] as $sizes
+            | ($pathlist | split("\n") | map(select(length>0))) as $paths
+            | (. | split("\n") | map(select(length>0))) as $lines
             | ($lines | map(
                   . as $line | ($line | index(":")) as $i
                   | select($i != null)
@@ -434,6 +449,7 @@ if [ "${#changed_paths[@]}" -gt 0 ]; then
                   v: $ver
               })
         ' 2>/dev/null)
+        rm -rf "$batch_tmp"
     else
         # A handful of files actually changed: read only the bytes appended
         # since each one's cached offset.
@@ -486,16 +502,19 @@ fi
 # transcript's cache entry doesn't linger forever) overlaid with the fresh
 # ones just computed.
 kept_paths_json=$(printf '%s\n' "${transcript_paths[@]}" | jq -R -s -c 'split("\n") | map(select(length>0))')
-cache_json=$(jq -c --argjson keep "$kept_paths_json" --argjson new "$new_entries_json" '
+printf '%s' "$new_entries_json" > "$WORK_DIR/new.json"
+cache_json=$(jq -c --argjson keep "$kept_paths_json" --slurpfile newf "$WORK_DIR/new.json" '
     (to_entries | map(select(.key as $k | $keep | index($k) != null)) | from_entries) as $kept
-    | $kept + $new
+    | $kept + $newf[0]
 ' <<< "$cache_json" 2>/dev/null)
 [ -n "$cache_json" ] || cache_json='{}'
 printf '%s' "$cache_json" > "$CONSOLIDATED_CACHE" 2>/dev/null
 
 # id -> {custom_titles, ai_title} keyed by session id rather than by path.
-titles_by_id=$(jq -c --argjson cache "$cache_json" '
-    map_values(. as $path | ($cache[$path] // {custom_titles: [], ai_title: ""})
+printf '%s' "$cache_json" > "$WORK_DIR/cache.json"
+titles_by_id=$(jq -c --slurpfile cachef "$WORK_DIR/cache.json" '
+    $cachef[0] as $cache
+    | map_values(. as $path | ($cache[$path] // {custom_titles: [], ai_title: ""})
         | {custom_titles, ai_title})
 ' <<< "$transcript_of_json" 2>/dev/null)
 [ -n "$titles_by_id" ] || titles_by_id='{}'
@@ -519,6 +538,7 @@ fi
 #    modes) — it exists only so resolve can tell a name he chose from an
 #    ai-title fallback without a second join.
 # --------------------------------------------------------------------------
+printf '%s' "$titles_by_id" > "$WORK_DIR/titles.json"
 entries_ndjson=$(jq -n -c \
     --argjson events "$events_by_id" \
     --argjson pidfiles "$pidfiles_by_id" \
@@ -526,9 +546,10 @@ entries_ndjson=$(jq -n -c \
     --argjson pids "$pid_by_id" \
     --argjson ttys "$tty_by_id" \
     --argjson dup_pids "$duplicate_pids_by_id" \
-    --argjson titles "$titles_by_id" \
+    --slurpfile titlesf "$WORK_DIR/titles.json" \
     --argjson transcripts "$transcript_of_json" \
     --argjson mtimes "$transcript_mtime_json" '
+    $titlesf[0] as $titles |
     def norm_ms: if . != null and (type == "number") then (. / 1000 | floor) else null end;
     ( ($events | keys) + ($pidfiles | keys) + ($transcripts | keys) | unique ) as $ids
     | $ids[]

@@ -99,5 +99,24 @@ jq -c --arg p "$tp3" --argjson sz "$sz" --argjson mt "$mt" '. + {($p): {custom_t
 assert_eq "the stale entry does not hide the title" "Real Name" "$(name_of s3)"
 
 echo
+echo "=== a cold read over many transcripts with megabytes of re-appended titles ==="
+# Past one command-line argument's limit: the batch scan must stream it.
+for i in 1 2 3 4 5 6 7; do
+	tpb="$PROJ/big$i.jsonl"
+	: > "$tpb"
+	n=0
+	while [ "$n" -lt 1500 ]; do
+		title_rec "Big Session $i $(printf 'x%.0s' $(seq 1 40))" "big$i" >> "$tpb"
+		n=$((n + 1))
+	done
+	title_rec "Final Name $i" "big$i" >> "$tpb"
+	start_event "big$i" "$tpb"
+done
+rm -rf "${CLAUDE_SESSION_READER_CACHE:?}"/*
+assert_eq "big4 resolves its last title" "Final Name 4" "$(name_of big4)"
+assert_eq "big7 resolves its last title" "Final Name 7" "$(name_of big7)"
+assert_eq "an earlier fixture still resolves" "Fifth" "$(name_of s2)"
+
+echo
 echo "=== summary: $pass passed, $fail failed ==="
 [ "$fail" -eq 0 ]
