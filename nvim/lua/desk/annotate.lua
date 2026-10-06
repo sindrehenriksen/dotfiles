@@ -103,11 +103,15 @@ end
 
 --- The display text for a session-name token, from one reader entry
 --- (design.md §2: "live / idle / ended, last activity and 'closed by
---- 16:30'" — here "closed by desk", the pass isn't named in dotfiles):
+--- 16:30'" — here "closed idle", the pass isn't named in dotfiles):
 ---   "live"                                 — live, active recently
 ---   "live · idle Nd"                       — live, but quiet N days
----   "closed by desk · resumable"           — the pass closed it
+---   "done · last active <date>"            — he ended it himself (an end
+---                                            event with a user-exit reason)
+---   "closed idle · resumable"              — the pass closed it for being idle
 ---   "not running · last active <date>"     — ended any other way
+local USER_EXIT_REASONS = { prompt_input_exit = true, clear = true, logout = true }
+
 function M.session_text(entry, now)
 	now = now or os.time()
 	if entry.live then
@@ -119,9 +123,12 @@ function M.session_text(entry, now)
 		return "live"
 	end
 	if entry.end_reason == "closed-by-pass" then
-		return "closed by desk · resumable"
+		return "closed idle · resumable"
 	end
 	local date = entry.last_activity and os.date("%Y-%m-%d", entry.last_activity) or "unknown"
+	if USER_EXIT_REASONS[entry.end_reason] then
+		return "done · last active " .. date
+	end
 	return "not running · last active " .. date
 end
 
