@@ -4,9 +4,8 @@
 # push), a missing refs/desk/ledger never blocking main's own push — and
 # claude/desk-run's own weekday split: commit-and-push runs every day,
 # including a weekend, while a weekday-only pass's model steps are
-# skipped on one. No live model call; a fake `date` forces "+%u" to a
-# chosen weekday without touching any other date arithmetic desk-run
-# relies on.
+# skipped on one. No live model call; the weekend is decided by the slot's
+# scheduled date, so each case pins its pass to a Saturday or a Wednesday slot.
 set -u
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -145,22 +144,12 @@ jq -n --arg repo "$repo3" --arg prompt "$prompt" '{
 	mail_fetch_step_id: "F-private",
 	push_enabled: true,
 	files: ["notes.md", "reading.md"],
-	passes: { morning: { steps: [
+	passes: { morning: { trigger: { start_calendar_interval: [{ hour: 0, minute: 0, weekday: 6 }] }, steps: [
 		{ id: "commit-push", kind: "commit_push" },
 		{ id: "F-test", kind: "fetch", prompt: $prompt, tools: ["Read"], connector: false, timeout: 30 }
 	] } }
 }' > "$cfg3"
 printf 'Section A\n  weekend text\n' > "$repo3/notes.md"
-
-cat > "$FAKEBIN/date" <<'FAKE'
-#!/usr/bin/env bash
-if [ "$1" = "+%u" ]; then
-	echo "6" # Saturday
-	exit 0
-fi
-exec /bin/date "$@"
-FAKE
-chmod +x "$FAKEBIN/date"
 
 DESK_CONFIG="$cfg3" "$DESK_RUN" morning > "$ROOT/case3.out" 2>&1
 rc3=$?
@@ -174,15 +163,7 @@ echo
 echo "=== the same weekday-only pass on an actual weekday: both steps run ==="
 rm -rf "$STATE"
 : > "$FETCH_CALLS"
-cat > "$FAKEBIN/date" <<'FAKE'
-#!/usr/bin/env bash
-if [ "$1" = "+%u" ]; then
-	echo "3" # Wednesday
-	exit 0
-fi
-exec /bin/date "$@"
-FAKE
-chmod +x "$FAKEBIN/date"
+jq '.passes.morning.trigger.start_calendar_interval[0].weekday = 3' "$cfg3" > "$cfg3.wed" && mv "$cfg3.wed" "$cfg3"
 printf 'Section A\n  weekday text\n' > "$repo3/notes.md"
 DESK_CONFIG="$cfg3" "$DESK_RUN" morning > "$ROOT/case3b.out" 2>&1
 rc3b=$?

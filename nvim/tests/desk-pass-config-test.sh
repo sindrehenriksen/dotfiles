@@ -6,8 +6,10 @@
 #   - the config's `files` are the notes files (any names), and
 #     `captures_file` is where session captures land;
 #   - the tab-helper env var accepts both of its names.
-# Today's weekday is faked as Saturday through a `date` wrapper, so the
-# weekend case does not depend on when the test runs.
+# The weekend skip follows the slot's scheduled date, not the run date: a
+# Saturday slot is skipped and a Friday 16:30 slot that fires on Saturday's
+# wake still runs. The run date is faked as a Saturday through a `date`
+# wrapper, so neither case depends on when the test runs.
 set -u
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -123,8 +125,16 @@ cat > "$INSTANCE/config.json" << CONFIG
   "passes": {
     "weekend-off": {
       "weekdays_only": true,
+      "trigger": { "start_calendar_interval": [{ "hour": 8, "minute": 0, "weekday": 6 }] },
       "steps": [
         { "id": "commit-push", "kind": "commit_push" },
+        { "id": "Feed", "kind": "fetch", "prompt": "f.md", "tools": ["WebSearch"] }
+      ]
+    },
+    "friday-late": {
+      "weekdays_only": true,
+      "trigger": { "start_calendar_interval": [{ "hour": 16, "minute": 30, "weekday": 5 }] },
+      "steps": [
         { "id": "Feed", "kind": "fetch", "prompt": "f.md", "tools": ["WebSearch"] }
       ]
     },
@@ -175,6 +185,13 @@ assert_true "and no overflow summary item is in the proposal" \
 echo
 echo "=== the tab helper is found by its alias name ==="
 assert_eq "the open_tab step reached the helper" "1" "$(wc -l < "$TABS_LOG" | tr -d ' ')"
+
+echo
+echo "=== a weekdays-only Friday slot firing on a Saturday wake still runs ==="
+calls_before="$(find "$CALLS" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')"
+out="$(HOME="$FAKE_HOME" "$DESK_RUN" friday-late 2>&1)"
+assert_true "the fetch step was not skipped as a weekend" "$(grep -q 'skipped (weekend' <<< "$out" && echo false || echo true)"
+assert_eq "its model call was made" "$((calls_before + 1))" "$(find "$CALLS" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')"
 
 echo
 echo "=== summary: $pass passed, $fail failed ==="

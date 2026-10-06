@@ -109,9 +109,10 @@ case "$pass" in
 	*) weekday_default="false" ;;
 esac
 weekday_only_pass="$(jq -r --arg d "$weekday_default" 'if .weekdays_only == null then $d else (.weekdays_only | tostring) end' <<< "$pass_config")"
+# Whether this is a weekend slot is decided below, from the slot's scheduled
+# date: a Friday 16:30 slot that only fires on Saturday's wake is still a
+# Friday slot and runs.
 is_weekend="false"
-dow="$(date +%u)" # 1=Mon .. 7=Sun
-[ "$dow" -ge 6 ] && is_weekend="true"
 
 # One lock, shared across every pass (lock.sh's own DESK_LOCK_NAME): morning
 # and 16:30 both touch the same notes repo, ledger and status.json, so they
@@ -149,6 +150,9 @@ desk_status_mark_stale_running "$pass"
 # no-op for anything not yet wired to a trigger.
 slots_json="$(jq -c '.trigger.start_calendar_interval // []' <<< "$pass_config")"
 scheduled_date="$(desk_scheduled_date_for "$slots_json")"
+scheduled_dow="$(desk_weekday_of_date "$scheduled_date")"
+[ -n "$scheduled_dow" ] || scheduled_dow="$(date +%u)"
+[ "$scheduled_dow" -ge 6 ] && is_weekend="true"
 
 # The once-a-day guard: a slot firing after this scheduled date's pass
 # already finished ok is a no-op.

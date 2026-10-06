@@ -10,11 +10,9 @@
 # never fetched.
 #
 # Drives claude/desk-run itself (a fake `claude`, a throwaway notes repo +
-# bare remote — same fixture shape as desk-run-test.sh), faking only the
-# one bare `date +%u` call desk-run's own weekend check makes (never any
-# other `date` invocation, so every other date computation in the same run
-# still uses the real clock) to force a deterministic weekday/weekend
-# without depending on which day this suite happens to run on.
+# bare remote — same fixture shape as desk-run-test.sh). The weekend skip
+# follows the slot's scheduled date, so each pass is pinned to a Wednesday or
+# a Saturday slot instead of depending on which day this suite runs.
 set -u
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -50,24 +48,6 @@ exit 0
 FAKE
 chmod +x "$FAKEBIN/claude"
 
-# A real `date` underneath (found once, before this fake is put on PATH,
-# so it never recurses into itself) — every call is forwarded to it
-# unchanged EXCEPT the exact bare `date +%u` desk-run's own weekend check
-# makes, which returns $FAKE_DOW instead. desk_day_before (lock.sh) and
-# every other date computation in this same run use a different form
-# (`date -d/-j ... '+%F\t%u'`, always with extra args) and are never
-# touched by this.
-REAL_DATE="$(command -v date)"
-cat > "$FAKEBIN/date" <<FAKE
-#!/usr/bin/env bash
-if [ "\$#" -eq 1 ] && [ "\$1" = "+%u" ]; then
-	printf '%s\n' "\${FAKE_DOW:-1}"
-	exit 0
-fi
-exec "$REAL_DATE" "\$@"
-FAKE
-chmod +x "$FAKEBIN/date"
-
 export PATH="$FAKEBIN:$PATH"
 export DESK_CLAUDE_BIN=claude
 
@@ -101,7 +81,9 @@ prompt="$ROOT/prompt.md"
 echo "a generic test prompt" > "$prompt"
 
 # One config, two independently-guarded pass names (morning/1630 — the
-# only two names desk-run's own weekday_only_pass check recognizes) so
+# only two names desk-run's own weekday_only_pass check recognizes), pinned
+# to a Wednesday and a Saturday slot, since the weekend skip follows the
+# slot's scheduled date, not the date this suite happens to run on, so
 # each case below runs its own pass exactly once, never tripping the
 # once-a-day guard against the other's own result.
 cfg="$ROOT/config.json"
@@ -115,11 +97,11 @@ jq -n --arg repo "$repo" --arg prompt "$prompt" '{
 	push_enabled: false,
 	files: ["notes.md", "reading.md"],
 	passes: {
-		morning: { steps: [
+		morning: { trigger: { start_calendar_interval: [{ hour: 0, minute: 0, weekday: 3 }] }, steps: [
 			{ id: "commit-push", kind: "commit_push" },
 			{ id: "F-test", kind: "fetch", prompt: $prompt, tools: ["Read"], connector: false, timeout: 30 }
 		] },
-		"1630": { steps: [
+		"1630": { trigger: { start_calendar_interval: [{ hour: 0, minute: 0, weekday: 6 }] }, steps: [
 			{ id: "commit-push", kind: "commit_push" },
 			{ id: "F-test", kind: "fetch", prompt: $prompt, tools: ["Read"], connector: false, timeout: 30 }
 		] },
@@ -138,7 +120,7 @@ jq -n --arg repo "$repo" --arg prompt "$prompt" '{
 
 echo "=== a weekday run: its fetch step ran and succeeded, so last_fetch_ok advances ==="
 t0="$(date +%s)"
-FAKE_DOW=1 DESK_CONFIG="$cfg" "$DESK_RUN" morning > "$ROOT/weekday.out" 2>&1
+DESK_CONFIG="$cfg" "$DESK_RUN" morning > "$ROOT/weekday.out" 2>&1
 rc=$?
 t1="$(date +%s)"
 assert_eq "the run succeeds" "0" "$rc"
@@ -149,7 +131,7 @@ assert_true "last_fetch_ok falls within this run's own window (start of run thro
 
 echo
 echo "=== a weekend run of a DIFFERENT weekday_only_pass: fetch never ran, last_fetch_ok is never touched ==="
-FAKE_DOW=6 DESK_CONFIG="$cfg" "$DESK_RUN" 1630 > "$ROOT/weekend.out" 2>&1
+DESK_CONFIG="$cfg" "$DESK_RUN" 1630 > "$ROOT/weekend.out" 2>&1
 rc=$?
 assert_eq "the run still succeeds (commit_push alone)" "0" "$rc"
 assert_true "the fetch step itself was skipped (weekend, model steps only run weekdays)" \

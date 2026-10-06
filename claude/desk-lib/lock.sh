@@ -98,6 +98,16 @@ desk_scheduled_date_for() {
 	if desk_is_linux; then date -d "@$best" +%F; else date -j -r "$best" +%F; fi
 }
 
+# The weekday (1=Mon..7=Sun) of the calendar date $1 (YYYY-MM-DD), empty on a
+# parse failure.
+desk_weekday_of_date() {
+	if desk_is_linux; then
+		date -d "$1" +%u 2> /dev/null
+	else
+		date -j -f "%Y-%m-%d" "$1" +%u 2> /dev/null
+	fi
+}
+
 # The epoch for the most recent past occurrence of weekday $2 (1=Mon..7=Sun,
 # per `date +%u`) at $3:$4 local time, strictly before $1 (epoch) — never
 # today's own even when today already matches $2 (the weekly pass's own
