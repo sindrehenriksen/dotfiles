@@ -50,12 +50,12 @@ assert_eq("passes sort by name", "1630: ok · morning: partial · weekly: ok", s
 print()
 print("=== summary: the proposal state and overflow ===")
 
-local pending = { proposal = { state = "pending", queued = 1 } }
-assert_eq("a pending proposal with something still unresolved", "proposal pending", status.summary(pending))
+local pending = { proposal = { state = "pending", untaken = 1 } }
+assert_eq("a pending proposal with something still untaken", "proposal pending", status.summary(pending))
 
-local resolved_already = { proposal = { state = "pending", queued = 0, deferred = 0 } }
+local resolved_already = { proposal = { state = "pending", untaken = 0 } }
 assert_eq(
-	"'pending' with nothing left queued or deferred: silent (every item's since been resolved by hand)",
+	"'pending' with nothing left untaken: silent (every suggestion has since been taken or declined)",
 	"",
 	status.summary(resolved_already)
 )
@@ -64,7 +64,7 @@ local none = { proposal = { state = "none" } }
 assert_eq("state 'none' shows nothing", "", status.summary(none))
 
 local overflow = {
-	proposal = { state = "pending", queued = 1, overflow = { act = 2, worth_knowing = 0, wildcard = 1 } },
+	proposal = { state = "pending", untaken = 1, overflow = { act = 2, worth_knowing = 0, wildcard = 1 } },
 }
 assert_eq(
 	"nonzero overflow tiers are named, a zero one is silent",
@@ -72,24 +72,10 @@ assert_eq(
 	status.summary(overflow)
 )
 
+local partial = { proposal = { state = "partial", untaken = 2 } }
+assert_eq("a partial pass with suggestions waiting says partial", "proposal partial", status.summary(partial))
+
 print()
-print("=== summary: his-text counts, only when nonzero ===")
-
-local all_zero = { waiting_edits = {}, resolved_without_key = {}, accepted_by_accident = {}, proposal = { deferred = 0 } }
-assert_eq("every count at zero: nothing shown", "", status.summary(all_zero))
-
-local counts = {
-	waiting_edits = { 12 },
-	resolved_without_key = { "j1", "j2" },
-	accepted_by_accident = { "j3" },
-	proposal = { deferred = 4 }, -- desk-run's own field: under proposal, never top-level
-}
-assert_eq(
-	"each nonzero count gets its own segment, in his terms, deferred read from proposal.deferred",
-	"1 of your edits wait on a suggestion · 2 resolved without a key · 1 accepted by accident · 4 deferred",
-	status.summary(counts)
-)
-
 print()
 print("=== summary: closes/refusals/lockouts, only when nonzero ===")
 

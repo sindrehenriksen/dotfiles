@@ -1,8 +1,8 @@
--- Git plumbing shared by the desk his-text, ledger and apply pieces. Every
+-- Git plumbing shared by the desk ledger, proposal and review pieces. Every
 -- function takes the repo directory explicitly (never a hardcoded path) so
 -- the same code runs against a real notes repo, a test's throwaway one, or
--- (via `nvim -l`) the runner's. Nothing here ever touches a working file —
--- only the index and refs, per design.md §2/§9.
+-- (via `nvim -l`) the runner's. Nothing here ever touches a working file or
+-- the index — only objects and refs.
 local M = {}
 
 --- Runs `git -C repo_dir <args>` synchronously, optionally feeding `input`
@@ -72,61 +72,6 @@ function M.cas_retry(repo_dir, ref, compute, max_attempts)
 		end
 	end
 	return nil, "update-ref compare-and-swap failed after retries"
-end
-
---- The git index's current entry for `path`: { mode, sha }, or nil if the
---- path isn't in the index at all.
-function M.index_entry(repo_dir, path)
-	local ok, out = M.run(repo_dir, { "ls-files", "-s", "--", path })
-	if not ok or vim.trim(out) == "" then
-		return nil
-	end
-	local mode, sha = out:match("^(%d+) (%x+) %d+\t")
-	if not mode then
-		return nil
-	end
-	return { mode = mode, sha = sha }
-end
-
---- The content the index currently holds for `path`, or nil if there is no
---- index entry for it.
-function M.index_content(repo_dir, path)
-	local entry = M.index_entry(repo_dir, path)
-	if not entry then
-		return nil
-	end
-	return M.cat_file(repo_dir, entry.sha)
-end
-
---- Points the index's entry for `path` at a new blob (write-then-cacheinfo)
---- — never `git add`, which would also require the file to exist on disk.
-function M.update_index_cacheinfo(repo_dir, mode, sha, path)
-	return M.run(repo_dir, { "update-index", "--cacheinfo", string.format("%s,%s,%s", mode, sha, path) })
-end
-
---- The absolute path to the repo's index file, for the "unchanged since
---- read" check below — cheaper than re-reading every tracked path's
---- content to compare.
-function M.index_file_path(repo_dir)
-	local ok, out = M.run(repo_dir, { "rev-parse", "--path-format=absolute", "--git-dir" })
-	if not ok then
-		return nil
-	end
-	return vim.trim(out) .. "/index"
-end
-
---- A cheap fingerprint (mtime + size) of the index file, to detect whether
---- it moved between a read and a later write.
-function M.index_fingerprint(repo_dir)
-	local path = M.index_file_path(repo_dir)
-	if not path then
-		return nil
-	end
-	local stat = vim.uv.fs_stat(path)
-	if not stat then
-		return "absent"
-	end
-	return string.format("%d.%d:%d", stat.mtime.sec, stat.mtime.nsec, stat.size)
 end
 
 return M

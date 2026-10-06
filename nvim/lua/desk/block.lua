@@ -77,9 +77,7 @@ end
 --- The first line index (1-indexed) whose content equals `quote` exactly
 --- (plain comparison, never a pattern), or nil if it's too short to trust
 --- or doesn't appear. Ambiguity (more than one exact match) resolves to the
---- first — a genuinely repeated heading-less line is rare, and this matches
---- his-text's own occurrence rule of "match at a specific position", here
---- the earliest one.
+--- first — a genuinely repeated heading-less line is rare.
 function M.find_line(lines, quote)
 	if not quote or #quote < MIN_QUOTE_LEN then
 		return nil

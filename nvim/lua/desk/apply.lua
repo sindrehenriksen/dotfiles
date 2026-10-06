@@ -1,5 +1,5 @@
 -- The apply function (design.md §9(e)): turns a validated proposal into
--- buffer text. Each item's `target` is the pinned wire-format anchor
+-- file text (desk.proposal applies it onto his HEAD). Each item's `target` is the pinned wire-format anchor
 -- (`"top"` | `{under=...}` | `{after=...}` | `{at=...}`, or — for
 -- `merge`/`move` — a two-element list of these), parsed via
 -- desk.block.parse_target. For `edit`, `remove`, and a move/merge's
@@ -8,17 +8,15 @@
 --
 -- An item whose `before` doesn't actually sit where its anchor resolved
 -- (occurrence-aware, never a bare substring) is deferred: left out of the
--- applied text, stays queued, and is counted — design.md §2, "An item that
--- doesn't apply cleanly at key press is deferred." That's a genuine
--- content conflict (his edits sit at that spot) and stays deferred
--- forever, on purpose.
+-- applied text and counted: the proposal carries it flagged deferred, with
+-- no hunk to take. That's a genuine content conflict (his edits sit at that
+-- spot), retried against his text at the next pass.
 --
 -- An anchor that doesn't resolve AT ALL — its quote is simply gone — is a
 -- different failure: there's no longer anywhere specific to identify a
 -- conflict against, so rather than defer it forever (a dead end nothing
 -- ever surfaces again), it lands at the top of the file instead, same as a
--- plain "top"-anchored item, and is counted as applied — never left
--- silently queued. See desk.block.find_after_anchor, which the insertion-
+-- plain "top"-anchored item, and is counted as applied. See desk.block.find_after_anchor, which the insertion-
 -- shaped half of every kind below goes through for this; a before-shaped
 -- leave/removal anchor keeps its own distinct nil (bad anchor vs. content
 -- conflict) via resolve_leave, below.
@@ -54,33 +52,20 @@ end
 
 --- One target file's committed lines (array of strings) + the items that
 --- target it -> new lines, a results table item.id -> "applied" |
---- "deferred", a set item.id -> true of every id that landed at the top
+--- "deferred", and a set item.id -> true of every id that landed at the top
 --- only because its anchor didn't resolve (never one legitimately
---- targeting "top") — a caller uses that set purely for its own reporting
---- (e.g. desk.review's stats), never to change how the edit itself
---- applied — and (desk.round's own input, design.md's "Review rounds")
---- item.id -> a list of { line, count, role } giving each applied item's
---- exact final range(s) in `new_lines` (1-indexed; two entries for
---- merge/move, in "leave"/"land" order; one "removal"-role entry for a
---- remove; one "edit"-role entry for everything else). `role` distinguishes
---- content-shaped ranges ("edit", "land") from gap-shaped ones ("leave",
---- "removal", always count 0 — nothing sits there, only where it would go
---- back).
+--- targeting "top") — a caller uses that set purely for its own reporting,
+--- never to change how the edit itself applied.
 ---
 --- Edits are collected as (position, remove-count, insert-lines) against
---- the *original* `lines`, tagged with the item id, role and the item's own
---- index in `items` (its lay-in-order tie-break — design.md: "ties at one
---- anchor are laid in input order"). They're applied bottom-of-file-up (by
---- descending original position, ties broken by *descending* input index —
---- so of two items sharing an anchor, the later one is inserted first and
---- the earlier one, inserted afterward at the same spot, pushes it down,
---- landing above it — input order top to bottom), so an earlier (lower)
---- edit's line-count change never shifts a later (higher) one out from
---- under it. Final ranges are then computed in a *second*, ascending pass
---- over the same edits with a running offset — the position each edit was
---- collected at only survives unchanged past every edit that lands below
---- it; one above it (processed later in the descending mutation pass) can
---- still shift it once inserted.
+--- the *original* `lines`, tagged with the item's own index in `items` (its
+--- tie-break — "ties at one anchor are laid in input order"). They're
+--- applied bottom-of-file-up (by descending original position, ties broken
+--- by *descending* input index — so of two items sharing an anchor, the
+--- later one is inserted first and the earlier one, inserted afterward at
+--- the same spot, pushes it down, landing above it — input order top to
+--- bottom), so an earlier (lower) edit's line-count change never shifts a
+--- later (higher) one out from under it.
 function M.apply_file(lines, items)
 	local edits = {}
 	local results = {}
@@ -88,16 +73,15 @@ function M.apply_file(lines, items)
 
 	for item_index, item in ipairs(items) do
 		local leave_anchor, land_anchor = block.parse_target(item.target)
-		local function push(pos, remove, insert, role)
-			edits[#edits + 1] =
-				{ pos = pos, remove = remove, insert = insert, item_id = item.id, role = role, seq = item_index }
+		local function push(pos, remove, insert)
+			edits[#edits + 1] = { pos = pos, remove = remove, insert = insert, seq = item_index }
 		end
 		if INSERT_KINDS[item.kind] then
 			local pos, fell_back = block.find_after_anchor(lines, land_anchor)
 			if pos == nil then
 				results[item.id] = "deferred" -- no anchor at all: malformed, nothing to do
 			else
-				push(pos, 0, snippet.split_lines(item.after), "edit")
+				push(pos, 0, snippet.split_lines(item.after))
 				results[item.id] = "applied"
 				if fell_back then
 					landed_on_top[item.id] = true
@@ -105,19 +89,18 @@ function M.apply_file(lines, items)
 			end
 		elseif item.kind == "edit" or item.kind == "remove" then
 			local before_lines = snippet.split_lines(item.before)
-			local role = item.kind == "remove" and "removal" or "edit"
 			local pos, status = resolve_leave(lines, leave_anchor, before_lines)
 			if status == "bad_anchor" then
 				-- Nowhere left to edit in place: land like a plain
 				-- insertion at the top instead (empty insert for remove,
 				-- whose `after` is always empty anyway).
-				push(0, 0, item.kind == "edit" and snippet.split_lines(item.after) or {}, role)
+				push(0, 0, item.kind == "edit" and snippet.split_lines(item.after) or {})
 				results[item.id] = "applied"
 				landed_on_top[item.id] = true
 			elseif status == "content_mismatch" then
 				results[item.id] = "deferred"
 			else
-				push(pos, #before_lines, item.kind == "edit" and snippet.split_lines(item.after) or {}, role)
+				push(pos, #before_lines, item.kind == "edit" and snippet.split_lines(item.after) or {})
 				results[item.id] = "applied"
 			end
 		elseif item.kind == "merge" or item.kind == "move" then
@@ -131,9 +114,9 @@ function M.apply_file(lines, items)
 					results[item.id] = "deferred"
 				else
 					if leave_status == "resolved" then
-						push(leave_pos, #before_lines, {}, "leave")
+						push(leave_pos, #before_lines, {})
 					end
-					push(land_pos, 0, snippet.split_lines(item.after), "land")
+					push(land_pos, 0, snippet.split_lines(item.after))
 					results[item.id] = "applied"
 					if leave_status == "bad_anchor" or land_fell_back then
 						landed_on_top[item.id] = true
@@ -145,32 +128,6 @@ function M.apply_file(lines, items)
 		end
 	end
 
-	-- Final ranges: ascending by original position (ties by ascending
-	-- input order — the earlier item's edit is visited, and thus placed,
-	-- first at a shared spot, exactly matching where the mutation pass
-	-- below actually leaves it), accumulating the net line-count change of
-	-- every edit already visited.
-	local ascending = vim.deepcopy(edits)
-	table.sort(ascending, function(a, b)
-		if a.pos ~= b.pos then
-			return a.pos < b.pos
-		end
-		return a.seq < b.seq
-	end)
-	local ranges = {}
-	local offset = 0
-	for _, e in ipairs(ascending) do
-		local final_pos = e.pos + offset
-		ranges[e.item_id] = ranges[e.item_id] or {}
-		table.insert(ranges[e.item_id], { line = final_pos + 1, count = #e.insert, role = e.role })
-		offset = offset + (#e.insert - e.remove)
-	end
-
-	-- Mutation: descending by original position, ties by *descending*
-	-- input order (the later item's insertion happens first at a shared
-	-- spot, so the earlier item's insertion afterward pushes it down —
-	-- landing the earlier item first, top to bottom, matching the ranges
-	-- computed above).
 	table.sort(edits, function(a, b)
 		if a.pos ~= b.pos then
 			return a.pos > b.pos
@@ -188,30 +145,7 @@ function M.apply_file(lines, items)
 		end
 	end
 
-	return new_lines, results, landed_on_top, ranges
-end
-
---- Groups `items` by their `file` field and applies each group against
---- `lines_by_file[file]` (every target file the proposal touches must have
---- an entry, even if empty). Returns new_lines_by_file, results (item.id ->
---- "applied" | "deferred", across every file).
-function M.apply(lines_by_file, items)
-	local by_file = {}
-	for _, item in ipairs(items) do
-		by_file[item.file] = by_file[item.file] or {}
-		table.insert(by_file[item.file], item)
-	end
-
-	local new_lines_by_file = {}
-	local results = {}
-	for file, file_lines in pairs(lines_by_file) do
-		local new_lines, file_results = M.apply_file(file_lines, by_file[file] or {})
-		new_lines_by_file[file] = new_lines
-		for id, r in pairs(file_results) do
-			results[id] = r
-		end
-	end
-	return new_lines_by_file, results
+	return new_lines, results, landed_on_top
 end
 
 return M

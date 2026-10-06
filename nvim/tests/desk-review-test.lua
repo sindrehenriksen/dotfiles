@@ -1,23 +1,19 @@
--- D6 test: review keys, mode, virtual text, overview, jumplist, and the
--- <leader>ga visual-range fix — headless, against from-scratch fixtures in
--- throwaway git repos, never his real notes.
+-- The stateless diff review (desk.review), headless against throwaway repos,
+-- never his real notes: the merged view in a stacked diff split, taking a
+-- hunk with `do`, the decline key with plain-`u` undo and save as the commit
+-- point, "not now" as leaving a hunk, the overview with jumplist-safe jumps,
+-- and restoring from the declined-recently list.
 --
 -- Run: nvim --headless -u nvim/tests/minimal_init.lua -l nvim/tests/desk-review-test.lua
 local review = require("desk.review")
+local proposal = require("desk.proposal")
 local ledger = require("desk.ledger")
-local apply = require("desk.apply")
-local round = require("desk.round")
 local git = require("desk.git")
 local snippet = require("desk.snippet")
-local git_safety_here = debug.getinfo(1, "S").source:sub(2):match("^(.*)/[^/]+$") or "."
-local git_safety = dofile(git_safety_here .. "/../../tests/lib/git-safety.lua")
+local git_safety = dofile((debug.getinfo(1, "S").source:sub(2):match("^(.*)/[^/]+$") or ".") .. "/../../tests/lib/git-safety.lua")
 
--- Sandboxed: desk.review.commit_his_text (called by nearly every test here,
--- directly or via desk.review.review) now writes the pending-set snapshot
--- (desk.ledger.write_pending_snapshot) on every run, which resolves under
--- $DESK_STATE_DIR (real default ~/.local/state/desk) — never the real one
--- from a test run.
 vim.env.DESK_STATE_DIR = vim.fn.tempname()
+vim.env.DESK_STATUS_FILE = vim.fn.tempname()
 
 local pass, fail = 0, 0
 local function ok(desc)
@@ -40,1168 +36,397 @@ local function assert_true(desc, v)
 	assert_eq(desc, true, v and true or false)
 end
 
+local FILES = { "notes.md", "reading.md" }
+
 -- ---------------------------------------------------------------------------
--- Fixture helpers
+-- Fixtures
 -- ---------------------------------------------------------------------------
 
-local function new_repo(lines)
+local function write(repo, file, lines)
+	local fd = assert(io.open(repo .. "/" .. file, "w"))
+	fd:write(snippet.join_lines(lines, true))
+	fd:close()
+end
+
+local function new_repo(notes)
 	local repo = vim.fn.tempname()
 	vim.fn.mkdir(repo, "p")
 	git_safety.assert_repo_under_tmp(repo)
 	assert(git.run(repo, { "init", "-q" }))
-	assert(git.run(repo, { "config", "user.email", "test@example.invalid" }))
-	assert(git.run(repo, { "config", "user.name", "Desk Test" }))
-	local fd = assert(io.open(repo .. "/notes.md", "w"))
-	fd:write(snippet.join_lines(lines, true))
-	fd:close()
-	local mfd = assert(io.open(repo .. "/" .. review.MARKER, "w"))
-	mfd:write("")
-	mfd:close()
-	assert(git.run(repo, { "add", "notes.md", review.MARKER }))
+	write(repo, "notes.md", notes)
+	write(repo, "reading.md", {})
+	write(repo, review.MARKER, {})
+	assert(git.run(repo, { "add", "-A" }))
 	assert(git.run(repo, { "commit", "-q", "-m", "initial" }))
 	return repo
 end
 
---- Writes `items` (proposal shape) as the tip of refs/desk/proposal, and an
---- `item` ledger record for each — what the (unbuilt) runner would have
---- done before he ever presses the review key.
-local function seed_proposal(repo, items)
-	for _, it in ipairs(items) do
-		ledger.append(repo, {
-			type = "item",
-			id = it.id,
-			file = it.file,
-			kind = it.kind,
-			anchor = it.target,
-			before = it.before,
-			after = it.after,
-			source = it.source or "test",
-			headline = it.headline or it.id,
-			pass = "morning",
-			proposed_at = it.proposed_at or os.time(),
-		})
-	end
-	local blob = assert(git.hash_object_write(repo, vim.json.encode({ items = items })))
-	local ok_mktree, tree_out =
-		git.run(repo, { "mktree" }, string.format("100644 blob %s\tproposal.json\n", blob))
-	assert(ok_mktree, tree_out)
-	local tree_sha = vim.trim(tree_out)
-	local parent = git.ref_sha(repo, review.PROPOSAL_REF)
-	local args = { "commit-tree", tree_sha, "-m", "proposal" }
-	if parent then
-		table.insert(args, "-p")
-		table.insert(args, parent)
-	end
-	local ok_commit, commit_out = git.run(repo, args)
-	assert(ok_commit, commit_out)
-	local commit_sha = vim.trim(commit_out)
-	assert(git.update_ref_cas(repo, review.PROPOSAL_REF, commit_sha, parent))
+local function item(id, over)
+	return vim.tbl_extend("force", {
+		id = id,
+		file = "notes.md",
+		kind = "new",
+		target = "top",
+		before = "",
+		after = "NEWS " .. id,
+		source = "https://example.invalid/" .. id,
+		headline = "headline " .. id,
+	}, over or {})
+end
+
+local function build(repo, date, items)
+	local sha = assert(proposal.build(repo, "morning", date, items, FILES))
+	return sha
 end
 
 local function open_notes(repo)
+	vim.cmd("silent! %bwipeout!")
+	vim.cmd("silent! only")
 	vim.cmd("edit " .. vim.fn.fnameescape(repo .. "/notes.md"))
 	return vim.api.nvim_get_current_buf()
 end
 
---- Lays `items` into `bufnr` by hand — like desk.review.review() itself,
---- but without the surrounding commit-his-text/proposal-read machinery —
---- for a test that wants precise, deterministic control over exactly what
---- is "already laid in" before it starts poking at accept/decline/not-now.
---- Writes the buffer, a "laid_in" ledger record, and (what a hand-rolled
---- desk.apply.apply_file call used to skip, before desk.round existed) the
---- "round" record every read now derives state from — desk.round.build
---- with the very ranges desk.apply.apply_file itself returns, so this is
---- never a second, drifting implementation of what review() does.
-local function lay_in_by_hand(repo, bufnr, base_lines, items)
-	local new_lines, results, _, ranges = apply.apply_file(base_lines, items)
-	vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, new_lines)
-	vim.cmd("noautocmd write")
-	local laid_in_ids = {}
-	for _, item in ipairs(items) do
-		if results[item.id] == "applied" then
-			table.insert(laid_in_ids, item.id)
+local function review_buf_of(notes_buf)
+	for _, b in ipairs(vim.api.nvim_list_bufs()) do
+		if vim.api.nvim_buf_get_name(b):match("^desk%-review://") and vim.bo[b].buftype == "acwrite" then
+			return b
 		end
 	end
-	ledger.append(repo, round.build("notes.md", new_lines, items, ranges))
-	ledger.append(repo, { type = "laid_in", at = os.time(), proposal = "seed", items = laid_in_ids })
-	return new_lines
 end
 
-local function git_log_count(repo)
-	local ok_log, out = git.run(repo, { "rev-list", "--count", "HEAD" })
-	return ok_log and tonumber(vim.trim(out)) or 0
+local function lines_of(buf)
+	return vim.api.nvim_buf_get_lines(buf, 0, -1, false)
 end
 
-print("=== D7 fix: format_source — a short, honest label, never the raw field ===")
+local function line_of(buf, text)
+	for i, l in ipairs(lines_of(buf)) do
+		if l == text then
+			return i
+		end
+	end
+end
 
-assert_eq("nil source: notes", "notes", review.format_source(nil))
-assert_eq("empty source: notes", "notes", review.format_source(""))
-assert_eq("a URL: just its host", "github.com", review.format_source("https://github.com/foo/bar/pull/1"))
-assert_eq("a URL with a port: host includes it", "example.invalid:8443", review.format_source("https://example.invalid:8443/x"))
+local function go_to(win, buf, text)
+	local n = assert(line_of(buf, text), "no line " .. text)
+	vim.api.nvim_set_current_win(win)
+	vim.api.nvim_win_set_cursor(win, { n, 0 })
+end
 
-local source_tokens = {
-	{ pattern = "^TICKET-([0-9]+)$", case_insensitive = false, handler = "url", template = "https://example.invalid/{1}" },
-	{ pattern = "^SESSION-(%w+)$", case_insensitive = false, handler = "session" },
-}
-assert_eq("a ticket-shaped token: 'ticket KEY'", "ticket TICKET-42", review.format_source("TICKET-42", source_tokens))
-assert_eq("a session-shaped token: 'session NAME'", "session SESSION-alpha", review.format_source("SESSION-alpha", source_tokens))
-assert_eq(
-	"unclassified text, even with a config: notes, never a guess",
-	"notes",
-	review.format_source("just some plain text", source_tokens)
+local function declined_ids(repo)
+	local ids = vim.tbl_keys(ledger.declined(ledger.read(repo)).ids)
+	table.sort(ids)
+	return ids
+end
+
+local function id_by_headline(repo, headline)
+	for _, it in ipairs(proposal.read_items(repo)) do
+		if it.headline == headline then
+			return it.id
+		end
+	end
+end
+
+local function head_lines(repo)
+	return proposal.lines_at(repo, "HEAD", "notes.md")
+end
+
+local BASE = { "Section A", "  existing", "Section B", "  other" }
+
+print("=== the review key: a stacked diff split holding the merged view ===")
+local repo = new_repo(BASE)
+build(repo, "2026-10-01", {
+	item("n1"),
+	item("a1", { kind = "add", target = { under = "Section A" }, after = "  added", source = "" }),
+})
+local nb = open_notes(repo)
+local notes_win = vim.api.nvim_get_current_win()
+review.attach(nb)
+local rok, err = review.open_review(nb)
+assert_true("open_review succeeds" .. tostring(err or ""), rok)
+local rb = review_buf_of(nb)
+assert_true("the review buffer exists", rb ~= nil)
+assert_eq("it is an acwrite scratch buffer", "acwrite", vim.bo[rb].buftype)
+local layout = vim.fn.winlayout()
+assert_eq("two windows, stacked (a column)", "col", layout[1])
+local review_win = vim.fn.bufwinid(rb)
+assert_true("both windows are in diff mode", vim.wo[review_win].diff and vim.wo[notes_win].diff)
+assert_true("review is below the notes window", vim.fn.win_screenpos(review_win)[1] > vim.fn.win_screenpos(notes_win)[1])
+assert_true("the merged view has the news on top", lines_of(rb)[1]:match("^NEWS ") ~= nil)
+assert_true("and the in-place add", line_of(rb, "  added") ~= nil)
+assert_eq("his buffer is untouched", BASE, lines_of(nb))
+assert_eq("his HEAD is untouched", BASE, head_lines(repo))
+assert_eq("his buffer is not modified", false, vim.bo[nb].modified)
+
+print("\n=== take a hunk with do in the notes window, then commit: taken is recorded ===")
+go_to(notes_win, nb, "Section A")
+vim.api.nvim_win_set_cursor(notes_win, { 1, 0 })
+-- the news hunk is a deletion on his side: do on the line it precedes
+vim.cmd("normal! do")
+assert_true("his buffer now holds the news line", line_of(nb, "NEWS n1") ~= nil or lines_of(nb)[1]:match("^NEWS ") ~= nil)
+assert_true("still no commit", #head_lines(repo) == #BASE)
+local cok, cres = review.commit(nb)
+assert_true("commit succeeds", cok)
+assert_true("HEAD has the taken suggestion", head_lines(repo)[1]:match("^NEWS ") ~= nil)
+local n1_id = id_by_headline(repo, "headline n1")
+assert_true("the taken item is recorded as taken", ledger.taken_by_id(ledger.read(repo))[n1_id] ~= nil)
+assert_eq("the other suggestion is not taken", false, ledger.taken_by_id(ledger.read(repo))[id_by_headline(repo, "headline a1")] ~= nil)
+assert_eq("one taken reported", 1, cres.taken)
+assert_eq("his buffer is saved", false, vim.bo[nb].modified)
+
+print("\n=== not now: a hunk left alone is carried by the next pass, batched with new items ===")
+build(repo, "2026-10-02", { item("n2") })
+local p = proposal.read(repo)
+local heads = vim.tbl_map(function(it)
+	return it.headline
+end, p.items)
+table.sort(heads)
+assert_eq("the left hunk and the new item; the taken one is gone", { "headline a1", "headline n2" }, heads)
+assert_eq("parent is his newest HEAD", vim.trim(select(2, git.run(repo, { "rev-parse", "HEAD" }))), p.parent)
+
+print("\n=== decline then u: nothing changes, nothing recorded ===")
+local nb2 = open_notes(repo)
+review.attach(nb2)
+notes_win = vim.api.nvim_get_current_win()
+assert_true("review opens against the new proposal", review.open_review(nb2))
+rb = review_buf_of(nb2)
+review_win = vim.fn.bufwinid(rb)
+local merged_before = lines_of(rb)
+go_to(review_win, rb, "  added")
+local dok = review.decline(rb)
+assert_true("decline succeeds", dok)
+assert_true("the declined hunk now equals his text", line_of(rb, "  added") == nil)
+vim.api.nvim_set_current_win(review_win)
+vim.cmd("normal! u")
+assert_eq("plain u restores the review buffer", merged_before, lines_of(rb))
+assert_eq("nothing is recorded without a save", {}, declined_ids(repo))
+vim.cmd("write")
+assert_eq("saving after the undo records nothing", {}, declined_ids(repo))
+assert_eq("the buffer reads as saved", false, vim.bo[rb].modified)
+
+print("\n=== decline then save: recorded, and not re-proposed by the next pass ===")
+go_to(review_win, rb, "  added")
+assert_true("decline again", review.decline(rb))
+assert_eq("still nothing recorded before the save", {}, declined_ids(repo))
+assert_eq("the review buffer is modified", true, vim.bo[rb].modified)
+vim.cmd("write")
+local a1_id = id_by_headline(repo, "headline a1")
+assert_eq("save records the declined item", { a1_id }, declined_ids(repo))
+assert_eq("only the declined one", 1, #declined_ids(repo))
+assert_eq("the buffer reads as saved", false, vim.bo[rb].modified)
+build(repo, "2026-10-03", {})
+local headlines3 = vim.tbl_map(function(it)
+	return it.headline
+end, proposal.read(repo).items)
+assert_eq("the next pass does not carry it", { "headline n2" }, headlines3)
+build(repo, "2026-10-04", { item("a1again", { kind = "add", target = { under = "Section A" }, after = "  added again", source = "" }) })
+assert_true("(no source) a different new item is of course proposed", id_by_headline(repo, "headline a1again") ~= nil)
+
+print("\n=== decline, then discard the review buffer: nothing is recorded ===")
+vim.cmd("silent! %bwipeout!")
+vim.cmd("silent! only")
+local repo2 = new_repo(BASE)
+build(repo2, "2026-10-01", { item("n1"), item("n2") })
+local nb3 = open_notes(repo2)
+review.attach(nb3)
+assert_true("open", review.open_review(nb3))
+rb = review_buf_of(nb3)
+review_win = vim.fn.bufwinid(rb)
+go_to(review_win, rb, lines_of(rb)[1])
+assert_true("decline the top hunk", review.decline(rb))
+vim.api.nvim_buf_delete(rb, { force = true })
+assert_eq("a discarded buffer records nothing", {}, declined_ids(repo2))
+assert_true("the notes window left diff mode", not vim.wo[vim.fn.bufwinid(nb3)].diff)
+assert_true("no review buffer remains", review_buf_of(nb3) == nil)
+
+print("\n=== a second pass before review: one review shows every pending hunk ===")
+local repo3 = new_repo(BASE)
+build(repo3, "2026-10-01", { item("n1") })
+build(repo3, "2026-10-01", { item("n2") })
+local nb4 = open_notes(repo3)
+review.attach(nb4)
+assert_true("open", review.open_review(nb4))
+rb = review_buf_of(nb4)
+assert_true("both news lines are in the merged view", line_of(rb, "NEWS n1") ~= nil or true)
+local news = 0
+for _, l in ipairs(lines_of(rb)) do
+	if l:match("^NEWS ") then
+		news = news + 1
+	end
+end
+assert_eq("both suggestions are hunks", 2, news)
+assert_eq("still a single proposal commit on his HEAD", vim.trim(select(2, git.run(repo3, { "rev-parse", "HEAD" }))), proposal.read(repo3).parent)
+
+print("\n=== his own edits after the pass do not appear as hunks ===")
+vim.api.nvim_buf_set_lines(nb4, 3, 4, false, { "  other, edited by him" })
+vim.cmd("silent! only")
+rb = review_buf_of(nb4)
+if rb then
+	vim.api.nvim_buf_delete(rb, { force = true })
+end
+assert_true("re-open", review.open_review(nb4))
+rb = review_buf_of(nb4)
+assert_true("his edit is in the merged view", line_of(rb, "  other, edited by him") ~= nil)
+local hunks = vim.diff(
+	snippet.join_lines(lines_of(nb4), true),
+	snippet.join_lines(lines_of(rb), true),
+	{ result_type = "indices" }
 )
-assert_eq("no tokens config at all: notes, never a guess", "notes", review.format_source("TICKET-42"))
+assert_eq("the two adjacent suggestions form one hunk", 1, #hunks)
+local hunk_text = table.concat(vim.list_slice(lines_of(rb), hunks[1][3], hunks[1][3] + hunks[1][4] - 1), "\n")
+assert_true("the hunk is the suggestions, not his edit", hunk_text:match("^NEWS [^\n]*\nNEWS [^\n]*$") ~= nil)
 
-print()
-print("=== D7 fix: the status line is wired into the notes buffer's winbar ===")
-do
-	local base = { "Alpha", "  original text", "Beta", "  other" }
-	local repo = new_repo(base)
-	local move_item = {
-		id = "mv1",
-		file = "notes.md",
-		kind = "move",
-		target = { { at = "  original text" }, { under = "Beta" } },
-		before = "  original text",
-		after = "  original text (moved)",
-		headline = "a move",
-	}
-	seed_proposal(repo, { move_item })
-	local bufnr = open_notes(repo)
-	lay_in_by_hand(repo, bufnr, base, { move_item })
+print("\n=== a suggestion conflicting with his edit: his text wins, no hunk for it ===")
+local repo4 = new_repo({ "Section A", "  keep this" })
+build(repo4, "2026-10-01", {
+	item("e1", { kind = "edit", target = { at = "  keep this" }, before = "  keep this", after = "  agent rewrite", source = "" }),
+})
+local nb5 = open_notes(repo4)
+review.attach(nb5)
+vim.api.nvim_buf_set_lines(nb5, 1, 2, false, { "  his rewrite" })
+local cok2, why = review.open_review(nb5)
+assert_eq("nothing to review: his text won the conflict", false, cok2)
+assert_eq("and it says so", "no suggestions to review", why)
 
-	-- Manually stage just the LEAVING side (as if it alone had already
-	-- been committed) while the landing side stays unstaged — the leave/
-	-- land disagreement desk.histext.compute itself calls "waiting_edit"
-	-- (its own pending_ranges entry for this item ends up with only one
-	-- of the two ranges a move needs, since only one side's own state was
-	-- "pending").
-	local staged = { "Alpha", "Beta", "  other" }
-	local blob = assert(git.hash_object_write(repo, snippet.join_lines(staged, true)))
-	local idx_entry = git.index_entry(repo, "notes.md") or { mode = "100644" }
-	assert(git.update_index_cacheinfo(repo, idx_entry.mode, blob, "notes.md"))
+print("\n=== adjacent suggestions are one hunk: decline and take act on the one under the cursor ===")
+vim.cmd("silent! %bwipeout!")
+vim.cmd("silent! only")
+local repo7 = new_repo(BASE)
+build(repo7, "2026-10-01", { item("n1"), item("n2") })
+local nb8 = open_notes(repo7)
+review.attach(nb8)
+assert_true("open", review.open_review(nb8))
+rb = review_buf_of(nb8)
+review_win = vim.fn.bufwinid(rb)
+local top, second = lines_of(rb)[1], lines_of(rb)[2]
+go_to(review_win, rb, top)
+assert_true("take the first", review.take(rb))
+assert_eq("only that one reached his buffer", { top }, vim.list_slice(lines_of(nb8), 1, 1))
+assert_true("the other is not in his buffer", line_of(nb8, second) == nil)
+go_to(review_win, rb, second)
+assert_true("decline the other", review.decline(rb))
+vim.api.nvim_set_current_win(review_win)
+vim.cmd("write")
+assert_eq("exactly one declined", 1, #declined_ids(repo7))
+assert_eq("and it is the second", second, (function()
+	for _, r in ipairs(ledger.read(repo7)) do
+		if r.type == "decline" then
+			return r.item.after
+		end
+	end
+end)())
 
-	local waiting = review.buffer_waiting_edits(bufnr)
-	assert_eq(
-		"finds exactly one waiting edit, naming the real line — never derivable from status.json's own bare id array",
-		{ "your edit (line 4) waits on the suggestion beside it" },
-		waiting
-	)
-
-	local status_path = vim.fn.tempname()
-	local sfd = assert(io.open(status_path, "w"))
-	sfd:write(vim.json.encode({ passes = { morning = { result = "ok" } } }))
-	sfd:close()
-	local old_status_file = vim.env.DESK_STATUS_FILE
-	vim.env.DESK_STATUS_FILE = status_path
-
-	review.attach(bufnr)
-	local win = vim.api.nvim_get_current_win()
-	review.refresh_status_line(bufnr)
-	assert_eq(
-		"the winbar combines the runner's status.json summary with this buffer's own live waiting-edit line",
-		"morning: ok · your edit (line 4) waits on the suggestion beside it",
-		vim.wo[win].winbar
-	)
-
-	-- Leaving the buffer clears the winbar — it's a window option, not a
-	-- real per-buffer one, so left alone it would keep showing this
-	-- notes buffer's own status line over whatever the window shows next.
-	vim.cmd("enew")
-	assert_eq("winbar is cleared once the notes buffer is left", "", vim.wo[win].winbar)
-
-	vim.env.DESK_STATUS_FILE = old_status_file
-	os.remove(status_path)
+print("\n=== restore from declined recently: it leaves the ledger and is proposed again ===")
+vim.cmd("silent! %bwipeout!")
+vim.cmd("silent! only")
+local repo5 = new_repo(BASE)
+build(repo5, "2026-10-01", { item("n1"), item("n2") })
+local nb6 = open_notes(repo5)
+review.attach(nb6)
+assert_true("open", review.open_review(nb6))
+rb = review_buf_of(nb6)
+review_win = vim.fn.bufwinid(rb)
+go_to(review_win, rb, lines_of(rb)[1])
+local victim_text = lines_of(rb)[1]
+assert_true("decline", review.decline(rb))
+vim.api.nvim_set_current_win(review_win)
+vim.cmd("write")
+local victim = victim_text:match("^NEWS (%S+)")
+assert_eq("one declined", 1, #declined_ids(repo5))
+local recent = review.declined_recently(repo5, 14)
+assert_eq("it is listed as declined recently", 1, #recent)
+review.list_declined_recently(nb6)
+assert_eq("a quickfix list with that entry", review.DECLINED_TITLE, vim.fn.getqflist({ title = 0 }).title)
+assert_eq("one entry", 1, #vim.fn.getqflist())
+vim.cmd("1")
+review.qf_restore()
+assert_eq("restoring removes it from the ledger", {}, declined_ids(repo5))
+build(repo5, "2026-10-02", {})
+local back = false
+for _, it in ipairs(proposal.read_items(repo5)) do
+	back = back or it.after == victim_text
 end
+assert_true("the next pass proposes it again", back)
 
-print()
-print("=== D6: the review key lays in a proposal ===")
-do
-	local repo = new_repo({ "Section A", "  detail" })
-	seed_proposal(repo, {
-		{
-			id = "p1",
-			file = "notes.md",
-			kind = "add",
-			target = { under = "Section A" },
-			before = "",
-			after = "  suggested line",
-			source = "test",
-			headline = "a suggestion",
-		},
-	})
-	local bufnr = open_notes(repo)
-	local before_log = git_log_count(repo)
-
-	local review_ok, result = review.review(bufnr)
-	assert_true("review() succeeds", review_ok)
-	assert_eq("one item laid in", 1, result and result.laid_in)
-
-	local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-	assert_eq("the suggestion landed under Section A", "  suggested line", lines[3])
-
-	local records = ledger.read(repo)
-	local laid_in_rec
-	for _, r in ipairs(records) do
-		if r.type == "laid_in" then
-			laid_in_rec = r
-		end
-	end
-	assert_true("a laid_in record was written", laid_in_rec ~= nil)
-	assert_eq("it names p1", { "p1" }, laid_in_rec and laid_in_rec.items)
-	assert_true("review mode is on for this buffer", vim.b[bufnr].desk_review_mode)
-	assert_true("his commit key ran (HEAD unchanged or advanced, never behind)", git_log_count(repo) >= before_log)
+print("\n=== overview: one headline per remaining hunk; jumps use the jumplist from its own split ===")
+vim.cmd("silent! %bwipeout!")
+vim.cmd("silent! only")
+vim.cmd("cclose")
+local repo6 = new_repo({ "Section A", "  existing", "Section B", "  other", "Section C", "  more" })
+build(repo6, "2026-10-01", {
+	item("n1"),
+	item("a1", { kind = "add", target = { under = "Section B" }, after = "  added under B", source = "", headline = "add under B" }),
+	item("r1", { kind = "remove", target = { at = "  more" }, before = "  more", after = "", source = "", headline = "drop more" }),
+})
+local nb7 = open_notes(repo6)
+review.attach(nb7)
+assert_true("overview opens the review split first", review.overview(nb7))
+assert_eq("a quickfix list titled for the overview", review.OVERVIEW_TITLE, vim.fn.getqflist({ title = 0 }).title)
+local qf = vim.fn.getqflist()
+local texts = vim.tbl_map(function(e)
+	return e.text
+end, qf)
+assert_eq("one headline per hunk", 3, #qf)
+table.sort(texts)
+assert_eq("the headlines", { "add under B", "drop more", "headline n1" }, texts)
+rb = review_buf_of(nb7)
+review_win = vim.fn.bufwinid(rb)
+assert_true("entries point into the review buffer", qf[1].bufnr == rb)
+for i = 2, #qf do
+	assert_true("sorted by position", qf[i].lnum >= qf[i - 1].lnum)
 end
+-- from the overview's own split: put the cursor on the last entry, press <CR>
+local qf_win = vim.fn.getqflist({ winid = 0 }).winid
+assert_true("the overview is in its own window", qf_win ~= 0 and qf_win ~= review_win)
+vim.api.nvim_set_current_win(review_win)
+vim.api.nvim_win_set_cursor(review_win, { 1, 0 })
+vim.api.nvim_set_current_win(qf_win)
+vim.api.nvim_win_set_cursor(qf_win, { #qf, 0 })
+review.qf_jump()
+assert_eq("the jump lands in the review split", review_win, vim.api.nvim_get_current_win())
+assert_eq("on the hunk's line", qf[#qf].lnum, vim.api.nvim_win_get_cursor(review_win)[1])
+vim.cmd([[execute "normal! 1\<C-o>"]])
+assert_eq("Ctrl-O goes back through the jumplist", 1, vim.api.nvim_win_get_cursor(review_win)[1])
+vim.cmd([[execute "normal! 1\<C-i>"]])
+assert_eq("Ctrl-I goes forward again", qf[#qf].lnum, vim.api.nvim_win_get_cursor(review_win)[1])
 
-print()
-print("=== D6: accept/decline/not-now act on the whole item, untouched neighbor ===")
-do
-	local base = { "Alpha", "  original", "Beta", "  keep me", "Gamma", "  other" }
-	local repo = new_repo(base)
+print("\n=== overview drops a hunk once it is declined or taken ===")
+go_to(review_win, rb, "  added under B")
+assert_true("decline one", review.decline(rb))
+assert_eq("the overview refreshes", 2, #vim.fn.getqflist())
+local nwin = vim.fn.bufwinid(nb7)
+go_to(nwin, nb7, "  other")
+vim.api.nvim_win_set_cursor(nwin, { 1, 0 })
+vim.cmd("normal! do")
+review.overview(nb7)
+assert_eq("a taken hunk leaves the overview too", 1, #vim.fn.getqflist())
 
-	local move_item = {
-		id = "mv1",
-		file = "notes.md",
-		kind = "move",
-		target = { { at = "  original" }, { under = "Beta" } },
-		before = "  original",
-		after = "  original (moved)",
-	}
-	-- A distinct anchor from the move's landing spot ("under Beta") — two
-	-- items sharing one anchor is its own (real, but separate) edge case,
-	-- not what this scenario is testing.
-	local add_item = {
-		id = "add1",
-		file = "notes.md",
-		kind = "add",
-		target = { under = "Gamma" },
-		before = "",
-		after = "  a pending add",
-	}
-	seed_proposal(repo, { move_item, add_item })
-	local bufnr = open_notes(repo)
-	lay_in_by_hand(repo, bufnr, base, { move_item, add_item })
-
-	-- His own edit, unrelated to either suggestion.
-	local edited = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-	for i, l in ipairs(edited) do
-		if l == "  keep me" then
-			edited[i] = "  keep me, edited by him"
-		end
-	end
-	vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, edited)
-	vim.cmd("noautocmd write")
-
-	-- Accept the move: find either of its two lines and press accept there.
-	local move_line
-	for i, l in ipairs(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)) do
-		if l == "  original (moved)" then
-			move_line = i
-		end
-	end
-	assert_true("found the move's landed line", move_line ~= nil)
-	local accept_ok, accept_err = review.accept(bufnr, move_line)
-	assert_true("accept succeeds on the move (" .. tostring(accept_err) .. ")", accept_ok)
-
-	local idx_lines = snippet.split_lines(git.index_content(repo, "notes.md") or "")
-	assert_eq(
-		"accepting the move stages BOTH its hunks (leaving side gone, landing side present)",
-		true,
-		(not vim.tbl_contains(idx_lines, "  original")) and vim.tbl_contains(idx_lines, "  original (moved)")
-	)
-	local buf_after_accept = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-	assert_true(
-		"his unrelated edit is still there after accepting the move",
-		vim.tbl_contains(buf_after_accept, "  keep me, edited by him")
-	)
-
-	-- Decline the add: find its line and press decline.
-	local add_line
-	for i, l in ipairs(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)) do
-		if l == "  a pending add" then
-			add_line = i
-		end
-	end
-	assert_true("found the pending add's line", add_line ~= nil)
-	local decline_ok, decline_err = review.decline(bufnr, add_line)
-	assert_true("decline succeeds (" .. tostring(decline_err) .. ")", decline_ok)
-	local buf_after_decline = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-	assert_true("the declined add is gone from the buffer", not vim.tbl_contains(buf_after_decline, "  a pending add"))
-	assert_true(
-		"his unrelated edit survived the decline too",
-		vim.tbl_contains(buf_after_decline, "  keep me, edited by him")
-	)
-
-	local records = ledger.read(repo)
-	local mv_key, add_key
-	for _, r in ipairs(records) do
-		if r.type == "key" and r.id == "mv1" then
-			mv_key = r
-		end
-		if r.type == "key" and r.id == "add1" then
-			add_key = r
-		end
-	end
-	assert_eq("the move's key record is accept", "accept", mv_key and mv_key.action)
-	assert_eq("the add's key record is decline", "decline", add_key and add_key.action)
+print("\n=== keymaps and status line ===")
+local maps = {}
+for _, k in ipairs(review.KEYMAPS) do
+	maps[k.lhs] = true
 end
-
-print()
-print("=== D6: not-now postpones rather than declines ===")
-do
-	local base = { "Alpha", "  line" }
-	local repo = new_repo(base)
-	local item = { id = "nn1", file = "notes.md", kind = "add", target = { under = "Alpha" }, before = "", after = "  suggestion" }
-	seed_proposal(repo, { item })
-	local bufnr = open_notes(repo)
-	local laid = lay_in_by_hand(repo, bufnr, base, { item })
-
-	local target_line
-	for i, l in ipairs(laid) do
-		if l == "  suggestion" then
-			target_line = i
+assert_true("review key kept", maps["<leader>gR"])
+assert_true("overview key kept", maps["<leader>go"])
+assert_true("declined-recently key kept", maps["<leader>gd"])
+assert_true("decline key present", maps["<leader>gD"])
+assert_true("the not-now key is gone (leaving a hunk is not-now)", not maps["<leader>gN"])
+local function mapped(buf, lhs)
+	for _, m in ipairs(vim.api.nvim_buf_get_keymap(buf, "n")) do
+		if m.lhs == vim.g.mapleader .. lhs:gsub("^<leader>", "") then
+			return true
 		end
 	end
-	local nn_ok = review.not_now(bufnr, target_line)
-	assert_true("not_now succeeds", nn_ok)
-
-	local idx = snippet.split_lines(git.index_content(repo, "notes.md") or "")
-	local wt = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-	local states = ledger.derive_all(repo, "notes.md", idx, wt)
-	assert_eq("the item is postponed, not declined", "postponed", states["nn1"])
+	return false
 end
+assert_true("the decline key is mapped in the review buffer", mapped(rb, "<leader>gD"))
+assert_true("and not in the notes buffer", not mapped(nb7, "<leader>gD"))
+assert_true("take-one is mapped in the review buffer only", mapped(rb, "<leader>gA") and not mapped(nb7, "<leader>gA"))
 
-print()
-print("=== D6: overview ordering (news, then in-place by position, then postponed count) ===")
-do
-	local base = { "Alpha", "  a", "Beta", "  b", "Gamma", "  c" }
-	local repo = new_repo(base)
-	local news_item = { id = "news1", file = "notes.md", kind = "new", target = "top", before = "", after = "NEWS", headline = "a news item" }
-	local late_item = { id = "late1", file = "notes.md", kind = "add", target = { under = "Gamma" }, before = "", after = "  late add", headline = "late in-place" }
-	local early_item = { id = "early1", file = "notes.md", kind = "add", target = { under = "Alpha" }, before = "", after = "  early add", headline = "early in-place" }
-	local postponed_item = { id = "post1", file = "notes.md", kind = "add", target = { under = "Beta" }, before = "", after = "  postponed add", headline = "postponed one" }
-	seed_proposal(repo, { news_item, late_item, early_item, postponed_item })
-	local bufnr = open_notes(repo)
-	lay_in_by_hand(repo, bufnr, base, { news_item, late_item, early_item, postponed_item })
+print("\n=== format_source: a short, honest label, never the raw field ===")
+assert_eq("nil source: notes", "notes", review.format_source(nil))
+assert_eq("a URL: just its host", "github.com", review.format_source("https://github.com/foo/bar/pull/1"))
 
-	-- Postpone one of the four before building the overview.
-	local post_line
-	for i, l in ipairs(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)) do
-		if l == "  postponed add" then
-			post_line = i
-		end
-	end
-	assert(review.not_now(bufnr, post_line))
-	local wt_after_postpone = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-	-- not_now already wrote the reset lines to the buffer; refresh the open
-	-- window's view of it for the overview build below.
-	vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, wt_after_postpone)
-
-	review.overview(bufnr)
-	local qf = vim.fn.getqflist({ title = 0, items = 0 })
-	assert_eq("overview title is set", review.OVERVIEW_TITLE, qf.title)
-	local texts = {}
-	for _, it in ipairs(qf.items) do
-		table.insert(texts, it.text)
-	end
-	assert_eq(
-		"news first, then in-place ordered by position, then the postponed count",
-		{ "a news item", "early in-place", "late in-place", "1 postponed" },
-		texts
-	)
+print(string.format("\n=== summary: %d passed, %d failed ===", pass, fail))
+if fail > 0 then
+	os.exit(1)
 end
-
-print()
-print("=== D6 fix: 'yours' finds a length-changing edit, never the item's own range ===")
-do
-	local base = { "Alpha", "  a", "Beta", "  b" }
-	local repo = new_repo(base)
-	local item = { id = "add1", file = "notes.md", kind = "add", target = { under = "Alpha" }, before = "", after = "  suggested", headline = "a suggestion" }
-	seed_proposal(repo, { item })
-	local bufnr = open_notes(repo)
-	lay_in_by_hand(repo, bufnr, base, { item })
-
-	-- His own edit, unrelated to the suggestion: a brand-new line appended
-	-- at the end — a length change the old same-length check would have
-	-- silently skipped entirely (not just missed this one line: it bailed
-	-- out of the WHOLE buffer the moment lengths stopped matching).
-	local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-	table.insert(lines, "  his own note")
-	vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
-	vim.cmd("noautocmd write")
-
-	local st = review.read_state(bufnr)
-	local hunks = review.unowned_hunks(bufnr, st)
-	local hunk_lines = {}
-	for _, h in ipairs(hunks) do
-		table.insert(hunk_lines, h.line)
-	end
-	local his_note_line
-	for i, l in ipairs(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)) do
-		if l == "  his own note" then
-			his_note_line = i
-		end
-	end
-	assert_eq("his own added line is found, at its real line", { his_note_line }, hunk_lines)
-
-	review.overview(bufnr)
-	local qf_items = vim.fn.getqflist()
-	local yours_lines = {}
-	for _, it in ipairs(qf_items) do
-		if it.text == "yours" then
-			table.insert(yours_lines, it.lnum)
-		end
-	end
-	assert_eq("the overview lists it as 'yours', at the right line", { his_note_line }, yours_lines)
-end
-
-print()
-print("=== D6: overview jump goes through the jumplist, even from its own split ===")
-do
-	local base = { "Alpha", "  a", "Beta", "  b" }
-	local repo = new_repo(base)
-	local item1 = { id = "j1", file = "notes.md", kind = "add", target = { under = "Alpha" }, before = "", after = "  jump target one", headline = "one" }
-	local item2 = { id = "j2", file = "notes.md", kind = "add", target = { under = "Beta" }, before = "", after = "  jump target two", headline = "two" }
-	seed_proposal(repo, { item1, item2 })
-
-	vim.cmd("tabnew")
-	local notes_buf = open_notes(repo)
-	lay_in_by_hand(repo, notes_buf, base, { item1, item2 })
-	local notes_win = vim.api.nvim_get_current_win()
-	vim.api.nvim_win_set_cursor(notes_win, { 1, 0 }) -- a known starting position
-
-	review.overview(notes_buf) -- opens the qf list in its own split (:copen)
-	local qf_win
-	for _, w in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
-		if vim.bo[vim.api.nvim_win_get_buf(w)].filetype == "qf" then
-			qf_win = w
-		end
-	end
-	assert_true("the overview opened in its own window", qf_win ~= nil and qf_win ~= notes_win)
-
-	vim.api.nvim_set_current_win(qf_win)
-	local qf_items = vim.fn.getqflist()
-	local jump_idx
-	for i, it in ipairs(qf_items) do
-		if it.text == "two" then
-			jump_idx = i
-		end
-	end
-	vim.api.nvim_win_set_cursor(qf_win, { jump_idx, 0 })
-	review.qf_jump()
-
-	assert_eq("after the jump, focus is back in the notes window", notes_win, vim.api.nvim_get_current_win())
-	local cur = vim.api.nvim_win_get_cursor(notes_win)
-	local jumped_line = vim.api.nvim_buf_get_lines(notes_buf, cur[1] - 1, cur[1], false)[1]
-	assert_eq("the cursor landed on item two's line", "  jump target two", jumped_line)
-
-	-- Ctrl-O in the notes window returns to where he was (line 1) — this
-	-- only holds if the jump set the ' mark in *that* window, not the qf one.
-	vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<C-o>", true, false, true), "x", false)
-	local after_ctrl_o = vim.api.nvim_win_get_cursor(notes_win)
-	assert_eq("Ctrl-O returns to the pre-jump line", 1, after_ctrl_o[1])
-
-	vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<C-i>", true, false, true), "x", false)
-	local after_ctrl_i = vim.api.nvim_win_get_cursor(notes_win)
-	assert_eq("Ctrl-I goes forward again, back to item two's line", jump_idx and cur[1], after_ctrl_i[1])
-
-	vim.cmd("tabclose!")
-end
-
-print()
-print("=== D6 fix: the quickfix <CR> override never touches a location list ===")
-do
-	vim.cmd("tabnew")
-	local repo = new_repo({ "GLOBAL TARGET", "LOCAL TARGET" })
-	local bufnr = open_notes(repo)
-	local win = vim.api.nvim_get_current_win()
-
-	-- The bug: getqflist() always reads the *global* quickfix list, so a
-	-- location list whose title happens to collide with desk's own
-	-- overview title would have its <CR> misread the global list's own
-	-- entries instead of its own.
-	vim.fn.setqflist({}, " ", { title = review.OVERVIEW_TITLE, items = { { bufnr = bufnr, lnum = 1, col = 1 } } })
-	vim.fn.setloclist(win, {}, " ", { title = review.OVERVIEW_TITLE, items = { { bufnr = bufnr, lnum = 2, col = 1 } } })
-	vim.cmd("lopen")
-	local loc_win = vim.api.nvim_get_current_win()
-	assert_true(
-		"this really is a location list window, not a quickfix one",
-		vim.fn.getloclist(loc_win, { filewinid = 0 }).filewinid ~= 0
-	)
-	vim.api.nvim_win_set_cursor(loc_win, { 1, 0 })
-
-	review.qf_jump()
-
-	local notes_win
-	for _, w in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
-		if vim.api.nvim_win_get_buf(w) == bufnr then
-			notes_win = w
-		end
-	end
-	assert_true("a window is showing the notes buffer", notes_win ~= nil)
-	assert_eq(
-		"landed on the location list's own line, never the (title-colliding) global list's",
-		2,
-		notes_win and vim.api.nvim_win_get_cursor(notes_win)[1]
-	)
-
-	vim.fn.setqflist({}, "r", { title = "", items = {} })
-	vim.cmd("tabclose!")
-end
-
-print()
-print("=== D6 fix: a removal at the file's very last lines stays reachable ===")
-do
-	local base = { "Alpha", "  keep", "  tail line to remove" }
-	local repo = new_repo(base)
-	local item = {
-		id = "rm-eof",
-		file = "notes.md",
-		kind = "remove",
-		target = { at = "  tail line to remove" },
-		before = "  tail line to remove",
-		after = "",
-		headline = "drop the tail",
-	}
-	seed_proposal(repo, { item })
-	local bufnr = open_notes(repo)
-	lay_in_by_hand(repo, bufnr, base, { item })
-
-	local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-	assert_eq("the removal is already applied in the buffer (pending)", { "Alpha", "  keep" }, lines)
-	local last_line = #lines
-
-	local found_item = review.item_at_line(bufnr, last_line)
-	assert_true("the item is reachable with the cursor on the file's actual last line", found_item ~= nil)
-	assert_eq("...and it's the right one", "rm-eof", found_item and found_item.id)
-
-	review.overview(bufnr)
-	local qf = vim.fn.getqflist()
-	local qf_entry
-	for _, it in ipairs(qf) do
-		if it.text == "drop the tail" then
-			qf_entry = it
-		end
-	end
-	assert_true("the overview lists it", qf_entry ~= nil)
-	assert_eq("...at a valid (clamped) line, not one past the last line", last_line, qf_entry and qf_entry.lnum)
-	vim.cmd("cclose")
-
-	review.refresh_virtual_text(bufnr)
-	local marks = vim.api.nvim_buf_get_extmarks(bufnr, review.ns, 0, -1, {})
-	local mark_row = marks[1] and marks[1][2]
-	assert_eq("its virtual text is attached to the actual last line, not a phantom one past it", last_line - 1, mark_row)
-
-	local not_now_ok, not_now_err = review.not_now(bufnr, last_line)
-	assert_true("not_now succeeds from the clamped, reachable line (" .. tostring(not_now_err) .. ")", not_now_ok)
-	local restored = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-	assert_eq("the removed tail is correctly re-inserted AFTER the last line, not before it", base, restored)
-end
-
-print()
-print("=== D6: format-on-save leaves the notes buffer untouched ===")
-do
-	package.path = package.path -- (no-op; real autocmds.lua uses relative require paths already on rtp)
-	require("autocmds")
-	local repo = new_repo({ "Alpha", "  line" })
-	local bufnr = open_notes(repo)
-	local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-	table.insert(lines, "  trailing space here   ")
-	vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
-	vim.cmd("write")
-	local after = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-	assert_eq(
-		"trailing whitespace in notes.md survives a plain :w (the cleanup autocmd's pattern excludes *.md)",
-		"  trailing space here   ",
-		after[#after]
-	)
-end
-
-print()
-print("=== D6: <leader>ga in visual mode stages the selection, not the whole hunk ===")
-do
-	local repo = vim.fn.tempname()
-	vim.fn.mkdir(repo, "p")
-	git_safety.assert_repo_under_tmp(repo)
-	assert(git.run(repo, { "init", "-q" }))
-	assert(git.run(repo, { "config", "user.email", "test@example.invalid" }))
-	assert(git.run(repo, { "config", "user.name", "Desk Test" }))
-	local base = {}
-	for i = 1, 12 do
-		base[i] = "line " .. i
-	end
-	local fd = assert(io.open(repo .. "/file.txt", "w"))
-	fd:write(snippet.join_lines(base, true))
-	fd:close()
-	assert(git.run(repo, { "add", "file.txt" }))
-	assert(git.run(repo, { "commit", "-q", "-m", "initial" }))
-
-	vim.cmd("edit " .. vim.fn.fnameescape(repo .. "/file.txt"))
-	local bufnr = vim.api.nvim_get_current_buf()
-
-	-- One THREE-line hunk (lines 2-4, all edited together) and one
-	-- independent single-line edit far enough away to be its own hunk. The
-	-- three-line hunk is the point: staging "the hunk under the cursor"
-	-- (the bug) and staging only the selected lines (the fix) produce
-	-- different results only when the selection is a genuine subset of a
-	-- multi-line hunk — a single-line hunk can't tell them apart.
-	vim.api.nvim_buf_set_lines(bufnr, 1, 4, false, { "line 2 EDITED", "line 3 EDITED", "line 4 EDITED" })
-	vim.api.nvim_buf_set_lines(bufnr, 9, 10, false, { "line 10 EDITED" }) -- line 10
-	vim.cmd("write")
-
-	local here = debug.getinfo(1, "S").source:sub(2):match("^(.*)/[^/]+$") or "."
-	local git_spec = dofile(here .. "/../lua/plugins/git.lua")
-	local on_attach = git_spec[1].opts.on_attach
-	local gitsigns = require("gitsigns")
-	gitsigns.setup({})
-	-- Attach synchronously for the test: gitsigns normally attaches via its
-	-- own BufRead autocmd (asynchronously); force it and wait for the hunks
-	-- to be computed before selecting a range against them.
-	gitsigns.attach(bufnr)
-	vim.wait(500, function()
-		local hunks = gitsigns.get_hunks(bufnr)
-		return hunks ~= nil and #hunks == 2
-	end)
-	on_attach(bufnr)
-
-	-- Visual-select only the MIDDLE line of the 3-line hunk (line 3), then
-	-- press <leader>ga: a range-aware stage takes only line 3; the buggy
-	-- cursor-hunk fallback would take all of lines 2-4.
-	vim.api.nvim_win_set_cursor(0, { 3, 0 })
-	vim.cmd("normal! V")
-	vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes(" ga", true, false, true), "x", false)
-	vim.wait(200)
-
-	local idx_lines = snippet.split_lines(git.index_content(repo, "file.txt") or "")
-	assert_true("the selected line (3) was staged", idx_lines[3] == "line 3 EDITED")
-	assert_true("its neighbor in the SAME hunk (line 2) was NOT staged", idx_lines[2] == "line 2")
-	assert_true("its other neighbor in the SAME hunk (line 4) was NOT staged", idx_lines[4] == "line 4")
-	assert_true("the unrelated hunk (line 10) was NOT staged", idx_lines[10] == "line 10")
-end
-
-print()
-print("=== D6 fix: pressing review again never re-lays an already-resolved item ===")
-do
-	local repo = new_repo({ "Section A", "  detail", "Section B", "  other" })
-	seed_proposal(repo, {
-		{
-			id = "acc1",
-			file = "notes.md",
-			kind = "add",
-			target = { under = "Section A" },
-			before = "",
-			after = "  will be accepted",
-			headline = "accept me",
-		},
-		{
-			id = "dec1",
-			file = "notes.md",
-			kind = "add",
-			target = { under = "Section B" },
-			before = "",
-			after = "  will be declined",
-			headline = "decline me",
-		},
-	})
-	local bufnr = open_notes(repo)
-
-	local ok1, result1 = review.review(bufnr)
-	assert_true("first review() succeeds", ok1)
-	assert_eq("both items laid in on the first press", 2, result1 and result1.laid_in)
-
-	local function line_of(text)
-		for i, l in ipairs(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)) do
-			if l == text then
-				return i
-			end
-		end
-	end
-
-	assert(review.accept(bufnr, line_of("  will be accepted")))
-	assert(review.decline(bufnr, line_of("  will be declined")))
-
-	local ok2, result2 = review.review(bufnr)
-	assert_true("second review() succeeds", ok2)
-	assert_eq("nothing new to lay in the second time", 0, result2 and result2.laid_in)
-
-	local lines_after = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-	local accepted_count, declined_count = 0, 0
-	for _, l in ipairs(lines_after) do
-		if l == "  will be accepted" then
-			accepted_count = accepted_count + 1
-		elseif l == "  will be declined" then
-			declined_count = declined_count + 1
-		end
-	end
-	assert_eq("the accepted item appears exactly once (never duplicated)", 1, accepted_count)
-	assert_eq("the declined item never comes back", 0, declined_count)
-end
-
-print()
-print("=== D6 fix: a postponed item is laid in again on its postponed state alone ===")
-do
-	-- design.md's "Review rounds" section: no `postponed_from` marker to
-	-- gate on any more — whether the runner re-proposed it because of a
-	-- newer pass is the runner's own call (git-ops.sh's supersede rule);
-	-- from review()'s own side, any item the current proposal still names
-	-- and the ledger derives as "postponed" is laid in again, full stop.
-	local repo = new_repo({ "Section A", "  detail" })
-	seed_proposal(repo, {
-		{
-			id = "pp1",
-			file = "notes.md",
-			kind = "add",
-			target = { under = "Section A" },
-			before = "",
-			after = "  postpone me",
-			headline = "postpone me",
-		},
-	})
-	local bufnr = open_notes(repo)
-	assert(review.review(bufnr))
-
-	local function line_of(text)
-		for i, l in ipairs(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)) do
-			if l == text then
-				return i
-			end
-		end
-	end
-	local not_now_at = os.time()
-	assert(review.not_now(bufnr, line_of("  postpone me")))
-
-	-- Re-pressing review right away, against the SAME still-standing
-	-- proposal (nothing new from the runner), lays it in again.
-	local ok_same, result_same = review.review(bufnr)
-	assert_true("review() succeeds against the unchanged proposal", ok_same)
-	assert_eq("the postponed item is laid in again", 1, result_same and result_same.laid_in)
-	assert_true("its content is back in the buffer", line_of("  postpone me") ~= nil)
-
-	local st = review.read_state(bufnr)
-	review.refresh_virtual_text(bufnr)
-	local marks = vim.api.nvim_buf_get_extmarks(bufnr, review.ns, 0, -1, { details = true })
-	local found_postponed_text
-	for _, m in ipairs(marks) do
-		local text = m[4].virt_text[1][1]
-		if text:find("postponed from ", 1, true) then
-			found_postponed_text = text
-		end
-	end
-	assert_true(
-		"its virtual text says 'postponed from <day>', read from the not_now key's own time (never a stored field)",
-		found_postponed_text ~= nil
-	)
-	assert_eq(
-		"that day matches the not_now key's own recorded time",
-		os.date("%A", not_now_at),
-		found_postponed_text and found_postponed_text:match("postponed from (%a+)")
-	)
-	assert_true("desk.round tracked it (not derived from any 'postponed_from' field)", st ~= nil)
-	assert_true(
-		"one separator style throughout (single spaces around ·, never doubled)",
-		found_postponed_text ~= nil and not found_postponed_text:find("  ·  ", 1, true) and found_postponed_text:find(" · ", 1, true) ~= nil
-	)
-end
-
-print()
-print("=== D6 fix: a bad anchor lands on top and is interactable, not deferred forever ===")
-do
-	local repo = new_repo({ "Section A", "  detail" })
-	seed_proposal(repo, {
-		{
-			id = "bad1",
-			file = "notes.md",
-			kind = "add",
-			target = { under = "a heading that doesn't exist" },
-			before = "",
-			after = "  orphaned suggestion",
-			headline = "orphaned",
-		},
-	})
-	local bufnr = open_notes(repo)
-	local review_ok, result = review.review(bufnr)
-	assert_true("review() succeeds", review_ok)
-	assert_eq("the bad-anchor item is applied, not deferred", 1, result and result.laid_in)
-	assert_eq("...and reported as landed on top", 1, result and result.landed_on_top)
-	assert_eq("...and never as deferred", 0, result and result.deferred)
-
-	local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-	assert_eq("its content is at the top of the file", "  orphaned suggestion", lines[1])
-
-	-- It has to be interactable, not just visible: accept must find it.
-	local accept_ok = review.accept(bufnr, 1)
-	assert_true("accept finds it at the top (ledger.derive_all agrees on the position)", accept_ok)
-	local idx_lines = snippet.split_lines(git.index_content(repo, "notes.md") or "")
-	assert_true("accepting it staged its content into the index", vim.tbl_contains(idx_lines, "  orphaned suggestion"))
-end
-
-print()
-print("=== D6 fix: the review key reports real deferrals and landed-on-top counts ===")
-do
-	local repo = new_repo({ "Section A", "  original line", "  something else" })
-	seed_proposal(repo, {
-		{
-			id = "bad-anchor",
-			file = "notes.md",
-			kind = "add",
-			target = { under = "a heading that doesn't exist" },
-			before = "",
-			after = "  orphaned suggestion",
-			headline = "orphaned",
-		},
-		{
-			id = "mismatch",
-			file = "notes.md",
-			kind = "edit",
-			target = { at = "  original line" },
-			before = "  original line\n  DIFFERENT next line",
-			after = "  edited line",
-			headline = "won't apply",
-		},
-	})
-	local bufnr = open_notes(repo)
-	review.attach(bufnr)
-
-	local notified = {}
-	local orig_notify = vim.notify
-	vim.notify = function(msg)
-		table.insert(notified, msg)
-	end
-	local ok_feed = pcall(
-		vim.api.nvim_feedkeys,
-		vim.api.nvim_replace_termcodes("<leader>gR", true, false, true),
-		"x",
-		false
-	)
-	vim.notify = orig_notify
-	assert_true("<leader>gR ran without erroring", ok_feed)
-
-	local combined = table.concat(notified, " | ")
-	assert_true(
-		"reports the real deferral (didn't apply cleanly), never confused with 'postponed'",
-		combined:find("1 deferred", 1, true) ~= nil
-	)
-	assert_true("reports the landed-on-top count", combined:find("1 landed on top", 1, true) ~= nil)
-end
-
-print()
-print("=== D6 fix: nomodeline is set buffer-local on a notes buffer (the .desk-notes marker) ===")
-do
-	require("desk").setup()
-	local repo = vim.fn.tempname()
-	vim.fn.mkdir(repo, "p")
-	local mfd = assert(io.open(repo .. "/" .. review.MARKER, "w"))
-	mfd:write("")
-	mfd:close()
-	local fd = assert(io.open(repo .. "/notes.md", "w"))
-	fd:write("Alpha\n  line\n\nvim: set tabstop=7 :\n")
-	fd:close()
-
-	vim.cmd("edit " .. vim.fn.fnameescape(repo .. "/notes.md"))
-	local bufnr = vim.api.nvim_get_current_buf()
-
-	assert_true("modeline is off for the notes buffer", not vim.bo[bufnr].modeline)
-	assert_true("the fixture's modeline was never applied (tabstop stayed default)", vim.bo[bufnr].tabstop ~= 7)
-end
-
-print()
-print("=== D8 fix: commit_his_text writes the pending-set snapshot ===")
-do
-	local repo = new_repo({ "Alpha" })
-	local item = {
-		id = "snap1",
-		file = "notes.md",
-		kind = "add",
-		target = { under = "Alpha" },
-		before = "",
-		after = "  a pending suggestion",
-		headline = "a pending suggestion",
-	}
-	seed_proposal(repo, { item })
-	local bufnr = open_notes(repo)
-	assert_true("review() succeeds", review.review(bufnr))
-
-	-- A later his-text run (a fresh <leader>gc press, or the next day's)
-	-- snapshots whatever's pending right now.
-	assert_true("commit_his_text succeeds", review.commit_his_text(bufnr))
-
-	-- git canonicalizes the repo path (symlinks and all — macOS's
-	-- /var -> /private/var), so the snapshot path has to be built from the
-	-- same resolved root commit_his_text used internally, not the raw
-	-- fixture path, or the two would never agree on a file.
-	local canon_repo = review.repo_context(bufnr)
-	local snap_path = ledger.pending_snapshot_path(canon_repo, "notes.md")
-	local snap = ledger.read_pending_snapshot(snap_path)
-	assert_true("a snapshot was written", snap ~= nil)
-	assert_eq("it names the still-pending item", { "snap1" }, snap and snap.items)
-
-	local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-	local accept_line
-	for i, l in ipairs(lines) do
-		if l == "  a pending suggestion" then
-			accept_line = i
-		end
-	end
-	assert_true("accept succeeds", review.accept(bufnr, accept_line))
-	assert_true("commit_his_text succeeds again", review.commit_his_text(bufnr))
-
-	local snap2 = ledger.read_pending_snapshot(snap_path)
-	assert_eq("once accepted, the next snapshot no longer names it", {}, snap2 and snap2.items)
-end
-
-print()
-print("=== D8 fix: declined recently -- list, then restore ===")
-do
-	local repo = new_repo({ "Alpha" })
-	local item = {
-		id = "dr1",
-		file = "notes.md",
-		kind = "add",
-		target = { under = "Alpha" },
-		before = "",
-		after = "  a declined suggestion",
-		headline = "a declined suggestion",
-	}
-	seed_proposal(repo, { item })
-	local bufnr = open_notes(repo)
-	assert_true("review() succeeds", review.review(bufnr))
-
-	local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-	local decline_line
-	for i, l in ipairs(lines) do
-		if l == "  a declined suggestion" then
-			decline_line = i
-		end
-	end
-	assert_true("decline succeeds", review.decline(bufnr, decline_line))
-	local after_decline = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-	assert_true("the declined line is gone from the buffer", not vim.tbl_contains(after_decline, "  a declined suggestion"))
-
-	review.list_declined_recently(bufnr)
-	local qf = vim.fn.getqflist({ title = 0, items = 0, context = 0 })
-	assert_eq("the declined-recently title is set", review.DECLINED_TITLE, qf.title)
-	assert_eq("one declined-recently item is listed", 1, #qf.items)
-	assert_true("it's labelled declined", qf.items[1].text:find("declined", 1, true) ~= nil)
-
-	-- list_declined_recently opened the qf list via :copen, which switched
-	-- focus into it — the cursor starts on line 1, its only entry.
-	review.qf_restore()
-
-	local restored_lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-	assert_true("the restored line is back in the buffer", vim.tbl_contains(restored_lines, "  a declined suggestion"))
-
-	local records = ledger.read(repo)
-	local restore_key
-	for _, r in ipairs(records) do
-		if r.type == "key" and r.id == "dr1" and r.action == "restore" then
-			restore_key = r
-		end
-	end
-	assert_true("a restore key record was written", restore_key ~= nil)
-
-	local head = review.head_lines(repo, "notes.md")
-	local index_lines = snippet.split_lines(git.index_content(repo, "notes.md") or "")
-	local worktree_lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-	local states = ledger.derive_all(repo, head, index_lines, worktree_lines)
-	assert_eq("the item derives as pending again", "pending", states["dr1"])
-end
-
-print()
-print("=== D8 fix: <leader>gd and :DeskDeclined are wired by attach ===")
-do
-	local repo = new_repo({ "Alpha" })
-	local bufnr = open_notes(repo)
-	review.attach(bufnr)
-
-	local found_keymap
-	for _, m in ipairs(vim.api.nvim_buf_get_keymap(bufnr, "n")) do
-		if m.desc and m.desc:find("Declined recently", 1, true) then
-			found_keymap = m
-		end
-	end
-	assert_true("a buffer-local normal-mode keymap for declined-recently exists", found_keymap ~= nil)
-
-	local commands = vim.api.nvim_buf_get_commands(bufnr, {})
-	assert_true("the :DeskDeclined buffer command exists", commands.DeskDeclined ~= nil)
-
-	-- Invoking either one opens the (empty) declined-recently list without
-	-- erroring.
-	vim.api.nvim_buf_call(bufnr, function()
-		vim.cmd("DeskDeclined")
-	end)
-	local qf2 = vim.fn.getqflist({ title = 0 })
-	assert_eq("the declined-recently title is set", review.DECLINED_TITLE, qf2.title)
-	vim.cmd("cclose")
-end
-
-print()
-print("=== D6 round fix: his own line added above a pending item, then a commit ===")
-do
-	-- The bug design.md names: his own line-count change above a pending
-	-- item used to shift its anchor's resolved position without moving the
-	-- item, misreading the result as "declined" — and the next commit then
-	-- kept his stray edit instead of reverting the still-pending item.
-	local repo = new_repo({ "Section A", "  detail" })
-	seed_proposal(repo, {
-		{ id = "p1", file = "notes.md", kind = "add", target = { under = "Section A" }, before = "", after = "  a suggestion" },
-	})
-	local bufnr = open_notes(repo)
-	assert(review.review(bufnr))
-
-	local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-	table.insert(lines, 1, "his own new line, added above everything")
-	vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
-	vim.cmd("noautocmd write")
-
-	local states = review.read_state(bufnr).states
-	assert_eq("still pending — his own edit above it never shifts it out of place", "pending", states["p1"])
-
-	assert(review.commit_his_text(bufnr))
-	local head_lines = review.head_lines(repo, "notes.md")
-	assert_true("his new line is committed", vim.tbl_contains(head_lines, "his own new line, added above everything"))
-	assert_true("the still-pending suggestion is reverted out of HEAD, not baked in", not vim.tbl_contains(head_lines, "  a suggestion"))
-end
-
-print()
-print("=== D6 round fix: accepting a news item, then committing with others still pending ===")
-do
-	local repo = new_repo({ "Section A", "  detail" })
-	seed_proposal(repo, {
-		{ id = "news1", file = "notes.md", kind = "new", target = "top", before = "", after = "NEWS ITEM", headline = "news" },
-		{ id = "add1", file = "notes.md", kind = "add", target = { under = "Section A" }, before = "", after = "  a pending add", headline = "add" },
-	})
-	local bufnr = open_notes(repo)
-	assert(review.review(bufnr))
-
-	local function line_of(text)
-		for i, l in ipairs(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)) do
-			if l == text then
-				return i
-			end
-		end
-	end
-	assert(review.accept(bufnr, line_of("NEWS ITEM")))
-	assert(review.commit_his_text(bufnr))
-
-	local head_lines = review.head_lines(repo, "notes.md")
-	assert_true("the accepted news item is committed", vim.tbl_contains(head_lines, "NEWS ITEM"))
-	assert_true("the still-pending add is reverted, not swept in with it", not vim.tbl_contains(head_lines, "  a pending add"))
-
-	local records = ledger.read(repo)
-	local resolved
-	for _, r in ipairs(records) do
-		if r.type == "resolved" and r.id == "news1" then
-			resolved = r
-		end
-	end
-	assert_true("the commit froze the accepted item's state", resolved ~= nil)
-	assert_eq("frozen as accepted", "accepted", resolved and resolved.state)
-end
-
-print()
-print("=== D6 round fix: an accepted item still reads accepted after HEAD moves further ===")
-do
-	-- design.md: "each commit freezes resolved items ... so they are never
-	-- re-derived against a moved HEAD." Once frozen, further commits (his
-	-- own continued editing) must never flip it back.
-	local repo = new_repo({ "Section A", "  detail" })
-	seed_proposal(repo, {
-		{ id = "acc1", file = "notes.md", kind = "add", target = { under = "Section A" }, before = "", after = "  will be accepted", headline = "acc" },
-	})
-	local bufnr = open_notes(repo)
-	assert(review.review(bufnr))
-	local function line_of(text)
-		for i, l in ipairs(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)) do
-			if l == text then
-				return i
-			end
-		end
-	end
-	assert(review.accept(bufnr, line_of("  will be accepted")))
-	assert(review.commit_his_text(bufnr))
-	assert_eq("accepted right after the freezing commit", "accepted", review.read_state(bufnr).states["acc1"])
-
-	-- HEAD moves further: several of his own unrelated edits, each its own
-	-- commit, right around the accepted item's own text.
-	for i = 1, 3 do
-		local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-		table.insert(lines, 1, "unrelated edit " .. i)
-		vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
-		vim.cmd("noautocmd write")
-		assert(review.commit_his_text(bufnr))
-	end
-
-	assert_eq(
-		"still accepted after HEAD moved three commits further — frozen, never re-derived",
-		"accepted",
-		review.read_state(bufnr).states["acc1"]
-	)
-end
-
-print()
-print("=== D6 round fix: a restart (a fresh nvim -l process) then pressing review again ===")
-do
-	-- Nothing this relies on may live only in this process's own Lua
-	-- state — a restart is exactly a second `nvim -l` process reading the
-	-- same repo. Simulated here by dropping every desk.* module from
-	-- package.loaded and re-require'ing them (a fresh interpreter would
-	-- start with an empty cache the same way), then working the SAME repo
-	-- through freshly-required modules end to end.
-	local repo = new_repo({ "Section A", "  detail" })
-	seed_proposal(repo, {
-		{ id = "pp1", file = "notes.md", kind = "add", target = { under = "Section A" }, before = "", after = "  postpone me", headline = "pp" },
-	})
-	local bufnr = open_notes(repo)
-	assert(review.review(bufnr))
-	local function line_of(bn, text)
-		for i, l in ipairs(vim.api.nvim_buf_get_lines(bn, 0, -1, false)) do
-			if l == text then
-				return i
-			end
-		end
-	end
-	assert(review.not_now(bufnr, line_of(bufnr, "  postpone me")))
-
-	for name in pairs(package.loaded) do
-		if name:match("^desk%.") then
-			package.loaded[name] = nil
-		end
-	end
-	local fresh_review = require("desk.review")
-	assert(fresh_review ~= review, "a genuinely fresh module table, not the cached one")
-
-	vim.cmd("bwipeout! " .. bufnr)
-	local bufnr2 = fresh_review.repo_context and open_notes(repo) or open_notes(repo)
-	local ok2, result2 = fresh_review.review(bufnr2)
-	assert_true("review() succeeds against a freshly-required module set", ok2)
-	assert_eq("the postponed item is laid in again, read entirely from the repo", 1, result2 and result2.laid_in)
-	assert_true("its content is back", line_of(bufnr2, "  postpone me") ~= nil)
-end
-
-print()
-print("=== D6 round fix: two passes land in the proposal before any review press ===")
-do
-	local repo = new_repo({ "Section A", "  detail" })
-	seed_proposal(repo, {
-		{ id = "j1", file = "notes.md", kind = "add", target = { under = "Section A" }, before = "", after = "  from the first pass", headline = "j1" },
-	})
-	-- A second pass's own write (the runner's own merge already carries the
-	-- first pass's item forward — desk_stage_and_write_proposal — so the
-	-- SECOND proposal blob names both, same as a real second pass would).
-	seed_proposal(repo, {
-		{ id = "j1", file = "notes.md", kind = "add", target = { under = "Section A" }, before = "", after = "  from the first pass", headline = "j1" },
-		{ id = "c1", file = "notes.md", kind = "new", target = "top", before = "", after = "  from the second pass", headline = "c1" },
-	})
-
-	local bufnr = open_notes(repo)
-	local ok, result = review.review(bufnr)
-	assert_true("review() succeeds", ok)
-	assert_eq("both passes' items are laid in together, in one round", 2, result and result.laid_in)
-	local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-	assert_true("the first pass's item is there", vim.tbl_contains(lines, "  from the first pass"))
-	assert_true("the second pass's item is there too", vim.tbl_contains(lines, "  from the second pass"))
-end
-
-print()
-print(string.format("=== summary: %d passed, %d failed ===", pass, fail))
-os.exit(fail == 0 and 0 or 1)

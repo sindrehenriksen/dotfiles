@@ -1,34 +1,38 @@
--- D6: review keys, review mode, virtual text, and the overview — the
--- interactive layer built on desk.ledger/desk.histext/desk.apply (D5).
+-- The stateless diff review. A pass leaves ONE proposal commit
+-- (desk.proposal): his HEAD at pass time as its parent, the files with every
+-- suggestion applied as its tree. Nothing in it ever enters his notes unless
+-- he takes it, and nothing here tracks a suggestion by position.
 --
--- A note on the proposal ref (design.md §9(e)): the runner (not built by
--- this piece) writes `refs/desk/proposal` as a commit chain, but its exact
--- tree layout isn't pinned anywhere yet. This module reads it as: the
--- ref's HEAD commit's tree holds one blob, `proposal.json`, containing
--- exactly the judge's own `{"items": [...]}` output (design.md §9(e) /
--- morning-j.md's "Output" section) — the simplest shape, needing no
--- translation on the runner's side. If the runner ends up writing
--- something else, `read_proposal` below is the one place to change.
-local apply = require("desk.apply")
+-- Review key: merges his CURRENT buffer text (ours) with the proposal
+-- (theirs) against the pass-time version (base) with `git merge-file`, his
+-- text winning any conflict, and opens the result in a stacked split as an
+-- `acwrite` scratch buffer, both windows in diff mode. He takes a hunk with
+-- `do` in the notes window (editing first is fine) and leaves one alone to
+-- mean "not now" (the next pass carries it). The decline key makes the hunk
+-- under the cursor in the review split equal his text — an ordinary edit, so
+-- plain `u` undoes it. Nothing is recorded until he SAVES the review split:
+-- that is the commit point, recording every suggestion whose lines are gone
+-- from the review buffer and not in his notes as declined. A discarded
+-- review buffer records nothing. Adjacent suggestions are one diff hunk, so
+-- the decline key (and `<leader>gA`, which takes one) act on a single
+-- suggestion's own lines rather than the whole hunk.
 local git = require("desk.git")
-local histext = require("desk.histext")
 local ledger = require("desk.ledger")
-local round = require("desk.round")
+local proposal = require("desk.proposal")
 local snippet = require("desk.snippet")
 local status = require("desk.status")
 local tokens = require("desk.tokens")
 
 local M = {}
 
-M.PROPOSAL_REF = "refs/desk/proposal"
+M.PROPOSAL_REF = proposal.REF
 
 -- ---------------------------------------------------------------------------
--- Repo/file context and state reading
+-- Repo/file context
 -- ---------------------------------------------------------------------------
 
 --- The notes repo root and the buffer's file name relative to it (assumed
---- to live at the repo root, per design.md §6 — notes.md / reading.md),
---- or nil, "not in a git repo" if the buffer isn't inside one.
+--- to live at the repo root — notes.md / reading.md), or nil, why.
 function M.repo_context(bufnr)
 	local full = vim.api.nvim_buf_get_name(bufnr)
 	if full == "" then
@@ -42,530 +46,459 @@ function M.repo_context(bufnr)
 	return vim.trim(out), vim.fn.fnamemodify(full, ":t")
 end
 
---- HEAD's content for `file` in `repo`, or {} if HEAD has no such blob yet
---- (a brand-new repo before its first commit of this file).
-function M.head_lines(repo, file)
-	local exists = git.run(repo, { "cat-file", "-e", "HEAD:" .. file })
-	if not exists then
-		return {}
+local function buf_lines(buf)
+	return vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+end
+
+-- ---------------------------------------------------------------------------
+-- The merged view
+-- ---------------------------------------------------------------------------
+
+--- `git merge-file` of `ours` (his current text) with the proposal: base is
+--- the proposal's parent version, theirs the proposal's version, his text
+--- winning conflicts. Returns the merged lines, or nil, err.
+function M.merged_lines(repo, p, file, ours_lines)
+	local base = p.parent and proposal.lines_at(repo, p.parent, file) or {}
+	local theirs = proposal.lines_at(repo, p.sha, file)
+	local dir = vim.fn.tempname()
+	vim.fn.mkdir(dir, "p")
+	local function put(name, lines)
+		local path = dir .. "/" .. name
+		local fd = assert(io.open(path, "w"))
+		fd:write(snippet.join_lines(lines, true))
+		fd:close()
+		return path
 	end
-	local ok, out = git.run(repo, { "show", "HEAD:" .. file })
+	local ours_path, base_path, theirs_path = put("ours", ours_lines), put("base", base), put("theirs", theirs)
+	local ok, out, err = git.run(repo, { "merge-file", "-p", "--ours", ours_path, base_path, theirs_path })
+	vim.fn.delete(dir, "rf")
 	if not ok then
-		return {}
+		return nil, "git merge-file failed: " .. err
 	end
 	return (snippet.split_lines(out))
 end
 
---- Reads head/index/worktree lines plus every id's derived state, items,
---- last-key records and pending ranges for `bufnr` in one call.
-function M.read_state(bufnr)
-	local repo, file = M.repo_context(bufnr)
-	if not repo then
-		return nil, file
+-- ---------------------------------------------------------------------------
+-- Sessions (one review split per notes buffer)
+-- ---------------------------------------------------------------------------
+
+local sessions = {} -- notes bufnr -> session
+
+local function session_for_review_buf(buf)
+	for _, s in pairs(sessions) do
+		if s.review_buf == buf then
+			return s
+		end
 	end
-	local head = M.head_lines(repo, file)
-	local index_lines = snippet.split_lines(git.index_content(repo, file) or "")
-	local worktree_lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-	local states, items, last_key, ranges = ledger.derive_all(repo, file, index_lines, worktree_lines)
-	return {
+end
+
+--- The suggestions of `file` the merged view actually shows as hunks: not
+--- deferred, not already taken or declined, proposed in the merged text but
+--- not yet in his own.
+local function shown_items(repo, p, file, ours, merged)
+	local records = ledger.read(repo)
+	local declined = ledger.declined(records)
+	local taken = ledger.taken_by_id(records)
+	local shown = {}
+	for _, item in ipairs(p.items) do
+		if
+			item.file == file
+			and not item.deferred
+			and not taken[item.id]
+			and not declined.ids[item.id]
+			and proposal.proposed_in(item, merged)
+			and not proposal.proposed_in(item, ours)
+		then
+			shown[item.id] = item
+		end
+	end
+	return shown
+end
+
+local function first_hunk(win)
+	vim.api.nvim_win_call(win, function()
+		vim.cmd("diffupdate")
+		vim.api.nvim_win_set_cursor(win, { 1, 0 })
+		pcall(vim.cmd, "normal! ]c")
+	end)
+end
+
+local function close_session(s)
+	sessions[s.notes_buf] = nil
+	if vim.api.nvim_buf_is_valid(s.review_buf) then
+		pcall(vim.api.nvim_buf_delete, s.review_buf, { force = true })
+	end
+end
+
+--- Records as declined every shown suggestion whose lines are gone from the
+--- review buffer and not present in his notes — the review split's save.
+function M.save_review(s)
+	if not vim.api.nvim_buf_is_valid(s.review_buf) then
+		return false, "review buffer is gone"
+	end
+	local review_lines = buf_lines(s.review_buf)
+	local notes_lines
+	if vim.api.nvim_buf_is_loaded(s.notes_buf) then
+		notes_lines = buf_lines(s.notes_buf)
+	else
+		notes_lines = proposal.lines_at(s.repo, "HEAD", s.file)
+	end
+	local gone = {}
+	for _, item in pairs(s.shown) do
+		if not proposal.proposed_in(item, review_lines) and not proposal.proposed_in(item, notes_lines) then
+			gone[#gone + 1] = item
+		end
+	end
+	table.sort(gone, function(a, b)
+		return a.id < b.id
+	end)
+	if not ledger.record_declines(s.repo, gone) then
+		return false, "could not record the declines in the ledger"
+	end
+	vim.bo[s.review_buf].modified = false
+	return true, #gone
+end
+
+--- The review key: opens the merged view in a stacked split (or focuses
+--- the one already open for this proposal). Returns true, or false, why.
+function M.open_review(notes_buf)
+	local repo, file = M.repo_context(notes_buf)
+	if not repo then
+		return false, file
+	end
+	local p = proposal.read(repo)
+	if not p then
+		return false, "no proposal yet"
+	end
+	local existing = sessions[notes_buf]
+	if existing and vim.api.nvim_buf_is_valid(existing.review_buf) then
+		if existing.sha == p.sha then
+			local win = vim.fn.bufwinid(existing.review_buf)
+			if win ~= -1 then
+				vim.api.nvim_set_current_win(win)
+				return true
+			end
+		end
+		close_session(existing)
+	end
+
+	local ours = buf_lines(notes_buf)
+	local merged, err = M.merged_lines(repo, p, file, ours)
+	if not merged then
+		return false, err
+	end
+	local shown = shown_items(repo, p, file, ours, merged)
+	if next(shown) == nil then
+		return false, "no suggestions to review"
+	end
+
+	local notes_win = vim.fn.bufwinid(notes_buf)
+	if notes_win == -1 then
+		notes_win = vim.api.nvim_get_current_win()
+		vim.api.nvim_win_set_buf(notes_win, notes_buf)
+	end
+	vim.api.nvim_set_current_win(notes_win)
+	vim.cmd("belowright split")
+	local review_win = vim.api.nvim_get_current_win()
+	local review_buf = vim.api.nvim_create_buf(false, true)
+	vim.bo[review_buf].buftype = "acwrite"
+	vim.bo[review_buf].bufhidden = "wipe"
+	vim.bo[review_buf].swapfile = false
+	vim.bo[review_buf].modeline = false
+	vim.api.nvim_buf_set_name(review_buf, "desk-review://" .. file)
+	vim.bo[review_buf].filetype = vim.bo[notes_buf].filetype
+	vim.api.nvim_buf_set_lines(review_buf, 0, -1, false, merged)
+	vim.bo[review_buf].modified = false
+	vim.api.nvim_win_set_buf(review_win, review_buf)
+
+	local s = {
+		notes_buf = notes_buf,
+		review_buf = review_buf,
 		repo = repo,
 		file = file,
-		head_lines = head,
-		index_lines = index_lines,
-		worktree_lines = worktree_lines,
-		states = states,
-		items = items,
-		last_key = last_key,
-		ranges = ranges,
+		sha = p.sha,
+		shown = shown,
 	}
-end
+	sessions[notes_buf] = s
 
--- ---------------------------------------------------------------------------
--- Item under cursor
--- ---------------------------------------------------------------------------
-
---- Where a gap-shaped range (`r.count == 0` — a removal, or a move/merge's
---- leaving side) is actually reachable/visible in `bufnr` right now: `r.line`
---- itself, except when the content it stands for was the file's own very
---- last lines — desk.round.derive correctly computes that gap as sitting
---- one PAST the current last line (`#lines + 1`, the exact spot
---- reset_item's own re-insertion needs: appending after the true last line
---- restores the removed tail to where it belongs), but a cursor can never
---- sit on a line that doesn't exist, and neither can a quickfix entry or an
---- extmark row meant to look like it's attached to real content. Display/
---- hit-test callers clamp through this; reset_item (the one place that
---- actually re-inserts content there) uses `r.line` unclamped.
-local function display_line(bufnr, line)
-	return math.min(line, vim.api.nvim_buf_line_count(bufnr))
-end
-
---- The pending item whose current worktree range contains `line` (1-
---- indexed), plus the read_state() table it was found in — or nil, a
---- message if nothing pending sits there.
-function M.item_at_line(bufnr, line)
-	local st, err = M.read_state(bufnr)
-	if not st then
-		return nil, err
-	end
-	for id, rs in pairs(st.ranges) do
-		for _, r in ipairs(rs) do
-			local at = display_line(bufnr, r.line)
-			local hit = (r.count > 0 and line >= r.line and line <= r.line + r.count - 1) or (r.count == 0 and line == at)
-			if hit then
-				return st.items[id], st
-			end
-		end
-	end
-	return nil, "no pending suggestion under the cursor"
-end
-
--- ---------------------------------------------------------------------------
--- Accept / decline / not-now (whole-item actions)
--- ---------------------------------------------------------------------------
-
---- The item's live content at its "after"-bearing range(s) right now — what
---- accept should stage, honoring an edit he made before pressing it
---- ("accept edited" is just edit, then accept — design.md §2).
-local function live_after(bufnr, item, ranges)
-	for _, r in ipairs(ranges or {}) do
-		if r.count > 0 then
-			return snippet.join_lines(vim.api.nvim_buf_get_lines(bufnr, r.line - 1, r.line - 1 + r.count, false), false)
-		end
-	end
-	return item.after
-end
-
---- Stages `item`'s current buffer content into the index and records an
---- `accept` key. Returns true, or false, an error message. The index write
---- goes through desk.histext's own guard (design.md's own instruction:
---- reuse the retry-on-drift check `write_to_index` already had here too),
---- so a concurrent writer touching the index between the read and the
---- write is retried rather than silently overwritten or clobbering.
-function M.accept(bufnr, line)
-	line = line or vim.api.nvim_win_get_cursor(0)[1]
-	local item, st = M.item_at_line(bufnr, line)
-	if not item then
-		return false, st
-	end
-	local after = live_after(bufnr, item, st.ranges[item.id])
-	local proposal_item = { id = item.id, file = st.file, kind = item.kind, target = item.anchor, before = item.before, after = after }
-	local sha, _, err = histext.write_index_guarded(st.repo, st.file, function()
-		return { index_lines = snippet.split_lines(git.index_content(st.repo, st.file) or "") }
-	end, function(state)
-		local new_index = apply.apply_file(state.index_lines, { proposal_item })
-		return snippet.join_lines(new_index, true)
+	vim.api.nvim_win_call(review_win, function()
+		vim.cmd("diffthis")
 	end)
-	if not sha then
-		return false, err or "could not write the staged blob"
-	end
-	local ok = ledger.append(st.repo, { type = "key", id = item.id, at = os.time(), action = "accept" })
-	if not ok then
-		return false, "could not record the accept in the ledger"
-	end
-	vim.cmd("silent! noautocmd write")
+	vim.api.nvim_win_call(notes_win, function()
+		vim.cmd("diffthis")
+	end)
+
+	local group = vim.api.nvim_create_augroup("desk_review_" .. review_buf, { clear = true })
+	vim.api.nvim_create_autocmd("BufWriteCmd", {
+		group = group,
+		buffer = review_buf,
+		callback = function()
+			local ok, n_or_err = M.save_review(s)
+			if not ok then
+				vim.notify("desk: " .. tostring(n_or_err), vim.log.levels.WARN)
+			elseif n_or_err > 0 then
+				vim.notify("desk: declined " .. n_or_err .. " suggestion(s)", vim.log.levels.INFO)
+			end
+			M.refresh_overview(s)
+		end,
+	})
+	vim.api.nvim_create_autocmd("BufWipeout", {
+		group = group,
+		buffer = review_buf,
+		callback = function()
+			if sessions[notes_buf] == s then
+				sessions[notes_buf] = nil
+			end
+			local win = vim.fn.bufwinid(notes_buf)
+			if win ~= -1 then
+				vim.api.nvim_win_call(win, function()
+					vim.cmd("diffoff")
+				end)
+			end
+		end,
+	})
+	vim.keymap.set("n", "<leader>gD", function()
+		local ok, why = M.decline(review_buf)
+		if not ok then
+			vim.notify("desk: " .. tostring(why), vim.log.levels.WARN)
+		end
+	end, { buffer = review_buf, desc = "Decline the suggestion under the cursor (u undoes; :w records)" })
+	vim.keymap.set("n", "<leader>gA", function()
+		local ok, why = M.take(review_buf)
+		if not ok then
+			vim.notify("desk: " .. tostring(why), vim.log.levels.WARN)
+		end
+	end, { buffer = review_buf, desc = "Take just the suggestion under the cursor" })
+	vim.keymap.set("n", "<leader>go", function()
+		M.overview(notes_buf)
+	end, { buffer = review_buf, desc = "Overview: remaining suggestions" })
+
+	vim.api.nvim_set_current_win(notes_win)
+	first_hunk(notes_win)
 	return true
 end
 
---- Resets `item`'s lines in the buffer back to `before` — occurrence-aware
---- via desk.histext, so an edit of his beside it is never touched — and
---- records a `decline` or `not_now` key.
--- Resets `item` at its known-correct current buffer range(s) (from
--- desk.ledger's `ranges`, already offset-adjusted for every OTHER pending
--- item sharing the file — unlike resolving the anchor fresh via
--- desk.histext with just this one item, which would be wrong the moment a
--- sibling suggestion sits between it and the top of the file: its content
--- would still be sitting in the worktree, uncounted, throwing off every
--- position after it). A move/merge's gap-shaped (leaving) range gets
--- `before` re-inserted; its content-shaped (landing) range, like a plain
--- add/edit/new/link, gets replaced with `before` (empty for a pure
--- insertion, meaning removed outright).
-local function reset_item(bufnr, line, action)
-	line = line or vim.api.nvim_win_get_cursor(0)[1]
-	local item, st = M.item_at_line(bufnr, line)
-	if not item then
-		return false, st
+local function find_all(lines, block)
+	local out = {}
+	if #block == 0 then
+		return out
 	end
-	local before_lines = snippet.split_lines(item.before)
-	local two_location = item.kind == "move" or item.kind == "merge"
-	local ranges = vim.deepcopy(st.ranges[item.id] or {})
-	table.sort(ranges, function(a, b)
-		return a.line > b.line -- bottom to top, so an earlier edit never shifts a later lookup
-	end)
-	for _, r in ipairs(ranges) do
-		if r.count == 0 then
-			vim.api.nvim_buf_set_lines(bufnr, r.line - 1, r.line - 1, false, before_lines)
+	for pos = 1, #lines - #block + 1 do
+		if snippet.lines_match_at(lines, pos, block) then
+			out[#out + 1] = pos
+		end
+	end
+	return out
+end
+
+--- The review-buffer line range of the suggestion whose lines contain
+--- `line`, or nil (a removal has no lines of its own there, and plain text
+--- of his own is no suggestion). Adjacent suggestions form ONE diff hunk, so
+--- acting on a single suggestion means acting on this range, not the hunk.
+function M.item_range(s, line)
+	local review_lines = buf_lines(s.review_buf)
+	for _, item in pairs(s.shown) do
+		local after = snippet.split_lines(item.after)
+		for _, pos in ipairs(find_all(review_lines, after)) do
+			if line >= pos and line <= pos + #after - 1 then
+				return pos, pos + #after - 1, item
+			end
+		end
+	end
+end
+
+-- Runs `diffget` (obtain from his notes) or `diffput` (hand to his notes)
+-- for the suggestion under the cursor in the review split, or for the whole
+-- hunk there when the cursor isn't on a suggestion's own lines. Returns
+-- whether either buffer changed.
+local function diff_act(s, verb)
+	local win = vim.fn.bufwinid(s.review_buf)
+	if win == -1 then
+		return false, "review buffer has no window"
+	end
+	local before_review, before_notes = buf_lines(s.review_buf), buf_lines(s.notes_buf)
+	vim.api.nvim_win_call(win, function()
+		local first, last = M.item_range(s, vim.api.nvim_win_get_cursor(win)[1])
+		if first then
+			pcall(vim.cmd, string.format("%d,%d%s", first, last, verb))
 		else
-			local replacement = two_location and {} or before_lines
-			vim.api.nvim_buf_set_lines(bufnr, r.line - 1, r.line - 1 + r.count, false, replacement)
+			pcall(vim.cmd, "normal! d" .. (verb == "diffget" and "o" or "p"))
 		end
-	end
-	local ok = ledger.append(st.repo, { type = "key", id = item.id, at = os.time(), action = action })
-	if not ok then
-		return false, "could not record the " .. action .. " in the ledger"
-	end
-	vim.cmd("silent! noautocmd write")
-	return true
-end
-
-function M.decline(bufnr, line)
-	return reset_item(bufnr, line, "decline")
-end
-
-function M.not_now(bufnr, line)
-	return reset_item(bufnr, line, "not_now")
-end
-
---- Restores `item` (a ledger item record, from desk.ledger.declined_recently
---- — a genuinely declined one, or one resolved without ever going through a
---- key) into `bufnr` at its own anchor, via the same desk.apply.apply_file
---- machinery the review key uses to lay items in, against the buffer's
---- CURRENT content — never against head, so it never disturbs anything
---- else already sitting there. Records a `restore` key for provenance —
---- never one derive_all's own bucketing consults (an item's state is
---- content-derived, so what makes it "pending" again is `after` landing
---- back in the worktree, not this key), same reasoning as `accept`/
---- `decline`/`not_now`'s own key records. design.md §2's "A 'declined
---- recently' listing".
-function M.restore(bufnr, item)
-	local repo, file = M.repo_context(bufnr)
-	if not repo then
-		return false, file
-	end
-	local worktree_lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-	local proposal_item =
-		{ id = item.id, file = file, kind = item.kind, target = item.anchor, before = item.before, after = item.after }
-	local new_lines, results, _, ranges = apply.apply_file(worktree_lines, { proposal_item })
-	if results[item.id] ~= "applied" then
-		return false, "could not restore: its anchor no longer resolves cleanly"
-	end
-	vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, new_lines)
-	vim.cmd("silent! noautocmd write")
-	-- Extends the round (design.md: "restore ... uses the same extend
-	-- step") so the restored item — and every other still-pending item
-	-- from the round before it — is tracked from here, never re-derived
-	-- against a stale anchor.
-	M.extend_round(repo, file, worktree_lines, { item }, new_lines, ranges)
-	local ok = ledger.append(repo, { type = "key", id = item.id, at = os.time(), action = "restore" })
-	if not ok then
-		return false, "could not record the restore in the ledger"
-	end
-	return true
-end
-
--- ---------------------------------------------------------------------------
--- His commit key / the review key
--- ---------------------------------------------------------------------------
-
---- Commits his text (design.md §2): computes it (reverting only genuinely
---- pending items, at their own round-derived ranges) and writes it to the
---- index via desk.histext, then turns that index state into a real commit
---- — his own identity, nothing special. A no-op (no commit) if his text
---- already matches HEAD.
----
---- Freezes every resolved (accepted/declined) laid-in item not already
---- frozen (design.md's "Review rounds": "each commit freezes resolved
---- items ... so they are never re-derived against a moved HEAD") — the
---- commit is the one moment desk.ledger.derive_all's content-derived state
---- is trusted as final for anything no longer pending; postponed/queued
---- items are still active and are never frozen.
----
---- Every run also (re)writes the pending-set snapshot (§9(g)): the ids
---- this run derived as "pending", against the repo's resulting HEAD sha —
---- the baseline a later `ledger-classify` reads back to tell "resolved
---- through the review key" apart from "resolved some other way" between
---- this run and the next one.
-function M.commit_his_text(bufnr)
-	local repo, file = M.repo_context(bufnr)
-	if not repo then
-		return false, file
-	end
-
-	local pending_ids = {}
-	local to_freeze = {}
-	local sha, results, err = histext.write_to_index(repo, file, function()
-		local index_lines = snippet.split_lines(git.index_content(repo, file) or "")
-		local worktree_lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-		local states, items, _, ranges = ledger.derive_all(repo, file, index_lines, worktree_lines)
-		local resolved = round.resolved_states(ledger.read(repo))
-		local pending_items = {}
-		pending_ids = {}
-		to_freeze = {}
-		for id, item in pairs(items) do
-			local state = states[id]
-			if state == "pending" then
-				table.insert(pending_items, item)
-				table.insert(pending_ids, id)
-			elseif (state == "accepted" or state == "declined") and not resolved[id] then
-				table.insert(to_freeze, { id = id, state = state })
-			end
-		end
-		return {
-			worktree_lines = worktree_lines,
-			pending_items = pending_items,
-			pending_ranges = ranges,
-		}
 	end)
-	if not sha then
-		return false, err
+	if vim.deep_equal(before_review, buf_lines(s.review_buf)) and vim.deep_equal(before_notes, buf_lines(s.notes_buf)) then
+		return false, "no suggestion under the cursor"
 	end
+	return true
+end
 
-	if #to_freeze > 0 then
-		local freeze_records = {}
-		for _, f in ipairs(to_freeze) do
-			freeze_records[#freeze_records + 1] = round.build_resolved(f.id, f.state)
-		end
-		ledger.append_many(repo, freeze_records)
+--- The decline key: makes the suggestion under the cursor in the review
+--- split equal his text (it obtains his side), so its diff disappears. An
+--- ordinary edit — `u` undoes it; nothing is recorded until the review split
+--- is saved.
+function M.decline(review_buf)
+	local s = session_for_review_buf(review_buf)
+	if not s then
+		return false, "not a desk review buffer"
 	end
-
-	local diff_ok = git.run(repo, { "diff", "--cached", "--quiet", "HEAD", "--", file })
-	local commit_err
-	if not diff_ok then
-		local commit_ok
-		commit_ok, _, commit_err = git.run(repo, { "commit", "-m", "notes" })
-		if not commit_ok then
-			return false, "git commit failed: " .. commit_err
-		end
+	local ok, why = diff_act(s, "diffget")
+	if ok then
+		M.refresh_overview(s)
 	end
+	return ok, why
+end
 
-	local head_ok, head_out = git.run(repo, { "rev-parse", "HEAD" })
-	ledger.write_pending_snapshot(
-		ledger.pending_snapshot_path(repo, file),
-		head_ok and vim.trim(head_out) or "",
-		pending_ids
+--- Takes the suggestion under the cursor into his notes buffer (just that
+--- one — `do` in his window takes the whole hunk, which can be several
+--- adjacent suggestions). His buffer stays unsaved until he commits.
+function M.take(review_buf)
+	local s = session_for_review_buf(review_buf)
+	if not s then
+		return false, "not a desk review buffer"
+	end
+	local ok, why = diff_act(s, "diffput")
+	if ok then
+		M.refresh_overview(s)
+	end
+	return ok, why
+end
+
+-- ---------------------------------------------------------------------------
+-- Overview: one quickfix entry per remaining hunk
+-- ---------------------------------------------------------------------------
+
+M.OVERVIEW_TITLE = "Desk overview"
+M.DECLINED_TITLE = "Desk declined recently"
+M.DECLINED_WINDOW_DAYS = 14
+
+--- The suggestions still left as hunks right now: shown at open, still
+--- proposed in the review buffer, not yet in his notes. Each with the review
+--- buffer line to jump to, sorted by position.
+function M.remaining(s)
+	local review_lines = buf_lines(s.review_buf)
+	local notes_lines = buf_lines(s.notes_buf)
+	local hunks = vim.diff(
+		snippet.join_lines(notes_lines, true),
+		snippet.join_lines(review_lines, true),
+		{ result_type = "indices" }
 	)
-
-	return true, results
-end
-
---- Reads the latest proposal from refs/desk/proposal (see the file-level
---- comment on its assumed shape). Returns a list of items, or {} if the
---- ref doesn't exist.
-function M.read_proposal(repo)
-	local sha = git.ref_sha(repo, M.PROPOSAL_REF)
-	if not sha then
-		return {}
+	local out = {}
+	for _, item in pairs(s.shown) do
+		if proposal.proposed_in(item, review_lines) and not proposal.proposed_in(item, notes_lines) then
+			local lnum = 1
+			local after = snippet.split_lines(item.after)
+			if #after > 0 then
+				local positions = find_all(review_lines, after)
+				lnum = positions[1] or 1
+				for _, pos in ipairs(positions) do
+					for _, h in ipairs(hunks) do
+						if pos >= h[3] and pos <= h[3] + math.max(h[4], 1) - 1 then
+							lnum = pos
+						end
+					end
+				end
+			else
+				local positions = find_all(notes_lines, snippet.split_lines(item.before))
+				for _, pos in ipairs(positions) do
+					for _, h in ipairs(hunks) do
+						if pos >= h[1] and pos <= h[1] + math.max(h[2], 1) - 1 then
+							lnum = math.max(h[3], 1)
+						end
+					end
+				end
+			end
+			out[#out + 1] = { item = item, lnum = math.min(lnum, math.max(#review_lines, 1)) }
+		end
 	end
-	local ok, out = git.run(repo, { "show", sha .. ":proposal.json" })
-	if not ok then
-		return {}
-	end
-	local decode_ok, parsed = pcall(vim.json.decode, out)
-	if not decode_ok or type(parsed) ~= "table" then
-		return {}
-	end
-	return parsed.items or {}
-end
-
---- Writes `items` (the pinned proposal shape, design.md §9(e)) as the new
---- tip of refs/desk/proposal: a commit whose tree holds one blob,
---- `proposal.json`, parented on the ref's current tip (design.md's own
---- "Proposal ref layout" — "Each pass commits a new proposal commit whose
---- parent is the previous one"). This is the runner's own write path (via
---- `nvim -l`, per design.md §6): it never touches the working file or the
---- index, only this ref, through the same compare-and-swap-with-retry
---- helper every other desk ref write uses. Returns the new commit sha, or
---- nil, an error message.
-function M.write_proposal(repo, items)
-	return git.cas_retry(repo, M.PROPOSAL_REF, function(old_sha)
-		local blob = git.hash_object_write(repo, vim.json.encode({ items = items }))
-		if not blob then
-			return nil
+	table.sort(out, function(a, b)
+		if a.lnum ~= b.lnum then
+			return a.lnum < b.lnum
 		end
-		local mktree_ok, tree_out =
-			git.run(repo, { "mktree" }, string.format("100644 blob %s\tproposal.json\n", blob))
-		if not mktree_ok then
-			return nil
-		end
-		local args = { "commit-tree", vim.trim(tree_out), "-m", "proposal" }
-		if old_sha then
-			table.insert(args, "-p")
-			table.insert(args, old_sha)
-		end
-		local commit_ok, commit_out = git.run(repo, args)
-		if not commit_ok then
-			return nil
-		end
-		return vim.trim(commit_out)
+		return a.item.id < b.item.id
 	end)
+	return out
 end
 
---- Extends the round for `file` (design.md's "Review rounds": "a second
---- review press extends the round ... it never rebuilds from HEAD" — also
---- used by restore, "using the same extend step"). Appends a new "round"
---- ledger record whose text is `new_lines` — the buffer after
---- `added_items` were laid into `pre_lines` via desk.apply.apply_file,
---- which also supplies `added_ranges` for them — plus every item still
---- "pending" as of the round *before* this one (derived against
---- `pre_lines`, i.e. the buffer as it stood just before `added_items` went
---- in), carried forward with its ranges remapped from the OLD round's own
---- text into `new_lines` via desk.round.remap_ranges — the same content-
---- diff mapping every read already uses, never a fresh anchor resolution
---- against head.
-function M.extend_round(repo, file, pre_lines, added_items, new_lines, added_ranges)
-	local records = ledger.read(repo)
-	local old_round = round.latest(records, file)
-	local items_by_id = ledger.items_by_id(records)
-
-	local round_items = {}
-	for _, item in ipairs(added_items) do
-		round_items[#round_items + 1] = item
+local function overview_items(s)
+	local qf = {}
+	for _, r in ipairs(M.remaining(s)) do
+		qf[#qf + 1] = { bufnr = s.review_buf, lnum = r.lnum, col = 1, text = r.item.headline or r.item.id }
 	end
-	local merged_ranges = vim.deepcopy(added_ranges)
-
-	if old_round then
-		local index_lines = snippet.split_lines(git.index_content(repo, file) or "")
-		local resolved = round.resolved_states(records)
-		local states = select(1, ledger.derive_all(repo, file, index_lines, pre_lines))
-		-- pairs() iterates old_round.items in an arbitrary order; carried
-		-- items are appended after the freshly-added ones, so ties at one
-		-- anchor between an OLD carried item and a brand-new one still
-		-- favor the new one's own (already-correct) lay-in-order tie-break
-		-- — a carried item was, by definition, already laid in before this
-		-- press, so it never competes for input order with what's new.
-		for id, entry in pairs(old_round.items) do
-			if states[id] == "pending" and not resolved[id] and not merged_ranges[id] then
-				merged_ranges[id] = round.remap_ranges(old_round.text, entry.ranges, new_lines)
-				round_items[#round_items + 1] = items_by_id[id]
-			end
-		end
-	end
-
-	return ledger.append(repo, round.build(file, new_lines, round_items, merged_ranges))
+	return qf
 end
 
---- The review key: commits his text, lays the currently queued (or
---- re-proposed postponed) slice of the proposal into the buffer against
---- the CURRENT WORKTREE — never head — so whatever the round before this
---- press is already carrying (every still-pending item, wherever his own
---- editing has since left it) stays exactly where it is; this press only
---- adds to it. Extends the round (M.extend_round), records which items it
---- laid in, and turns on review mode.
----
---- Only an item the ledger derives as "queued" (never laid in before) or
---- "postponed" (a "not now"'d item still present in the current proposal —
---- design.md's "Review rounds": "a postponed item is laid in again on its
---- postponed state alone") gets laid in. Without this filter, every press
---- would blindly re-apply the WHOLE proposal regardless of what's already
---- accepted/declined/still pending — duplicating what's already there and
---- resurrecting a declined item whose content is gone from the buffer.
----
---- An item whose anchor doesn't apply cleanly against the current worktree
---- (a real content conflict — his edits sit where it expected to find its
---- own `before`) is deferred (left out, stays queued) — design.md §2. An
---- item whose anchor doesn't resolve AT ALL instead lands on top and
---- counts as applied (see desk.apply.apply_file); `landed_on_top` in the
---- returned stats is how many of this press's own lay-ins took that path.
-function M.review(bufnr)
-	local ok, err = M.commit_his_text(bufnr)
-	if not ok then
-		return false, err
-	end
-	local repo, file = M.repo_context(bufnr)
-	local index_lines = snippet.split_lines(git.index_content(repo, file) or "")
-	local worktree_lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-	local states = ledger.derive_all(repo, file, index_lines, worktree_lines)
-
-	local proposal_items = M.read_proposal(repo)
-	local by_file = {}
-	for _, item in ipairs(proposal_items) do
-		if item.file == file then
-			local state = states[item.id]
-			if state == "queued" or state == "postponed" then
-				table.insert(by_file, item)
-			end
-		end
-	end
-	local new_lines, results, landed_on_top, new_ranges = apply.apply_file(worktree_lines, by_file)
-	vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, new_lines)
-	vim.cmd("silent! noautocmd write")
-
-	local laid_in_ids = {}
-	local applied_items = {}
-	local deferred = 0
-	local landed_on_top_count = 0
-	for _, item in ipairs(by_file) do
-		if results[item.id] == "applied" then
-			table.insert(laid_in_ids, item.id)
-			table.insert(applied_items, item)
-			if landed_on_top[item.id] then
-				landed_on_top_count = landed_on_top_count + 1
-			end
-		else
-			deferred = deferred + 1
-		end
-	end
-	M.extend_round(repo, file, worktree_lines, applied_items, new_lines, new_ranges)
-
-	local proposal_sha = git.ref_sha(repo, M.PROPOSAL_REF) or "unknown"
-	ledger.append(repo, { type = "laid_in", at = os.time(), proposal = proposal_sha, items = laid_in_ids })
-
-	M.enable_review_mode(bufnr)
-	return true, { laid_in = #laid_in_ids, deferred = deferred, landed_on_top = landed_on_top_count }
-end
-
--- ---------------------------------------------------------------------------
--- Review mode: gitsigns inline deleted lines + word diff. Both are global
--- gitsigns settings (its `config` table has no per-buffer notion), so this
--- turns them on for as long as focus stays in a notes buffer and off the
--- moment it leaves one — approximating "on for this buffer" with the only
--- lever gitsigns actually exposes. See desk.review's BufEnter/BufLeave wiring
--- in M.attach.
--- ---------------------------------------------------------------------------
-
-function M.enable_review_mode(bufnr)
-	local ok, gitsigns = pcall(require, "gitsigns")
-	if not ok then
+--- Rebuilds an overview list already open for `s` (after a decline or a save).
+function M.refresh_overview(s)
+	local info = vim.fn.getqflist({ title = 0, context = 0 })
+	if info.title ~= M.OVERVIEW_TITLE or not (info.context and info.context.desk_review_buf == s.review_buf) then
 		return
 	end
-	gitsigns.toggle_deleted(true)
-	gitsigns.toggle_word_diff(true)
-	if bufnr then
-		vim.b[bufnr].desk_review_mode = true
-	end
+	vim.fn.setqflist({}, "r", { title = M.OVERVIEW_TITLE, items = overview_items(s), context = info.context })
 end
 
-function M.disable_review_mode()
-	local ok, gitsigns = pcall(require, "gitsigns")
-	if not ok then
+--- The overview key: opens the review split if needed, then a quickfix list
+--- with one headline per remaining hunk.
+function M.overview(notes_buf)
+	local s = sessions[notes_buf]
+	if not s or not vim.api.nvim_buf_is_valid(s.review_buf) then
+		local ok, why = M.open_review(notes_buf)
+		if not ok then
+			return false, why
+		end
+		s = sessions[notes_buf]
+	end
+	vim.fn.setqflist({}, " ", {
+		title = M.OVERVIEW_TITLE,
+		items = overview_items(s),
+		context = { desk_review_buf = s.review_buf },
+	})
+	vim.cmd("copen")
+	return true
+end
+
+-- ---------------------------------------------------------------------------
+-- Quickfix handlers: <CR> jumps (overview) and r restores (declined list)
+-- ---------------------------------------------------------------------------
+
+local function is_loclist_win(win)
+	local info = vim.fn.getwininfo(win)[1]
+	return info ~= nil and info.loclist == 1
+end
+
+--- The quickfix `<CR>` handler for every quickfix buffer (installed once,
+--- globally): anything that isn't desk's own overview falls through to the
+--- ordinary jump. An overview entry jumps in the review split — through the
+--- jumplist (`m'` first), so Ctrl-O/Ctrl-I work there afterward — from
+--- wherever the overview was opened, including its own split.
+function M.qf_jump()
+	if is_loclist_win(vim.api.nvim_get_current_win()) then
+		vim.cmd(vim.fn.line(".") .. "ll")
 		return
 	end
-	gitsigns.toggle_deleted(false)
-	gitsigns.toggle_word_diff(false)
+	if vim.fn.getqflist({ title = 0 }).title ~= M.OVERVIEW_TITLE then
+		vim.cmd(vim.fn.line(".") .. "cc")
+		return
+	end
+	local item = vim.fn.getqflist()[vim.fn.line(".")]
+	if not item or not item.bufnr or item.bufnr == 0 then
+		return
+	end
+	local win = vim.fn.bufwinid(item.bufnr)
+	if win == -1 then
+		vim.notify("desk: the review split is closed — press the review key again", vim.log.levels.WARN)
+		return
+	end
+	vim.api.nvim_set_current_win(win)
+	vim.cmd("normal! m'")
+	vim.api.nvim_win_set_cursor(win, { math.max(item.lnum, 1), 0 })
 end
 
 -- ---------------------------------------------------------------------------
--- Virtual text: headline, source, "suggested · age", and — for an item
--- laid in on its postponed state alone (design.md's "Review rounds": "a
--- postponed item is laid in again on its postponed state alone
--- ('postponed from <day>' comes from the not_now key's time)") —
--- "postponed from <day>", read straight from that item's own last `key`
--- record rather than a marker field on the item itself.
+-- Declined recently
 -- ---------------------------------------------------------------------------
-
-M.ns = vim.api.nvim_create_namespace("desk_review")
-
-local function format_age(proposed_at)
-	if not proposed_at then
-		return "unknown age"
-	end
-	local days = math.floor((os.time() - proposed_at) / 86400)
-	if days <= 0 then
-		return "today"
-	elseif days == 1 then
-		return "1 day"
-	end
-	return days .. " days"
-end
 
 --- A short, one-word-ish label for where a suggestion came from, never the
---- raw `item.source` verbatim (which could be a full URL, a bare ticket key,
---- a bare session name, or nothing at all): a URL's own host ("github.com"),
---- a ticket-shaped token as "ticket KEY", a session-shaped one as "session
---- NAME", and "notes" — never blank — for anything else, empty/absent
---- included (found directly in his own notes, no external source at all).
---- `tokens_config` (desk.tokens shape) is what tells a ticket key and a
---- session name apart; without one (or with neither classifying it), the
---- honest label is still "notes" rather than a guess.
+--- raw `item.source` verbatim: a URL's own host, a ticket-shaped token as
+--- "ticket KEY", a session-shaped one as "session NAME", else "notes".
 function M.format_source(source, tokens_config)
 	if not source or source == "" then
 		return "notes"
@@ -584,317 +517,51 @@ function M.format_source(source, tokens_config)
 	return "notes"
 end
 
---- Redraws every pending item's virtual text in `bufnr` from scratch.
-function M.refresh_virtual_text(bufnr)
-	local st = M.read_state(bufnr)
-	if not st then
-		return
-	end
-	local tokens_config = tokens.tokens_from(select(1, tokens.load()))
-	vim.api.nvim_buf_clear_namespace(bufnr, M.ns, 0, -1)
-	for id, rs in pairs(st.ranges) do
-		local item = st.items[id]
-		local line = display_line(bufnr, rs[1].line)
-		local parts = {}
-		if item.headline and item.headline ~= "" then
-			table.insert(parts, item.headline)
-		end
-		table.insert(parts, M.format_source(item.source, tokens_config))
-		table.insert(parts, "suggested · " .. format_age(item.proposed_at))
-		local last_key = st.last_key[id]
-		if last_key and last_key.action == "not_now" and last_key.at then
-			table.insert(parts, "postponed from " .. os.date("%A", last_key.at))
-		end
-		vim.api.nvim_buf_set_extmark(bufnr, M.ns, math.max(line - 1, 0), 0, {
-			virt_text = { { table.concat(parts, " · "), "Comment" } },
-			virt_text_pos = "eol",
-		})
-	end
-end
-
--- ---------------------------------------------------------------------------
--- Status line (D7, design.md §2 "Status line", §9(f)): desk.status.statusline()
--- was called by nothing — this is that wiring, into a notes buffer's own
--- winbar (buffer-local via a per-window autocmd, since winbar itself is a
--- window option; there's no other statusline component in nvim/lua to fit
--- into instead). It reads two things: the runner-written status file
--- (desk.status.statusline, global — the same for every notes buffer) and
--- this buffer's own LIVE waiting-edit state (an edit of his that waits on
--- the suggestion beside it — desk.histext's own "waiting_edit"), which
--- status.json can't carry a line number for at all: its own waiting_edits
--- field is a bare array of item ids merged across every configured file,
--- with no live buffer to resolve a line against and no guarantee an id
--- even belongs to THIS file. Refreshed at the same points the virtual
--- text already is, so it never needs its own polling.
--- ---------------------------------------------------------------------------
-
---- Every currently pending item in `bufnr` whose own suggestion doesn't
---- fully resolve against the worktree right now (desk.histext.compute's
---- "waiting_edit": its round-derived ranges are missing or incomplete —
---- design.md §2's "an edit of his that waits on the suggestion beside
---- it"), as one formatted line each, naming the real line number when one
---- of its ranges did resolve.
-function M.buffer_waiting_edits(bufnr)
-	local st = M.read_state(bufnr)
-	if not st then
-		return {}
-	end
-	local pending_items = {}
-	for id, item in pairs(st.items) do
-		if st.states[id] == "pending" then
-			table.insert(pending_items, item)
-		end
-	end
-	local _, results = histext.compute(st.worktree_lines, pending_items, st.ranges)
+--- Declines still in force within the last `days`, newest first.
+function M.declined_recently(repo, days)
+	local cutoff = os.time() - days * 86400
 	local out = {}
-	for id, result in pairs(results) do
-		if result == "waiting_edit" then
-			local rs = st.ranges[id]
-			local line = rs and rs[1] and display_line(bufnr, rs[1].line)
-			if line then
-				table.insert(out, string.format("your edit (line %d) waits on the suggestion beside it", line))
-			else
-				table.insert(out, "your edit waits on the suggestion beside it")
-			end
+	for _, rec in ipairs(ledger.declined(ledger.read(repo)).list) do
+		if (rec.at or 0) >= cutoff then
+			out[#out + 1] = rec
 		end
 	end
-	table.sort(out)
+	table.sort(out, function(a, b)
+		return (a.at or 0) > (b.at or 0)
+	end)
 	return out
 end
 
---- The buffer-wired status line: the runner's own status.json summary plus
---- this buffer's own live waiting-edit notices, joined the same way every
---- other segment list in this codebase is (" · ").
-function M.status_line(bufnr)
-	local parts = {}
-	local summary = status.summary(status.read())
-	if summary ~= "" then
-		table.insert(parts, summary)
-	end
-	for _, seg in ipairs(M.buffer_waiting_edits(bufnr)) do
-		table.insert(parts, seg)
-	end
-	return table.concat(parts, " · ")
-end
-
---- Sets every window currently showing `bufnr`'s own winbar to
---- M.status_line(bufnr) — the actual wiring. Safe to call from a window
---- other than the one(s) showing `bufnr` (M.attach's BufEnter callback
---- runs with `bufnr` current, but a refresh after a review key press does
---- too, so this never assumes which window is current).
-function M.refresh_status_line(bufnr)
-	if not vim.api.nvim_buf_is_valid(bufnr) then
-		return
-	end
-	local line = M.status_line(bufnr)
-	for _, win in ipairs(vim.fn.win_findbuf(bufnr)) do
-		vim.wo[win].winbar = line
-	end
-end
-
--- ---------------------------------------------------------------------------
--- Overview: a quickfix list of pending suggestions — news first, then in-
--- place items by position, then a postponed count — plus his own unstaged
--- edits, labelled "yours". Every jump goes through the jumplist (design.md
--- §2), including from an overview opened in its own split: the jump moves
--- the cursor (and sets the ' mark) in the *notes* window, never the qf one.
--- ---------------------------------------------------------------------------
-
-M.OVERVIEW_TITLE = "Desk overview"
-M.DECLINED_TITLE = "Desk declined recently"
-M.DECLINED_WINDOW_DAYS = 14
-
---- True if the (1-indexed, `count` possibly 0 for a zero-width gap) ranges
---- `[a_line, a_line+a_count-1]` and `[b_line, b_line+b_count-1]` overlap —
---- a zero-count range is treated as occupying its own single line for this
---- purpose (matching M.item_at_line's own "count == 0: hit at exactly this
---- line" rule).
-local function ranges_overlap(a_line, a_count, b_line, b_count)
-	local a_end = a_line + math.max(a_count, 1) - 1
-	local b_end = b_line + math.max(b_count, 1) - 1
-	return a_line <= b_end and b_line <= a_end
-end
-
---- Lines that differ between the worktree and the index, outside of any
---- pending item's own current range — his own edit, not yet staged,
---- unrelated to any suggestion (design.md's "yours" listing). Goes
---- through desk.round's own line-shift-robust content diff (the same
---- primitive every round-derived range is already mapped through) rather
---- than a same-length, position-by-position comparison, which broke the
---- moment an edit also inserted or deleted a line — a hunk here is real
---- regardless of any length change elsewhere in the file; it's counted as
---- "yours" only once checked against every pending item's own range, so a
---- hunk a suggestion itself accounts for is never double-reported.
-function M.unowned_hunks(bufnr, st)
-	local hunks = round.diff_hunks(st.index_lines, st.worktree_lines)
-	local out = {}
-	for _, h in ipairs(hunks) do
-		local wt_start, wt_count = h[3], h[4]
-		if wt_count > 0 then -- a deletion (nothing left in the worktree) has no line to point at
-			local owned = false
-			for _, rs in pairs(st.ranges) do
-				for _, r in ipairs(rs) do
-					if ranges_overlap(wt_start, wt_count, r.line, r.count) then
-						owned = true
-					end
-				end
-			end
-			if not owned then
-				table.insert(out, { line = wt_start })
-			end
-		end
-	end
-	return out
-end
-
---- True if `win` is showing a location list rather than a quickfix list —
---- both share filetype "qf", so this is the only reliable way to tell them
---- apart. Desk never opens a location list (M.overview/M.list_declined_recently
---- both go through setqflist), so the override below has no business acting
---- on one at all: LSP references, `:grep` piped to a loclist, or anything
---- else's own loclist window must fall through to the ordinary default.
-local function is_loclist_win(win)
-	local info = vim.fn.getwininfo(win)[1]
-	return info ~= nil and info.loclist == 1
-end
-
---- The quickfix `<CR>` handler for every quickfix buffer (installed once,
---- globally): a no-op override for a location list or any quickfix list
---- that isn't desk's own (falls through to the ordinary jump), and
---- otherwise jumps in the *previous* window (`wincmd p` — wherever he was
---- before opening the overview, never just "the first non-quickfix window
---- in the tab", which could be an unrelated split) with `m'` set first, so
---- Ctrl-O/Ctrl-I work there afterward.
-function M.qf_jump()
-	if is_loclist_win(vim.api.nvim_get_current_win()) then
-		vim.cmd(vim.fn.line(".") .. "ll")
-		return
-	end
-	local title = vim.fn.getqflist({ title = 0 }).title
-	if title ~= M.OVERVIEW_TITLE then
-		vim.cmd(vim.fn.line(".") .. "cc")
-		return
-	end
-	local idx = vim.fn.line(".")
-	local item = vim.fn.getqflist()[idx]
-	if not item or not item.bufnr or item.bufnr == 0 then
-		return -- a header-only line (the postponed count): nothing to jump to
-	end
-	local qf_win = vim.api.nvim_get_current_win()
-	vim.cmd("wincmd p")
-	local target_win = vim.api.nvim_get_current_win()
-	if target_win == qf_win then
-		-- No previous window to return to (the overview was opened as the
-		-- only window in the tab): make one, same fallback as before.
-		vim.cmd("botright vsplit")
-		target_win = vim.api.nvim_get_current_win()
-	end
-	vim.api.nvim_set_current_win(target_win)
-	vim.cmd("normal! m'")
-	vim.api.nvim_win_set_buf(target_win, item.bufnr)
-	vim.api.nvim_win_set_cursor(target_win, { math.max(item.lnum, 1), 0 })
-end
-
---- Builds and opens the overview for `bufnr`'s notes file.
-function M.overview(bufnr)
-	local st = M.read_state(bufnr)
-	if not st then
-		return
-	end
-
-	local news, in_place = {}, {}
-	for id, rs in pairs(st.ranges) do
-		local item = st.items[id]
-		local entry = { bufnr = bufnr, lnum = display_line(bufnr, rs[1].line), col = 1, text = item.headline or item.id }
-		if item.anchor == "top" then
-			table.insert(news, { pos = rs[1].line, entry = entry })
-		else
-			table.insert(in_place, { pos = rs[1].line, entry = entry })
-		end
-	end
-	table.sort(news, function(a, b)
-		return a.pos < b.pos
-	end)
-	table.sort(in_place, function(a, b)
-		return a.pos < b.pos
-	end)
-
-	local qf_items = {}
-	for _, n in ipairs(news) do
-		table.insert(qf_items, n.entry)
-	end
-	for _, n in ipairs(in_place) do
-		table.insert(qf_items, n.entry)
-	end
-
-	-- "postponed" (the ledger state a not_now'd item derives as), never
-	-- "deferred" — that word already names something else: M.review's own
-	-- returned count of items that didn't apply cleanly THIS press
-	-- (design.md §2's "an item that doesn't apply cleanly ... stays
-	-- queued"). Reusing it here for a different state read back as "how
-	-- many failed to lay in", when it actually meant "how many he's
-	-- postponed".
-	local postponed = 0
-	for id in pairs(st.items) do
-		if st.states[id] == "postponed" then
-			postponed = postponed + 1
-		end
-	end
-	if postponed > 0 then
-		table.insert(qf_items, { text = postponed .. " postponed" })
-	end
-
-	for _, hunk in ipairs(M.unowned_hunks(bufnr, st)) do
-		table.insert(qf_items, { bufnr = bufnr, lnum = hunk.line, col = 1, text = "yours" })
-	end
-
-	vim.fn.setqflist({}, " ", { title = M.OVERVIEW_TITLE, items = qf_items })
-	vim.cmd("copen")
-end
-
---- Builds and opens a quickfix list of items declined, or resolved without
---- ever going through a key, within the last `days` (default
---- M.DECLINED_WINDOW_DAYS) — desk.ledger.declined_recently, design.md §2's
---- "A 'declined recently' listing". Newest first. Each entry is
---- restorable: press "r" on it (M.qf_restore, wired the same way as
---- M.qf_jump — by the list's own title, so it's a no-op on any other
---- quickfix list).
+--- Opens a quickfix list of recent declines; `r` on an entry restores it.
 function M.list_declined_recently(bufnr, days)
-	local st = M.read_state(bufnr)
-	if not st then
+	local repo = M.repo_context(bufnr)
+	if not repo then
 		return
 	end
-	local entries = ledger.declined_recently(
-		st.repo,
-		st.file,
-		st.index_lines,
-		st.worktree_lines,
-		days or M.DECLINED_WINDOW_DAYS
-	)
-	table.sort(entries, function(a, b)
-		return (a.item.proposed_at or 0) > (b.item.proposed_at or 0)
-	end)
+	local entries = M.declined_recently(repo, days or M.DECLINED_WINDOW_DAYS)
+	local tokens_config = tokens.tokens_from((tokens.load()))
 	local qf_items = {}
-	for _, e in ipairs(entries) do
-		local reason = e.reason == "declined" and "declined" or "resolved without a key"
-		table.insert(qf_items, { text = string.format("%s (%s)", e.item.headline or e.item.id, reason) })
+	for _, rec in ipairs(entries) do
+		qf_items[#qf_items + 1] =
+			{ text = string.format("%s (%s)", rec.headline or rec.id, M.format_source(rec.source, tokens_config)) }
 	end
 	vim.fn.setqflist({}, " ", {
 		title = M.DECLINED_TITLE,
 		items = qf_items,
-		context = { desk_declined = { bufnr = bufnr, entries = entries } },
+		context = { desk_declined = { repo = repo, ids = vim.tbl_map(function(r)
+			return r.id
+		end, entries) } },
 	})
 	vim.cmd("copen")
 end
 
---- The quickfix "r" handler for every quickfix buffer (installed once,
---- globally, alongside M.qf_jump): a no-op for a location list or any
---- quickfix list that isn't ours (checked by title, same as M.qf_jump —
---- desk's own lists are never location lists, so a loclist window is
---- rejected before even reading getqflist(), which would otherwise read
---- the unrelated *global* quickfix list instead of whatever the current
---- window is actually showing), and otherwise restores the item under the
---- cursor (M.restore) back into the notes buffer the list was built from.
+--- Restores a declined item: it leaves the decline ledger, so the next pass
+--- proposes it again.
+function M.restore(repo, id)
+	return ledger.restore_declined(repo, id)
+end
+
+--- The quickfix "r" handler: restores the declined entry under the cursor.
 function M.qf_restore()
 	if is_loclist_win(vim.api.nvim_get_current_win()) then
 		return
@@ -904,17 +571,13 @@ function M.qf_restore()
 		return
 	end
 	local declined = qf.context and qf.context.desk_declined
-	if not declined then
+	local id = declined and declined.ids[vim.fn.line(".")]
+	if not id then
 		return
 	end
-	local entry = declined.entries[vim.fn.line(".")]
-	if not entry then
-		return
-	end
-	local ok, err = M.restore(declined.bufnr, entry.item)
+	local ok, err = M.restore(declined.repo, id)
 	if ok then
-		vim.notify("desk: restored " .. (entry.item.headline or entry.item.id), vim.log.levels.INFO)
-		M.refresh_virtual_text(declined.bufnr)
+		vim.notify("desk: restored — the next pass proposes it again", vim.log.levels.INFO)
 		vim.cmd("cclose")
 	else
 		vim.notify("desk: " .. tostring(err), vim.log.levels.WARN)
@@ -922,10 +585,58 @@ function M.qf_restore()
 end
 
 -- ---------------------------------------------------------------------------
+-- His commit key
+-- ---------------------------------------------------------------------------
+
+--- Saves his notes buffer and commits the file as it is, then records any
+--- suggestion now in HEAD as taken. A no-op commit when nothing changed.
+function M.commit(bufnr)
+	local repo, file = M.repo_context(bufnr)
+	if not repo then
+		return false, file
+	end
+	if vim.bo[bufnr].modified then
+		vim.api.nvim_buf_call(bufnr, function()
+			vim.cmd("silent write")
+		end)
+	end
+	local _, dirty = git.run(repo, { "status", "--porcelain", "--", file })
+	if vim.trim(dirty) ~= "" then
+		local ok, _, err = git.run(repo, { "add", "--", file })
+		if ok then
+			ok, _, err = git.run(repo, { "commit", "-q", "-m", "notes", "--", file })
+		end
+		if not ok then
+			return false, "git commit failed: " .. err
+		end
+	end
+	local taken = proposal.sync_taken(repo)
+	return true, { taken = #taken }
+end
+
+-- ---------------------------------------------------------------------------
+-- Status line: the runner's status.json summary in the notes buffer's winbar.
+-- ---------------------------------------------------------------------------
+
+function M.status_line()
+	return status.summary(status.read())
+end
+
+function M.refresh_status_line(bufnr)
+	if not vim.api.nvim_buf_is_valid(bufnr) then
+		return
+	end
+	local line = M.status_line()
+	for _, win in ipairs(vim.fn.win_findbuf(bufnr)) do
+		vim.wo[win].winbar = line
+	end
+end
+
+-- ---------------------------------------------------------------------------
 -- Wiring: buffer-local keymaps for a notes buffer, and the once-only global
--- quickfix <CR> override. The notes files are enabled by a local marker in
--- the notes repo (design.md §6) — not a path in dotfiles — so this module
--- never hardcodes where the notes repo lives.
+-- quickfix overrides. The notes files are enabled by a local marker in the
+-- notes repo — not a path in dotfiles — so this module never hardcodes
+-- where the notes repo lives.
 -- ---------------------------------------------------------------------------
 
 M.MARKER = ".desk-notes"
@@ -946,18 +657,16 @@ function M.has_marker(dir)
 	return false
 end
 
---- The whole-item keys this piece adds, layered over gitsigns' own raw
---- per-hunk keys (<leader>gj/gk/ga/gu/gp/gb, unchanged): capitals so they
---- read as "the same letter, but for the whole item" rather than a new,
---- unrelated mnemonic.
+--- The keys this module adds, layered over gitsigns' own raw per-hunk keys
+--- (<leader>gj/gk/ga/gu/gp/gb, unchanged). `<leader>gD` and `<leader>gA`
+--- live in the review split only.
 M.KEYMAPS = {
-	{ mode = "n", lhs = "<leader>gR", desc = "Review: lay in the pending proposal" },
-	{ mode = "n", lhs = "<leader>gc", desc = "Commit his text (no lay-in)" },
-	{ mode = "n", lhs = "<leader>gA", desc = "Accept the whole item under cursor" },
-	{ mode = "n", lhs = "<leader>gD", desc = "Decline the whole item under cursor" },
-	{ mode = "n", lhs = "<leader>gN", desc = "Not now: postpone the whole item under cursor" },
-	{ mode = "n", lhs = "<leader>go", desc = "Overview: pending suggestions" },
+	{ mode = "n", lhs = "<leader>gR", desc = "Review: open the proposal as a diff against your notes" },
+	{ mode = "n", lhs = "<leader>gc", desc = "Commit your notes (records taken suggestions)" },
+	{ mode = "n", lhs = "<leader>go", desc = "Overview: remaining suggestions" },
 	{ mode = "n", lhs = "<leader>gd", desc = "Declined recently: list, restorable with r" },
+	{ mode = "n", lhs = "<leader>gD", desc = "Decline the suggestion under the cursor (review split)" },
+	{ mode = "n", lhs = "<leader>gA", desc = "Take just the suggestion under the cursor (review split)" },
 }
 
 local qf_autocmd_installed = false
@@ -977,41 +686,13 @@ local function install_qf_autocmd()
 end
 
 local function report(ok, err_or_result)
-	if ok then
-		return
-	end
-	vim.notify("desk: " .. tostring(err_or_result), vim.log.levels.WARN)
-end
-
---- Reports M.review's own result once it lands: an error same as every
---- other whole-item action, and — on success — the two counts M.review
---- already computes but nothing ever surfaced (design.md §2's "an item
---- that doesn't apply cleanly ... is deferred" and "landed_on_top ... how
---- many of this press's own lay-ins took that path"): a real deferral
---- (his edits sit at the spot the anchor expected, so it stayed queued
---- rather than laying in) and a landed-on-top count (the anchor's quote
---- is simply gone, so it landed at the top instead). Silent when there is
---- nothing to say — everything applied cleanly, nothing landed on top —
---- same as every other action here already is.
-local function report_review(ok, result_or_err)
 	if not ok then
-		vim.notify("desk: " .. tostring(result_or_err), vim.log.levels.WARN)
-		return
-	end
-	local parts = {}
-	if (result_or_err.deferred or 0) > 0 then
-		parts[#parts + 1] = result_or_err.deferred .. " deferred (didn't apply cleanly)"
-	end
-	if (result_or_err.landed_on_top or 0) > 0 then
-		parts[#parts + 1] = result_or_err.landed_on_top .. " landed on top (its anchor is gone)"
-	end
-	if #parts > 0 then
-		vim.notify("desk: " .. table.concat(parts, ", "), vim.log.levels.INFO)
+		vim.notify("desk: " .. tostring(err_or_result), vim.log.levels.WARN)
 	end
 end
 
---- Attaches the review keymaps and review-mode toggling to `bufnr`. Safe to
---- call more than once for the same buffer (idempotent).
+--- Attaches the review keymaps to `bufnr`. Safe to call more than once for
+--- the same buffer (idempotent).
 function M.attach(bufnr)
 	if vim.b[bufnr].desk_attached then
 		return
@@ -1023,32 +704,15 @@ function M.attach(bufnr)
 		vim.keymap.set("n", lhs, fn, { buffer = bufnr, desc = desc })
 	end
 	map("<leader>gR", function()
-		report_review(M.review(bufnr))
-		M.refresh_virtual_text(bufnr)
-		M.refresh_status_line(bufnr)
-	end, "Review: lay in the pending proposal")
+		report(M.open_review(bufnr))
+	end, "Review: open the proposal as a diff against your notes")
 	map("<leader>gc", function()
-		report(M.commit_his_text(bufnr))
+		report(M.commit(bufnr))
 		M.refresh_status_line(bufnr)
-	end, "Commit his text (no lay-in)")
-	map("<leader>gA", function()
-		report(M.accept(bufnr))
-		M.refresh_virtual_text(bufnr)
-		M.refresh_status_line(bufnr)
-	end, "Accept the whole item under cursor")
-	map("<leader>gD", function()
-		report(M.decline(bufnr))
-		M.refresh_virtual_text(bufnr)
-		M.refresh_status_line(bufnr)
-	end, "Decline the whole item under cursor")
-	map("<leader>gN", function()
-		report(M.not_now(bufnr))
-		M.refresh_virtual_text(bufnr)
-		M.refresh_status_line(bufnr)
-	end, "Not now: postpone the whole item under cursor")
+	end, "Commit your notes (records taken suggestions)")
 	map("<leader>go", function()
-		M.overview(bufnr)
-	end, "Overview: pending suggestions")
+		report(M.overview(bufnr))
+	end, "Overview: remaining suggestions")
 	map("<leader>gd", function()
 		M.list_declined_recently(bufnr)
 	end, "Declined recently: list, restorable with r")
@@ -1056,28 +720,22 @@ function M.attach(bufnr)
 		M.list_declined_recently(bufnr)
 	end, { desc = "Desk: list declined-recently items, restorable with r" })
 
-	vim.api.nvim_create_autocmd({ "BufEnter" }, {
+	vim.api.nvim_create_autocmd("BufEnter", {
 		buffer = bufnr,
 		callback = function()
-			if vim.b[bufnr].desk_review_mode then
-				M.enable_review_mode(bufnr)
-			end
-			M.refresh_virtual_text(bufnr)
 			M.refresh_status_line(bufnr)
 		end,
 	})
-	vim.api.nvim_create_autocmd({ "BufLeave" }, {
+	vim.api.nvim_create_autocmd("BufLeave", {
 		buffer = bufnr,
 		callback = function()
-			M.disable_review_mode()
 			-- winbar is a window option, not a real per-buffer one: left set,
-			-- it would keep showing this notes buffer's own status line over
-			-- whatever the window shows next.
+			-- it would keep showing this status line over whatever the window
+			-- shows next.
 			vim.wo[0].winbar = ""
 		end,
 	})
 
-	M.refresh_virtual_text(bufnr)
 	M.refresh_status_line(bufnr)
 end
 

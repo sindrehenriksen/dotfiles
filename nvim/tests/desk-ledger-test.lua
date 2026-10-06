@@ -1,22 +1,14 @@
--- Ledger tests for the surfaces a neutral review found wired to nothing:
--- desk.ledger.namespace_ids (id collisions across passes/days),
--- desk.ledger.write_pending_snapshot/read_pending_snapshot (the §9(g)
--- round trip), and desk.ledger.classify_transitions/declined_recently as
--- pure functions in isolation (desk-review-test.lua covers them wired into
--- the interactive review key/declined-recently list; this file covers
--- their own direct behavior).
+-- Ledger tests: desk.ledger.namespace_ids (id collisions across passes/days
+-- and against carried items) and the decision records (decline / restore /
+-- taken) in isolation. desk-proposal-test.lua and desk-review-test.lua cover
+-- them wired into the proposal build and the review split.
 --
 -- Run: nvim --headless -u nvim/tests/minimal_init.lua -l nvim/tests/desk-ledger-test.lua
 local ledger = require("desk.ledger")
-local round = require("desk.round")
 local git = require("desk.git")
 local git_safety_here = debug.getinfo(1, "S").source:sub(2):match("^(.*)/[^/]+$") or "."
 local git_safety = dofile(git_safety_here .. "/../../tests/lib/git-safety.lua")
 
--- Sandboxed: desk.ledger.pending_snapshot_path resolves under
--- $DESK_STATE_DIR (real default ~/.local/state/desk), same as every other
--- desk-lib state file — never the real one from a test run.
-vim.env.DESK_STATE_DIR = vim.fn.tempname()
 
 local pass, fail = 0, 0
 local function ok(desc)
@@ -44,8 +36,6 @@ local function new_repo()
 	vim.fn.mkdir(repo, "p")
 	git_safety.assert_repo_under_tmp(repo)
 	assert(git.run(repo, { "init", "-q" }))
-	assert(git.run(repo, { "config", "user.email", "test@example.invalid" }))
-	assert(git.run(repo, { "config", "user.name", "Desk Test" }))
 	local fd = assert(io.open(repo .. "/notes.md", "w"))
 	fd:write("Alpha\n")
 	fd:close()
@@ -92,83 +82,60 @@ do
 end
 
 print()
-print("=== desk.ledger pending-set snapshot: round-trips atomically ===")
+print("=== namespace_ids: carried items' ids are never reused ===")
 do
 	local repo = new_repo()
-	local path = ledger.pending_snapshot_path(repo, "notes.md")
-	assert_true("nothing written yet: nil, not an error", ledger.read_pending_snapshot(path) == nil)
-
-	ledger.write_pending_snapshot(path, "deadbeef", { "p1", "p2" })
-	local snap = ledger.read_pending_snapshot(path)
-	assert_true("a snapshot was written and reads back", snap ~= nil)
-	assert_eq("its head sha round-trips", "deadbeef", snap.head)
-	assert_eq("its pending ids round-trip", { "p1", "p2" }, snap.items)
-
-	-- Two different (repo, file) pairs never share a path.
-	local other_path = ledger.pending_snapshot_path(repo, "reading.md")
-	assert_true("a different file gets a different snapshot path", other_path ~= path)
+	local out = ledger.namespace_ids(
+		repo,
+		"morning",
+		"2026-10-01",
+		{ { id = "x", file = "notes.md", kind = "new", target = "top", before = "", after = "a" } },
+		{ "morning-2026-10-01-1-x" }
+	)
+	assert_eq("bumped past the carried id", "morning-2026-10-01-2-x", out[1].id)
 end
 
 print()
-print("=== desk.ledger.classify_transitions: accepted-by-accident vs. resolved-without-a-key ===")
-do
-	local prev_pending = { "acc1", "dec1", "clean1" }
-	local states = { acc1 = "accepted", dec1 = "declined", clean1 = "declined" }
-	local last_key = { clean1 = { action = "decline" } } -- dec1 has no key at all; acc1 has no accept key
-	local accepted_by_accident, resolved_without_key = ledger.classify_transitions(prev_pending, states, last_key)
-	assert_eq("acc1 is accepted with no accept key: accepted by accident", { "acc1" }, accepted_by_accident)
-	assert_eq("dec1 is declined with no decline key: resolved without a key", { "dec1" }, resolved_without_key)
-end
-
-print()
-print("=== desk.ledger.declined_recently: within the window, restorable ===")
+print("=== decisions: decline, restore and taken records ===")
 do
 	local repo = new_repo()
-	local head = { "Alpha" }
-	local long_ago = os.time() - 30 * 86400
-	local item = {
-		id = "p1",
-		file = "notes.md",
-		kind = "add",
-		anchor = { under = "Alpha" },
-		before = "",
-		after = "  a declined suggestion",
-		proposed_at = long_ago,
-	}
-	ledger.append(repo, {
-		type = "item",
-		id = item.id,
-		file = item.file,
-		kind = item.kind,
-		anchor = item.anchor,
-		before = item.before,
-		after = item.after,
-		headline = "a declined suggestion",
-		proposed_at = item.proposed_at,
-	})
-	ledger.append(repo, { type = "laid_in", at = long_ago, proposal = "seed", items = { "p1" } })
-	-- A round record: what the review key itself would have appended at
-	-- lay-in (desk.round.build) — the full laid-in text plus the item's own
-	-- range in it. Without this, derive_all has no content baseline to map
-	-- the decline against at all (desk.round.derive: "nothing" -> the
-	-- conservative "still needs review" fallback), never mind derive the
-	-- right one.
-	local laid_in_text = { "Alpha", "  a declined suggestion" }
-	ledger.append(repo, round.build("notes.md", laid_in_text, { item }, { p1 = { { line = 2, count = 1, role = "edit" } } }))
-	ledger.append(repo, { type = "key", id = "p1", at = long_ago, action = "decline" })
+	local a = { id = "d1", file = "notes.md", kind = "new", before = "", after = "A text", source = "https://example.invalid/a", headline = "A" }
+	local b = { id = "d2", file = "notes.md", kind = "remove", before = "B text", after = "", source = "", headline = "B" }
 
-	-- After the decline, the content is gone from both index and worktree.
-	-- Its decline key is 30 days old: outside a 14-day window, inside a
-	-- 60-day one.
-	local outside_window = ledger.declined_recently(repo, "notes.md", head, head, 14)
-	assert_eq("a 14-day window doesn't reach a 30-day-old decline", 0, #outside_window)
+	assert_true("declining records", ledger.record_declines(repo, { a, b }))
+	local declined = ledger.declined(ledger.read(repo))
+	assert_true("both are declined by id", declined.ids.d1 ~= nil and declined.ids.d2 ~= nil)
+	assert_true("the URL source is blocked", declined.sources["https://example.invalid/a"] == true)
+	assert_true("an empty source blocks nothing", declined.sources[""] == nil)
 
-	local inside_window = ledger.declined_recently(repo, "notes.md", head, head, 60)
-	assert_eq("exactly one declined-recently item in a 60-day window", 1, #inside_window)
-	assert_eq("its id is p1", "p1", inside_window[1].item.id)
-	assert_eq("its reason is 'declined' (there IS a decline key)", "declined", inside_window[1].reason)
+	assert_true("restoring a declined id works", ledger.restore_declined(repo, "d1"))
+	declined = ledger.declined(ledger.read(repo))
+	assert_true("it is no longer declined", declined.ids.d1 == nil and declined.ids.d2 ~= nil)
+	assert_true("nor is its source blocked", declined.sources["https://example.invalid/a"] == nil)
+	assert_eq("the restored item waits for the next pass", { "d1" }, vim.tbl_map(function(it)
+		return it.id
+	end, ledger.restored(ledger.read(repo))))
+	ledger.append(repo, { type = "restore_applied", id = "d1" })
+	assert_eq("a pass that re-proposed it clears the wait", 0, #ledger.restored(ledger.read(repo)))
+	assert_true("declining it again works", ledger.record_declines(repo, { a }))
+	assert_true("and it is declined again", ledger.declined(ledger.read(repo)).ids.d1 ~= nil)
+
+	assert_true("taken records", ledger.record_taken(repo, { a, b }))
+	assert_true("again records nothing new", ledger.record_taken(repo, { a }))
+	local taken = ledger.taken_by_id(ledger.read(repo))
+	assert_eq("a hash of the after text", ledger.content_hash(a), taken.d1.hash)
+	assert_eq("a removal hashes its before", vim.fn.sha256("B text"), taken.d2.hash)
+	local n = 0
+	for _, r in ipairs(ledger.read(repo)) do
+		if r.type == "taken" then
+			n = n + 1
+		end
+	end
+	assert_eq("one record per item", 2, n)
 end
 
 print()
 print(string.format("=== summary: %d passed, %d failed ===", pass, fail))
-os.exit(fail == 0 and 0 or 1)
+if fail > 0 then
+	os.exit(1)
+end

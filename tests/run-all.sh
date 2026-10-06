@@ -88,7 +88,6 @@ BASH_SUITES=(
 
 LUA_SUITES=(
 	nvim/tests/desk-annotate-test.lua
-	nvim/tests/desk-histext-test.lua
 	nvim/tests/desk-hotkey-test.lua
 	nvim/tests/desk-ledger-test.lua
 	nvim/tests/desk-proposal-test.lua
