@@ -71,5 +71,15 @@ assert_eq "the step's own value" "5" "$(extract_budget)"
 rm -rf "$PASS_SCRATCH"
 
 echo
+echo "=== the config's default_max_budget_usd sits between the step's and the generic default ==="
+PASS_SCRATCH="$(desk_scratch_dir test-pass)"
+echo '{"default_max_budget_usd": 7}' > "$DESK_CONFIG"
+desk_step_fetch testpass "$step_default" "" '{}' > /dev/null
+assert_eq "the config's default" "7" "$(extract_budget)"
+desk_step_fetch testpass "$step_custom" "" '{}' > /dev/null
+assert_eq "a step's own value still wins" "5" "$(extract_budget)"
+rm -rf "$PASS_SCRATCH"
+
+echo
 echo "=== summary: $pass passed, $fail failed ==="
 [ "$fail" -eq 0 ]

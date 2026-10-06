@@ -96,7 +96,7 @@ Every step has `id` and `kind`. Model steps (`fetch`, `judge`, `write`, `close`)
 | `connector` | `false` | `true` loads his user settings so claude.ai connectors are available; a PreToolUse hook (`claude/desk-lib/deny-unlisted-tool.sh`) then refuses every tool not in `tools`, whatever his own allow rules say. `false` runs `--restricted` with `--strict-mcp-config`. |
 | `mcp_config` | empty | Non-connector calls only: an MCP config file (relative to the config's directory) for tools that need a server. |
 | `timeout` | `300` | Seconds; the call's whole process group is killed after it. |
-| `max_budget_usd` | `$DESK_DEFAULT_MAX_BUDGET_USD`, `2` | Passed as `--max-budget-usd`. |
+| `max_budget_usd` | `default_max_budget_usd`, then `$DESK_DEFAULT_MAX_BUDGET_USD`, then `2` | Passed as `--max-budget-usd`. |
 | `visible` | `false` | Persist the session under the name `desk-<pass>-<date>-<id>`, with its cwd kept under `~/.local/state/desk/runs/` for seven days, so it can be resumed. |
 
 A judge or close step whose `tools` include `Read` gets it narrowed to its own scratch directory, by the allowlist and again by the deny hook.

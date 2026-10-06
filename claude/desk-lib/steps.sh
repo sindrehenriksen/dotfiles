@@ -422,6 +422,7 @@ desk_step_model_call() {
 	# `--restricted` call's Read is really confined to (a live 16:30 close
 	# call's own failure: --allowedTools naming Read(<seed dir>/**) and the
 	# prompt's own {{scratch}} placeholder pointing at that same seed dir
+	[ -n "$max_budget_usd" ] || max_budget_usd="$(jq -r '.default_max_budget_usd // empty' "$DESK_CONFIG" 2> /dev/null)"
 	# meant nothing once the process itself ran from a DIFFERENT cwd, so
 	# every Read got refused). Always this function's own properly-named
 	# dir — visible or not, its "$pass-$id"/kept-runs naming is itself
