@@ -1245,32 +1245,14 @@ desk_open_follow_up_tab() {
 	fi
 }
 
-# Resolves an open_tab step's own launch-envelope paths (`mcp_config`,
-# `settings`, `skill`) relative to the *workspace* root — one directory
-# above $DESK_CONFIG's own (desk/config.json sits inside the workspace's
-# own desk/ directory, so its parent is the workspace root itself) — rather
-# than desk_prompt_path's config-directory base. This matches how those
-# fields are actually spelled in the private config ("desk/weekly/mcp.json",
-# "agents/skills/.../SKILL.md": both resolve against the workspace root,
-# never against desk/config.json's own directory) — a prompt step's own
-# `prompt`/`mcp_config` fields are a different, config-directory-relative
-# convention, never confused with this one.
-desk_workspace_path() {
-	local rel="$1"
-	[[ "$rel" = /* ]] && { echo "$rel"; return; }
-	# Plain string manipulation, deliberately not `cd -P`-resolved (unlike
-	# desk_project_folder_name's own canonicalization elsewhere): the same
-	# convention desk_prompt_path already uses, so this never returns a
-	# symlink-resolved path a test's own (unresolved) tmp dir wouldn't match.
-	echo "$(dirname "$(dirname "$DESK_CONFIG")")/$rel"
-}
-
 # desk_notes_diff_since_epoch <notes_diff_since>
-# Resolves an open_tab step's own `notes_diff_since` to an epoch — the
-# window-start end of the notes-diff (weekly/README.md). Only "last_wednesday"
-# is a known value so far (the weekly pass's own config); anything else logs
-# and returns empty, which desk_write_notes_diff treats as "diff against the
-# empty tree" rather than failing the step over an unrecognized value.
+# Resolves an open_tab step's `notes_diff_since` to an epoch: the window
+# start of the notes diff. Either `last_wednesday` (an alias for Wednesday
+# 08:00) or a JSON object `{"weekday": "wed", "time": "08:00"}` (weekday as
+# mon..sun, a full English name, or 1-7 with 1 = Monday; time as HH:MM),
+# meaning the most recent such moment strictly before now. Anything else
+# logs and returns non-zero, which desk_write_notes_diff treats as "diff
+# against the empty tree" rather than failing the step.
 desk_notes_diff_since_epoch() {
 	local kind="$1"
 	case "$kind" in
@@ -1469,9 +1451,9 @@ desk_step_open_tab() {
 	# time — session_name was already read for that check but never handed
 	# to `claude` itself, which left the check permanently unable to match.
 	[ -n "$session_name" ] && argv+=(-n "$session_name")
-	[ -n "$mcp_config_rel" ] && argv+=(--mcp-config "$(desk_workspace_path "$mcp_config_rel")")
-	[ -n "$settings_rel" ] && argv+=(--settings "$(desk_workspace_path "$settings_rel")")
-	[ -n "$skill_rel" ] && argv+=(--append-system-prompt-file "$(desk_workspace_path "$skill_rel")")
+	[ -n "$mcp_config_rel" ] && argv+=(--mcp-config "$(desk_prompt_path "$mcp_config_rel")")
+	[ -n "$settings_rel" ] && argv+=(--settings "$(desk_prompt_path "$settings_rel")")
+	[ -n "$skill_rel" ] && argv+=(--append-system-prompt-file "$(desk_prompt_path "$skill_rel")")
 	argv+=("$prompt_text")
 
 	local command="" a

@@ -54,9 +54,9 @@ FAKE
 chmod +x "$FAKEBIN/session-status.sh"
 export PATH="$FAKEBIN:$PATH"
 
-# desk_workspace_path resolves mcp_config/settings/skill relative to
-# $DESK_CONFIG's own *parent* directory — a workspace root standing in for
-# ~/dev/example-workspace, with $DESK_CONFIG standing in for its desk/config.json.
+# mcp_config/settings/skill resolve relative to $DESK_CONFIG's own
+# directory, like every other config path ($DESK_CONFIG standing in for
+# an instance's desk/config.json).
 export DESK_CONFIG="$ROOT/workspace/desk/config.json"
 mkdir -p "$ROOT/workspace/desk"
 
@@ -78,9 +78,9 @@ step_json='{
 	"permission_mode": "default",
 	"tools": ["Read", "Glob", "Grep", "Write", "Bash"],
 	"strict_mcp_config": true,
-	"mcp_config": "desk/weekly/mcp.json",
-	"settings": "desk/weekly/settings.json",
-	"skill": "agents/skills/weekly-update/SKILL.md",
+	"mcp_config": "weekly/mcp.json",
+	"settings": "weekly/settings.json",
+	"skill": "../agents/skills/weekly-update/SKILL.md",
 	"prompt_text": "Run the weekly update. The notes diff is ./notes-diff.md.",
 	"session_name": "Weekly Update"
 }'
@@ -107,12 +107,12 @@ assert_true "--permission-mode default is present" "$(grep -q -- "'--permission-
 assert_true "--tools carries the exact CSV" \
 	"$(grep -q -- "'--tools' 'Read,Glob,Grep,Write,Bash'" <<< "$command_line" && echo true || echo false)"
 assert_true "--strict-mcp-config is present" "$(grep -q -- '--strict-mcp-config' <<< "$command_line" && echo true || echo false)"
-assert_true "--mcp-config resolves under the workspace root, not \$DESK_CONFIG's own dir" \
+assert_true "--mcp-config resolves against \$DESK_CONFIG's own dir" \
 	"$(grep -qE -- "--mcp-config' '$ROOT/workspace/desk/weekly/mcp.json'" <<< "$command_line" && echo true || echo false)"
 assert_true "--settings resolves the same way" \
 	"$(grep -qE -- "--settings' '$ROOT/workspace/desk/weekly/settings.json'" <<< "$command_line" && echo true || echo false)"
 assert_true "the skill is passed in explicitly via --append-system-prompt-file" \
-	"$(grep -qE -- "--append-system-prompt-file' '$ROOT/workspace/agents/skills/weekly-update/SKILL.md'" <<< "$command_line" && echo true || echo false)"
+	"$(grep -qE -- "--append-system-prompt-file' '$ROOT/workspace/desk/../agents/skills/weekly-update/SKILL.md'" <<< "$command_line" && echo true || echo false)"
 assert_true "the fixed prompt_text is the final argument, single-quoted" \
 	"$(grep -qF "'Run the weekly update. The notes diff is ./notes-diff.md.'" <<< "$command_line" && echo true || echo false)"
 
@@ -184,7 +184,7 @@ default_perms_step_json='{
 	"permission_mode": "default",
 	"tools": ["Read", "Glob", "Grep", "Write", "Bash"],
 	"strict_mcp_config": true,
-	"settings": "desk/weekly/settings.json",
+	"settings": "weekly/settings.json",
 	"prompt_text": "Run the weekly update. The notes diff is ./notes-diff.md.",
 	"session_name": "Weekly Update"
 }'
