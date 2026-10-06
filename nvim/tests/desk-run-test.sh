@@ -307,40 +307,28 @@ assert_true "it says a rebase is in progress" \
 	"$([ "$(grep -c 'a rebase is in progress' "$ROOT/case6.out")" -ge 1 ] && echo true || echo false)"
 
 echo
-echo "=== never writes the working file, whatever else happens ==="
+echo "=== commits his on-disk files exactly as they are, and records a taken suggestion ==="
 rm -rf "$STATE"
 repo="$(new_notes_repo "$ROOT/case7")"
 cfg="$ROOT/case7/config.json"
 write_commit_push_config "$cfg" "$repo"
-# Seed a pending (laid-in) item so his-text has something to revert in the
-# INDEX only — the working file must read exactly as it does right now,
-# untouched, before and after.
+# A proposal whose one suggestion he has since taken (its text is in his
+# on-disk notes, uncommitted) alongside a line of his own.
 CLI="$HERE/../lua/desk/cli.lua"
-cat > "$ROOT/case7-recs.ndjson" <<EOF
-{"type":"item","id":"p1","file":"notes.md","kind":"add","anchor":{"under":"Section A"},"before":"","after":"  a laid-in suggestion","source":"test","headline":"h","pass":"morning","proposed_at":1}
-{"type":"round","file":"notes.md","at":1,"text":["Section A","  detail","  a laid-in suggestion"],"items":{"p1":{"kind":"add","ranges":[{"line":3,"count":1,"role":"edit"}]}}}
-{"type":"laid_in","at":1,"proposal":"x","items":["p1"]}
+cat > "$ROOT/case7-items.json" <<EOF
+{"items":[{"id":"p1","file":"notes.md","kind":"add","target":{"under":"Section A"},"before":"","after":"  a taken suggestion","source":"test","headline":"h"}]}
 EOF
-nvim -l "$CLI" ledger-append-batch "$repo" "$ROOT/case7-recs.ndjson" > /dev/null
-# His own new line, alongside the pending suggestion — so there's something
-# genuinely his to commit once the suggestion alone is reverted back out.
-# The suggestion has to sit exactly at its own anchor (right after
-# "  detail", per {"under": "Section A"}) for the revert to find it there;
-# his own line goes after it, never between the anchor and the suggestion.
-printf 'Section A\n  detail\n  a laid-in suggestion\n  his own new line\n' > "$repo/notes.md"
+nvim -l "$CLI" proposal-build "$repo" morning 2026-10-01 "$ROOT/case7-items.json" notes.md reading.md > /dev/null
+printf 'Section A\n  detail\n  a taken suggestion\n  his own new line\n' > "$repo/notes.md"
 worktree_before="$(cat "$repo/notes.md")"
 run_desk "$cfg" > "$ROOT/case7.out" 2>&1
 worktree_after="$(cat "$repo/notes.md")"
 assert_eq "the working file's content is byte-for-byte unchanged" "$worktree_before" "$worktree_after"
-index_content="$(git -C "$repo" show :notes.md)"
-assert_true "but the INDEX no longer has the pending suggestion (reverted there instead)" \
-	"$(printf '%s' "$index_content" | grep -q 'a laid-in suggestion' && echo false || echo true)"
-assert_true "the INDEX does have his own new line" \
-	"$(printf '%s' "$index_content" | grep -q 'his own new line' && echo true || echo false)"
-assert_true "the pass committed his text (a real commit happened)" \
+assert_eq "HEAD holds exactly the on-disk text" "$worktree_before" "$(git -C "$repo" show HEAD:notes.md)"
+assert_true "the pass committed it (a real commit happened)" \
 	"$([ "$(git -C "$repo" rev-list --count HEAD)" -gt 1 ] && echo true || echo false)"
-assert_true "HEAD's own committed content also excludes the still-pending suggestion" \
-	"$(git -C "$repo" show HEAD:notes.md | grep -q 'a laid-in suggestion' && echo false || echo true)"
+assert_true "the taken suggestion is recorded as taken" \
+	"$(nvim -l "$CLI" taken-lines "$repo" notes.md | jq -e '.lines == ["  a taken suggestion"]' > /dev/null 2>&1 && echo true || echo false)"
 
 echo
 echo "=== the config dir's project folder (tool-result spill) is cleaned up ==="

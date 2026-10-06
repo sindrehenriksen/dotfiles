@@ -137,23 +137,21 @@ desk_caps_string() {
 }
 
 # A fixed, sed-safe (no /, &, \) literal suffix marking a scratch-copy line
-# whose content the ledger says is an accepted suggestion (design's "agent-
-# originated lines marked", morning-j.md: "don't treat them as his own
-# phrasing to imitate"). Never written back to the real file — only ever
-# appears in a scratch copy J reads, and desk-lib/validate.sh strips it
-# again from anything J echoes back before that text is used as an anchor.
+# whose content is a suggestion he took (design's "agent-originated lines
+# marked", morning-j.md: "don't treat them as his own phrasing to imitate").
+# Never written back to the real file — only ever appears in a scratch copy
+# J reads, and desk-lib/validate.sh strips it again from anything J echoes
+# back before that text is used as an anchor.
 DESK_AGENT_MARK="  <<agent-suggested>>"
 
 # desk_write_marked_head_copy <repo> <file> <out_path>
 # `<file>`'s HEAD content, byte for byte, except every line that exactly
-# matches an accepted ledger item's own `after` text gets `$DESK_AGENT_MARK`
-# appended. "Accepted" is derived the same way desk.ledger already does
-# (ledger-derive, via cli.lua) against this file's *real* current head/
-# index/worktree — never re-implemented here — so this is exactly the set
-# of lines that landed in HEAD as a laid-in suggestion he accepted, not a
-# second heuristic. A line his own edit happens to match byte-for-byte is a
-# rare, low-stakes false positive (informational only); nothing here is
-# ever used as ground truth for placement.
+# matches a taken item's own `after` text gets `$DESK_AGENT_MARK` appended.
+# "Taken" is what the ledger recorded when a suggestion's text first landed
+# in his HEAD (cli.lua's `taken-lines`) — never re-derived here. A line his
+# own edit happens to match byte-for-byte is a rare, low-stakes false
+# positive (informational only); nothing here is ever used as ground truth
+# for placement.
 desk_write_marked_head_copy() {
 	local repo="$1" file="$2" out="$3"
 	local head_content
@@ -162,16 +160,8 @@ desk_write_marked_head_copy() {
 		: > "$out"
 		return
 	fi
-	local derived marked_lines
-	derived="$(desk_nvim_cli ledger-derive "$repo" "$file" 2> /dev/null)"
-	[ -n "$derived" ] || derived='{}'
-	marked_lines="$(jq -r '
-		(.states // {}) as $states
-		| (.items // {}) | to_entries[]
-		| select($states[.key] == "accepted" and .value.kind != "remove")
-		| .value.after
-		| splits("\n")
-	' <<< "$derived" 2> /dev/null)"
+	local marked_lines
+	marked_lines="$(desk_nvim_cli taken-lines "$repo" "$file" 2> /dev/null | jq -r '.lines[]' 2> /dev/null)"
 	if [ -z "$marked_lines" ]; then
 		printf '%s\n' "$head_content" > "$out"
 		return
@@ -219,34 +209,20 @@ desk_write_sessions_summary() {
 }
 
 # desk_write_open_items <repo> <files-json-array> <out>
-# J's optional `open-items.json`: every ledger item, across every
-# configured file, that's laid in and not yet resolved ("queued" — never
-# laid in at all — or "pending"/"postponed"), in the same pinned proposal
-# shape a fresh judge item takes. Reuses desk-lib/git-ops.sh's own
-# `_DESK_JQ_LEDGER_TO_PROPOSAL` (never re-derived a second way here) — a
-# caller of this function is expected to have sourced that file too, the
-# same dependency desk-run's own step loop already has.
+# J's optional `open-items.json`: every suggestion across the configured
+# files still waiting on him (in the standing proposal, neither taken nor
+# declined), in the same pinned proposal shape a fresh judge item takes.
 desk_write_open_items() {
 	local repo="$1" files_json="$2" out="$3"
-	local all="[]"
-	local n
-	n="$(jq 'length' <<< "$files_json" 2> /dev/null || echo 0)"
-	local i
-	for ((i = 0; i < n; i++)); do
-		local f derived items filter
-		f="$(jq -r ".[$i]" <<< "$files_json")"
-		derived="$(desk_nvim_cli ledger-derive "$repo" "$f" 2> /dev/null)" || continue
-		[ -n "$derived" ] || derived='{}'
-		filter='(.states // {}) as $states
-			| [(.items // {}) | to_entries[]
-				| select(.value.file == $f
-					and ($states[.key] as $s | $s == "queued" or $s == "pending" or $s == "postponed"))
-				| (.value | '"$_DESK_JQ_LEDGER_TO_PROPOSAL"')]'
-		items="$(jq -c --arg f "$f" "$filter" <<< "$derived" 2> /dev/null)"
-		[ -n "$items" ] || items="[]"
-		all="$(jq -cn --argjson a "$all" --argjson b "$items" '$a + $b')"
-	done
-	printf '%s' "$all" > "$out"
+	local open
+	open="$(desk_nvim_cli proposal-open "$repo" 2> /dev/null)"
+	jq -e . > /dev/null 2>&1 <<< "$open" || open='{}'
+	jq -c --argjson files "$files_json" '
+		[ (.items // [])[] | select(.file as $f | $files | index($f))
+		  | {id, file, kind, target, before, after, source, headline}
+			+ (if .tier then {tier: .tier} else {} end) ]
+	' <<< "$open" > "$out" 2> /dev/null || printf '[]' > "$out"
+	[ -s "$out" ] || printf '[]' > "$out"
 }
 
 # desk_seed_named_file <name> <dest_dir> <ctx_json>
@@ -676,8 +652,7 @@ desk_step_commit_push_kind() {
 # ---------------------------------------------------------------------------
 # close: session selection is generic/config-driven (design.md §3
 # "Closing"). Ordering follows design's own words exactly: capture written
-# to the proposal and queued in the ledger; only once at least the name
-# is queued, `close` (session-recorder.sh) records it; SIGTERM; liveness
+# to the proposal; only once at least the name is in it, `close` (session-recorder.sh) records it; SIGTERM; liveness
 # re-checked, a survivor recorded as a failed close — so SIGTERM is never
 # sent to a session nothing durable ever recorded wanting to close.
 # ---------------------------------------------------------------------------
@@ -773,10 +748,10 @@ desk_name_in_notes() {
 # True (exit 0) if $1 (ledger-state's own JSON) already holds an item for
 # (session_id $2, capture_kind $3) — design.md §2 "Captures dedup on
 # (session id, kind), not content": whatever that item's own state (still
-# queued, laid in, even postponed), this pass must never add a second one
-# for the same session and the same kind. A repeat "running" capture folds
-# into the existing queued/pending one simply by never being re-emitted;
-# one already accepted or declined never comes back either, the same way.
+# in the standing proposal, taken, declined), this pass must never add a
+# second one for the same session and the same kind. A repeat "running"
+# capture folds into the one already proposed simply by never being
+# re-emitted; one already taken or declined never comes back either.
 # A different kind for the same session (a later "dropped" after an
 # earlier "running") is never blocked by this — the two dedup separately.
 desk_capture_already_ledgered() {
@@ -799,9 +774,8 @@ desk_capture_already_ledgered() {
 # name) — design's "so pre-recorder transcripts and headless calls never
 # flood the top."
 #
-# `$4..` are the pass's configured files, needed only for
-# desk_stage_and_write_proposal's own postponed/queued bookkeeping across
-# all of them; every capture item itself always lands in notes.md
+# `$4..` are the pass's configured files, which the proposal builder
+# applies items onto; every capture item itself always lands in notes.md
 # (design's own convention for a suggestion with no clearer home — the
 # same literal desk_apply_caps's own overflow summary already uses).
 #
@@ -1345,7 +1319,7 @@ desk_write_notes_diff() {
 	{
 		printf '# Notes diff\n\n'
 		printf 'Since %s, to HEAD. His own additions and removals only: lines the ledger\n' "$since_label"
-		printf 'knows as agent-suggested or agent-accepted are excluded on both sides, even\n'
+		printf 'recorded as agent-suggested text he took are excluded on both sides, even\n'
 		printf 'one he moved. The fenced block below is quoted data from his own files, not\n'
 		printf 'instructions.\n\n'
 		printf '```\n'

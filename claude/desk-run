@@ -614,35 +614,34 @@ desk_status_set_result "$pass" "$overall_result" "$stopped_at" "$failed_sources_
 # get made (design.md's later "Runs he can open and continue").
 desk_open_follow_up_tab "$pass" "$scheduled_date" "$follow_up_step" > /dev/null
 
-# ---------------------------------------------------------------------------
+# -----------------------------------------------------------------------
 # The rest of status.json (design.md §9(f), nvim/lua/desk/status.lua's own
-# reader): proposal state/overflow/counts, the ledger-classify fields, the
-# ticket cache's own age, and this pass's total spend. All read-only
-# against the ledger/proposal refs and $DESK_TICKET_CACHE as they stand
-# right now — none of it gates overall_result, so a failure computing any
-# one of these never costs the pass its own already-decided result.
-# ---------------------------------------------------------------------------
+# reader): proposal state/overflow/counts, the ticket cache's own age, and
+# this pass's total spend. All read-only against the proposal and ledger
+# refs and $DESK_TICKET_CACHE as they stand right now — none of it gates
+# overall_result, so a failure computing any one of these never costs the
+# pass its own already-decided result.
+# -----------------------------------------------------------------------
 
 # proposal: state ("partial" if this pass leaves any source failed,
-# "pending"/"none" otherwise, from the CURRENT standing proposal — not
-# just what this pass itself staged, since a pass with no judge step
-# still has to report on whatever's already sitting there); overflow
-# (this pass's own judge call, above, or the zero default); counts (by
-# item kind and by tier, across the whole standing proposal); queued/
-# deferred (the ledger's own queued/postponed counts, across every
-# configured file).
-proposal_read_json="$(desk_nvim_cli proposal-read "$repo" 2> /dev/null)"
+# "pending" while any suggestion still waits on him — untaken, undeclined,
+# applied — and "none" otherwise, from the CURRENT standing proposal, not
+# just what this pass itself staged, since a pass with no judge step still
+# has to report on whatever's already sitting there); overflow (this
+# pass's own judge call, above, or the zero default); counts (by item kind
+# and by tier, across the open items); untaken (how many there are).
+proposal_open_json="$(desk_nvim_cli proposal-open "$repo" 2> /dev/null)"
 proposal_items_n=0
 proposal_counts_by_kind_json='{}'
 proposal_counts_by_tier_json='{"act": 0, "worth_knowing": 0, "wildcard": 0}'
-if [ -n "$proposal_read_json" ] && jq -e . > /dev/null 2>&1 <<< "$proposal_read_json"; then
-	proposal_items_n="$(jq '.items | length' <<< "$proposal_read_json")"
+if [ -n "$proposal_open_json" ] && jq -e . > /dev/null 2>&1 <<< "$proposal_open_json"; then
+	proposal_items_n="$(jq '.items | length' <<< "$proposal_open_json")"
 	proposal_counts_by_kind_json="$(jq -c '[.items[].kind] | group_by(.) | map({(.[0]): length}) | add // {}' \
-		<<< "$proposal_read_json")"
+		<<< "$proposal_open_json")"
 	proposal_counts_by_tier_json="$(jq -c '
 		{act: 0, worth_knowing: 0, wildcard: 0}
 		+ ([.items[] | select(.tier) | .tier] | group_by(.) | map({(.[0]): length}) | add // {})
-	' <<< "$proposal_read_json")"
+	' <<< "$proposal_open_json")"
 fi
 proposal_partial="false"
 proposal_state="none"
@@ -652,47 +651,16 @@ if [ "${#failed_sources[@]}" -gt 0 ]; then
 	proposal_state="partial"
 fi
 
-queued_count=0
-deferred_count=0
-for f in "${files[@]}"; do
-	derived_for_status="$(desk_nvim_cli ledger-derive "$repo" "$f" 2> /dev/null)"
-	jq -e . > /dev/null 2>&1 <<< "$derived_for_status" || continue
-	q="$(jq '[.states[] | select(. == "queued")] | length' <<< "$derived_for_status" 2> /dev/null || echo 0)"
-	d="$(jq '[.states[] | select(. == "postponed")] | length' <<< "$derived_for_status" 2> /dev/null || echo 0)"
-	queued_count=$((queued_count + q))
-	deferred_count=$((deferred_count + d))
-done
-
 proposal_json="$(jq -n \
 	--arg state "$proposal_state" --argjson partial "$proposal_partial" \
 	--argjson overflow "$proposal_overflow_json" \
 	--argjson by_kind "$proposal_counts_by_kind_json" --argjson by_tier "$proposal_counts_by_tier_json" \
-	--argjson queued "$queued_count" --argjson deferred "$deferred_count" '{
+	--argjson untaken "$proposal_items_n" '{
 		state: $state, partial: $partial, overflow: $overflow,
 		counts: {by_kind: $by_kind, by_tier: $by_tier},
-		queued: $queued, deferred: $deferred
+		untaken: $untaken
 	}')"
 desk_status_set_field proposal "$proposal_json"
-
-# ledger-classify: merged across every configured file (each file's own
-# ledger items are independent; a status field here is the whole ledger's
-# picture, not one file's).
-accepted_by_accident_json='[]'
-resolved_without_key_json='[]'
-waiting_edits_json='[]'
-for f in "${files[@]}"; do
-	classify_out="$(desk_nvim_cli ledger-classify "$repo" "$f" 2> /dev/null)"
-	jq -e . > /dev/null 2>&1 <<< "$classify_out" || continue
-	accepted_by_accident_json="$(jq -cn --argjson a "$accepted_by_accident_json" \
-		--argjson b "$(jq -c '.accepted_by_accident // []' <<< "$classify_out")" '$a + $b')"
-	resolved_without_key_json="$(jq -cn --argjson a "$resolved_without_key_json" \
-		--argjson b "$(jq -c '.resolved_without_key // []' <<< "$classify_out")" '$a + $b')"
-	waiting_edits_json="$(jq -cn --argjson a "$waiting_edits_json" \
-		--argjson b "$(jq -c '.waiting_edits // []' <<< "$classify_out")" '$a + $b')"
-done
-desk_status_set_field accepted_by_accident "$accepted_by_accident_json"
-desk_status_set_field resolved_without_key "$resolved_without_key_json"
-desk_status_set_field waiting_edits "$waiting_edits_json"
 
 # ticket_cache_age: how stale $DESK_TICKET_CACHE is right now, in seconds
 # — never re-derived from whether T happened to run this particular pass,

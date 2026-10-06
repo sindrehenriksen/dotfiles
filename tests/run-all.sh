@@ -44,8 +44,6 @@ desk_test_safe_env_init "$GUARD_DIR/safe-env"
 
 BASH_SUITES=(
 	nvim/tests/desk-capture-sessions-test.sh
-	nvim/tests/desk-cli-classify-test.sh
-	nvim/tests/desk-cli-namespace-test.sh
 	nvim/tests/desk-cli-test.sh
 	nvim/tests/desk-cli-tokens-test.sh
 	nvim/tests/desk-close-recheck-test.sh

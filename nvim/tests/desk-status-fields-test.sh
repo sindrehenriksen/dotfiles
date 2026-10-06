@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # D8 fix test (review item #11): desk-run writes the rest of status.json
-# after every pass — proposal {state, partial, overflow, counts, queued,
-# deferred}, the ledger-classify fields, ticket_cache_age, and this pass's
+# after every pass — proposal {state, partial, overflow, counts, untaken},
+# ticket_cache_age, and this pass's
 # own total_cost_usd — none of which the runner ever wrote before (status.
 # sh's own header comment: "D8a leaves them at their zero-ish defaults
 # where no such step runs" — no step ever did). Drives desk-run itself
@@ -109,17 +109,9 @@ assert_eq "state: pending" "pending" "$(jq -r '.proposal.state' <<< "$status")"
 assert_eq "partial: false (no failed source this pass)" "false" "$(jq -r '.proposal.partial' <<< "$status")"
 assert_eq "overflow.act: 1 (cap of 1, two ACT items)" "1" "$(jq -r '.proposal.overflow.act' <<< "$status")"
 assert_eq "counts.by_kind.new includes the overflow-summary item too" "2" "$(jq -r '.proposal.counts.by_kind.new' <<< "$status")"
-assert_true "queued is a number" "$(jq -e '.proposal.queued | type == "number"' > /dev/null 2>&1 <<< "$status" && echo true || echo false)"
-assert_true "deferred is a number" "$(jq -e '.proposal.deferred | type == "number"' > /dev/null 2>&1 <<< "$status" && echo true || echo false)"
-
-echo
-echo "=== ledger-classify fields ==="
-assert_true "accepted_by_accident is an array" \
-	"$(jq -e '.accepted_by_accident | type == "array"' > /dev/null 2>&1 <<< "$status" && echo true || echo false)"
-assert_true "resolved_without_key is an array" \
-	"$(jq -e '.resolved_without_key | type == "array"' > /dev/null 2>&1 <<< "$status" && echo true || echo false)"
-assert_true "waiting_edits is an array" \
-	"$(jq -e '.waiting_edits | type == "array"' > /dev/null 2>&1 <<< "$status" && echo true || echo false)"
+assert_eq "untaken: both kept items still wait on him" "2" "$(jq -r '.proposal.untaken' <<< "$status")"
+assert_true "the retired queue/classify fields are gone" \
+	"$(jq -e '(.proposal | has("queued") or has("deferred")) or has("accepted_by_accident") or has("waiting_edits")' > /dev/null 2>&1 <<< "$status" && echo false || echo true)"
 
 echo
 echo "=== ticket_cache_age (no T step ran, no cache file: null) ==="

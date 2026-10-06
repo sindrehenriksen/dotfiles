@@ -118,8 +118,7 @@ desk_shq() {
 }
 
 # Writes $2 to $1 atomically (temp file in the same directory, then
-# rename) — the same pattern desk.ledger's pending-snapshot writer uses, so
-# a reader never sees a half-written file.
+# rename), so a reader never sees a half-written file.
 desk_write_atomic() {
 	local path="$1" content="$2"
 	local dir tmp

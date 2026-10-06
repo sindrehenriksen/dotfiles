@@ -1,12 +1,9 @@
--- D7/D8: a `nvim -l` entry point onto the desk Lua modules (design.md §10
--- D7: "expose desk.block via nvim -l ... printing JSON"), so a non-Lua
--- caller — the private regression test (design.md's own F5), and the
--- runner (design.md §6: "the his-text and apply module ... also run by the
--- runner via nvim -l") — reaches the one implementation instead of a
--- second copy that could quietly drift from it. D8 adds the verbs the
--- runner itself needs (commit-his-text, ledger and proposal reads/writes):
--- every one of them is a thin JSON-in/JSON-out wrapper around an existing
--- module function, never new git-plumbing logic of its own.
+-- A `nvim -l` entry point onto the desk Lua modules, so a non-Lua caller —
+-- the private regression test, and the runner (which also runs this module's
+-- proposal and ledger writes through `nvim -l`) — reaches the one
+-- implementation instead of a second copy that could quietly drift from it.
+-- Every verb is a thin JSON-in/JSON-out wrapper around an existing module
+-- function, never new git-plumbing logic of its own.
 --
 -- `nvim -l` runs this file under nvim's embedded Lua without loading any
 -- config or 'runtimepath', so this module's own directory is added to
@@ -18,9 +15,7 @@ local block = require("desk.block")
 local snippet = require("desk.snippet")
 local git = require("desk.git")
 local ledger = require("desk.ledger")
-local review = require("desk.review")
-local histext = require("desk.histext")
-local round = require("desk.round")
+local proposal = require("desk.proposal")
 local tokens = require("desk.tokens")
 local annotate = require("desk.annotate")
 
@@ -77,247 +72,119 @@ if verb == "blocks" then
 	local lines = snippet.split_lines(read_file(path))
 	print_json(compute_blocks(lines))
 	os.exit(0)
-elseif verb == "commit-his-text" then
-	-- Usage: commit-his-text <repo> <file> [<file>...]
-	-- Index-only: writes each file's his-text (design.md §2) into the git
-	-- index via desk.histext, never the working file. Prints, per file,
-	-- {file, sha, changed, results} or {file, error}; a caller (the
-	-- runner) decides from `changed` whether a `git commit` is warranted,
-	-- and does that commit itself — this verb never commits.
-	--
-	-- Also writes the pending-set snapshot (§9(g)) for each file: the ids
-	-- this run derived as "pending", against the repo's HEAD sha as of
-	-- this call (the commit this verb's caller may make next hasn't
-	-- happened yet, but no pending item's state changes because of it —
-	-- commit-his-text only ever reverts pending content in the index/
-	-- worktree to match head, never the reverse). A later `ledger-classify`
-	-- call reads this snapshot back to tell "resolved through the review
-	-- key" apart from "resolved some other way" between this run and that
-	-- one.
-	local repo = args[2]
-	if not repo or not args[3] then
-		fail("usage: nvim -l nvim/lua/desk/cli.lua commit-his-text <repo> <file> [<file>...]")
-	end
-	local head_sha_ok, head_sha_out = git.run(repo, { "rev-parse", "--verify", "--quiet", "HEAD" })
-	local head_sha = head_sha_ok and vim.trim(head_sha_out) or ""
-	local out = {}
-	for i = 3, #args do
-		local file = args[i]
-		local pending_ids = {}
-		local to_freeze = {}
-		local sha, results, err = histext.write_to_index(repo, file, function()
-			local index_lines = snippet.split_lines(git.index_content(repo, file) or "")
-			local worktree_lines = snippet.split_lines(read_file(repo .. "/" .. file))
-			local states, items, _, ranges = ledger.derive_all(repo, file, index_lines, worktree_lines)
-			local resolved = round.resolved_states(ledger.read(repo))
-			local pending_items = {}
-			pending_ids = {}
-			to_freeze = {}
-			for id, item in pairs(items) do
-				local state = states[id]
-				if state == "pending" then
-					table.insert(pending_items, item)
-					table.insert(pending_ids, id)
-				elseif (state == "accepted" or state == "declined") and not resolved[id] then
-					table.insert(to_freeze, { id = id, state = state })
-				end
-			end
-			return {
-				worktree_lines = worktree_lines,
-				pending_items = pending_items,
-				pending_ranges = ranges,
-			}
-		end)
-		if not sha then
-			out[#out + 1] = { file = file, error = err }
-		else
-			if #to_freeze > 0 then
-				local freeze_records = {}
-				for _, f in ipairs(to_freeze) do
-					freeze_records[#freeze_records + 1] = round.build_resolved(f.id, f.state)
-				end
-				ledger.append_many(repo, freeze_records)
-			end
-			local head_blob_ok, head_blob = git.run(repo, { "rev-parse", "--verify", "--quiet", "HEAD:" .. file })
-			local changed = not (head_blob_ok and vim.trim(head_blob) == sha)
-			ledger.write_pending_snapshot(ledger.pending_snapshot_path(repo, file), head_sha, pending_ids)
-			out[#out + 1] = { file = file, sha = sha, changed = changed, results = results }
-		end
-	end
-	print_json(out)
-	os.exit(0)
-elseif verb == "ledger-derive" then
-	-- Usage: ledger-derive <repo> <file>
-	-- Every item's derived state for `file` (design.md §2's queued/pending/
-	-- accepted/declined/postponed, via desk.ledger.derive_all) against its
-	-- current HEAD/index/worktree content. This is how the runner tells a
-	-- genuinely postponed item ("not now"'d after being laid in) apart from
-	-- one merely still queued (never laid in) or already resolved — the one
-	-- state desk.ledger.state_summary alone can't answer, since that needs
-	-- each item's own anchor resolved against real file content, not just
-	-- the ledger's own records. Prints {states: {id: state}, items: {id:
-	-- item}}.
-	local repo, file = args[2], args[3]
-	if not repo or not file then
-		fail("usage: nvim -l nvim/lua/desk/cli.lua ledger-derive <repo> <file>")
-	end
-	local index_lines = snippet.split_lines(git.index_content(repo, file) or "")
-	local worktree_lines = snippet.split_lines(read_file(repo .. "/" .. file))
-	local states, items = ledger.derive_all(repo, file, index_lines, worktree_lines)
-	print_json({ states = states, items = items })
-	os.exit(0)
-elseif verb == "ledger-classify" then
-	-- Usage: ledger-classify <repo> <file>
-	-- The runner's his-text-derived status fields (design.md §9(f)),
-	-- read-only against whatever the ledger/index/worktree already hold —
-	-- never mutates anything, so calling it repeatedly (or not at all)
-	-- never changes the outcome of a later commit-his-text.
-	--
-	-- accepted_by_accident / resolved_without_key: compares the pending-
-	-- set snapshot (§9(g)) written by the last commit-his-text run against
-	-- freshly derived states (desk.ledger.classify_transitions) — an item
-	-- pending back then that's since become accepted/declined with no
-	-- matching key record went through some route other than the review
-	-- keys (a `git add -A`, a manual edit that happened to erase it). No
-	-- snapshot yet (never run) means an empty "prev pending" set, never
-	-- an error.
-	--
-	-- waiting_edits: every currently-pending item whose content doesn't
-	-- resolve cleanly against the index right now (desk.histext.compute's
-	-- own "waiting_edit" — design.md §2's "an edit of his that waits on
-	-- the suggestion beside it") — independent of the snapshot, since
-	-- it's about right now, not a transition.
-	--
-	-- Prints {accepted_by_accident, resolved_without_key, waiting_edits},
-	-- each an array of item ids.
-	local repo, file = args[2], args[3]
-	if not repo or not file then
-		fail("usage: nvim -l nvim/lua/desk/cli.lua ledger-classify <repo> <file>")
-	end
-	local index_lines = snippet.split_lines(git.index_content(repo, file) or "")
-	local worktree_lines = snippet.split_lines(read_file(repo .. "/" .. file))
-	local states, items, last_key, ranges = ledger.derive_all(repo, file, index_lines, worktree_lines)
-
-	local snap = ledger.read_pending_snapshot(ledger.pending_snapshot_path(repo, file))
-	local prev_pending_ids = (snap and snap.items) or {}
-	local accepted_by_accident, resolved_without_key = ledger.classify_transitions(prev_pending_ids, states, last_key)
-
-	local pending_items = {}
-	for id, item in pairs(items) do
-		if states[id] == "pending" then
-			table.insert(pending_items, item)
-		end
-	end
-	local _, histext_results = histext.compute(worktree_lines, pending_items, ranges)
-	local waiting_edits = {}
-	for id, result in pairs(histext_results) do
-		if result == "waiting_edit" then
-			table.insert(waiting_edits, id)
-		end
-	end
-
-	print_json({
-		accepted_by_accident = accepted_by_accident,
-		resolved_without_key = resolved_without_key,
-		waiting_edits = waiting_edits,
-	})
-	os.exit(0)
-elseif verb == "ledger-state" then
-	-- Usage: ledger-state <repo>
-	-- The runner's dedup/postponed-re-add input (design.md §2): every item
-	-- record, which ids have ever been laid in, and each id's latest `key`
-	-- record.
-	local repo = args[2]
-	if not repo then
-		fail("usage: nvim -l nvim/lua/desk/cli.lua ledger-state <repo>")
-	end
-	print_json(ledger.state_summary(repo))
-	os.exit(0)
-elseif verb == "ledger-append-batch" then
-	-- Usage: ledger-append-batch <repo> <ndjson-file>
-	-- Appends every record in the NDJSON file to refs/desk/ledger under one
-	-- compare-and-swap (design.md §2 "one compare-and-swap-with-retry
-	-- helper"), so a pass's own new items and re-added postponed ones land
-	-- together, never half-written. Prints {sha} or {error}.
-	local repo, path = args[2], args[3]
-	if not repo or not path then
-		fail("usage: nvim -l nvim/lua/desk/cli.lua ledger-append-batch <repo> <ndjson-file>")
-	end
-	local records = {}
-	for line in read_file(path):gmatch("[^\n]+") do
-		local ok, rec = pcall(vim.json.decode, line)
-		if not ok or type(rec) ~= "table" then
-			fail("invalid JSON line in " .. path .. ": " .. line)
-		end
-		records[#records + 1] = rec
-	end
-	local sha, err = ledger.append_many(repo, records)
-	if not sha then
-		print_json({ error = err })
-		os.exit(1)
-	end
-	print_json({ sha = sha })
-	os.exit(0)
-elseif verb == "proposal-read" then
-	-- Usage: proposal-read <repo>
-	local repo = args[2]
-	if not repo then
-		fail("usage: nvim -l nvim/lua/desk/cli.lua proposal-read <repo>")
-	end
-	print_json({ items = review.read_proposal(repo) })
-	os.exit(0)
-elseif verb == "proposal-write" then
-	-- Usage: proposal-write <repo> <items-json-file>
-	-- <items-json-file> holds {"items": [...]} (the pinned shape, design.md
-	-- §9(e)). Prints {sha} or {error}.
-	local repo, path = args[2], args[3]
-	if not repo or not path then
-		fail("usage: nvim -l nvim/lua/desk/cli.lua proposal-write <repo> <items-json-file>")
+elseif verb == "proposal-build" then
+	-- Usage: proposal-build <repo> <pass> <scheduled-date> <items-json-file> <file>...
+	-- The pass's one proposal commit (desk.proposal.build): his newest HEAD
+	-- plus the previous proposal's untaken, undeclined items plus the new
+	-- items in <items-json-file> ({"items": [...]}), all applied, written as
+	-- the tip of refs/desk/proposal. Prints {sha, stats} or {error}.
+	local repo, pass, scheduled_date, path = args[2], args[3], args[4], args[5]
+	if not repo or not pass or not scheduled_date or not path or not args[6] then
+		fail("usage: nvim -l nvim/lua/desk/cli.lua proposal-build <repo> <pass> <scheduled-date> <items-json-file> <file>...")
 	end
 	local ok, parsed = pcall(vim.json.decode, read_file(path))
 	if not ok or type(parsed) ~= "table" then
 		fail("invalid JSON in " .. path)
 	end
-	local sha, err = review.write_proposal(repo, parsed.items or {})
+	local files = {}
+	for i = 6, #args do
+		files[#files + 1] = args[i]
+	end
+	local sha, stats = proposal.build(repo, pass, scheduled_date, parsed.items or {}, files)
 	if not sha then
-		print_json({ error = err })
+		print_json({ error = stats })
 		os.exit(1)
 	end
-	print_json({ sha = sha })
+	print_json({ sha = sha, stats = stats })
+	os.exit(0)
+elseif verb == "proposal-read" then
+	-- Usage: proposal-read <repo>
+	-- Every item of the tip proposal, taken or not.
+	local repo = args[2]
+	if not repo then
+		fail("usage: nvim -l nvim/lua/desk/cli.lua proposal-read <repo>")
+	end
+	print_json({ items = proposal.read_items(repo) })
+	os.exit(0)
+elseif verb == "proposal-open" then
+	-- Usage: proposal-open <repo>
+	-- The tip proposal's items still waiting on him: not taken, not
+	-- declined, and applied (a deferred item has no hunk to take).
+	local repo = args[2]
+	if not repo then
+		fail("usage: nvim -l nvim/lua/desk/cli.lua proposal-open <repo>")
+	end
+	print_json({ items = proposal.open_items(repo) })
+	os.exit(0)
+elseif verb == "taken-sync" then
+	-- Usage: taken-sync <repo>
+	-- Records, as taken, every tip-proposal item whose `after` is now in his
+	-- HEAD (desk.proposal.sync_taken). The runner calls it after its own
+	-- daily commit. Prints {recorded: [ids]}.
+	local repo = args[2]
+	if not repo then
+		fail("usage: nvim -l nvim/lua/desk/cli.lua taken-sync <repo>")
+	end
+	local ids = {}
+	for _, item in ipairs(proposal.sync_taken(repo)) do
+		ids[#ids + 1] = item.id
+	end
+	print_json({ recorded = ids })
+	os.exit(0)
+elseif verb == "taken-lines" then
+	-- Usage: taken-lines <repo> <file>
+	-- The agent-originated lines of `file`: every taken item's `after`
+	-- lines, for the runner's marked copy of his notes. Prints {lines}.
+	local repo, file = args[2], args[3]
+	if not repo or not file then
+		fail("usage: nvim -l nvim/lua/desk/cli.lua taken-lines <repo> <file>")
+	end
+	local lines = {}
+	for _, rec in pairs(ledger.taken_by_id(ledger.read(repo))) do
+		if rec.file == file and rec.kind ~= "remove" and rec.after and rec.after ~= "" then
+			for _, l in ipairs(snippet.split_lines(rec.after)) do
+				lines[#lines + 1] = l
+			end
+		end
+	end
+	table.sort(lines)
+	print_json({ lines = lines })
+	os.exit(0)
+elseif verb == "ledger-state" then
+	-- Usage: ledger-state <repo>
+	-- Every item the runner already knows about, for its dedup (a session
+	-- capture is never made twice): the tip proposal's items, declined and
+	-- restored items, and taken ones. Prints {items: {id: item}}.
+	local repo = args[2]
+	if not repo then
+		fail("usage: nvim -l nvim/lua/desk/cli.lua ledger-state <repo>")
+	end
+	local items = {}
+	local records = ledger.read(repo)
+	for _, rec in ipairs(records) do
+		if rec.type == "taken" and rec.id then
+			items[rec.id] = rec
+		elseif (rec.type == "decline" or rec.type == "restore") and rec.item then
+			items[rec.id] = rec.item
+		end
+	end
+	for _, item in ipairs(proposal.read_items(repo)) do
+		items[item.id] = item
+	end
+	print_json({ items = items })
 	os.exit(0)
 elseif verb == "notes-diff" then
 	-- Usage: notes-diff <repo> <file> <since>
 	-- The weekly tab's own notes-diff input (design's weekly/README.md):
 	-- his own additions/removals in `file` between `since` (any commit-
-	-- ish) and HEAD, with every line the ledger says is agent-originated
-	-- excluded on its own side — never a second heuristic, and the two
-	-- sides are excluded two different ways on purpose:
+	-- ish) and HEAD, with every line the taken-provenance records call
+	-- agent-originated excluded on its own side. Records any item newly in
+	-- his HEAD as taken first, so a commit made outside the review key or
+	-- the runner is still attributed.
 	--
-	-- Additions: an item's own `after`, whenever desk.ledger.derive_all
-	-- (the same per-position state machine the review key and the daily
-	-- marked-head-copy already use) calls it "accepted" *or* "pending".
-	-- "pending" is included deliberately, not defensively: an accepted
-	-- edit/remove/move's own anchor quotes its `before`'s first line,
-	-- text that the very next `commit_his_text` erases from HEAD — so a
-	-- read any time after that (this one, run a weekly's worth of commits
-	-- later) can no longer resolve that anchor and mis-derives "pending"
-	-- (derive_all's own "can't resolve; conservatively still needs
-	-- review" fallback) for an item that was actually accepted long ago.
-	-- `after` is agent text either way, so both states exclude it; a
-	-- truly still-pending item's `after` never reaches a commit in the
-	-- first place (his committed text always reverts pending items), so
-	-- including "pending" here never wrongly excludes something of his.
-	--
-	-- Removals: never derive_all's own per-item state — a stale anchor is
-	-- exactly the case that matters most here, and the one derive_all can
-	-- no longer place at all (same reasoning as above, but "removed"
-	-- has no "pending" to fall back on: the removal already happened).
-	-- Instead, an item's own `before` is excluded whenever the ledger's
-	-- own `key` records say its last key was an accept — position-
-	-- independent, since it never re-resolves an anchor at all. The
-	-- "removed-line hashes": a plain content lookup built once from the
-	-- ledger's own records, not re-derived from wherever the line used to
-	-- sit.
+	-- Additions: every taken item's own `after` lines. Removals: every
+	-- taken item's own `before` lines — a plain content lookup, so a line
+	-- he took into HEAD and later moved or replaced is still excluded.
 	local repo, file, since = args[2], args[3], args[4]
 	if not repo or not file or not since then
 		fail("usage: nvim -l nvim/lua/desk/cli.lua notes-diff <repo> <file> <since>")
@@ -335,32 +202,17 @@ elseif verb == "notes-diff" then
 		os.exit(1)
 	end
 
-	local function read_worktree_or_empty(path)
-		local fd = io.open(path, "r")
-		if not fd then
-			return ""
-		end
-		local content = fd:read("*a")
-		fd:close()
-		return content
-	end
-
-	local index_lines = snippet.split_lines(git.index_content(repo, file) or "")
-	local worktree_lines = snippet.split_lines(read_worktree_or_empty(repo .. "/" .. file))
-	local states, items, last_key = ledger.derive_all(repo, file, index_lines, worktree_lines)
-
+	proposal.sync_taken(repo)
 	local exclude_add, exclude_remove = {}, {}
-	for id, item in pairs(items) do
-		if item.file == file then
-			local state = states[id]
-			if item.after and item.after ~= "" and (state == "accepted" or state == "pending") then
-				for _, l in ipairs(snippet.split_lines(item.after)) do
+	for _, rec in pairs(ledger.taken_by_id(ledger.read(repo))) do
+		if rec.file == file then
+			if rec.after and rec.after ~= "" then
+				for _, l in ipairs(snippet.split_lines(rec.after)) do
 					exclude_add[l] = true
 				end
 			end
-			local key = last_key[id]
-			if item.before and item.before ~= "" and key and key.action == "accept" then
-				for _, l in ipairs(snippet.split_lines(item.before)) do
+			if rec.before and rec.before ~= "" then
+				for _, l in ipairs(snippet.split_lines(rec.before)) do
 					exclude_remove[l] = true
 				end
 			end
@@ -395,25 +247,6 @@ elseif verb == "notes-diff" then
 	end
 
 	print_json({ additions = additions, removals = removals })
-	os.exit(0)
-elseif verb == "namespace-ids" then
-	-- Usage: namespace-ids <repo> <pass> <scheduled-date> <items-json-file>
-	-- The runner's own staging step (desk.ledger.namespace_ids): rewrites
-	-- each item's own (model-assigned) `id` into one unique across the
-	-- whole ledger before it's ever appended, so the model's own promise
-	-- of uniqueness (good only within one reply) never becomes the
-	-- ledger's key space. <items-json-file> holds {"items": [...]}, each
-	-- with its own `id`. Prints {"items": [...]}, same order, every `id`
-	-- rewritten to `<pass>-<scheduled date>-<seq>-<model id>`.
-	local repo, pass, scheduled_date, path = args[2], args[3], args[4], args[5]
-	if not repo or not pass or not scheduled_date or not path then
-		fail("usage: nvim -l nvim/lua/desk/cli.lua namespace-ids <repo> <pass> <scheduled-date> <items-json-file>")
-	end
-	local ok, parsed = pcall(vim.json.decode, read_file(path))
-	if not ok or type(parsed) ~= "table" then
-		fail("invalid JSON in " .. path)
-	end
-	print_json({ items = ledger.namespace_ids(repo, pass, scheduled_date, parsed.items or {}) })
 	os.exit(0)
 elseif verb == "tokens" then
 	-- Usage: tokens <file>
@@ -451,6 +284,6 @@ elseif verb == "tokens" then
 else
 	fail("unknown verb: "
 		.. tostring(verb)
-		.. " (expected: blocks, commit-his-text, ledger-derive, ledger-classify, ledger-state,"
-		.. " ledger-append-batch, proposal-read, proposal-write, notes-diff, namespace-ids, tokens)")
+		.. " (expected: blocks, proposal-build, proposal-read, proposal-open, taken-sync, taken-lines,"
+		.. " ledger-state, notes-diff, tokens)")
 end

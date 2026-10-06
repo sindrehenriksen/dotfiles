@@ -1,17 +1,14 @@
 #!/usr/bin/env bash
-# D8b test: the weekly tab's notes-diff (weekly/README.md's "holding the
-# runner's fenced notes-diff.md") — nvim/lua/desk/cli.lua's own `notes-diff`
-# verb (the diffing + ledger-based exclusion, reusing desk.ledger/desk.snippet
-# rather than a second normalization here) and claude/desk-lib/steps.sh's
-# desk_write_notes_diff/desk_last_weekday_epoch (the since-commit resolution
-# and rendering around it). Three from-scratch-repo scenarios drive the verb
-# directly: his own edit is kept, an accepted agent line is excluded even
-# after it was moved elsewhere in the file, and an accepted agent removal is
-# excluded — the two exclusion mechanisms this feature relies on (an after-
-# snippet match via desk.ledger.derive_all's own accepted/pending states, and
-# a before-content match via the ledger's own accept key records, position-
-# independent on purpose — see cli.lua's own comment on why removals can't
-# use derive_all's state the way additions do). No live model call, nothing
+# The weekly tab's notes-diff (weekly/README.md's "holding the runner's
+# fenced notes-diff.md") — nvim/lua/desk/cli.lua's own `notes-diff` verb
+# (the diffing + taken-provenance exclusion, reusing desk.proposal/
+# desk.snippet rather than a second normalization here) and
+# claude/desk-lib/steps.sh's desk_write_notes_diff/desk_last_weekday_epoch
+# (the since-commit resolution and rendering around it). From-scratch-repo
+# scenarios drive the verb directly: his own edit is kept, an agent line he
+# took is excluded even after he moved it elsewhere in the file, and a taken
+# agent removal is excluded — exclusions come from what the ledger recorded
+# as taken (by content), never from positions. No live model call, nothing
 # pushed anywhere.
 set -u
 
@@ -40,9 +37,8 @@ source "$HERE/../../tests/lib/git-safety.sh"
 desk_test_git_safety_init "$ROOT"
 
 # ---------------------------------------------------------------------------
-# The from-scratch repo + ledger: an agent-suggested line accepted, then
-# moved by a later accepted `move`; an agent-suggested removal accepted; and
-# a line only he ever touched.
+# The from-scratch repo: an agent-suggested line he took, then moved; an
+# agent-suggested removal he took; and a line only he ever touched.
 # ---------------------------------------------------------------------------
 repo="$ROOT/notes"
 desk_test_assert_repo_under_root "$repo" "$ROOT"
@@ -51,7 +47,7 @@ git -C "$repo" init -q
 git -C "$repo" config user.email test@example.invalid
 git -C "$repo" config user.name "Desk Test"
 
-printf 'Alpha: existing block\nGamma: agent-suggested content\nBeta: existing block\nEpsilon: to be removed by agent\n' \
+printf 'Alpha: existing block\nBeta: existing block\nEpsilon: to be removed by agent\n' \
 	> "$repo/notes.md"
 git -C "$repo" add notes.md
 # Backdated well before any real "last Wednesday" cutoff (desk_write_notes_diff's
@@ -62,20 +58,26 @@ GIT_AUTHOR_DATE="2020-01-01T00:00:00" GIT_COMMITTER_DATE="2020-01-01T00:00:00" \
 	git -C "$repo" commit -q -m initial
 since_sha="$(git -C "$repo" rev-parse HEAD)"
 
+# One proposal commit holding an agent addition and an agent removal.
+items="$ROOT/items.json"
+cat > "$items" <<'EOF'
+{"items":[
+ {"id":"add1","kind":"add","file":"notes.md","target":{"under":"Beta: existing block"},"before":"","after":"Gamma: agent-suggested content","source":"test","headline":"added"},
+ {"id":"remove1","kind":"remove","file":"notes.md","target":{"at":"Epsilon: to be removed by agent"},"before":"Epsilon: to be removed by agent","after":"","source":"test2","headline":"removed"}
+]}
+EOF
+nvim -l "$CLI" proposal-build "$repo" morning 2026-10-01 "$items" notes.md > /dev/null
+
+# He takes both (plus a line of his own) and commits; later he moves the
+# agent line elsewhere.
 printf 'Alpha: existing block\nBeta: existing block\nGamma: agent-suggested content\nHis own new line\n' \
 	> "$repo/notes.md"
 git -C "$repo" add notes.md
-git -C "$repo" commit -q -m "his edit plus the accepted move/removal"
-
-recs="$ROOT/ledger-recs.ndjson"
-cat > "$recs" <<'EOF'
-{"type":"item","id":"move1","kind":"move","file":"notes.md","anchor":[{"at":"Gamma: agent-suggested content"},{"under":"Beta: existing block"}],"before":"Gamma: agent-suggested content","after":"Gamma: agent-suggested content","source":"test","headline":"moved"}
-{"type":"item","id":"remove1","kind":"remove","file":"notes.md","anchor":{"at":"Epsilon: to be removed by agent"},"before":"Epsilon: to be removed by agent","after":"","source":"test","headline":"removed"}
-{"type":"laid_in","at":1,"proposal":"p1","items":["move1","remove1"]}
-{"type":"key","id":"move1","at":2,"action":"accept"}
-{"type":"key","id":"remove1","at":2,"action":"accept"}
-EOF
-nvim -l "$CLI" ledger-append-batch "$repo" "$recs" > /dev/null
+git -C "$repo" commit -q -m "his edit plus the taken suggestions"
+printf 'Alpha: existing block\nGamma: agent-suggested content\nBeta: existing block\nHis own new line\n' \
+	> "$repo/notes.md"
+git -C "$repo" add notes.md
+git -C "$repo" commit -q -m "he moved the agent line"
 
 echo "=== cli.lua notes-diff: the three scenarios ==="
 out="$(nvim -l "$CLI" notes-diff "$repo" notes.md "$since_sha")"
@@ -86,11 +88,11 @@ removals="$(jq -c '.removals' <<< "$out")"
 
 assert_true "his own new line is kept as an addition" \
 	"$(jq -e '. == ["His own new line"]' > /dev/null 2>&1 <<< "$additions" && echo true || echo false)"
-assert_true "the accepted, later-moved agent line never shows up as an addition" \
+assert_true "the taken, later-moved agent line never shows up as an addition" \
 	"$(jq -e 'index("Gamma: agent-suggested content") == null' > /dev/null 2>&1 <<< "$additions" && echo true || echo false)"
-assert_true "the accepted, later-moved agent line never shows up as a removal either" \
+assert_true "the taken, later-moved agent line never shows up as a removal either" \
 	"$(jq -e 'index("Gamma: agent-suggested content") == null' > /dev/null 2>&1 <<< "$removals" && echo true || echo false)"
-assert_true "the accepted agent removal never shows up as a removal" \
+assert_true "the taken agent removal never shows up as a removal" \
 	"$(jq -e 'index("Epsilon: to be removed by agent") == null' > /dev/null 2>&1 <<< "$removals" && echo true || echo false)"
 assert_true "no removal is left unaccounted for (only the excluded one dropped)" \
 	"$(jq -e '. == []' > /dev/null 2>&1 <<< "$removals" && echo true || echo false)"

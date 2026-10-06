@@ -104,19 +104,28 @@ mkdir -p "$repo"
 git -C "$repo" init -q
 git -C "$repo" config user.email test@example.invalid
 git -C "$repo" config user.name "Desk Test"
-printf 'accepted line\nSection A\n  detail\n' > "$repo/notes.md"
+printf 'Section A\n  detail\n' > "$repo/notes.md"
 : > "$repo/reading.md"
 git -C "$repo" add notes.md reading.md
 git -C "$repo" commit -q -m initial
 
-recs="$ROOT/ledger-recs.ndjson"
-cat > "$recs" <<EOF
-{"type":"item","id":"acc1","file":"notes.md","kind":"new","anchor":"top","before":"","after":"accepted line","source":"test","headline":"already accepted"}
-{"type":"round","file":"notes.md","at":1,"text":["accepted line","Section A","  detail"],"items":{"acc1":{"kind":"new","ranges":[{"line":1,"count":1,"role":"edit"}]}}}
-{"type":"laid_in","at":1,"proposal":"p1","items":["acc1"]}
-{"type":"item","id":"q1","file":"notes.md","kind":"add","anchor":{"under":"Section A"},"before":"","after":"  a queued suggestion","source":"notes","headline":"still open"}
+# A suggestion he took: proposed, then its text lands in HEAD.
+acc_items="$ROOT/acc-items.json"
+cat > "$acc_items" <<'EOF'
+{"items":[{"id":"acc1","file":"notes.md","kind":"new","target":"top","before":"","after":"accepted line","source":"test","headline":"already accepted"}]}
 EOF
-nvim -l "$CLI" ledger-append-batch "$repo" "$recs" > /dev/null
+nvim -l "$CLI" proposal-build "$repo" morning 2026-10-01 "$acc_items" notes.md reading.md > /dev/null
+printf 'accepted line\nSection A\n  detail\n' > "$repo/notes.md"
+git -C "$repo" add notes.md
+git -C "$repo" commit -q -m "he took it"
+nvim -l "$CLI" taken-sync "$repo" > /dev/null
+
+# A suggestion still waiting on him.
+q_items="$ROOT/q-items.json"
+cat > "$q_items" <<'EOF'
+{"items":[{"id":"q1","file":"notes.md","kind":"add","target":{"under":"Section A"},"before":"","after":"  a queued suggestion","source":"notes","headline":"still open"}]}
+EOF
+nvim -l "$CLI" proposal-build "$repo" morning 2026-10-02 "$q_items" notes.md reading.md > /dev/null
 
 # --- sources.json's own source file ---
 sources_path="$ROOT/sources.json"
@@ -202,11 +211,11 @@ assert_true "Alpha, busy" \
 	"$(jq -e '. == [{"name":"Alpha","status":"busy"}]' > /dev/null 2>&1 "$CAPTURE/sessions.json" && echo true || echo false)"
 
 echo
-echo "=== open-items.json: the still-queued suggestion, never the accepted one ==="
+echo "=== open-items.json: the still-untaken suggestion, never the taken one ==="
 assert_true "q1 is present" \
-	"$(jq -e '[.[] | select(.id == "q1")] | length == 1' > /dev/null 2>&1 "$CAPTURE/open-items.json" && echo true || echo false)"
-assert_true "acc1 (already accepted) is absent" \
-	"$(jq -e '[.[] | select(.id == "acc1")] | length == 0' > /dev/null 2>&1 "$CAPTURE/open-items.json" && echo true || echo false)"
+	"$(jq -e '[.[] | select(.headline == "still open")] | length == 1' > /dev/null 2>&1 "$CAPTURE/open-items.json" && echo true || echo false)"
+assert_true "acc1 (already taken) is absent" \
+	"$(jq -e '[.[] | select(.headline == "already accepted")] | length == 0' > /dev/null 2>&1 "$CAPTURE/open-items.json" && echo true || echo false)"
 
 echo
 echo "=== summary: $pass passed, $fail failed ==="

@@ -1,13 +1,12 @@
 #!/usr/bin/env bash
 # D8 fix test (review item #10): claude/desk-lib/git-ops.sh's
 # desk_stage_and_write_proposal namespaces every new item's own (model-
-# assigned) id via cli.lua's namespace-ids verb (desk.ledger.namespace_ids)
-# before anything is ever appended to the ledger or written into the
-# proposal — a model's own promise of id uniqueness only ever holds within
+# assigned) id inside the proposal builder (desk.ledger.namespace_ids)
+# before anything is written into the proposal — a model's own promise of id uniqueness only ever holds within
 # its own single reply, so two different calls this same scheduled date
 # reusing the same literal id (a real, likely scenario: a judge call and a
 # close capture both handing back "id": "c1") must never collide in the
-# ledger.
+# proposal.
 set -u
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -54,7 +53,7 @@ git -C "$repo" commit -q -m initial
 
 echo "=== a new item's id is namespaced, never the model's own literal id ==="
 items1="$ROOT/items1.json"
-jq -n '{items: [{id:"c1", file:"notes.md", kind:"new", target:"top", before:"", after:"first", source:"test", headline:"h1"}]}' > "$items1"
+jq -n '{items: [{id:"c1", file:"notes.md", kind:"new", target:"top", before:"", after:"first", source:"test-one", headline:"h1"}]}' > "$items1"
 sha1="$(desk_stage_and_write_proposal "$repo" "morning" "2026-09-28" "$items1" notes.md reading.md)"
 assert_true "staging succeeds" "$([ -n "$sha1" ] && echo true || echo false)"
 proposal1="$(git -C "$repo" show refs/desk/proposal:proposal.json)"
@@ -66,7 +65,7 @@ assert_true "the namespaced id carries the pass/date and the model's own id" \
 echo
 echo "=== a second call the same scheduled date, reusing the model's own id 'c1', never collides ==="
 items2="$ROOT/items2.json"
-jq -n '{items: [{id:"c1", file:"notes.md", kind:"new", target:"top", before:"", after:"second", source:"test", headline:"h2"}]}' > "$items2"
+jq -n '{items: [{id:"c1", file:"notes.md", kind:"new", target:"top", before:"", after:"second", source:"test-two", headline:"h2"}]}' > "$items2"
 sha2="$(desk_stage_and_write_proposal "$repo" "morning" "2026-09-28" "$items2" notes.md reading.md)"
 assert_true "the second staging also succeeds" "$([ -n "$sha2" ] && echo true || echo false)"
 proposal2="$(git -C "$repo" show refs/desk/proposal:proposal.json)"
