@@ -28,12 +28,12 @@ desk_repo_committable() {
 # as taken, then pushes main + refs/desk/ledger. Prints one status word to
 # stdout: "ok" (ran, whether or not there was anything new to commit),
 # "skipped" (HEAD isn't main / mid-rebase — reported, never attempted), or
-# "error" (the commit or the taken-sync failed — a loud failure). Sets
-# status.json's `push` field to "ok"/"failed"/"disabled" (config's own
-# `push_enabled`, default false: commit every day, never push) regardless
-# of which of those three it prints, since a push can still be retried
-# even after a skipped commit (an earlier pass's commit might still be
-# sitting there unpushed).
+# "error" (the commit or the taken-sync failed — a loud failure). The push
+# comes last and only on the "ok" path: it sets status.json's `push` field to
+# "ok"/"failed" (or "disabled" when config's `push_enabled`, default false,
+# is off: commit every day, never push). A "skipped" or "error" run never
+# reaches it, so it neither pushes nor touches the `push` field, which keeps
+# its previous value.
 #
 # $1 = repo, $2 = push_enabled ("true"/"false"), $3.. = files (notes.md
 # reading.md, per config's `files`).
