@@ -127,7 +127,7 @@ for _, id in ipairs(first_ids) do
 	end
 	assert_true("carried id still present: " .. id, found)
 end
-assert_eq("the new item is on top", "1630-2026-10-01-1-n2", p2.items[1].id)
+assert_eq("the morning news stays above the 16:30 item", "1630-2026-10-01-1-n2", p2.items[#p2.items].id)
 
 print("\n=== taken: after content in HEAD marks it taken, recorded once, and it is not carried ===")
 write(repo, "notes.md", { "NEWS n1", "Section A", "  existing" })
@@ -152,7 +152,11 @@ assert_eq("parent is his newest HEAD", vim.trim(select(2, git.run(repo, { "rev-p
 assert_true("tip notes keep his committed line", vim.tbl_contains(tip_lines(repo, "notes.md"), n1.after))
 
 print("\n=== declined: by id and by source, never re-proposed; restore brings it back ===")
-local victim = p3.items[1]
+local victim
+for _, it in ipairs(p3.items) do
+	victim = victim or (it.headline == "headline n2" and it) or nil
+end
+victim = victim or p3.items[1]
 assert_true("decline recorded", ledger.record_declines(repo, { victim }))
 assert_eq("declining twice records once", true, ledger.record_declines(repo, { victim }))
 local declines = 0
@@ -312,6 +316,18 @@ do
 	}, FILES)
 	assert_eq("only the unseen story is proposed", { "fresh story" }, vim.tbl_map(function(it) return it.headline end, proposal.read(r).items))
 	assert_eq("the two dropped are counted", 2, st.skipped)
+end
+
+print("\n=== morning news sits above the 16:30 captures on top, whichever pass landed last ===")
+do
+	local r = new_repo({ "Section A" })
+	proposal.build(r, "morning", "2026-10-01", { item("n1", { after = "MORNING news" }) }, FILES)
+	proposal.build(r, "1630", "2026-10-01", { item("c1", { after = "CAPTURE five", source = "session:aaaaaaaa-0000-0000-0000-000000000000" }) }, FILES)
+	assert_eq("morning above the later 16:30 capture", { "MORNING news", "CAPTURE five", "Section A" }, tip_lines(r, "notes.md"))
+	local r2 = new_repo({ "Section A" })
+	proposal.build(r2, "1630", "2026-10-01", { item("c1", { after = "CAPTURE five", source = "session:aaaaaaaa-0000-0000-0000-000000000000" }) }, FILES)
+	proposal.build(r2, "morning", "2026-10-02", { item("n1", { after = "MORNING news" }) }, FILES)
+	assert_eq("and above an earlier one too", { "MORNING news", "CAPTURE five", "Section A" }, tip_lines(r2, "notes.md"))
 end
 
 print(string.format("\n=== summary: %d passed, %d failed ===", pass, fail))

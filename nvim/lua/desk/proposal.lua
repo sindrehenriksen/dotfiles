@@ -448,6 +448,25 @@ function M.build(repo, pass, scheduled_date, new_items, files)
 			items[#items + 1] = e
 		end
 
+		-- Order on top: the morning news sits above the 16:30 captures,
+		-- whichever pass landed last (items keep their order within a pass).
+		-- A pass is the first dash-separated part of an item's id.
+		local function pass_rank(item)
+			return tostring(item.id):match("^morning%-") and 0 or 1
+		end
+		for i, item in ipairs(items) do
+			item._order = i
+		end
+		table.sort(items, function(a, b)
+			if pass_rank(a) ~= pass_rank(b) then
+				return pass_rank(a) < pass_rank(b)
+			end
+			return a._order < b._order
+		end)
+		for _, item in ipairs(items) do
+			item._order = nil
+		end
+
 		-- Apply per file onto HEAD.
 		local blobs = {}
 		local by_file = {}
