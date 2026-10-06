@@ -98,7 +98,7 @@ Wayland blocks external window manipulation, so the only viable approach is a Sh
 
 Written rather than adopted. The off-the-shelf tilers (Tiling Shell, Forge, PaperWM) each impose their own model — auto-tiling, tree layouts, or scrollable columns — and none offers a modal picker that drops a window into a named slot, which is the whole interaction here. Bending one into shape is more work than the placement maths, which is a dozen lines.
 
-Ubuntu's own Tiling Assistant is enabled by default and unused; it goes when the extension lands.
+Ubuntu's own Tiling Assistant is enabled by default and unused; `linux/gnome-shortcuts.sh` disables it.
 
 ## Key decisions
 

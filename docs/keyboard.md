@@ -132,7 +132,6 @@ A change on one machine should be mirrored on the other, unless there is a reaso
 - **`Super+D` is freed on Linux** so `Cmd+D` bookmarking works. Nothing to mirror: show-desktop on macOS is F11 and Mission Control, not Cmd+D.
 - **Caps hold** is a software layer on macOS (Hammerspoon) and lives in the input remapper on Linux, but the bindings match.
 - **The modifier taps cost `Ctrl+click` and `Shift+click` on Linux**, and are kept regardless. See the section above.
-- **The two-window layouts are macOS-only for now.** They belong on both; the Linux side waits on the Shell extension.
 - **Super is on both sides of the space bar on macOS, only the left on Linux.** The right-hand key there has to stay AltGr for the Norwegian letters, and the key that would otherwise take AltGr is a Copilot key that cannot be remapped at all.
 - **The Caps layer engages by hold time on Linux, by release order on macOS.** Hammerspoon waits to see which key comes up first and replays what it buffered, so a `caps`→`b` roll yields Escape then b with no delay. xremap cannot reorder, so it needs a hold threshold instead, and the layer costs a real wait before it engages.
 
@@ -140,6 +139,6 @@ A change on one machine should be mirrored on the other, unless there is a reaso
 
 macOS is built (`hammerspoon/init.lua`, `macos/keyboard-remap.sh`).
 
-Linux has the keyboard layer but not the window layer, in `linux/` — see its README for how the pieces fit and what still needs confirming on first run. Everything on this page below "Caps as a layer" is implemented there except directional focus, which needs the GNOME Shell extension nobody has written yet.
+Linux is built too, in `linux/` — the keyboard layer on xremap and the window layer as a GNOME Shell extension. See its README for how the pieces fit, what still needs confirming on first run, and the gaps that remain. Everything on this page below "Caps as a layer" is implemented there.
 
 The earlier attempt left two things that `linux/setup-input.sh` and `gnome-shortcuts.sh` clear out: `keyd`, installed and running against a 0-byte config, and Ubuntu's Tiling Assistant. The `xremap@k0kubun.com` entry in `enabled-extensions` was never backed by an installed extension at all.

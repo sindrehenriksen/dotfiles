@@ -1,6 +1,6 @@
 # Linux keyboard setup
 
-The Linux half of the model in [../docs/keyboard.md](../docs/keyboard.md) — read that first; it says what the bindings are and why Super carries app commands. This file is only how the pieces fit together on this machine. Window placement is not built yet.
+The Linux half of the model in [../docs/keyboard.md](../docs/keyboard.md) — read that first; it says what the bindings are and why Super carries app commands. This file is only how the pieces fit together on this machine.
 
 ## What is here
 
@@ -9,6 +9,7 @@ The Linux half of the model in [../docs/keyboard.md](../docs/keyboard.md) — re
 | `xremap.yml` | the remapping itself, symlinked to `~/.config/xremap/config.yml` |
 | `xremap.service` | user service, symlinked into `~/.config/systemd/user/` |
 | `focus-or-launch` | app-jump helper for the Caps layer, symlinked into `~/.local/bin` |
+| `gnome-extension/` | the window placement grid; the model is in [../docs/window-layout.md](../docs/window-layout.md) |
 | `install.sh` | fetches xremap and its GNOME extension; no root |
 | `setup-input.sh` | input-device permissions, and removes keyd; needs root |
 | `gnome-shortcuts.sh` | clears the GNOME defaults that collide with Super |
@@ -46,9 +47,9 @@ busctl --user call org.gnome.Shell /com/k0kubun/Xremap com.k0kubun.Xremap WMClas
 - **Directional swap is missing.** On the Mac, `Cmd+Ctrl+h/t/n/s` exchanges the focused window's frame with its neighbour. The extension does the focus half but not the swap; it would be the same neighbour-finding with an exchange instead of an activate. Left undone deliberately — it sees little use.
 - **The two-window sizes live in the extension's JavaScript**, so changing one costs a logout: GNOME re-reads extension code only when the Shell restarts, and disable/enable reuses the cached module. Moving those numbers into the extension's GSettings schema would make a tweak a `gsettings` command taking effect immediately. Worth doing if they ever need more than occasional adjustment.
 - **`Ctrl+click` and `Shift+click` arrive without their modifier**, so links do not open in new tabs. The tap-to-switch-tabs gesture causes it: a dual-function modifier in xremap does not carry into pointer events at any hold threshold. The gesture is worth more here, so this is accepted rather than fixed. Whether kanata's tap-hold shares the flaw is untested — it emits through a virtual device too, so do not assume it is immune, but the fault is in xremap's held/alone rather than in remapping as such, since position-swapped modifiers carry fine.
-- **The Caps layer waits.** It engages on hold time (`hold_threshold_millis`) rather than on which key is released first, so the layer costs a real pause that macOS does not.
+- **The Caps layer waits, and no threshold satisfies both ends.** It engages on hold time (`hold_threshold_millis`) rather than on which key is released first, so the layer costs a real pause that macOS does not. The two ends have been measured against each other and they overlap: at 100 ms a `caps`→`b` roll still reaches the layer, so Files launches instead of Escape-then-b reaching the shell or vim, and at 150 ms the layer itself feels slow to engage. It sits at 90 ms, which admits the misfire knowingly in exchange for the feel. Raising it is not the fix — the decision has to stop being a timing one, which xremap cannot do.
 
-  Both of the above are fixable, but only by adding [kanata](https://github.com/jtroo/kanata) alongside xremap: it has `tap-hold-order`, which resolves purely by release order with no timeout, and `(require-prior-idle <ms>)`, which suppresses a tap that follows recent typing. Neither exists in xremap. kanata cannot replace it, having no window awareness for the per-application Super translation, so this means two remappers chained — kanata grabbing the keyboard and emitting a virtual device, xremap reading only that. Not done, because it doubles the input stack for a question of feel — worth revisiting if the pause or the stray taps still irritate after a few weeks of use rather than a few hours.
+  Both of the above are fixable, but only by adding [kanata](https://github.com/jtroo/kanata) alongside xremap: it has `tap-hold-order`, which decides by which key comes up first rather than by how long the layer key was held, and `(require-prior-idle <ms>)`, which suppresses a tap that follows recent typing. Neither exists in xremap. kanata cannot replace it, having no window awareness for the per-application Super translation, so this means two remappers chained — kanata grabbing the keyboard and emitting a virtual device, xremap reading only that. Not done, because it doubles the input stack for a question of feel — worth revisiting if the pause or the stray taps still irritate after a few weeks of use rather than a few hours.
 - **Slack and Notes are unmapped** on the Caps layer. Slack is not installed; Notes is a decision recorded in the keyboard doc.
 - **Super is only on the left of the space bar**, unlike the Mac. The key right of it carries a small menu glyph but is a Copilot key: one press emits `KEY_LEFTMETA` + `KEY_LEFTSHIFT` + `KEY_F23` together, so nothing can be mapped onto it — its Meta and Shift are the same events the real keys produce. Read the scancodes rather than the legend. AltGr therefore stays where it is, on the right of the space bar.
 
