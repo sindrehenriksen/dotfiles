@@ -220,7 +220,8 @@ desk_write_open_items() {
 	jq -c --argjson files "$files_json" '
 		[ (.items // [])[] | select(.file as $f | $files | index($f))
 		  | {id, file, kind, target, before, after, source, headline}
-			+ (if .tier then {tier: .tier} else {} end) ]
+			+ (if .tier then {tier: .tier} else {} end)
+			+ (if .also_sources then {also_sources: .also_sources} else {} end) ]
 	' <<< "$open" > "$out" 2> /dev/null || printf '[]' > "$out"
 	[ -s "$out" ] || printf '[]' > "$out"
 }

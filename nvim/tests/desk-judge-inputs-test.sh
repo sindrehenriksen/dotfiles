@@ -123,7 +123,7 @@ nvim -l "$CLI" taken-sync "$repo" > /dev/null
 # A suggestion still waiting on him.
 q_items="$ROOT/q-items.json"
 cat > "$q_items" <<'EOF'
-{"items":[{"id":"q1","file":"notes.md","kind":"add","target":{"under":"Section A"},"before":"","after":"  a queued suggestion","source":"notes","headline":"still open"}]}
+{"items":[{"id":"q1","file":"notes.md","kind":"add","target":{"under":"Section A"},"before":"","after":"  a queued suggestion","source":"notes","also_sources":["https://example.invalid/also"],"headline":"still open"}]}
 EOF
 nvim -l "$CLI" proposal-build "$repo" morning 2026-10-02 "$q_items" notes.md reading.md > /dev/null
 
@@ -214,6 +214,8 @@ echo
 echo "=== open-items.json: the still-untaken suggestion, never the taken one ==="
 assert_true "q1 is present" \
 	"$(jq -e '[.[] | select(.headline == "still open")] | length == 1' > /dev/null 2>&1 "$CAPTURE/open-items.json" && echo true || echo false)"
+assert_true "open-items.json carries also_sources" \
+	"$(jq -e '[.[] | select(.headline == "still open")][0].also_sources == ["https://example.invalid/also"]' > /dev/null 2>&1 "$CAPTURE/open-items.json" && echo true || echo false)"
 assert_true "acc1 (already taken) is absent" \
 	"$(jq -e '[.[] | select(.headline == "already accepted")] | length == 0' > /dev/null 2>&1 "$CAPTURE/open-items.json" && echo true || echo false)"
 
