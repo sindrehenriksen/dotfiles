@@ -371,7 +371,7 @@ local function supersedes(n, e)
 	if ledger.any_url_in(have, n) then
 		return true
 	end
-	if e.target ~= nil and canon(e.target) ~= canon("top") and n.kind == e.kind and canon(n.target) == canon(e.target) then
+	if in_place_kind[e.kind] and n.kind == e.kind and at_anchored(e.target) and canon(n.target) == canon(e.target) then
 		return true
 	end
 	return false

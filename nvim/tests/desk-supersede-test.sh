@@ -2,9 +2,9 @@
 # claude/desk-lib/git-ops.sh's desk_stage_and_write_proposal: an untaken
 # item from the last proposal is carried into the next (a "not now"), and a
 # new item replaces a carried one only when it names it (`supersedes: <id>`),
-# shares its `source`, or targets the same non-"top" place with the same
-# kind — "top" is where every news item lands, so two unrelated news items
-# sharing kind "new" must never read as the same suggestion.
+# shares its `source`, or is an in-place edit/remove/move/merge of the same
+# existing line. Insertions (`add`, `new`) never supersede by place: two
+# unrelated items under one heading or at "top" are two suggestions.
 set -u
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -101,14 +101,14 @@ proposal="$(git -C "$repo" show refs/desk/proposal:proposal.json)"
 assert_true "q1 is dropped, explicitly superseded" "$([ "$(has_headline "$proposal" q1)" = false ] && echo true || echo false)"
 
 echo
-echo "=== a same non-top (target, kind) new item replaces the carried one ==="
+echo "=== two adds under the same heading are two suggestions, not one replacing the other ==="
 repo="$ROOT/notes-e"
 new_repo "$repo"
 items="$ROOT/items-e.json"
 jq -n '{items: [{id:"d1", file:"notes.md", kind:"add", target:{under:"Section A"}, before:"", after:"  a newer take", headline:"d1"}]}' > "$items"
 desk_stage_and_write_proposal "$repo" "morning" "2026-10-01" "$items" notes.md reading.md > /dev/null
 proposal="$(git -C "$repo" show refs/desk/proposal:proposal.json)"
-assert_true "p1 (same place, same kind) is replaced" "$([ "$(has_headline "$proposal" p1)" = false ] && echo true || echo false)"
+assert_true "p1 (same heading, same kind) is still carried" "$(has_headline "$proposal" p1)"
 assert_true "d1 is present" "$(has_headline "$proposal" d1)"
 
 echo

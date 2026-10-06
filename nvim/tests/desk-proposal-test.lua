@@ -275,7 +275,19 @@ do
 	assert_eq("both items are in the proposal", { "new add B", "postponed add A" }, hs)
 	assert_eq("nothing was superseded", 0, st.superseded)
 	local _, st2 = proposal.build(r, "morning", "2026-10-03", { item("m3", { kind = "add", target = { under = "Section A" }, after = "  - link: newer doc", source = "notes", headline = "newer add A" }) }, FILES)
-	assert_eq("replacing a carried item at the same place is counted", 1, st2.superseded)
+	assert_eq("a second add under the same heading is another suggestion", 0, st2.superseded)
+	local hs2 = vim.tbl_map(function(it) return it.headline end, proposal.read(r).items)
+	table.sort(hs2)
+	assert_eq("all three adds coexist", { "new add B", "newer add A", "postponed add A" }, hs2)
+end
+
+print("\n=== an in-place edit of the same line replaces the carried edit ===")
+do
+	local r = new_repo({ "Section A", "  - ping Kari" })
+	proposal.build(r, "morning", "2026-10-01", { item("e1", { kind = "edit", target = { at = "  - ping Kari" }, before = "  - ping Kari", after = "  - ping Kari today", source = "notes", headline = "first edit" }) }, FILES)
+	local _, st = proposal.build(r, "morning", "2026-10-02", { item("e2", { kind = "edit", target = { at = "  - ping Kari" }, before = "  - ping Kari", after = "  - ping Kari tomorrow", source = "notes", headline = "second edit" }) }, FILES)
+	assert_eq("the carried edit of the same line is superseded", 1, st.superseded)
+	assert_eq("only the newer edit remains", { "second edit" }, vim.tbl_map(function(it) return it.headline end, proposal.read(r).items))
 end
 
 print("\n=== presence is judged at the anchored occurrence, not anywhere in the file ===")
