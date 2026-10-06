@@ -579,6 +579,7 @@ desk_step_model_call() {
 		${settings_arg:+--settings "$settings_arg"} \
 		--max-budget-usd "$max_budget_usd" \
 		${session_name:+--name "$session_name"} \
+		${session_name:+--session-id-file "$call_scratch.session-id"} \
 		--timeout "$timeout" \
 		--config-dir "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" \
 		--out "$out"
@@ -1170,9 +1171,9 @@ desk_step_close() {
 # $DESK_RUNS_ROOT/<pass>-<scheduled_date>/ either by its exact id (a plain
 # step like "J") or by prefix "<follow_up_step>-" (desk_step_close's own
 # per-session ids, "close-<session id>" — several may exist in one pass);
-# each match's --session-id/-n name is resolved back to a live session
-# through session-status.sh's own `resolve` mode (its exact-match
-# lookup, never re-derived here). Nothing configured, nothing that
+# each match's runner-generated --session-id (recorded beside its run
+# directory) is resolved back to a session through session-status.sh's own
+# `resolve` mode (its id lookup, never re-derived here). Nothing configured, nothing that
 # actually ran this pass, or nothing that resolves to a real session are
 # all "ok", not "failed" — there was simply nothing to open. The other
 # names, when more than one resolves, are logged only (their
@@ -1216,28 +1217,34 @@ desk_open_follow_up_tab() {
 		return
 	fi
 
-	local -a candidate_names=()
-	local d base
+	# Each call recorded the --session-id the runner generated beside its run
+	# directory (<step dir>.session-id); a session is found by that id, never by
+	# its display name, which anyone may reuse.
+	local -a candidate_ids=()
+	local d base sid_file
 	for d in "$runs_dir"/*; do
 		[ -d "$d" ] || continue
 		base="$(basename "$d")"
 		case "$base" in
-			"$follow_up_step" | "$follow_up_step"-*) candidate_names+=("desk-$pass-$scheduled_date-$base") ;;
+			"$follow_up_step" | "$follow_up_step"-*)
+				sid_file="$d.session-id"
+				[ -s "$sid_file" ] && candidate_ids+=("$(head -n1 "$sid_file")")
+				;;
 		esac
 	done
-	if [ "${#candidate_names[@]}" -eq 0 ]; then
+	if [ "${#candidate_ids[@]}" -eq 0 ]; then
 		desk_log "$pass" "follow-up tab: no $follow_up_step call ran this pass — nothing to open"
 		echo "ok"
 		return
 	fi
 
 	local -a resolved=()
-	local name entry
-	for name in "${candidate_names[@]}"; do
-		entry="$(session-status.sh resolve "$name" 2> /dev/null)" && [ -n "$entry" ] && resolved+=("$entry")
+	local sid entry
+	for sid in "${candidate_ids[@]}"; do
+		entry="$(session-status.sh resolve "$sid" 2> /dev/null)" && [ -n "$entry" ] && resolved+=("$entry")
 	done
 	if [ "${#resolved[@]}" -eq 0 ]; then
-		desk_log "$pass" "follow-up tab: $follow_up_step ran but no session resolved by name — nothing to open"
+		desk_log "$pass" "follow-up tab: $follow_up_step ran but no session resolved by id — nothing to open"
 		echo "ok"
 		return
 	fi

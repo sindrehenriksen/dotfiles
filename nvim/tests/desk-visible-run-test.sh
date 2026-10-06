@@ -83,7 +83,7 @@ export DESK_CLAUDE_BIN=claude
 cat > "$FAKEBIN/session-status.sh" <<FAKE
 #!/usr/bin/env bash
 if [ "\${1:-}" = "resolve" ]; then
-	match="\$(grep -F "\"name\":\"\${2:-}\"" "$SESSIONS_FIXTURE" 2> /dev/null | tail -n1)"
+	match="\$(grep -F "\"id\":\"\${2:-}\"" "$SESSIONS_FIXTURE" 2> /dev/null | tail -n1)"
 	[ -n "\$match" ] || exit 1
 	printf '%s\n' "\$match"
 	exit 0

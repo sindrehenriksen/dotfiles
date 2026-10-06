@@ -166,8 +166,9 @@ desk_write_deny_hook_settings() {
 # `--name` is what
 # turns this from the ordinary ephemeral call (`--no-session-persistence`,
 # cleaned up immediately after) into a "visible" one: the session persists
-# under a runner-picked --session-id, named via `-n NAME` so a later
-# `session-status.sh resolve NAME` can find it again, and its config-dir
+# under a runner-picked --session-id (written to --session-id-file when
+# given, which is how a later follow-up tab finds exactly this session), named
+# via `-n NAME` for display, and its config-dir
 # project folder is left standing (desk_prune_old_runs is the only thing
 # that ever removes it, days later) rather than cleaned up here — its
 # transcript is the very thing a follow-up `claude --resume` needs. Empty
@@ -191,7 +192,7 @@ desk_write_deny_hook_settings() {
 # ephemeral connector call unmarked.
 desk_call_model() {
 	local tools_given="false" scratch="" prompt_file="" allowed_tools="" tools="" connector="false" restricted="false"
-	local mcp_config="" strict_mcp="false" settings="" max_budget_usd="" timeout_secs="" config_dir="" out="" name=""
+	local mcp_config="" strict_mcp="false" settings="" max_budget_usd="" timeout_secs="" config_dir="" out="" name="" session_id_file=""
 	while [ $# -gt 0 ]; do
 		case "$1" in
 			--scratch) scratch="$2"; shift 2 ;;
@@ -205,6 +206,7 @@ desk_call_model() {
 			--settings) settings="$2"; shift 2 ;;
 			--max-budget-usd) max_budget_usd="$2"; shift 2 ;;
 			--name) name="$2"; shift 2 ;;
+			--session-id-file) session_id_file="$2"; shift 2 ;;
 			--timeout) timeout_secs="$2"; shift 2 ;;
 			--config-dir) config_dir="$2"; shift 2 ;;
 			--out) out="$2"; shift 2 ;;
@@ -228,6 +230,7 @@ desk_call_model() {
 	if [ -n "$name" ]; then
 		session_id="$(desk_new_session_id)"
 		argv+=(--session-id "$session_id" -n "$name")
+		[ -z "$session_id_file" ] || printf '%s\n' "$session_id" > "$session_id_file"
 	else
 		argv+=(--no-session-persistence)
 	fi

@@ -52,7 +52,7 @@ SESSIONS_FIXTURE="$ROOT/sessions-by-name.jsonl"
 cat > "$FAKEBIN/session-status.sh" <<FAKE
 #!/usr/bin/env bash
 if [ "\${1:-}" = "resolve" ]; then
-	match="\$(grep -F "\"name\":\"\${2:-}\"" "$SESSIONS_FIXTURE" 2> /dev/null | tail -n1)"
+	match="\$(grep -F "\"id\":\"\${2:-}\"" "$SESSIONS_FIXTURE" 2> /dev/null | tail -n1)"
 	[ -n "\$match" ] || exit 1
 	printf '%s\n' "\$match"
 	exit 0
@@ -95,6 +95,7 @@ source "$LIB/steps.sh"
 scheduled_date="2026-09-28"
 run_dir="$DESK_RUNS_ROOT/testpass-$scheduled_date/J"
 mkdir -p "$run_dir"
+echo sess-live-1 > "$run_dir.session-id"
 
 echo "=== a live resolved session: focused by tty, never a second process ==="
 jq -cn --arg name "desk-testpass-$scheduled_date-J" '
@@ -126,6 +127,7 @@ jq -cn --arg name "desk-testpass2-$scheduled_date-J" '
 ' > "$SESSIONS_FIXTURE"
 run_dir2="$DESK_RUNS_ROOT/testpass2-$scheduled_date/J"
 mkdir -p "$run_dir2"
+echo sess-live-2 > "$run_dir2.session-id"
 : > "$FOCUS_TAB_LOG"
 : > "$OPEN_TAB_LOG"
 result="$(desk_open_follow_up_tab testpass2 "$scheduled_date" J)"
@@ -142,6 +144,7 @@ jq -cn --arg name "desk-testpass3-$scheduled_date-J" '
 ' > "$SESSIONS_FIXTURE"
 run_dir3="$DESK_RUNS_ROOT/testpass3-$scheduled_date/J"
 mkdir -p "$run_dir3"
+echo sess-live-3 > "$run_dir3.session-id"
 echo "1" > "$FOCUS_TAB_RESULT_FILE"
 : > "$FOCUS_TAB_LOG"
 : > "$OPEN_TAB_LOG"
@@ -161,6 +164,7 @@ jq -cn --arg name "desk-testpass4-$scheduled_date-J" '
 ' > "$SESSIONS_FIXTURE"
 run_dir4="$DESK_RUNS_ROOT/testpass4-$scheduled_date/J"
 mkdir -p "$run_dir4"
+echo sess-not-live > "$run_dir4.session-id"
 : > "$FOCUS_TAB_LOG"
 : > "$OPEN_TAB_LOG"
 result="$(desk_open_follow_up_tab testpass4 "$scheduled_date" J)"
@@ -169,6 +173,27 @@ assert_eq "focus was never attempted (not live)" "0" "$(wc -l < "$FOCUS_TAB_LOG"
 assert_true "open-tab (resume) was invoked" "$(grep -q "CMD=claude --resume 'sess-not-live'" "$OPEN_TAB_LOG" && echo true || echo false)"
 assert_true "the guard stamp was written" \
 	"$([ -f "$DESK_GUARD_DIR/followup-testpass4-$scheduled_date" ] && echo true || echo false)"
+
+echo
+echo "=== a session that merely shares the display name is never opened ==="
+rm -rf "$DESK_GUARD_DIR"
+mkdir -p "$DESK_GUARD_DIR"
+run_dir5="$DESK_RUNS_ROOT/testpass5-$scheduled_date/J"
+mkdir -p "$run_dir5"
+echo sess-ours > "$run_dir5.session-id"
+jq -cn --arg name "desk-testpass5-$scheduled_date-J" '
+	{name:$name, id:"sess-stranger", cwd:"/stranger/cwd", last_activity:9, live:false}
+' > "$SESSIONS_FIXTURE"
+: > "$OPEN_TAB_LOG"
+result="$(desk_open_follow_up_tab testpass5 "$scheduled_date" J)"
+assert_eq "reports ok (nothing of ours to open)" "ok" "$result"
+assert_eq "no tab was opened for the same-named stranger" "0" "$(grep -c '^CMD=' "$OPEN_TAB_LOG" 2> /dev/null)"
+jq -cn --arg name "desk-testpass5-$scheduled_date-J" '
+	{name:$name, id:"sess-ours", cwd:"/our/cwd", last_activity:1, live:false}
+' >> "$SESSIONS_FIXTURE"
+result="$(desk_open_follow_up_tab testpass5 "$scheduled_date" J)"
+assert_true "the session whose id the runner generated is the one opened" \
+	"$(grep -q "CMD=claude --resume 'sess-ours'" "$OPEN_TAB_LOG" && echo true || echo false)"
 
 echo
 echo "=== summary: $pass passed, $fail failed ==="
