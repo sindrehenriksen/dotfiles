@@ -1,0 +1,18 @@
+{
+  "interests": [
+    "terminal tooling and editors",
+    "home automation with open hardware"
+  ],
+  "web": [
+    {
+      "name": "Example Tools Weekly",
+      "url": "https://news.example.com/tools",
+      "why": "release notes for the editors and shells in daily use"
+    },
+    {
+      "name": "Example Hardware Blog",
+      "url": "https://blog.example.org/hardware",
+      "why": "occasional deep dives worth a slow read"
+    }
+  ]
+}

@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.local.desk.morning</string>
+    <!-- launchd expands neither ~ nor $HOME, so the paths resolve through a
+         shell. Replace the two placeholders: the instance's config file, and
+         the directory holding the `claude` binary (`dirname "$(command -v
+         claude)"`). PATH must put a bash 4+ (Homebrew's) ahead of /bin, and
+         reach jq, nvim, perl, rg and ~/.local/bin. The log is the only record
+         of a pass's own progress; status.json holds its outcome. -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/sh</string>
+        <string>-c</string>
+        <string>export DESK_CONFIG="$HOME/PATH/TO/INSTANCE/config.json"; export PATH="$HOME/.local/bin:CLAUDE_BIN_DIR:/opt/homebrew/bin:/usr/bin:/bin"; mkdir -p "$HOME/.local/state/desk/logs"; exec desk-run morning >> "$HOME/.local/state/desk/logs/morning.log" 2>&amp;1</string>
+    </array>
+    <!-- Mirror of the pass's `trigger.start_calendar_interval` in config.json:
+         the runner never reads this file, so the two are kept equal by hand.
+         The later slot only retries; once a scheduled date has finished ok,
+         another firing for it is a no-op. A slot missed while asleep fires on
+         wake. -->
+    <key>StartCalendarInterval</key>
+    <array>
+        <dict>
+            <key>Hour</key>
+            <integer>8</integer>
+            <key>Minute</key>
+            <integer>30</integer>
+        </dict>
+        <dict>
+            <key>Hour</key>
+            <integer>10</integer>
+            <key>Minute</key>
+            <integer>0</integer>
+        </dict>
+    </array>
+</dict>
+</plist>

@@ -1,0 +1,96 @@
+{
+  "notes_repo": "~/notes",
+  "files": ["notes.md", "reading.md"],
+  "timezone": "Europe/London",
+
+  "ticket_search_tool": "mcp__example-tickets__search",
+  "mail_search_tool": "mcp__example-mail__search_threads",
+  "ticket_status_step_id": "T",
+  "mail_fetch_step_id": "F-mail",
+
+  "push_enabled": false,
+  "dry_run": true,
+  "log_only": true,
+
+  "close_after_working_days": 3,
+  "keep_open": ["scratchpad"],
+  "max_closes": 3,
+  "away_days": 5,
+
+  "caps": {
+    "daily": { "act": 3, "worth_knowing": 3, "wildcard": 1 },
+    "weekly": { "act": 5, "worth_knowing": 8, "wildcard": 1 }
+  },
+
+  "sources_file": "sources.json",
+
+  "tokens": [
+    {
+      "pattern": "^ABC-([0-9]+)$",
+      "case_insensitive": true,
+      "handler": "url",
+      "template": "https://tickets.example.com/browse/ABC-{1}"
+    },
+    { "pattern": "^.+$", "case_insensitive": false, "handler": "session" }
+  ],
+
+  "passes": {
+    "morning": {
+      "trigger": {
+        "start_calendar_interval": [
+          { "hour": 8, "minute": 30 },
+          { "hour": 10, "minute": 0 }
+        ]
+      },
+      "follow_up_step": "J",
+      "steps": [
+        { "id": "commit-push", "kind": "commit_push" },
+        {
+          "id": "F-web",
+          "kind": "fetch",
+          "prompt": "prompts/web.md",
+          "tools": ["WebSearch", "WebFetch"],
+          "connector": false,
+          "timeout": 600,
+          "max_budget_usd": 1
+        },
+        {
+          "id": "J",
+          "kind": "judge",
+          "prompt": "prompts/judge.md",
+          "tools": ["Read"],
+          "connector": false,
+          "visible": true,
+          "input_files": ["notes.md", "reading.md", "sources.json", "f-web.json", "open-items.json"],
+          "timeout": 600,
+          "max_budget_usd": 2
+        }
+      ]
+    },
+
+    "1630": {
+      "trigger": { "start_calendar_interval": [{ "hour": 16, "minute": 30 }] },
+      "steps": [
+        { "id": "commit-push", "kind": "commit_push" },
+        { "id": "capture", "kind": "capture" }
+      ]
+    },
+
+    "weekly": {
+      "trigger": { "start_calendar_interval": [{ "hour": 9, "minute": 0, "weekday": 3 }] },
+      "steps": [
+        {
+          "id": "review-week",
+          "kind": "open_tab",
+          "cwd_outside": "~",
+          "restricted": false,
+          "session_name": "weekly-review",
+          "scratch_dir": "~/.local/state/desk/weekly",
+          "notes_diff_file": "notes-diff.md",
+          "notes_diff_since": "last_wednesday",
+          "prompt_text": "Read notes-diff.md in this directory: it is what I wrote in my notes this past week. Help me review the week and pick what carries into the next one."
+        }
+      ]
+    }
+  }
+}
