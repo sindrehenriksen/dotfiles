@@ -498,8 +498,13 @@ desk_step_model_call() {
 		mcp_config="$(jq -r '.mcp_config // empty' <<< "$step_json")"
 		if [ -n "$mcp_config" ]; then
 			mcp_config="$(desk_prompt_path "$mcp_config")"
-			strict_mcp="true"
+		else
+			# No server named: an explicit empty config under strict mode, so
+			# no user-level MCP server is ever loaded into this call.
+			mcp_config="$call_scratch/empty-mcp.json"
+			printf '%s\n' '{"mcpServers":{}}' > "$mcp_config"
 		fi
+		strict_mcp="true"
 		# A restricted call otherwise gets no --settings at all (it needs
 		# none: --allowedTools plus --permission-mode dontAsk already do
 		# the job) — except a judge/close call whose Read is scoped above,
@@ -525,16 +530,22 @@ desk_step_model_call() {
 	# (Bash, Write, WebFetch, ...) unless `--tools` narrows the set — the
 	# deny hook (desk_write_deny_hook_settings) then refuses any of those
 	# by NAME, but a tool that was never loaded is refused before it ever
-	# gets that far. Only a connector call needs this: a plain
-	# `--restricted` call already loads nothing but its own `--allowedTools`.
-	local tools_arg=""
-	[ "$connector" = "true" ] && tools_arg="$tools_csv"
+	# gets that far. A restricted call gets an explicit --tools too: exactly the step's own
+	# built-in tools (MCP tools arrive through --mcp-config, never --tools),
+	# and an explicit empty value when it needs none.
+	local tools_arg="" tools_args=()
+	if [ "$connector" = "true" ]; then
+		tools_args=(--tools "$tools_csv")
+	else
+		tools_arg="$(jq -r '(.tools // []) | map(select(startswith("mcp__") | not)) | join(",")' <<< "$step_json")"
+		tools_args=(--tools "$tools_arg")
+	fi
 	local rc
 	desk_call_model \
 		--scratch "$call_scratch" \
 		--prompt-file "$prompt_file" \
 		--allowed-tools "$tools_csv" \
-		${tools_arg:+--tools "$tools_arg"} \
+		"${tools_args[@]}" \
 		--connector "$connector" \
 		--restricted "$restricted" \
 		${mcp_config:+--mcp-config "$mcp_config"} \

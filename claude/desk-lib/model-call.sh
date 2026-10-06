@@ -197,14 +197,14 @@ desk_write_deny_hook_settings() {
 # criteria matches. Gating this on --name (as the code used to) left every
 # ephemeral connector call unmarked.
 desk_call_model() {
-	local scratch="" prompt_file="" allowed_tools="" tools="" connector="false" restricted="false"
+	local tools_given="false" scratch="" prompt_file="" allowed_tools="" tools="" connector="false" restricted="false"
 	local mcp_config="" strict_mcp="false" settings="" max_budget_usd="" timeout_secs="" config_dir="" out="" name=""
 	while [ $# -gt 0 ]; do
 		case "$1" in
 			--scratch) scratch="$2"; shift 2 ;;
 			--prompt-file) prompt_file="$2"; shift 2 ;;
 			--allowed-tools) allowed_tools="$2"; shift 2 ;;
-			--tools) tools="$2"; shift 2 ;;
+			--tools) tools="$2"; tools_given="true"; shift 2 ;;
 			--connector) connector="$2"; shift 2 ;;
 			--restricted) restricted="$2"; shift 2 ;;
 			--mcp-config) mcp_config="$2"; shift 2 ;;
@@ -240,7 +240,7 @@ desk_call_model() {
 	else
 		argv+=(--no-session-persistence)
 	fi
-	[ -n "$tools" ] && argv+=(--tools "$tools")
+	[ "$tools_given" = "true" ] && argv+=(--tools "$tools")
 	[ "$restricted" = "true" ] && argv+=(--restricted)
 	[ -n "$mcp_config" ] && argv+=(--mcp-config "$mcp_config")
 	[ "$strict_mcp" = "true" ] && argv+=(--strict-mcp-config)
