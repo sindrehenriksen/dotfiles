@@ -66,21 +66,31 @@ desk_strip_agent_marks() {
 	printf '%s' "${text//${DESK_AGENT_MARK:-  <<agent-suggested>>}/}"
 }
 
-# One item's before/after/headline run through both stripping passes and
-# the URL check, in one place so nothing downstream can apply only one of
-# them. $2 = allowed URLs, newline-separated (desk_allowed_urls's output).
+# One item's text run through the stripping passes and the URL check, in one
+# place so nothing downstream can apply only one of them. $2 = allowed URLs,
+# newline-separated (desk_allowed_urls's output). `before` is his text as the
+# agent quoted it and must keep matching his file, so it is never altered
+# (beyond the scratch-copy agent mark). The URLs on his own line are his:
+# `after` may keep any URL `before` already carries, and only URLs the agent
+# adds (in `after` or the headline) are checked against the allowed set.
 desk_sanitize_item_text() {
 	local item_json="$1" allowed_urls="$2"
 	local before after headline
 	before="$(jq -r '.before // ""' <<< "$item_json")"
 	after="$(jq -r '.after // ""' <<< "$item_json")"
 	headline="$(jq -r '.headline // ""' <<< "$item_json")"
-	local field
-	for field in before after headline; do
-		local val
+	before="$(desk_strip_agent_marks "$before")"
+	local own_urls after_allowed
+	own_urls="$(grep -oE 'https?://[^[:space:]"'"'"'<>)]+' <<< "$before" 2> /dev/null | sort -u)"
+	after_allowed="$allowed_urls"
+	[ -z "$own_urls" ] || after_allowed="$allowed_urls"$'\n'"$own_urls"
+	local field val allow
+	for field in after headline; do
 		val="${!field}"
+		allow="$allowed_urls"
+		[ "$field" != after ] || allow="$after_allowed"
 		val="$(desk_strip_agent_marks "$val")"
-		val="$(desk_strip_disallowed_urls "$val" "$allowed_urls")"
+		val="$(desk_strip_disallowed_urls "$val" "$allow")"
 		val="$(desk_strip_modelines <<< "$val")"
 		val="$(desk_strip_control_chars <<< "$val")"
 		printf -v "$field" '%s' "$val"

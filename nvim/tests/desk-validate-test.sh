@@ -116,6 +116,17 @@ desk_validate_items "$items" "$allowed_urls" > /dev/null 2> "$ROOT/drop.err"
 assert_contains "the drop count is reported" "$(cat "$ROOT/drop.err")" "dropped 4 invalid also_sources"
 
 echo
+echo "=== his own URL on an edited line is neither stripped nor reported as agent-added ==="
+own='see https://his.example/own for notes'
+items="$(jq -n --arg b "$own" --arg s "$slack_ok" '[
+  {id:"e1",file:"notes.md",kind:"edit",target:"at",before:$b,after:($b + " (done) https://evil.example/new"),source:$s,headline:"h"}]')"
+validated="$(desk_validate_items "$items" "$allowed_urls" 2> /dev/null)"
+assert_eq "before is left exactly as quoted" "$own" "$(jq -r '.[0].before' <<< "$validated")"
+assert_contains "after keeps the URL that was already on his line" "$(jq -r '.[0].after' <<< "$validated")" "https://his.example/own"
+assert_true "a URL the agent added to after is still stripped" \
+	"$([[ "$(jq -r '.[0].after' <<< "$validated")" != *evil.example* ]] && echo true || echo false)"
+
+echo
 echo "=== desk_apply_caps: overflow goes to the dated brief with a summary line ==="
 five_act='[
   {"id":"a1","tier":"act","headline":"one","source":"notes"},
