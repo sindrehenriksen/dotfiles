@@ -70,6 +70,7 @@ BASH_SUITES=(
 	nvim/tests/desk-run-test.sh
 	nvim/tests/desk-runner-lock-test.sh
 	nvim/tests/desk-restricted-argv-test.sh
+	nvim/tests/desk-safe-env-test.sh
 	nvim/tests/desk-scoped-read-test.sh
 	nvim/tests/desk-stage-proposal-namespace-test.sh
 	nvim/tests/desk-status-fields-test.sh

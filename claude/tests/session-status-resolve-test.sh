@@ -269,5 +269,17 @@ resolved=$("$READER" resolve "Alpha Session")
 assert_eq "a name still resolves by name" "alpha" "$(printf '%s' "$resolved" | jq -r '.id')"
 
 echo
+echo "=== default reader cache: one per config dir, never shared ==="
+home_x="$TMP/home-x"
+mkdir -p "$home_x"
+config_b="$TMP/config-b"
+mkdir -p "$config_b/sessions" "$config_b/projects/-tmp-b"
+printf '{"type":"ai-title","aiTitle":"B","sessionId":"bbbbbbbb-1"}\n' > "$config_b/projects/-tmp-b/bbbbbbbb-1.jsonl"
+for cfg in "$CONFIG_DIR" "$config_b"; do
+    (unset CLAUDE_SESSION_READER_CACHE; HOME="$home_x" CLAUDE_CONFIG_DIR="$cfg" "$READER" > /dev/null)
+done
+assert_eq "two config dirs get two cache files" "2" "$(find "$home_x/.local/state/claude/session-reader-cache" -name transcripts.json | wc -l | tr -d ' ')"
+
+echo
 echo "=== summary: $pass passed, $fail failed ==="
 [ "$fail" -eq 0 ]

@@ -200,21 +200,30 @@ desk_test_guard_not_real_repo() {
 # belt-and-suspenders check that nothing slipped past it regardless — same
 # relationship the config guard has to each test's own isolation.
 #
-# A plain sorted `find` listing (paths only, never mtimes/content) is the
-# comparison basis — unlike the config guard's own `git config --local
-# --list` diff, a plain `ls -la` here would flag on totally unrelated
-# activity (a real, legitimate session-recorder hook touching its own
-# directory's mtime) that never actually changed what's IN these
-# directories.
+# Each file's path AND content hash is the comparison basis, so a test that
+# rewrites an existing file in place (a reader cache, a ledger, a status
+# file) is caught as well as one that adds or removes files. Directory
+# mtimes are deliberately not part of it.
+# Three things are written by Claude Code itself while a test run is in
+# flight, whenever a session is open: its per-version lock files (`locks/`,
+# skipped), and the recorder hook's event files and log, which every live
+# session appends to (compared by path only). Everything else is compared by
+# content.
+_DESK_TEST_STATE_LIVE_APPENDED=(-path '*/session-events/*' -o -path '*/live-sessions/*' -o -name session-recorder.log)
 DESK_TEST_STATE_GUARD_DIRS=("$HOME/.local/state/claude" "$HOME/.local/state/desk")
 
 # desk_test_state_guard_snapshot <dest_dir> <suffix>: writes each guarded
-# real directory's own recursive path listing to <dest_dir>/state-<n>.<suffix>.
+# real directory's recursive directory listing and file content hashes to
+# <dest_dir>/state-<n>.<suffix>.
 desk_test_state_guard_snapshot() {
 	local dest="$1" suffix="$2" i=0 dir
 	mkdir -p "$dest"
 	for dir in "${DESK_TEST_STATE_GUARD_DIRS[@]}"; do
-		find "$dir" 2> /dev/null | LC_ALL=C sort > "$dest/state-$i.$suffix"
+		{
+			find "$dir" -path "$dir/locks" -prune -o -type d -print 2> /dev/null | sed 's/^/d /'
+			find "$dir" -path "$dir/locks" -prune -o -type f \( "${_DESK_TEST_STATE_LIVE_APPENDED[@]}" \) -print 2> /dev/null | sed 's/^/l /'
+			find "$dir" -path "$dir/locks" -prune -o -type f ! \( "${_DESK_TEST_STATE_LIVE_APPENDED[@]}" \) -exec shasum -a 256 {} + 2> /dev/null | sed 's/^/f /'
+		} | LC_ALL=C sort > "$dest/state-$i.$suffix"
 		i=$((i + 1))
 	done
 }
@@ -238,19 +247,21 @@ desk_test_state_guard_check() {
 # desk_test_safe_env_init <dest_dir>: the actual fix, not just the check —
 # exports temp-scoped defaults for every real path a desk-lib test can
 # forget to override (DESK_STATE_DIR and everything common.sh derives from
-# it, CLAUDE_SESSION_STORE, CLAUDE_SESSION_RECORDER_LOG, DESK_TICKET_CACHE,
-# DESK_STATUS_FILE, CLAUDE_CONFIG_DIR), plus refusing stubs for the three
-# executables a forgotten override would otherwise let a test actually run
-# for real (DESK_CLAUDE_BIN — a live model call; DESK_OPEN_TAB_BIN/
-# DESK_OPEN_URL — a real tab/URL opened). Call once, before the first
-# suite/test runs; every value here is still just a default; a suite that
+# it, CLAUDE_SESSION_STORE, CLAUDE_SESSION_RECORDER_LOG,
+# CLAUDE_SESSION_READER_CACHE, DESK_TICKET_CACHE, DESK_STATUS_FILE,
+# CLAUDE_CONFIG_DIR), plus refusing stubs for the executables a forgotten
+# override would otherwise let a test actually run for real (DESK_CLAUDE_BIN
+# — a live model call; DESK_OPEN_TAB_BIN/DESK_FOCUS_TAB_BIN/DESK_OPEN_URL —
+# a real tab focused or URL opened) and an empty reader for DESK_READER, so
+# a lookup that was never stubbed sees no sessions instead of his real ones.
+# Call once, before the first suite/test runs; every value here is still just a default; a suite that
 # sets its own (as most already do) overrides it the ordinary way.
 desk_test_safe_env_init() {
 	local dest="$1"
 	mkdir -p "$dest/state" "$dest/claude-config" "$dest/bin"
 
 	local stub
-	for stub in claude desk-open-tab.sh open-url; do
+	for stub in claude desk-open-tab.sh desk-focus-tab.sh open-url; do
 		{
 			printf '#!/usr/bin/env bash\n'
 			printf 'echo "refusing stub ($0): this test never overrode the env var pointing at it — refusing to run for real" >&2\n'
@@ -259,7 +270,13 @@ desk_test_safe_env_init() {
 		chmod +x "$dest/bin/$stub"
 	done
 
+	printf '#!/usr/bin/env bash\nexit 0\n' > "$dest/bin/session-status.sh"
+	chmod +x "$dest/bin/session-status.sh"
+
 	export DESK_STATE_DIR="$dest/state"
+	export CLAUDE_SESSION_READER_CACHE="$dest/state/session-reader-cache"
+	export DESK_READER="$dest/bin/session-status.sh"
+	export DESK_FOCUS_TAB_BIN="$dest/bin/desk-focus-tab.sh"
 	export CLAUDE_SESSION_STORE="$dest/state/session-events"
 	export CLAUDE_SESSION_RECORDER_LOG="$dest/state/session-recorder.log"
 	export DESK_TICKET_CACHE="$dest/state/ticket-status.json"

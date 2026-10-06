@@ -63,7 +63,10 @@ set -u
 
 CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 STORE_DIR="${CLAUDE_SESSION_STORE:-$HOME/.local/state/claude/session-events}"
-CACHE_DIR="${CLAUDE_SESSION_READER_CACHE:-$HOME/.local/state/claude/session-reader-cache}"
+# The default cache is per config dir: two accounts (~/.claude and
+# ~/.claude-work, say) hold different transcripts, and one shared file would be
+# rewritten by whichever ran last.
+CACHE_DIR="${CLAUDE_SESSION_READER_CACHE:-$HOME/.local/state/claude/session-reader-cache/$(printf '%s' "$CONFIG_DIR" | tr '/' '_')}"
 PIDFILE_DIR="$CONFIG_DIR/sessions"
 PROJECTS_DIR="$CONFIG_DIR/projects"
 CONSOLIDATED_CACHE="$CACHE_DIR/transcripts.json"
