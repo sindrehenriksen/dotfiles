@@ -36,8 +36,7 @@ function M.setup()
 			end
 			review.attach(args.buf)
 
-			-- The tokens config is instantiation-specific ($DESK_CONFIG,
-			-- design.md §9(c)) and can be genuinely absent while dotfiles is
+			-- The tokens config is instantiation-specific and can be genuinely absent while dotfiles is
 			-- being exercised on its own (e.g. these tests): a missing or
 			-- invalid config just means annotations/hotkey have nothing to
 			-- classify against, not a load error in the notes buffer.

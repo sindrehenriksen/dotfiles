@@ -428,7 +428,7 @@ function DeskOpenTab(cmd, session_id, cwd)
       decision.window_id, tab_configuration(cmd, cwd)
     )
   elseif decision.mode == "new_window" then
-    -- Unverified against real Ghostty (Phase-0, design.md §8): that "new
+    -- Unverified against real Ghostty: that "new
     -- window with configuration" takes the same record and that its result
     -- is the new window's id, usable below to place it.
     script = string.format(

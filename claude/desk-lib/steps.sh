@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# Generic step-kind drivers (design.md §9(c), §10 D8: "generic step kinds
-# ... fetch, judge, write, ticket-status, close, commit-and-push"). Each
+# Generic step-kind drivers. Each
 # function here builds the right isolation flags and scratch-dir
 # arrangement for its kind and calls desk_call_model; none of them
 # interpret a model's actual output beyond generic shape (stream-json ->
@@ -11,8 +10,7 @@ set -u
 
 # ---------------------------------------------------------------------------
 # Prompt rendering: plain {{name}} substitution from a flat JSON object of
-# string values. Generic (design.md §9(c): "Prompts take scalars as
-# {{name}} placeholders and bulk inputs as files") — only *which* values
+# string values. Generic — only *which* values
 # go in is pass-specific, and that's supplied by the caller, not decided
 # here.
 # ---------------------------------------------------------------------------
@@ -51,8 +49,9 @@ desk_render_prompt() {
 	' "$template_file"
 }
 
-# Resolves a step's `prompt` path (relative to $DESK_CONFIG's directory,
-# design.md §9(c)) to an absolute one.
+# Resolves a path from the config (a step's `prompt`, `mcp_config`,
+# `settings`, `skill`), relative to $DESK_CONFIG's directory, to an
+# absolute one.
 desk_prompt_path() {
 	local prompt_rel="$1"
 	[[ "$prompt_rel" = /* ]] && { echo "$prompt_rel"; return; }
@@ -60,7 +59,7 @@ desk_prompt_path() {
 }
 
 # The exact --allowedTools value for a step: its own `tools` array, comma-
-# joined — design's "exact --allowedTools" per call. A judge/close step
+# joined. A judge/close step
 # (the two kinds that only ever legitimately read their own seeded
 # scratch files, never anywhere else) whose tools include a bare "Read"
 # gets it scoped instead, to Read(<scratch>/**) — an absolute glob under
@@ -80,8 +79,8 @@ desk_step_allowed_tools() {
 }
 
 # ---------------------------------------------------------------------------
-# Pass-level context and named producers (prompts/README.md's own table:
-# every call's {{placeholders}} and scratch-dir input files, keyed by name
+# Pass-level context and named producers (the prompt contract in
+# docs/desk.md: every call's {{placeholders}} and scratch-dir input files, keyed by name
 # rather than by which step happens to want them — this is the "runner
 # knows how to produce each kind" half; which names a step's own prompt
 # actually references is that prompt's business, so a producer here is
@@ -89,8 +88,7 @@ desk_step_allowed_tools() {
 # {{key}} is simply never substituted, per desk_render_prompt above).
 # ---------------------------------------------------------------------------
 
-# "DAILY" normally; "WEEKLY" on the first run of the ISO week (design.md
-# §4's own daily/weekly split for a pass's own bar). $1 = this pass's last
+# "DAILY" normally; "WEEKLY" on the first run of the ISO week. $1 = this pass's last
 # "ok" run (epoch, "" for never) — the same value the caller already reads
 # for its Gmail-window lookback, never re-derived a second way here.
 desk_compute_mode() {
@@ -107,8 +105,8 @@ desk_compute_mode() {
 }
 
 # $1 (epoch) as ISO 8601 with an explicit offset for $2 (an IANA zone
-# name, e.g. "Europe/Oslo" — prompts/README.md: "ISO 8601, his own
-# offset") — always that zone, regardless of this machine's own, so a test
+# name, e.g. "Europe/Oslo"; ISO 8601 with that zone's own
+# offset) — always that zone, regardless of this machine's own, so a test
 # or a run from anywhere still renders the zone the prompts are written
 # against. $2 is a required $DESK_CONFIG field (desk-run's own "timezone"),
 # never a literal here: dotfiles names no work-specific fact, his
@@ -125,8 +123,7 @@ desk_iso8601_at_tz() {
 	fi
 }
 
-# The `{{caps}}` scalar (morning-j.md: "e.g. `ACT ≤3, worth knowing ≤3,
-# wildcard ≤1`") from one pass's own caps object ({act, worth_knowing,
+# The `{{caps}}` scalar from one pass's own caps object ({act, worth_knowing,
 # wildcard}).
 desk_caps_string() {
 	local caps_json="$1" act wk wc
@@ -137,8 +134,8 @@ desk_caps_string() {
 }
 
 # A fixed, sed-safe (no /, &, \) literal suffix marking a scratch-copy line
-# whose content is a suggestion he took (design's "agent-originated lines
-# marked", morning-j.md: "don't treat them as his own phrasing to imitate").
+# whose content is a suggestion he took (the judge is told not to treat
+# such lines as his own phrasing to imitate).
 # Never written back to the real file — only ever appears in a scratch copy
 # J reads, and desk-lib/validate.sh strips it again from anything J echoes
 # back before that text is used as an anchor.
@@ -176,8 +173,7 @@ desk_write_marked_head_copy() {
 }
 
 # desk_write_tickets_diff <old-ticket-cache-json> <ticket-cache-file> <out>
-# J's `tickets.json` (prompts/README.md, morning-j.md: "ticket keys his
-# lines mention whose status changed since the last pass"): every ticket
+# J's `tickets.json`: every ticket
 # present in both the cache from before this pass's own T step ran and the
 # (now current) cache, whose status differs. A brand-new key (nothing to
 # have "changed" from) and an unchanged one are both left out.
@@ -199,7 +195,7 @@ desk_write_tickets_diff() {
 
 # desk_write_sessions_summary <out>
 # J's optional `sessions.json`: session-status.sh's own entries, names and
-# status only (morning-j.md: "names and status only"). Bare on PATH, same
+# status only. Bare on PATH, same
 # as desk_close_candidates's own reader call — never a second lookup
 # convention for the same tool.
 desk_write_sessions_summary() {
@@ -227,7 +223,7 @@ desk_write_open_items() {
 }
 
 # desk_seed_named_file <name> <dest_dir> <ctx_json>
-# Writes one named scratch-dir input file (prompts/README.md's own table)
+# Writes one named scratch-dir input file
 # into $2. `ctx_json` carries whatever the producer needs: `repo`,
 # `sources_path`, `pass_scratch`, `files` (the configured file list),
 # `old_ticket_cache` (the cache as it stood before this pass's own T step
@@ -393,8 +389,7 @@ desk_fetch_cache_clear() {
 # `--pinned` (W's own extra layer — see desk_step_write). Prints
 # "ok"/"failed"/"timeout".
 #
-# A step whose own config sets `"visible": true` (design.md's later
-# "Visible run sessions") gets a durable, named, persisted call instead of
+# A step whose own config sets `"visible": true` gets a durable, named, persisted call instead of
 # the ordinary ephemeral one: its cwd is desk_pass_scratch_dir under
 # $DESK_RUNS_ROOT rather than a throwaway desk_scratch_dir, named
 # `desk-<pass>-<scheduled date>-<id>` (desk_open_follow_up_tab is what
@@ -590,9 +585,7 @@ desk_step_fetch() { desk_step_model_call "$@"; }
 desk_step_ticket_status() { desk_step_model_call "$@"; }
 
 # desk_step_judge <pass> <step_json> <repo> <placeholders_json> <pass_ctx_json> <file>...
-# The judge call's own scratch-dir inputs (prompts/README.md's own table:
-# notes.md, reading.md, sources.json, f-private.json, f-web.json,
-# tickets.json, optional sessions.json/open-items.json) — named generically
+# The judge call's own scratch-dir inputs — named generically
 # via the step's own `input_files` (falling back to that full pinned list
 # when a step doesn't declare one, so an as-yet-unconfigured private config
 # still gets everything J's own prompt expects) and produced one by one via
@@ -631,8 +624,7 @@ desk_step_judge() {
 }
 
 # ---------------------------------------------------------------------------
-# write: the pinned single-tool call (design.md's W / "the one unattended
-# external write"). Exactly one tool allowed, plus (when `pinned_args_json`
+# write: the pinned single-tool call. Exactly one tool allowed, plus (when `pinned_args_json`
 # is given) the deny-hook also refuses any call whose own tool_input isn't
 # one of that exact set — the caller (desk-run, for W specifically) is the
 # one place that knows the runner-pinned thread ids/label this pass, built
@@ -662,8 +654,7 @@ desk_step_commit_push_kind() {
 }
 
 # ---------------------------------------------------------------------------
-# close: session selection is generic/config-driven (design.md §3
-# "Closing"). Ordering follows design's own words exactly: capture written
+# close: session selection is generic/config-driven. Ordering: capture written
 # to the proposal; only once at least the name is in it, `close` (session-recorder.sh) records it; SIGTERM; liveness
 # re-checked, a survivor recorded as a failed close — so SIGTERM is never
 # sent to a session nothing durable ever recorded wanting to close.
@@ -715,7 +706,7 @@ desk_close_candidates() {
 
 # SIGTERMs $2 (a pid) and re-checks liveness after a short grace period.
 # Prints "closed" or "failed" (a survivor). Never `/exit`-into-a-tab
-# (design.md §3): this only ever signals the process directly.
+#: this only ever signals the process directly.
 desk_close_session() {
 	local pid="$1" grace="${2:-5}"
 	kill -TERM "$pid" 2> /dev/null
@@ -733,12 +724,11 @@ desk_close_session() {
 
 # ---------------------------------------------------------------------------
 # capture: the 16:30 pass's own "running"/"dropped" session captures
-# (design.md §3 "Capture" — a name on top, no model call, no transcript
-# read: purely mechanical, built off session-status.sh and the ledger).
+#.
 # ---------------------------------------------------------------------------
 
 # The short id every capture of an unnamed session labels itself with
-# (design.md's own "<auto title> · <short id>"), also what the hotkey's
+#, also what the hotkey's
 # resume-by-token relies on to disambiguate one from another.
 desk_short_session_id() {
 	printf '%s' "${1:0:8}"
@@ -748,7 +738,7 @@ desk_short_session_id() {
 # somewhere in $1 (a file's committed HEAD content) as a whole token —
 # letters, digits, `_`, `-` only, the same alphabet a token under the
 # cursor is read with elsewhere — never as a bare substring inside a
-# longer word. design.md §3: "a name already in the notes" is never
+# longer word. A name already in the notes is never
 # re-captured; an empty name never matches anything, by design (nothing to
 # have already written down).
 desk_name_in_notes() {
@@ -761,8 +751,8 @@ desk_name_in_notes() {
 }
 
 # True (exit 0) if $1 (ledger-state's own JSON) already holds an item for
-# (session_id $2, capture_kind $3) — design.md §2 "Captures dedup on
-# (session id, kind), not content": whatever that item's own state (still
+# (session_id $2, capture_kind $3) . Captures dedup on
+# (session id, kind), not content: whatever that item's own state (still
 # in the standing proposal, taken, declined), this pass must never add a
 # second one for the same session and the same kind. A repeat "running"
 # capture folds into the one already proposed simply by never being
@@ -777,7 +767,7 @@ desk_capture_already_ledgered() {
 }
 
 # desk_step_capture_sessions <pass> <repo> <scheduled_date> <file>...
-# design.md §3's own two kinds: "running" (live right now) and "dropped"
+# The two kinds: "running" (live right now) and "dropped"
 # (has a start event, isn't live, and its last run never got a deliberate
 # end — prompt_input_exit/clear/logout/resume all surface as `ended: true`
 # with exactly that reason, which the filter below excludes outright;
@@ -786,8 +776,8 @@ desk_capture_already_ledgered() {
 # already tells the two apart, so "not live" is all this needs). Only
 # sessions with a recorder start event qualify (excludes both pre-recorder
 # transcripts and a scheduled desk-run call, source-tagged and excluded by
-# name) — design's "so pre-recorder transcripts and headless calls never
-# flood the top."
+# name) ; pre-recorder transcripts and headless calls never
+# flood the top.
 #
 # `$4..` are the pass's configured files, which the proposal builder
 # applies items onto; every capture item itself always lands in notes.md
@@ -820,8 +810,7 @@ desk_step_capture_sessions() {
 	}
 
 	# Excludes a scheduled run's own session on any of three independent
-	# grounds (design.md's own "16:30 never captures a desk-run session" —
-	# each is a separate defense, since any one alone can miss it): the
+	# grounds: the
 	# recorder's own any_desk_run_start (true the moment ANY of its start
 	# events, not just the last, was tagged desk-run — a scheduled call he
 	# later resumes himself under his own permissions gets a second, real
@@ -899,8 +888,7 @@ desk_step_capture_sessions() {
 	echo "ok"
 }
 
-# The capped tail of a session's own transcript (design's "the capped end
-# of that session's transcript"), as JSON lines, each keeping its own
+# The capped tail of a session's own transcript (only its end), as JSON lines, each keeping its own
 # `uuid` — the 16:30-close prompt's own per-bullet turn citations are
 # checked against exactly this file, never the full transcript. $3 = cap
 # in lines (the step's own `cap` field; a step with none gets 200).
@@ -914,9 +902,9 @@ desk_write_transcript_tail() {
 }
 
 # desk_step_close <pass> <step_json> <config_json> <repo> <file>...
-# The composite close step (design.md §3 "Closing", §5's own ordering).
+# The composite close step.
 # Skips every candidate (closes nothing) on the first pass after more than
-# `away_days` days away — design's own safety valve against a close storm
+# `away_days` days away, a safety valve against a close storm
 # on first wake. Otherwise, per candidate, in order: the per-session call;
 # its reply's turn citations verified/stripped and its text sanitized
 # (desk-lib/validate.sh); if a closure-note item survives, staged into the
@@ -930,7 +918,7 @@ desk_write_transcript_tail() {
 # stays exactly as it was and would otherwise be the only record, silently
 # wrong about what actually happened.
 # `max_closes` (K) bounds real closes only; `log_only` queues every
-# would-close candidate regardless, so the dry-run week (design.md §8)
+# would-close candidate regardless, so the dry-run week
 # sees the whole list. Prints "ok" once every candidate is processed (each
 # one's own outcome is only ever logged/counted, never a step failure),
 # "failed" only if the mechanism itself (session-status.sh) breaks.
@@ -984,8 +972,7 @@ desk_step_close() {
 		# This call's own seed dir — desk_step_model_call copies its
 		# content into whatever it computes as this call's own actual cwd
 		# (call_scratch), never a separate location: nothing here needs to
-		# point the prompt at this seed dir manually (unlike the design
-		# this once had), since call_scratch is always the one directory a
+		# point the prompt at this seed dir manually since call_scratch is always the one directory a
 		# scoped Read can actually reach.
 		local seed
 		seed="$PASS_SCRATCH/close-seed-$id"
@@ -993,8 +980,7 @@ desk_step_close() {
 		echo "$sess" > "$seed/session.json"
 		desk_write_transcript_tail "$transcript_path" "$seed/transcript-tail.jsonl" "$cap"
 		cp -f "$seed/transcript-tail.jsonl" "$PASS_SCRATCH/close-$id-transcript-tail.jsonl" 2> /dev/null
-		# "notes.md: his committed notes, for placement only" (prompts/
-		# README.md, 1630-close.md) — the marked copy, same as J's, though a
+		# "notes.md: his committed notes, for placement only" — the marked copy, same as J's, though a
 		# 1630 call never anchors an *edit* on a marked line the way J's own
 		# in-place suggestions might, only ever placing new bullets under or
 		# after one.
@@ -1050,8 +1036,7 @@ desk_step_close() {
 			continue
 		fi
 
-		# Re-check just before signaling (design's "still idle on a
-		# re-check just before"): a fresh read, the same session id,
+		# Re-check just before signaling (it must still be idle): a fresh read, the same session id,
 		# still both live AND idle — the candidate list was built (and
 		# every earlier candidate in this same loop was processed,
 		# model call included) possibly minutes ago, so "still live" alone
@@ -1127,7 +1112,7 @@ desk_step_close() {
 }
 
 # desk_open_follow_up_tab <pass> <scheduled_date> <follow_up_step>
-# design.md's later "Runs he can open and continue": after this pass
+# After this pass
 # FINISHES (desk-run calls this once, after the step loop, whatever the
 # pass's own result — "a failed pass still opens the tab on what exists"),
 # open one Ghostty tab resuming the pass's own `follow_up_step` call — the
@@ -1140,12 +1125,12 @@ desk_step_close() {
 # step like "J") or by prefix "<follow_up_step>-" (desk_step_close's own
 # per-session ids, "close-<session id>" — several may exist in one pass);
 # each match's --session-id/-n name is resolved back to a live session
-# through session-status.sh's own `resolve` mode (D7's own exact-match
+# through session-status.sh's own `resolve` mode (its exact-match
 # lookup, never re-derived here). Nothing configured, nothing that
 # actually ran this pass, or nothing that resolves to a real session are
 # all "ok", not "failed" — there was simply nothing to open. The other
-# names, when more than one resolves, are logged only (design's "the
-# others' names in status"); the most recently active one is what
+# names, when more than one resolves, are logged only (their
+# names go in status); the most recently active one is what
 # actually gets a tab.
 #
 # At most one tab is ever opened per (pass, scheduled_date) — a guard
@@ -1156,7 +1141,7 @@ desk_step_close() {
 # already LIVE (he's already in it — resumed it himself, or an earlier
 # slot's own call this same run is still there), this never opens a
 # second process against it: it focuses the live tab by tty instead (the
-# same D7 mechanism the notes hotkey uses for a live session), and skips
+# same mechanism the notes hotkey uses for a live session), and skips
 # entirely — never resumes — if focusing fails or no tty was recorded,
 # same reasoning as the hotkey: a second process against a live transcript
 # is worse than no tab at all. Only a not-live session gets a fresh
@@ -1302,7 +1287,7 @@ desk_notes_diff_since_epoch() {
 DESK_GIT_EMPTY_TREE="4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 
 # desk_write_notes_diff <repo> <out_file> <notes_diff_since> <file>...
-# Writes the weekly tab's own notes-diff input (weekly/README.md): his own
+# Writes the weekly tab's own notes-diff input: his own
 # additions/removals in each of `file`s, from the commit at or before
 # `notes_diff_since`'s window start through HEAD, with every line the
 # ledger says is agent-originated excluded — nvim/lua/desk/cli.lua's own
@@ -1312,8 +1297,7 @@ DESK_GIT_EMPTY_TREE="4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 # renders the result. Best-effort per file: one whose diff can't be
 # computed gets a one-line note in its place rather than failing the whole
 # step — the Wednesday tab isn't worth blocking over this. The whole body
-# is fenced as one block (weekly/README.md's own "holding the runner's
-# fenced notes-diff.md"): quoted lines from his own files are data for
+# is fenced as one block: quoted lines from his own files are data for
 # whatever reads this next, never instructions.
 desk_write_notes_diff() {
 	local repo="$1" out="$2" since_kind="$3"
@@ -1381,18 +1365,15 @@ desk_fresh_scratch_dir() {
 }
 
 # ---------------------------------------------------------------------------
-# open_tab: interactive (Wednesday), not run headless (design.md §4
-# "Weekly"). This assembles the weekly pass's own launch envelope —
+# open_tab: interactive (Wednesday), not run headless. This assembles the weekly pass's own launch envelope —
 # `cwd_outside` (a cwd outside any repo), `permission_mode`, `tools`,
 # `strict_mcp_config`/`mcp_config`, `settings`, and `skill` (passed in
 # explicitly via `--append-system-prompt-file`, since nothing discovers it
-# from that cwd — desk/weekly/README.md's own worked example is the exact
-# command line this builds) plus the fixed `prompt_text` — into one shell
+# from that cwd) plus the fixed `prompt_text` — into one shell
 # command string (desk_shq quotes every argument; Ghostty's own
 # `command:` field takes a whole command line, never an argv array) and
 # hands that straight to the Hammerspoon function through
-# hammerspoon/desk-open-tab.sh, never System Events keystrokes (design.md
-# §4's own "Launch envelope" note). `session_name`, when the step
+# hammerspoon/desk-open-tab.sh, never System Events keystrokes. `session_name`, when the step
 # configures one, is checked against the reader first: a session already
 # live under that name means he's already in the tab (or resumed it
 # himself), so this skips opening a second one — "ok", not "failed", since
@@ -1404,8 +1385,7 @@ desk_fresh_scratch_dir() {
 # everything below is gated on the step's own `scratch_dir`/`notes_diff_file`/
 # `notes_diff_since` fields, absent from that fixture. When `scratch_dir` is
 # configured, a fresh directory under it becomes the tab's actual cwd in
-# place of `cwd_outside` (weekly/README.md: "from a fresh scratch dir ...
-# holding the runner's fenced notes-diff.md"), and — when the notes-diff
+# place of `cwd_outside`, and — when the notes-diff
 # fields are configured too — desk_write_notes_diff seeds that fresh
 # directory with the notes-diff file before the tab opens.
 #
@@ -1413,8 +1393,7 @@ desk_fresh_scratch_dir() {
 # absent keeps its full isolation envelope) gates `--restricted`,
 # `--permission-mode`, `--tools` and `--strict-mcp-config` together: a step
 # that sets it `false` gets none of those — his own default permissions,
-# same as any session he opens by hand (design.md's later "Runner
-# decisions" call on the Wednesday tab, and a run's own follow-up tab).
+# same as any session he opens by hand.
 # `mcp_config`/`settings`/`skill` are independent of it and still apply
 # when configured either way.
 # ---------------------------------------------------------------------------
@@ -1433,9 +1412,7 @@ desk_step_open_tab() {
 	# Default true: every existing caller (the original Wednesday-tab-only
 	# envelope) configures the full isolation envelope and never sets this
 	# field, so an absent `restricted` must keep behaving exactly as before.
-	# A step whose launch instead wants his own default permissions (a run's
-	# own follow-up tab, design.md's own later "Runner decisions" call on the
-	# Wednesday tab too) sets `"restricted": false` and gets none of the
+	# A step whose launch instead wants his own default permissions sets `"restricted": false` and gets none of the
 	# isolation/restriction flags below — `claude` then reads his own
 	# settings, same as any session he opens by hand.
 	restricted="$(jq -r 'if .restricted == null then true else .restricted end' <<< "$step_json")"

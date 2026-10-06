@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # D8b test: claude/desk-lib/tool-results.sh and validate.sh — the item
-# validation design.md hangs everything else on: only a source URL that
+# validation everything else rests on: only a source URL that
 # genuinely appears in a call's raw tool_results survives (Slack rebuilt
 # from channel+ts, Gmail/WebSearch literal), control/ANSI characters and
 # modelines are stripped from item text, tier caps overflow to a dated

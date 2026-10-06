@@ -1,8 +1,5 @@
 #!/usr/bin/env bash
-# The once-a-day guard and the mutual-exclusion lock (design.md §5 Failure,
-# and the Interfaces brief: "Guard keyed on (pass, the slot's scheduled
-# date); mkdir lock recording pid + start time, broken when the owner is
-# dead, a locked-out run waits").
+# The once-a-day guard and the mutual-exclusion lock.
 #
 # The two are deliberately separate: the guard answers "has this pass
 # already finished ok today" (so a later retry slot the same day is a
@@ -44,8 +41,8 @@ desk_day_before() {
 }
 
 # The calendar date (local, YYYY-MM-DD) of the most recent configured slot
-# at-or-before $2 (epoch, default now) — the Interfaces brief's "the slot's
-# scheduled date", not the date desk-run actually happened to be invoked on.
+# at-or-before $2 (epoch, default now) — the slot's
+# scheduled date, not the date desk-run actually happened to be invoked on.
 # $1 is a JSON array of {hour, minute} (daily) or {hour, minute, weekday}
 # (weekly, 1=Mon..7=Sun per `date +%u`) slot objects — a pass's own
 # `.trigger.start_calendar_interval`. This is what makes a 16:30 pass that
@@ -123,7 +120,7 @@ desk_last_weekday_epoch() {
 }
 
 # True (exit 0) if $1 already completed "ok" for $2's own scheduled date
-# (design's "later slots only retry": a slot whose scheduled date already
+# (a slot whose scheduled date already
 # succeeded is a no-op, not a second run — see desk_scheduled_date_for for
 # what "scheduled date" means here instead of simply "today").
 desk_guard_already_ok_today() {
@@ -202,7 +199,7 @@ desk_lock_dir_mtime() {
 # lock dir exists with no meta.json to as close to zero as a local rename
 # gets. That window can never be fully closed by construction alone, so a
 # waiter that sees a meta-less lock dir treats it as held for a short grace
-# period (design.md §5 Failure: "a lock with no meta ... never as dead")
+# period
 # rather than tearing it down the instant it's seen — which is what made
 # the old "dead lock owner" test flaky: two real processes racing meant a
 # waiter could observe the winner's lock dir microseconds before its
@@ -296,7 +293,7 @@ desk_lock_acquire() {
 }
 
 # Releases the runner lock only if THIS process is the one meta.json
-# records as owning it (design.md §5: "release only a lock you own") —
+# records as owning it —
 # never a bare rm -rf, which would just as happily destroy a lock some
 # other process has since (legitimately) acquired, e.g. after this
 # process's own lock was broken as dead by a waiter that gave up on it.
@@ -310,10 +307,8 @@ desk_lock_release() {
 }
 
 # The exact count of Mon-Fri calendar dates strictly after $1's own date up
-# to and including $2's (default now) — design.md §3 "Closing"'s own "idle
-# ≥ 3 working days", replacing the close step's earlier calendar-day
-# approximation (steps.sh's own documented placeholder) with a real
-# day-by-day walk built on desk_day_before. 0 if both epochs fall on the
+# to and including $2's (default now) — the close step's "idle ≥ N working
+# days", as a real day-by-day walk built on desk_day_before. 0 if both epochs fall on the
 # same calendar date.
 desk_working_days_since() {
 	local since_epoch="$1" now="${2:-$(desk_now)}"

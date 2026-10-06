@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# claude/desk-lib/steps.sh's desk_step_capture_sessions (design.md §3
-# "Capture"): the 16:30 pass's own "running" (live now) and "dropped" (has
+# claude/desk-lib/steps.sh's desk_step_capture_sessions: the 16:30 pass's own "running" (live now) and "dropped" (has
 # a start event, isn't live, never got a deliberate end) session captures,
 # a bare name on top of notes.md — no model call, no transcript read.
 # session-status.sh is faked (a fixture file, never a real Claude Code

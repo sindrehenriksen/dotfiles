@@ -1,8 +1,5 @@
 #!/usr/bin/env bash
-# D8b test: claude/desk-lib/steps.sh's desk_step_close (design.md §3
-# "Closing", §5's own ordering: capture staged into the ledger/proposal
-# BEFORE session-recorder.sh close, before SIGTERM, before the liveness
-# re-check; a survivor is a failed close, never retried). Covers the
+# D8b test: claude/desk-lib/steps.sh's desk_step_close. Covers the
 # away_days safety valve, log_only queuing a "would_close" capture without
 # ever signaling, a real close of a throwaway process this test spawns
 # itself, an invalid turn citation dropping the capture, and the

@@ -175,7 +175,7 @@ elseif verb == "ledger-state" then
 	os.exit(0)
 elseif verb == "notes-diff" then
 	-- Usage: notes-diff <repo> <file> <since>
-	-- The weekly tab's own notes-diff input (design's weekly/README.md):
+	-- The weekly tab's own notes-diff input:
 	-- his own additions/removals in `file` between `since` (any commit-
 	-- ish) and HEAD, with every line the taken-provenance records call
 	-- agent-originated excluded on its own side. Records any item newly in

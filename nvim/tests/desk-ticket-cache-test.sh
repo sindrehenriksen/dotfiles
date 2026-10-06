@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
-# D8b test: claude/desk-lib/ticket-cache.sh — T's own two jobs (design.md
-# §4 "Ticket status, both passes"): building the `key in (...)` JQL from
+# D8b test: claude/desk-lib/ticket-cache.sh — T's own two jobs: building the `key in (...)` JQL from
 # ticket-like tokens in his notes, and parsing T's raw search results
-# (both Cloud Jira shapes, prompts/README.md's own note) into the ticket
+# into the ticket
 # cache nvim/lua/desk/annotate.lua reads. Fixtures throughout — no live
 # Jira call.
 set -u

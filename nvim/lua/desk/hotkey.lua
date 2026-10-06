@@ -171,8 +171,7 @@ function M.run(bufnr, win, config, deps)
 	end
 
 	-- session: a plain in-notes reference to a section defined elsewhere in
-	-- this same buffer is followed internally (design.md §10 D7's done-
-	-- check) — the ' mark is set first, so Ctrl-O returns to where he was.
+	-- this same buffer is followed internally — the ' mark is set first, so Ctrl-O returns to where he was.
 	-- "Elsewhere" means the cursor isn't already inside the block that
 	-- section head starts (block.block_containing): jumping there from
 	-- within it would just be a no-op self-jump, and — when two sections
@@ -214,8 +213,8 @@ function M.run(bufnr, win, config, deps)
 
 		if entry.duplicate_pids then
 			-- More than one pid file names this session id (session-status.sh's
-			-- own duplicate_pids, D8's own "prefer the live one, but refuse
-			-- rather than guess") — acting on either "live" or "not live" here
+			-- own duplicate_pids, the rule is to prefer the live one, but refuse
+			-- rather than guess) — acting on either "live" or "not live" here
 			-- would be a guess about which pid file is real; refuse outright
 			-- rather than risk focusing or resuming the wrong process.
 			notify("session '" .. token .. "' has more than one pid file recorded; refusing to act on it")

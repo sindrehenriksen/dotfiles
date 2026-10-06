@@ -3,8 +3,7 @@
 # the write (W) step — after a real (non-dry-run) W call, the runner
 # compares the thread ids its own tool_use arguments actually named
 # against the FULL pinned set (built from F-private's raw results), and
-# fails the pass loudly on any mismatch (design.md §5's own "a W count
-# mismatch" loud failure). The deny hook's own --pinned only ever stops W
+# fails the pass loudly on any mismatch. The deny hook's own --pinned only ever stops W
 # from touching something OUTSIDE the pinned set — it can't tell
 # "unlabelled all of them" from "unlabelled only some", which is what this
 # closes. Same fixture shape as desk-run-morning-integration-test.sh: one

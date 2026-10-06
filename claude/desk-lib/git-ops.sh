@@ -12,8 +12,7 @@ DESK_NOTES_REMOTE="${DESK_NOTES_REMOTE:-origin}"
 
 # True (exit 0) if $1 is a repo the commit step may write to right now:
 # HEAD is the branch "main" (never detached, never another branch) and no
-# rebase or merge is mid-flight (design.md §4: "commits only when HEAD is
-# main with no rebase or merge in progress").
+# rebase or merge is mid-flight.
 desk_repo_committable() {
 	local repo="$1" head
 	head="$(git -C "$repo" symbolic-ref --short -q HEAD 2> /dev/null || true)"

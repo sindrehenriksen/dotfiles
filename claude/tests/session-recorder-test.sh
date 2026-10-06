@@ -131,10 +131,7 @@ assert_eq "sess-g: exactly one close-failed event" "1" \
     "$(jq -rs 'map(select(.event=="close-failed")) | length' "$log_g")"
 
 # --- sess-h: DESK_HEADLESS=1 tags source desk-run regardless of the hook's
-# own reported source (design.md's "Visible run sessions": a non-restricted
-# desk-run call's real SessionStart hook still fires on its own; DESK_HEADLESS
-# tells it to tag itself desk-run rather than the runner recording a second,
-# duplicate start event for the same call) ----------------------------------
+# own reported source ----------------------------------
 tp_h="$PROJ_DIR/sess-h.jsonl"
 : > "$tp_h"
 DESK_HEADLESS=1 rec_start sess-h "$PROJ_DIR" "$tp_h" startup

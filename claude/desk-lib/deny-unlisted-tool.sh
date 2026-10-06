@@ -1,9 +1,5 @@
 #!/usr/bin/env bash
-# The PreToolUse hook a connector model call is launched with (design.md
-# §5 "Isolation, enforced" / the Runner decisions note: "the wall is a
-# per-call allowlist PreToolUse hook ... it denies every tool not on that
-# call's exact list, including anything his user allow rules would
-# permit"). Every positional argument after an optional `--pinned <file>
+# The PreToolUse hook a connector model call is launched with. Every positional argument after an optional `--pinned <file>
 # --` is one allowed tool name for THIS call only; the hook reads the
 # tool-call JSON Claude Code feeds it on stdin (`tool_name`, `tool_input`)
 # and exits 2 — an unconditional, override-proof deny, regardless of what
@@ -16,8 +12,7 @@
 # to load the claude.ai connectors at all) also loads his 220 allow rules,
 # which this hook denies regardless of.
 #
-# `--pinned <file>` (W's own extra layer, design.md §5 "The one unattended
-# external write"): <file> holds a JSON array of exact tool_input shapes
+# `--pinned <file>`: <file> holds a JSON array of exact tool_input shapes
 # this call may use, e.g. one `{"threadId": "...", "labelIds":
 # ["UNREAD"]}` per runner-pinned thread id. When given, an otherwise-
 # allowed tool call is still denied unless its own tool_input deep-equals

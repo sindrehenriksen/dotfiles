@@ -27,7 +27,7 @@
 # source (the recorder's own SessionStart "source" for the LAST start
 # event only, null with no start event — display purposes),
 # any_desk_run_start (true if ANY start event this session ever recorded
-# had source "desk-run" — design.md §3's 16:30 capture keys its own
+# had source "desk-run" — the capture step keys its own
 # exclusion off THIS, never off `source` alone: a scheduled call's session
 # he later resumes himself gets a real second start event, e.g. "resume",
 # which would overwrite `source` and — checked against the last start
@@ -713,7 +713,7 @@ case "${1:-}" in
     "")
         # name_source ("user" vs "ai_or_none") tells apart a session he
         # actually named from one only ever known by its auto title — the
-        # 16:30 capture's own "unnamed" (design.md §3) needs exactly this,
+        # 16:30 capture's own "unnamed" needs exactly this,
         # not just an empty .name (an ai-title fallback is never empty when
         # Claude Code has assigned one).
         printf '%s\n' "$entries_ndjson" | jq -c '.name_source = ._name_source | del(._name_source)'

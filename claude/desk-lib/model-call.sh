@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
-# The model-call wrapper (design.md §5 "Isolation, enforced", the
-# Interfaces brief's own bullet, and the Runner decisions note on
-# connectors). Every headless `claude -p` desk makes — fetch, judge, the
+# The model-call wrapper. Every headless `claude -p` desk makes — fetch, judge, the
 # pinned single-tool write, ticket-status, a per-session close call — goes
 # through desk_call_model, so the isolation flags are set in exactly one
 # place rather than re-typed at every call site.
@@ -26,17 +24,14 @@ desk_project_folder_name() {
 	printf '%s' "$real" | tr -c 'A-Za-z0-9' '-'
 }
 
-# Deletes $2's project folder under config dir $1 (design.md's "tool-result
-# spill": `--no-session-persistence` still spills overflowing tool results
-# under here). Always safe to call even if the folder never got created.
+# Deletes $2's project folder under config dir $1. Always safe to call even if the folder never got created.
 desk_cleanup_project_folder() {
 	local config_dir="$1" cwd="$2" name
 	name="$(desk_project_folder_name "$cwd")"
 	rm -rf "${config_dir:?}/projects/${name:?}" 2>/dev/null
 }
 
-# A fresh per-run scratch cwd outside any repo (design.md: "a per-run
-# scratch cwd outside any repo"), built from plain alnum/hyphen segments
+# A fresh per-run scratch cwd outside any repo, built from plain alnum/hyphen segments
 # only (see desk_project_folder_name above). Caller is responsible for
 # removing it when done; desk-run's own cleanup happens in its trap.
 desk_scratch_dir() {
@@ -48,9 +43,8 @@ desk_scratch_dir() {
 }
 
 # desk_pass_scratch_dir <pass> <scheduled_date> <step_id>
-# The durable cwd for one "visible" (persisted) call — design.md's later
-# "Runs he can open and continue": "its scratch dir is kept under
-# ~/.local/state/desk/runs/<pass>-<date>/ ... so resume finds its cwd".
+# The durable cwd for one "visible" (persisted) call: its scratch dir is kept under
+# ~/.local/state/desk/runs/ so a resume finds its cwd.
 # Deterministic (no random suffix, unlike desk_scratch_dir above): a same-day
 # retry of the same step re-enters the exact cwd a `claude --resume` for it
 # would still be pointed at, rather than orphaning the first attempt's own
@@ -65,9 +59,8 @@ desk_pass_scratch_dir() {
 
 # desk_prune_old_runs [<now_epoch>]
 # Removes any $DESK_RUNS_ROOT/<pass>-<date> directory whose <date> is more
-# than 7 days old (design.md's "pruned after 7 days"), taking each visible
-# call's own CLAUDE_CONFIG_DIR project folder down with it (design's "...
-# with their config-dir project folder") — a persisted call's transcript and
+# than 7 days old, taking each visible
+# call's own CLAUDE_CONFIG_DIR project folder down with it — a persisted call's transcript and
 # any spilled tool-results otherwise never get cleaned up at all, since
 # desk_cleanup_project_folder above only ever ran right after an ephemeral
 # (--no-session-persistence) call. Best-effort and silent about anything it
@@ -103,8 +96,8 @@ desk_prune_old_runs() {
 # Writes the PreToolUse deny-hook settings file for a call's exact
 # allowlist (the remaining args, tool names) into $1 (a path this call's
 # own scratch dir owns), optionally also pinning tool_input itself to a
-# pre-computed exact set (design's W: "runner-pinned thread ids and
-# label" — see deny-unlisted-tool.sh's own `--pinned` doc) and/or scoping
+# pre-computed exact set (the write step's runner-pinned thread ids and
+# label — see deny-unlisted-tool.sh's own `--pinned` doc) and/or scoping
 # a Read call to under a directory (a judge/close call's own
 # Read(<scratch>/**) --allowedTools entry, backed up here in case that
 # glob alone is ever not enough — see deny-unlisted-tool.sh's own
@@ -170,7 +163,7 @@ desk_write_deny_hook_settings() {
 # run_with_timeout's exit code (0 ok, 124 killed on timeout, anything else
 # the claude process's own exit code).
 #
-# `--name` (design.md's later "Runs he can open and continue") is what
+# `--name` is what
 # turns this from the ordinary ephemeral call (`--no-session-persistence`,
 # cleaned up immediately after) into a "visible" one: the session persists
 # under a runner-picked --session-id, named via `-n NAME` so a later
@@ -180,7 +173,7 @@ desk_write_deny_hook_settings() {
 # transcript is the very thing a follow-up `claude --resume` needs. Empty
 # (the default) keeps the old ephemeral behavior exactly.
 #
-# A --restricted call loads no hooks at all (design.md §5), so nothing
+# A --restricted call loads no hooks at all, so nothing
 # else would ever record its lifecycle: this function calls
 # session-recorder.sh's own start/end verbs itself, source "desk-run". A
 # non-restricted (`--connector`) call DOES load his real settings (merged
@@ -227,9 +220,7 @@ desk_call_model() {
 
 	local argv=(
 		# --verbose is not optional here: --print with --output-format
-		# stream-json refuses to run without it (confirmed live, D8's
-		# canary run — not something design.md's own Phase-0 table had
-		# caught).
+		# stream-json refuses to run without it (confirmed live).
 		"$DESK_CLAUDE_BIN" -p --output-format stream-json --verbose --permission-mode dontAsk
 		--allowedTools "$allowed_tools"
 	)
@@ -248,10 +239,7 @@ desk_call_model() {
 	[ -n "$max_budget_usd" ] && argv+=(--max-budget-usd "$max_budget_usd")
 
 	# The rendered prompt is passed as claude's own positional argument
-	# (design.md §9(e): "Prompts take scalars as {{name}} placeholders and
-	# bulk inputs as files in the per-run scratch dir" — bulk content is
-	# never what's substituted into the prompt text itself, so the whole
-	# rendered prompt stays small enough to pass this way).
+	#.
 	local prompt_text
 	prompt_text="$(cat "$prompt_file")"
 
@@ -297,11 +285,11 @@ desk_call_model() {
 # The raw tool_result content blocks from a stream-json transcript, one
 # JSON object per line — what the fetch/judge/ticket-status/close steps'
 # own (pass-specific, D8b) parsing reads instead of the model's prose,
-# per design.md's "accepts a source URL only if it appears verbatim in the
-# fetch calls' raw tool_results". Generic across every call: stream-json's
+# since a source URL is accepted only if it appears verbatim in the
+# fetch calls' raw tool_results. Generic across every call: stream-json's
 # tool results arrive as `user`-role messages whose content carries
 # `tool_result` blocks, the same shape transcripts already use elsewhere in
-# desk. Exact field names are pinned by design.md §8's Phase-0 table as
+# desk. Exact field names are as
 # something to confirm live (not yet fully verified in this build); this is
 # the one place to adjust if a real call's shape differs.
 desk_extract_tool_results() {
@@ -321,7 +309,7 @@ desk_extract_tool_uses() {
 
 # A judge-shaped call's own final reply text (every text content block of
 # the LAST assistant message, joined) — J and 16:30 hold no output tool,
-# so their pinned {"items": [...]} shape (design.md §9(e)) is their last
+# so their pinned {"items": [...]} shape is their last
 # assistant turn's own text, never a tool_result. Prints "" if the stream
 # has no assistant text at all (a hung/killed call, or one that only ever
 # called tools).

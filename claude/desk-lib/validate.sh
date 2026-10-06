@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# Item validation shared by J (morning) and the 16:30 close calls
-# (design.md §4, §9(e), the Runner decisions note): every item a judge-
+# Item validation shared by J (morning) and the close calls: every item a judge-
 # shaped call returns is untrusted until checked against that call's own
 # raw tool_results, never its prose. This is the one place that runs: the
 # source-URL check (desk-lib/tool-results.sh supplies the allowed set),
@@ -11,9 +10,8 @@ set -u
 DESK_BRIEF_DIR="${DESK_BRIEF_DIR:-$DESK_STATE_DIR/briefs}"
 
 # ---------------------------------------------------------------------------
-# Stripping (design.md §5: "Suggested lines are stripped of control and
-# ANSI characters"; this build's own modeline defense-in-depth, since the
-# notes buffer's `nomodeline` is the other half of that).
+# Stripping: control and ANSI characters, and vim modelines (the notes
+# buffer's `nomodeline` is the other half of that defense).
 # ---------------------------------------------------------------------------
 
 # ANSI CSI sequences, a bare ESC, and any other C0 control byte except \t
@@ -37,8 +35,8 @@ desk_strip_modelines() {
 }
 
 # Removes any http(s) URL substring from $1 that isn't one of the allowed
-# URLs in $2 (newline-separated), replacing it with "[url removed]" —
-# design's "rejects or defangs other URLs in item text." An allowed URL is
+# URLs in $2 (newline-separated), replacing it with "[url removed]".
+# An allowed URL is
 # left exactly as it appears; a text with no URLs at all is unchanged.
 desk_strip_disallowed_urls() {
 	local text="$1" allowed_newline="$2"
@@ -132,8 +130,7 @@ desk_validate_also_sources() {
 }
 
 # ---------------------------------------------------------------------------
-# The full validation pass for a set of proposal-shaped items (design.md
-# §9(e)): drops an item whose URL source isn't verifiably from this call's
+# The full validation pass for a set of proposal-shaped items: drops an item whose URL source isn't verifiably from this call's
 # own raw results, then sanitizes every remaining item's text. $2 = the
 # allowed-URL set (desk_allowed_urls's output, newline-separated).
 # Caps are a separate step (desk_apply_caps below) since 16:30's items are
@@ -162,9 +159,8 @@ desk_validate_items() {
 }
 
 # ---------------------------------------------------------------------------
-# 16:30's own extra check (the Runner decisions note: "16:30 turn citations
-# are verified by the runner and stripped"). prompts/1630-close.md pins the
-# exact format: each bullet ends with "[turn <first 8 chars of a
+# A close call's own extra check: its turn citations are verified by the
+# runner and stripped. The exact format: each bullet ends with "[turn <first 8 chars of a
 # transcript entry's uuid>]". An item citing a uuid prefix absent from the
 # transcript tail it was actually given is dropped (a fabricated citation
 # is worse than none); every citation marker is stripped from before/after
@@ -211,8 +207,7 @@ desk_verify_and_strip_turn_citations() {
 }
 
 # ---------------------------------------------------------------------------
-# Caps (design.md §4: "daily ≤3 ACT, ≤3 worth-knowing, ≤1 wildcard; weekly
-# ≤5/≤8/≤1; overflow to the dated brief"). Only tiered items (news, via
+# Caps: per-tier maximums, overflow to a dated brief. Only tiered items (news, via
 # `tier`) are ever capped; anything else (edits, removals, closure notes)
 # passes straight through uncounted.
 # ---------------------------------------------------------------------------

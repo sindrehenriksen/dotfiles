@@ -13,8 +13,7 @@
 #      install step for a personal clone: `git config desk.denylist
 #      <path-to-your-private-pattern-list>` (set it locally, never tracked
 #      — the list's own contents would be the leak). Unset: refuses to
-#      push (design.md §5 fails closed — a fresh clone with no denylist
-#      configured yet must never read as "nothing to check"); set to the
+#      push; set to the
 #      literal "none" to opt out explicitly instead. Set but the file's
 #      missing: refuses to push.
 #
@@ -84,7 +83,7 @@ fi
 # --- hook form (no args): chained from git-hooks/pre-push --------------------
 denylist="$(git config --get desk.denylist 2>/dev/null || true)"
 if [ -z "$denylist" ]; then
-	# design.md §5 fails closed: an unconfigured denylist must never read
+	# Fails closed: an unconfigured denylist must never read
 	# as "nothing to check, let it through" — that's exactly the state a
 	# fresh clone starts in, and the one a push should never silently run
 	# under. Refuse until it's set, one way or the other.

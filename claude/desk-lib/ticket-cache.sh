@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# T's own two jobs (design.md §4 "Ticket status, both passes", §9(c)'s
-# `tokens` list, and nvim/lua/desk/annotate.lua's own pinned cache shape):
+# T's own two jobs:
 # building the `key in (...)` query from every ticket-like token in his
 # notes, and turning T's raw search results — either Jira shape — into
 # the ticket cache the editor reads. Never the model's reply: T's own
@@ -57,7 +56,7 @@ desk_ticket_keys_from_text() {
 # The `jql` placeholder for prompts/ticket-status.md: `key in (...)` over
 # every distinct key found. No keys found still returns valid JQL that
 # matches nothing (an empty `in ()` is invalid JQL), rather than skip the
-# call — T always runs, both passes (design.md §4).
+# call — T always runs, both passes.
 desk_build_jql() {
 	local text="$1" tokens_json="$2"
 	local keys
@@ -72,12 +71,12 @@ desk_build_jql() {
 }
 
 # desk_parse_jira_issues <raw-result-text>
-# Both Cloud Jira search shapes (prompts/README.md's own note, verbatim):
+# Both Cloud Jira search shapes:
 # interactive `{"issues": [...], "nextPageToken"}`, headless --mcp-config
 # `{"issues": {"nodes": [...], "pageInfo"}}`. Prints one JSON object per
 # issue found, `{"key", "summary", "status"}` — defensively over the
 # field path within one issue, since neither shape's own per-issue layout
-# is pinned by a live call yet (design.md §8's Phase-0 table): tries the
+# is pinned by a live call yet: tries the
 # REST shape (`fields.summary`/`fields.status.name`) first, falling back
 # to a flatter one a GraphQL-style node might use instead.
 desk_parse_jira_issues() {
@@ -100,8 +99,8 @@ desk_parse_jira_issues() {
 # made) into the ticket cache's pinned shape and writes it atomically to
 # $DESK_TICKET_CACHE: {"checked_at": <epoch>, "tickets": {"<KEY>":
 # {"status": "...", "summary": "..."}}}. Prints "ok" and writes the file,
-# or "failed" and writes nothing (design's "on failure the old cache
-# stays, its age visible") when not one page parsed as valid JSON — an
+# or "failed" and writes nothing (on failure the old cache
+# stays, its age visible) when not one page parsed as valid JSON — an
 # empty issue list from valid JSON (his notes name zero tickets, or all
 # are gone) is still an "ok", refreshing checked_at with an empty map.
 # `<tool-name>` is the instantiation's own ticket-search tool (desk-run's

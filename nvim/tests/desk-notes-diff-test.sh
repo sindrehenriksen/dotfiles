@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# The weekly tab's notes-diff (weekly/README.md's "holding the runner's
-# fenced notes-diff.md") — nvim/lua/desk/cli.lua's own `notes-diff` verb
+# The weekly tab's notes-diff — nvim/lua/desk/cli.lua's own `notes-diff` verb
 # (the diffing + taken-provenance exclusion, reusing desk.proposal/
 # desk.snippet rather than a second normalization here) and
 # claude/desk-lib/steps.sh's desk_write_notes_diff/desk_last_weekday_epoch

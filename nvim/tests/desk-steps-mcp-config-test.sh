@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
-# D8b test: a fetch/judge/ticket_status step's `mcp_config` field (design.md
-# §9(c)'s step schema; steps.sh's own "D8b: ... via the step's mcp_config
-# field") reaches the model call as --mcp-config with --strict-mcp-config,
+# D8b test: a fetch/judge/ticket_status step's `mcp_config` field reaches the model call as --mcp-config with --strict-mcp-config,
 # resolved relative to $DESK_CONFIG's directory the same as `prompt` is —
 # this is what lets T (ticket-status) run headless against the
 # ticket tracker's MCP server, alongside (not instead of) --restricted,

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# The desk runner (design.md §10 D8, §9(c)): `desk-run <pass>`, the one
-# entry point the plists call (design's own "desk-run install path" note:
-# a symlink at ~/.local/bin/desk-run, installed onto this file). Reads
+# The desk runner: `desk-run <pass>`, the one
+# entry point the plists call (installed as a symlink at
+# ~/.local/bin/desk-run, onto this file). Reads
 # $DESK_CONFIG, runs the named pass's step list against the generic step
 # kinds in claude/desk-lib/steps.sh, and writes the status file every
 # other desk piece reads.
@@ -67,7 +67,7 @@ if [ -z "$pass_config" ]; then
 fi
 
 # Generic ids: dotfiles is public and names no instantiation-specific fact
-# of any kind (design.md §6), which extends to the exact MCP tool names an
+# of any kind, which extends to the exact MCP tool names an
 # instantiation's own connectors happen to expose, the step ids it
 # special-cases for ticket status and mail, and his own timezone — none of
 # those are guessable defaults this repo can ship, so every one is a
@@ -85,9 +85,7 @@ for required_field in timezone ticket_search_tool mail_search_tool ticket_status
 	fi
 done
 
-# Weekdays only for morning/16:30's own MODEL steps (design.md §4's own
-# scheduling note, and the Interfaces brief: "weekdays filtered for
-# morning/16:30") — but commit-and-push runs every day, weekends included:
+# Weekdays only for morning/16:30's own MODEL steps — but commit-and-push runs every day, weekends included:
 # a weekend still deserves whatever his own text picked up committed (and
 # pushed, once push_enabled) even though nothing is calling a model.
 # Checked against the step loop below rather than a whole-pass early exit,
@@ -123,12 +121,12 @@ cleanup() {
 trap cleanup EXIT
 
 # A previous invocation that never finished shows as failed rather than
-# silently vanishing under this one's fresh "running" (design's "'started,
-# never finished' older than N minutes shows as failed").
+# silently vanishing under this one's fresh "running" (a "running" entry older
+# than the stale threshold shows as failed).
 desk_status_mark_stale_running "$pass"
 
 # The guard is keyed on (pass, the slot's scheduled date), not the date
-# desk-run happens to run on (design.md §4, §9(c)'s scheduled_date): a
+# desk-run happens to run on: a
 # pass's own `.trigger.start_calendar_interval` (the plist's own slot list,
 # mirrored into $DESK_CONFIG since desk-run never reads a plist directly)
 # says which slots exist; an unconfigured pass (no trigger, as every test
@@ -138,7 +136,7 @@ slots_json="$(jq -c '.trigger.start_calendar_interval // []' <<< "$pass_config")
 scheduled_date="$(desk_scheduled_date_for "$slots_json")"
 
 # The once-a-day guard: a slot firing after this scheduled date's pass
-# already finished ok is a no-op (design's "later slots only retry").
+# already finished ok is a no-op.
 if desk_guard_already_ok_today "$pass" "$scheduled_date"; then
 	desk_log "$pass" "already ok today (scheduled $scheduled_date): no-op"
 	exit 0
@@ -165,7 +163,7 @@ if ! cp "$DESK_LIB_DIR/deny-unlisted-tool.sh" "$DESK_DENY_HOOK_SCRIPT" 2> /dev/n
 fi
 export DESK_DENY_HOOK_SCRIPT
 
-# Visible run sessions (design.md's later "Runs he can open and continue"):
+# Visible run sessions:
 # sweep any $DESK_RUNS_ROOT/<pass>-<date> directory (and its config-dir
 # project folder) more than 7 days old, before this run creates its own —
 # never after, which would sweep the one this same invocation is about to
@@ -175,14 +173,14 @@ export DESK_DENY_HOOK_SCRIPT
 desk_prune_old_runs
 follow_up_step="$(jq -r '.follow_up_step // empty' <<< "$pass_config")"
 
-# A fixed lookback window for F-private's Gmail queries (design's "epoch
-# after:/before: for windows"): since this pass's own last successful run,
+# A fixed lookback window for F-private's Gmail queries (epoch
+# after:/before: bounds): since this pass's own last successful run,
 # or a config-configurable default when there's never been one. Computed
 # before desk_status_set_running overwrites that "ok" record with this
 # run's own "running" one, and before this pass ever runs a fetch step,
 # since W (later in the same pass) has to re-check the exact query
 # F-private actually ran against this same value — "the runner checks the
-# query it ran" (design.md §4) means checking it against what the runner
+# query it ran" means checking it against what the runner
 # itself told F-private to run, not a value re-derived after the fact.
 gmail_window_end="$(desk_now)"
 gmail_window_lookback="$(jq -r '.gmail_window_lookback_secs // 172800' <<< "$config")"
@@ -200,8 +198,7 @@ if [ -n "$last_fetch_ok" ]; then
 else
 	gmail_window_start=$((gmail_window_end - gmail_window_lookback))
 fi
-# The digest label is instantiation-specific data (design.md §6: dotfiles
-# names no actual mailing-list/label), so it's a config field, never a
+# The digest label is instantiation-specific data, so it's a config field, never a
 # literal here — an instantiation with no digest source configured still
 # gets valid (if pointless) JQL-shaped Gmail syntax rather than an error.
 digest_label="$(jq -r '.digest_gmail_label // "Digest"' <<< "$config")"
@@ -254,8 +251,7 @@ push_enabled="$(jq -r 'if .push_enabled == true then "true" else "false" end' <<
 export DESK_CONFIG
 export CLAUDE_CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 
-# The scalar context every call gets a share of (prompts/README.md's own
-# placeholder table): a generous superset computed once per pass, never
+# The scalar context every call gets a share of: a generous superset computed once per pass, never
 # gated per step — desk_render_prompt only ever substitutes a {{name}} a
 # prompt's own text actually references, so an unused key here costs
 # nothing ("the runner knows how to produce each kind"). `mode` uses
@@ -265,10 +261,7 @@ mode="$(desk_compute_mode "$last_ok")"
 today="$(date +%F)"
 window_start_iso="$(desk_iso8601_at_tz "$gmail_window_start" "$timezone")"
 window_end_iso="$(desk_iso8601_at_tz "$gmail_window_end" "$timezone")"
-# The morning pass's one source definition (prompts/README.md's own
-# placeholder table: the whole of a private source file, substituted
-# verbatim into F-private/F-web and copied into J's scratch dir as
-# sources.json). Its actual name is instantiation-specific data, same
+# The morning pass's one source definition. Its actual name is instantiation-specific data, same
 # reasoning as digest_gmail_label above — a config field, never a literal
 # here — so an instantiation with no `sources_file` configured still gets a
 # valid (if empty) sources placeholder rather than an error.
@@ -306,8 +299,8 @@ pass_ctx="$(jq -n --arg repo "$repo" --arg sources_path "$sources_path" --arg pa
 overall_result="ok"
 stopped_at=""
 # Source (fetch) steps get their own failure mode: recorded here, never
-# aborting the pass outright (design's own "later slots only retry the
-# missing sources" — see steps.sh's desk_fetch_cache_* for the same-day
+# aborting the pass outright (a later slot retries only the
+# missing sources — see steps.sh's desk_fetch_cache_* for the same-day
 # cache that makes an already-succeeded source skip a redundant re-run
 # rather than this array growing to include it again).
 failed_sources=()
@@ -379,8 +372,8 @@ $(git -C "$repo" show "HEAD:$f" 2> /dev/null)"
 					|| desk_log "$pass" "$id: ticket cache parse failed, old cache kept"
 			fi
 			if [ "$result" != "ok" ]; then
-				# A source's own failure is never fatal to the pass (design's
-				# "partial proposals"): recorded, logged, and the loop carries
+				# A source's own failure is never fatal to the pass (a
+				# "partial proposal"): recorded, logged, and the loop carries
 				# on with whatever other sources/J/W/close still have to say —
 				# never marked done for this scheduled date, so a later slot
 				# retries exactly this (and only this) source.
@@ -458,8 +451,8 @@ $(git -C "$repo" show "HEAD:$f" 2> /dev/null)"
 			;;
 
 		write)
-			# The pinning below applies by step KIND (design's own "W: the
-			# ONE unattended external write" — one per pass, by
+			# The pinning below applies by step KIND (the write step is the
+			# one unattended external write, one per pass by
 			# construction), never by checking this step's own `id`
 			# against a hardcoded literal: an instantiation is free to
 			# call it whatever it likes, and a check keyed on a literal
@@ -475,7 +468,7 @@ $(git -C "$repo" show "HEAD:$f" 2> /dev/null)"
 			# at all — proceeding would silently unlabel zero ids and
 			# report "ok", which reads as "nothing to do" rather than "the
 			# source it depends on never ran". Fail loudly instead
-			# (design's own "W asserts unlabelled = fetched").
+			# (the write step asserts that what it unlabels is what was fetched).
 			mail_fetch_failed="false"
 			for fs in "${failed_sources[@]:-}"; do
 				[ "$fs" = "$mail_fetch_step_id" ] && mail_fetch_failed="true"
@@ -535,7 +528,7 @@ $(git -C "$repo" show "HEAD:$f" 2> /dev/null)"
 					result="ok"
 				else
 					result="$(desk_step_write "$pass" "$step_json" "$pinned_args_json" "$placeholders" "$scheduled_date")"
-					# design.md §5's own "W count mismatch" loud failure:
+					# A count mismatch fails loudly:
 					# the deny hook's own --pinned only ever stops W from
 					# unlabelling something OUTSIDE the pinned set — it
 					# can't tell "unlabelled all of them" from "unlabelled
@@ -580,7 +573,7 @@ done
 # A source failure never broke the loop above (it `continue`s instead),
 # so reaching here with the loop otherwise clean ("ok", not a harder
 # failed/break from a later non-source step) but with sources still
-# outstanding is exactly design's "partial": J still ran and staged
+# outstanding is exactly a "partial" pass: J still ran and staged
 # whatever it could, flagged partial, but this scheduled date isn't fully
 # done — a later slot retries the missing sources, per
 # desk_guard_already_ok_today only ever treating "ok" as done.
@@ -613,12 +606,11 @@ desk_status_set_result "$pass" "$overall_result" "$stopped_at" "$failed_sources_
 
 # Visible run sessions: opens once the pass is done, whatever its own
 # result — a failed pass still opens the tab on whatever visible calls did
-# get made (design.md's later "Runs he can open and continue").
+# get made.
 desk_open_follow_up_tab "$pass" "$scheduled_date" "$follow_up_step" > /dev/null
 
 # -----------------------------------------------------------------------
-# The rest of status.json (design.md §9(f), nvim/lua/desk/status.lua's own
-# reader): proposal state/overflow/counts, the ticket cache's own age, and
+# The rest of status.json: proposal state/overflow/counts, the ticket cache's own age, and
 # this pass's total spend. All read-only against the proposal and ledger
 # refs and $DESK_TICKET_CACHE as they stand right now — none of it gates
 # overall_result, so a failure computing any one of these never costs the

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The status file writer (design.md §9(f), §2 "Status line"): the one
+# The status file writer: the one
 # producer of $DESK_STATUS_FILE, which nvim/lua/desk/status.lua reads
 # read-only. Every write goes through desk_status_update, so the file is
 # always replaced atomically and never seen half-written by a concurrent
@@ -44,8 +44,8 @@ desk_status_update() {
 	desk_write_atomic "$DESK_STATUS_FILE" "$new"
 }
 
-# Marks a previous "running" entry for $1 as failed if it's stale (design's
-# "started, never finished" older than N minutes) — called before a fresh
+# Marks a previous "running" entry for $1 as failed if it's stale (started, never
+# finished, older than N minutes) — called before a fresh
 # run marks itself running, so a crash from an earlier invocation is never
 # silently overwritten by the next one without ever having been reported.
 desk_status_mark_stale_running() {
@@ -63,8 +63,8 @@ desk_status_mark_stale_running() {
 desk_status_set_running() {
 	local pass="$1" now
 	now="$(desk_now)"
-	# `last_ok_run` (this pass's own last successful run's own `last_run`,
-	# design's own durable record) is carried forward explicitly rather
+	# `last_ok_run` (this pass's own last successful run's own `last_run`)
+	# is carried forward explicitly rather
 	# than dropped along with the rest of the previous record: a wholesale
 	# `.passes[$pass] = {...}` replace here would otherwise wipe it the
 	# moment a fresh run starts, which is exactly the bug this field

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Shared paths, env-var overrides and small helpers for the desk runner
-# (design.md §10 D8, §9). Sourced by claude/desk-run and every other
+# Shared paths, env-var overrides and small helpers for the desk runner.
+# Sourced by claude/desk-run and every other
 # claude/desk-lib/*.sh file — never executed on its own.
 #
 # Every path below follows the same override convention the rest of desk
@@ -34,19 +34,15 @@ DESK_LOCK_DIR="${DESK_LOCK_ROOT:-$DESK_STATE_DIR/lock}"
 DESK_GUARD_DIR="${DESK_GUARD_ROOT:-$DESK_STATE_DIR/guard}"
 DESK_SCRATCH_ROOT="${DESK_SCRATCH_ROOT:-$DESK_STATE_DIR/scratch}"
 DESK_LOG_DIR="${DESK_LOG_DIR:-$DESK_STATE_DIR/logs}"
-# Durable per-call scratch dirs for a "visible" (persisted) call — design.md's
-# later "Runs he can open and continue": kept here, never under
+# Durable per-call scratch dirs for a "visible" (persisted) call: kept here, never under
 # $DESK_SCRATCH_ROOT (which desk-run's own trap sweeps every invocation),
 # so a `claude --resume` after the pass finishes still finds its cwd. See
 # claude/desk-lib/model-call.sh's desk_pass_scratch_dir/desk_prune_old_runs.
 DESK_RUNS_ROOT="${DESK_RUNS_ROOT:-$DESK_STATE_DIR/runs}"
 
-# How long a lock wait gives up after (design.md §5: "A run waits for a held
-# lock; one that gives up says so in status"), and how long a "running"
-# status entry can go stale before the next run treats it as a crash
-# (design.md §9(c)'s "failed" plus the Interfaces brief's "'started, never
-# finished' older than N minutes shows as failed"). Neither N is pinned by
-# the design; both are overridable so a test never waits the real default.
+# How long a lock wait gives up after, and how long a "running"
+# status entry can go stale before the next run treats it as a crash.
+# Both are overridable so a test never waits the real default.
 DESK_LOCK_MAX_WAIT_SECS="${DESK_LOCK_MAX_WAIT_SECS:-1800}"
 DESK_LOCK_POLL_SECS="${DESK_LOCK_POLL_SECS:-5}"
 DESK_STALE_RUNNING_MINUTES="${DESK_STALE_RUNNING_MINUTES:-60}"
@@ -71,8 +67,7 @@ mkdir -p "$DESK_STATE_DIR" "$DESK_LOCK_DIR" "$DESK_GUARD_DIR" "$DESK_SCRATCH_ROO
 
 desk_log() {
 	# $1: pass name (or "-" outside any pass); rest: message. Goes to
-	# stderr only — launchd's own per-pass log redirect (design.md's plists,
-	# §5 "Env") is what actually persists it; this never writes a log file
+	# stderr only — launchd's own per-pass log redirect is what actually persists it; this never writes a log file
 	# itself so a test never has to clean one up.
 	local pass="$1"
 	shift
@@ -89,10 +84,7 @@ desk_pid_alive() {
 	kill -0 "$1" 2>/dev/null
 }
 
-# A fresh lowercase UUID for a "visible" call's own --session-id (design.md's
-# later "Runs he can open and continue": the runner picks the id up front,
-# rather than parsing it back out of stream-json, so it can name and record
-# the session before the call ever starts). uuidgen's own output is
+# A fresh lowercase UUID for a "visible" call's own --session-id. uuidgen's own output is
 # uppercase; Claude Code's session ids are lowercase.
 desk_new_session_id() {
 	if command -v uuidgen > /dev/null 2>&1; then

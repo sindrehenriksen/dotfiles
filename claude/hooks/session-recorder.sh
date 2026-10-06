@@ -97,7 +97,7 @@ start_event() {
     # just wrote.
     maybe_prune "$(boot_id)"
     file="$STORE_DIR/$sid.jsonl"
-    # design.md's "Visible run sessions": a desk-run call that isn't
+    # A desk-run call that isn't
     # --restricted still loads this hook via his real settings (merged in
     # alongside the call's own deny-hook settings file), so it would record
     # a real SessionStart on its own — the runner never also calls this

@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# "Visible run sessions" (design.md's later "Runs he can open and
-# continue"): a step whose own config sets "visible": true gets a named,
+# "Visible run sessions": a step whose own config sets "visible": true gets a named,
 # persisted call — --session-id/-n, no --no-session-persistence — instead
 # of the ordinary ephemeral one; its cwd survives under
 # $DESK_RUNS_ROOT/<pass>-<date>/<step> rather than being cleaned up; a

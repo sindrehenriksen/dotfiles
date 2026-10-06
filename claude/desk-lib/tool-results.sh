@@ -2,9 +2,9 @@
 # Reads raw tool_use/tool_result pairs out of a call's own stream-json
 # extraction (desk-lib/model-call.sh's desk_extract_tool_uses/
 # desk_extract_tool_results) and collects the literal URLs a call's raw
-# results actually carry — the trusted half of design.md's "accepts a
-# source URL only if it appears verbatim in the fetch calls' raw
-# tool_results" (§4, §9(e), the Runner decisions note). Nothing here reads
+# results actually carry — the trusted half of the rule that a
+# source URL is accepted only if it appears verbatim in the fetch calls' raw
+# tool_results. Nothing here reads
 # a model's prose reply; everything is keyed off tool_use_id, the one
 # link between a call and what it actually did.
 set -u
@@ -68,11 +68,9 @@ desk_collect_literal_urls() {
 
 # Every (channel, ts) pair found anywhere in $@'s raw tool_results — a
 # recursive walk for any JSON object carrying both a "ts" matching Slack's
-# <secs>.<micros> shape and a "channel" or "channel_id" field, per
-# prompts/morning-f-private.md ("give channel_id and ts exactly as the
-# tool returned them"). Printed as JSON lines {"channel": "...", "ts":
-# "..."}. Unverified against a live Slack tool result (design.md §8's
-# Phase-0 table flags the exact tool shapes generally) — this is the one
+# <secs>.<micros> shape and a "channel" or "channel_id" field, as a
+# fetch prompt is told to give them (exactly as the tool returned them). Printed as JSON lines {"channel": "...", "ts":
+# "..."}. Unverified against a live Slack tool result — this is the one
 # place to adjust if a real call's shape differs.
 desk_collect_slack_ts_pairs() {
 	_desk_result_texts "$@" | while IFS= read -r text; do
@@ -87,7 +85,7 @@ desk_collect_slack_ts_pairs() {
 	done
 }
 
-# The canonical Slack permalink design.md pins: <workspace_url>/archives/
+# The canonical Slack permalink: <workspace_url>/archives/
 # <channel_id>/p<ts with the dot removed>.
 desk_slack_permalink() {
 	local workspace_url="$1" channel="$2" ts="$3"

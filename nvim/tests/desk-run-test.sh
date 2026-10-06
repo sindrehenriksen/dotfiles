@@ -3,7 +3,7 @@
 # notes repo, a local BARE remote standing in for the real one (never the
 # real remote), and a fake `claude` on PATH that behaves however each case
 # needs (hangs, fails, or succeeds) without ever making a real model call.
-# Covers every design.md §10 D8 done-check case: a slept-through slot, an
+# Covers: a slept-through slot, an
 # offline slot, a rejected push, a dead lock owner, HEAD off main / mid-
 # rebase; and that desk-run never pulls, forces, or writes the working
 # file. The one live call (the canary) is its own script,

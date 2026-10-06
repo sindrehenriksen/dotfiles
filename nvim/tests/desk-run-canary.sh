@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# D8 canary (design.md §10 D8's own done-check: "the canaries are refused";
-# §8 Phase-0's "a canary that an unlisted tool is refused"). The ONE real
+# D8 canary. The ONE real
 # `claude -p` call this build makes: through the connector-call path (user
 # settings loaded, no --restricted — a claude.ai connector needs that),
 # with an allowlist of exactly one harmless read tool, asking the model to

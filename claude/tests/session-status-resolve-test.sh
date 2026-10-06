@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# D7's additions to claude/session-status.sh (design.md §9(a)): the `pid`
+# D7's additions to claude/session-status.sh: the `pid`
 # and `tty` fields on a live session, and the `resolve <token>` mode the
 # notes hotkey uses to turn a session name into exactly one session (or
 # refuse). From-scratch fixtures only, never real Claude Code state — see

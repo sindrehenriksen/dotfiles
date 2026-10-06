@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# A step's hard timeout, killing its whole process group (design.md §5:
-# "a hard one per step, killing its process group"). Neither `timeout` nor
+# A step's hard timeout, killing its whole process group. Neither `timeout` nor
 # `gtimeout` nor `setsid` ships on this machine (no coreutils/util-linux),
 # so this uses bash's own job control instead: `set -m` puts a background
 # job in its own process group whose pgid equals the job's pid, and
