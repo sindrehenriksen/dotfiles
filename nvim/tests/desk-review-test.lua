@@ -555,6 +555,61 @@ do
 	assert_eq("declining again works", 1, #declined_ids(r))
 end
 
+print("\n=== a removal next to an add: decline and take act on one suggestion, not the whole hunk ===")
+do
+	local function fresh()
+		local r = new_repo({ "Section A", "  existing", "  - stale", "Section B", "  other" })
+		build(r, "2026-10-01", {
+			item("rm", { kind = "remove", target = { at = "  - stale" }, before = "  - stale", after = "", source = "notes", headline = "drop stale" }),
+			item("ad", { kind = "add", target = { under = "Section A" }, after = "  - new under A", source = "https://example.invalid/ad", headline = "add A" }),
+		})
+		local nb = open_notes(r)
+		review.attach(nb)
+		assert_true("review opens", review.open_review(nb))
+		return r, nb, review_buf_of(nb)
+	end
+	local r, nb, rb = fresh()
+	assert_eq("the two form one hunk", 1, #vim.diff(
+		snippet.join_lines(lines_of(nb), true), snippet.join_lines(lines_of(rb), true), { result_type = "indices" }))
+	local rw = vim.fn.bufwinid(rb)
+	go_to(rw, rb, "  existing")
+	assert_true("decline on the removal's own place", review.decline(rb))
+	assert_eq("only the removal is declined: its line is back, the add stays", { "Section A", "  existing", "  - stale", "  - new under A", "Section B", "  other" }, lines_of(rb))
+	vim.cmd("write")
+	assert_eq("one decline recorded", { "drop stale" }, (function()
+		local t = {}
+		for _, rec in pairs(ledger.declined(ledger.read(r)).ids) do
+			t[#t + 1] = rec.headline
+		end
+		return t
+	end)())
+
+	local r2, nb2, rb2 = fresh()
+	local rw2 = vim.fn.bufwinid(rb2)
+	go_to(rw2, rb2, "  - new under A")
+	assert_true("decline the add", review.decline(rb2))
+	assert_eq("the removal is still pending in the review buffer", { "Section A", "  existing", "Section B", "  other" }, lines_of(rb2))
+	vim.cmd("write")
+	assert_eq("only the add is declined", { "add A" }, (function()
+		local t = {}
+		for _, rec in pairs(ledger.declined(ledger.read(r2)).ids) do
+			t[#t + 1] = rec.headline
+		end
+		return t
+	end)())
+
+	local _, nb3, rb3 = fresh()
+	local rw3 = vim.fn.bufwinid(rb3)
+	go_to(rw3, rb3, "  existing")
+	assert_true("take the removal", review.take(rb3))
+	assert_eq("his notes lose only the stale line", { "Section A", "  existing", "Section B", "  other" }, lines_of(nb3))
+	assert_eq("the add is still a hunk", 1, #vim.diff(
+		snippet.join_lines(lines_of(nb3), true), snippet.join_lines(lines_of(rb3), true), { result_type = "indices" }))
+	go_to(rw3, rb3, "  - new under A")
+	assert_true("then take the add", review.take(rb3))
+	assert_eq("his notes have it", { "Section A", "  existing", "  - new under A", "Section B", "  other" }, lines_of(nb3))
+end
+
 print(string.format("\n=== summary: %d passed, %d failed ===", pass, fail))
 if fail > 0 then
 	os.exit(1)

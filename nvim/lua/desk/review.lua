@@ -16,6 +16,7 @@
 -- review buffer records nothing. Adjacent suggestions are one diff hunk, so
 -- the decline key (and `<leader>gA`, which takes one) act on a single
 -- suggestion's own lines rather than the whole hunk.
+local block = require("desk.block")
 local git = require("desk.git")
 local ledger = require("desk.ledger")
 local proposal = require("desk.proposal")
@@ -305,6 +306,7 @@ function M.open_review(notes_buf)
 	}
 	sessions[notes_buf] = s
 	M.place_marks(s, ours)
+	M.place_del_marks(s)
 
 	vim.api.nvim_win_call(review_win, function()
 		vim.cmd("diffthis")
@@ -426,6 +428,184 @@ function M.place_marks(s, ours)
 	end
 end
 
+-- Maps a row of one side of a diff to the other: `hunks` as vim.diff gives
+-- them for (a -> b), `swap` true to map a b-row to the a side instead.
+-- A row inside a changed hunk maps to the end of that hunk's other side.
+local function map_row(hunks, l, swap)
+	local sa, ca, sb, cb = 1, 2, 3, 4
+	if swap then
+		sa, ca, sb, cb = 3, 4, 1, 2
+	end
+	local shift = 0
+	for _, h in ipairs(hunks) do
+		if h[ca] > 0 then
+			local last = h[sa] + h[ca] - 1
+			if l > last then
+				shift = shift + h[cb] - h[ca]
+			elseif l >= h[sa] then
+				return h[cb] > 0 and h[sb] + h[cb] - 1 or h[sb]
+			else
+				break
+			end
+		elseif l >= h[sa] then
+			shift = shift + h[cb]
+		else
+			break
+		end
+	end
+	return l + shift
+end
+
+local function diff_indices(a, b)
+	return vim.diff(snippet.join_lines(a, true), snippet.join_lines(b, true), { result_type = "indices" })
+end
+
+-- The first row of the occurrence of `item.before` the proposal anchored,
+-- in `lines`: the base text's anchored occurrence carried across his edits,
+-- else the anchor's own first occurrence. nil if it is not there.
+local function anchored_start(s, item, lines)
+	local before = snippet.split_lines(item.before)
+	if #before == 0 then
+		return nil
+	end
+	local leave = block.parse_target(item.target)
+	if not (leave and leave.kind == "at") then
+		return nil
+	end
+	if s.base then
+		local at = block.find_anchor(s.base, leave)
+		if at and snippet.lines_match_at(s.base, at + 1, before) then
+			local hunks = diff_indices(s.base, lines)
+			local row = map_row(hunks, at + 1, false)
+			local last = map_row(hunks, at + #before, false)
+			if last - row == #before - 1 and snippet.lines_match_at(lines, row, before) then
+				return row
+			end
+		end
+	end
+	local at = block.find_anchor(lines, leave)
+	if at and snippet.lines_match_at(lines, at + 1, before) then
+		return at + 1
+	end
+end
+
+-- Whether `item` removes its `before` (rather than only adding lines or
+-- rewriting them in place at its own add range).
+local function leaves_before(item)
+	return #snippet.split_lines(item.before) > 0 and item.kind ~= "edit"
+end
+
+--- Puts a zero-width extmark at each removing suggestion's deletion point
+--- in the review buffer: the row after which its `before` lines would sit.
+function M.place_del_marks(s)
+	s.dels = {}
+	if not s.base then
+		return
+	end
+	local review_lines = buf_lines(s.review_buf)
+	local hunks = diff_indices(s.base, review_lines)
+	for _, item in pairs(s.shown) do
+		if leaves_before(item) then
+			local leave = block.parse_target(item.target)
+			local before = snippet.split_lines(item.before)
+			local at = leave and leave.kind == "at" and block.find_anchor(s.base, leave)
+			if at and snippet.lines_match_at(s.base, at + 1, before) then
+				local row = math.min(map_row(hunks, at, false), #review_lines)
+				s.dels[item.id] = vim.api.nvim_buf_set_extmark(s.review_buf, MARK_NS, row, 0, { right_gravity = false })
+			end
+		end
+	end
+end
+
+local function del_row(s, item)
+	local id = s.dels and s.dels[item.id]
+	if not id then
+		return nil
+	end
+	local m = vim.api.nvim_buf_get_extmark_by_id(s.review_buf, MARK_NS, id, {})
+	return m and m[1]
+end
+
+--- The suggestion the cursor line `line` of the review buffer belongs to,
+--- and how: `add` (inside its own lines), or `del` (next to the point where
+--- it deletes lines — the line below the point, else the line above it
+--- unless an adding suggestion owns that one).
+function M.item_at(s, line)
+	local first, _, item = M.item_range(s, line)
+	if first then
+		return item, "add"
+	end
+	local total = vim.api.nvim_buf_line_count(s.review_buf)
+	for _, cand in pairs(s.shown) do
+		local row = del_row(s, cand)
+		if row and math.max(1, math.min(row + 1, total)) == line then
+			return cand, "del"
+		end
+	end
+	for _, cand in pairs(s.shown) do
+		local row = del_row(s, cand)
+		if row and row >= 1 and row == line then
+			return cand, "del"
+		end
+	end
+end
+
+-- Declines `item` in the review buffer: its added lines go (an edit's
+-- `before` returns in their place) and its deleted lines come back — an
+-- ordinary edit, so `u` undoes it.
+local function decline_item(s, item)
+	local buf = s.review_buf
+	local before = snippet.split_lines(item.before)
+	local changed = false
+	local first, last = mark_range(s, item)
+	if first then
+		vim.api.nvim_buf_set_lines(buf, first - 1, last, false, item.kind == "edit" and before or {})
+		changed = true
+	end
+	if leaves_before(item) then
+		local row = del_row(s, item)
+		if row then
+			vim.api.nvim_buf_set_lines(buf, row, row, false, before)
+			changed = true
+		end
+	end
+	return changed
+end
+
+-- Takes `item` into his notes buffer: its lines go in at the place the
+-- review shows them, its deleted lines go out of their anchored occurrence.
+local function take_item(s, item)
+	local nbuf = s.notes_buf
+	local notes = buf_lines(nbuf)
+	local before = snippet.split_lines(item.before)
+	local after = snippet.split_lines(item.after)
+	local changed = false
+	local first = mark_range(s, item)
+	local start = #before > 0 and anchored_start(s, item, notes)
+	if #before > 0 and not start then
+		return false
+	end
+	if first and #after > 0 then
+		if item.kind == "edit" then
+			vim.api.nvim_buf_set_lines(nbuf, start - 1, start - 1 + #before, false, after)
+			changed = true
+			start = nil
+		else
+			local row = map_row(diff_indices(notes, buf_lines(s.review_buf)), first - 1, true)
+			vim.api.nvim_buf_set_lines(nbuf, row, row, false, after)
+			changed = true
+			if start and row < start then
+				start = start + #after
+			end
+		end
+	end
+	if start and leaves_before(item) then
+		vim.api.nvim_buf_set_lines(nbuf, start - 1, start - 1 + #before, false, {})
+		changed = true
+	end
+	return changed
+end
+
 --- The review-buffer line range of the suggestion whose lines contain
 --- `line`, or nil (a removal has no lines of its own there, and plain text
 --- of his own is no suggestion). Adjacent suggestions form ONE diff hunk, so
@@ -477,6 +657,31 @@ local function diff_act(s, verb)
 	return true
 end
 
+-- Declines or takes the one suggestion under the cursor. Returns nil when
+-- the cursor is on no known suggestion (the caller falls back to the hunk).
+local function act_on_item(s, verb)
+	local win = vim.fn.bufwinid(s.review_buf)
+	if win == -1 then
+		return false, "review buffer has no window"
+	end
+	local item = M.item_at(s, vim.api.nvim_win_get_cursor(win)[1])
+	if not item then
+		return nil
+	end
+	if verb == "decline" then
+		if not decline_item(s, item) then
+			return false, "nothing to decline here"
+		end
+		return true
+	end
+	local pre = buf_lines(s.notes_buf)
+	if not take_item(s, item) then
+		return false, "could not take this suggestion"
+	end
+	note_takes(s, pre, item)
+	return true
+end
+
 --- The decline key: makes the suggestion under the cursor in the review
 --- split equal his text (it obtains his side), so its diff disappears. An
 --- ordinary edit — `u` undoes it; nothing is recorded until the review split
@@ -486,7 +691,10 @@ function M.decline(review_buf)
 	if not s then
 		return false, "not a desk review buffer"
 	end
-	local ok, why = diff_act(s, "diffget")
+	local ok, why = act_on_item(s, "decline")
+	if ok == nil then
+		ok, why = diff_act(s, "diffget")
+	end
 	if ok then
 		M.refresh_overview(s)
 	end
@@ -501,7 +709,10 @@ function M.take(review_buf)
 	if not s then
 		return false, "not a desk review buffer"
 	end
-	local ok, why = diff_act(s, "diffput")
+	local ok, why = act_on_item(s, "take")
+	if ok == nil then
+		ok, why = diff_act(s, "diffput")
+	end
 	if ok then
 		M.refresh_overview(s)
 	end
