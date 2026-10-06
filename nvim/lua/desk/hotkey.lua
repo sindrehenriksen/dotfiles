@@ -59,7 +59,7 @@ local function line_names_token(line, token)
 	local rest = line:gsub("^%s*#+%s*", "")
 	rest = rest:gsub("^%s*[-*+]%s*%[[^%]]?%]%s*", "") -- "- [ ] " / "- [x] "
 	rest = rest:gsub("^%s*[-*+]%s*", "")
-	local head = rest:match("^([%w_%-]+)")
+	local head = rest:match("^(" .. M.TOKEN_CHARS .. "+)")
 	return head == token
 end
 

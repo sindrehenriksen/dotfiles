@@ -469,5 +469,13 @@ do
 end
 
 print()
+print("=== a section headed by a non-ASCII name is found by that name ===")
+do
+	local lines = { "Intro", "Ærlig-økt: the section", "  detail", "See Ærlig-økt for context." }
+	assert_eq("the head line is found", 2, hotkey.find_section_head_line(lines, "Ærlig-økt"))
+	assert_eq("a token that is only a prefix of the head is not a match", nil, hotkey.find_section_head_line(lines, "Ærlig"))
+end
+
+print()
 print(string.format("=== summary: %d passed, %d failed ===", pass, fail))
 os.exit(fail == 0 and 0 or 1)
