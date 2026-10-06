@@ -330,6 +330,17 @@ do
 	assert_eq("and above an earlier one too", { "MORNING news", "CAPTURE five", "Section A" }, tip_lines(r2, "notes.md"))
 end
 
+print("\n=== a take he later moved elsewhere in the file is still recorded as taken ===")
+do
+	local r = new_repo({ "Alpha", "Beta" })
+	proposal.build(r, "morning", "2026-10-01", { item("a1", { kind = "add", target = { under = "Beta" }, after = "Gamma agent", source = "", headline = "gamma" }) }, FILES)
+	write(r, "notes.md", { "Alpha", "Beta", "Gamma agent" })
+	commit_all(r, "took it")
+	write(r, "notes.md", { "Alpha", "Gamma agent", "Beta" })
+	commit_all(r, "moved it")
+	assert_eq("recorded as taken from the intermediate commit", 1, #proposal.sync_taken(r))
+end
+
 print(string.format("\n=== summary: %d passed, %d failed ===", pass, fail))
 if fail > 0 then
 	os.exit(1)

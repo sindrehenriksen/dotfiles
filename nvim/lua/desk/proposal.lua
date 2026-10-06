@@ -191,12 +191,31 @@ function M.sync_taken(repo)
 		return {}
 	end
 	local have = ledger.taken_by_id(ledger.read(repo))
-	local head_cache, new = {}, {}
+	-- Taken is a decision made at some point: the change was in his text at
+	-- the anchored place in HEAD or in any commit since the proposal's
+	-- parent (he may have moved the line afterwards).
+	local revs = { "HEAD" }
+	if p.parent then
+		local ok, out = git.run(repo, { "rev-list", p.parent .. "..HEAD" })
+		if ok then
+			for sha in out:gmatch("%S+") do
+				revs[#revs + 1] = sha
+			end
+		end
+	end
+	local cache, new = {}, {}
+	local function at(rev, file)
+		cache[rev .. file] = cache[rev .. file] or M.lines_at(repo, rev, file)
+		return cache[rev .. file]
+	end
 	for _, item in ipairs(p.items) do
 		if not item.deferred and not have[item.id] then
-			head_cache[item.file] = head_cache[item.file] or M.lines_at(repo, "HEAD", item.file)
-			if M.proposed_in(item, head_cache[item.file], M.base_lines(repo, p, item.file)) then
-				new[#new + 1] = item
+			local base = M.base_lines(repo, p, item.file)
+			for _, rev in ipairs(revs) do
+				if M.proposed_in(item, at(rev, item.file), base) then
+					new[#new + 1] = item
+					break
+				end
 			end
 		end
 	end
