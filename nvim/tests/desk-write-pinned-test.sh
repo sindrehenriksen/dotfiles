@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# D8b test: the write step's pinned-args deny hook. Two layers:
+# the write step's pinned-args deny hook. Two layers:
 # deny-unlisted-tool.sh itself, exercised directly with crafted PreToolUse
 # JSON on stdin (its actual enforcement, not a simulation of it); and
 # desk_step_write/desk_step_model_call, checked to actually build the

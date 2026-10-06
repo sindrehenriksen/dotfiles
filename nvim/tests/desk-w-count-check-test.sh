@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# D8 fix test (review item #7): claude/desk-run's own post-call check on
+# claude/desk-run's own post-call check on
 # the write (W) step — after a real (non-dry-run) W call, the runner
 # compares the thread ids its own tool_use arguments actually named
 # against the FULL pinned set (built from F-private's raw results), and

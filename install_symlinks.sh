@@ -71,7 +71,7 @@ if [[ "$(uname)" == "Darwin" ]]; then
     mkdir -p ~/.hammerspoon
     link ~/dotfiles/hammerspoon/init.lua ~/.hammerspoon/init.lua
 
-    # macOS: desk (design.md's own D8 "desk-run install path": a symlink at
+    # macOS: desk (a symlink at
     # ~/.local/bin/desk-run, installed onto claude/desk-run — the plists,
     # nvim and the Hammerspoon tab function all reach these four through
     # PATH, never a repo-relative path).

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# D8 fix test (review item #2, first half): claude/desk-run's own judge
+# claude/desk-run's own judge
 # branch treats an unparseable or schema-invalid J reply (not the pinned
 # {"items": [...]} shape) as a loud pass failure — before this fix it only
 # logged a line and left `result` "ok", so the step after J (W) still ran,

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# D8b end-to-end test: a full desk-run pass (F-private, T, J, W steps)
+# End-to-end test: a full desk-run pass (F-private, T, J, W steps)
 # itself (not each lib function in isolation) — T's ticket cache, J's
 # validated proposal landing in the ledger, and W's dry-run pinning and
 # logging, all wired together the way desk-run's own step loop actually

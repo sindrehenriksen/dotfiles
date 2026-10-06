@@ -10,7 +10,7 @@ set -u
 DESK_CLAUDE_BIN="${DESK_CLAUDE_BIN:-claude}"
 
 # Computes the config dir's project-folder name for a given cwd. Verified
-# live against a real call (the D8 canary, whose scratch cwd was a plain
+# live against a real call (the live canary, whose scratch cwd was a plain
 # `mktemp -d` path under /var/folders — a macOS symlink to
 # /private/var/folders): Claude Code names the folder after the cwd's
 # *canonical* path (symlinks resolved), with every character that isn't
@@ -109,7 +109,7 @@ desk_write_deny_hook_settings() {
 	# into this pass's own scratch, made once at pass start — see
 	# claude/desk-run's own comment on why) when set, falling back to the
 	# repo's own live copy for a caller with no full pass context (a direct
-	# test, the D8 canary). Either way, missing at the moment this settings
+	# test, the live canary). Either way, missing at the moment this settings
 	# file is written is a hard refusal, never a settings file whose own
 	# `command` points at nothing: that would be a broken, silently
 	# unenforced hook, not a working one.
@@ -287,7 +287,7 @@ desk_call_model() {
 
 # The raw tool_result content blocks from a stream-json transcript, one
 # JSON object per line — what the fetch/judge/ticket-status/close steps'
-# own (pass-specific, D8b) parsing reads instead of the model's prose,
+# own (pass-specific) parsing reads instead of the model's prose,
 # since a source URL is accepted only if it appears verbatim in the
 # fetch calls' raw tool_results. Generic across every call: stream-json's
 # tool results arrive as `user`-role messages whose content carries
@@ -302,7 +302,7 @@ desk_extract_tool_results() {
 }
 
 # Every tool_use block a stream-json transcript's assistant turns made —
-# the runner's own check that a denied call never actually ran (the D8
+# the runner's own check that a denied call never actually ran (the live
 # canary, and any future audit of what a restricted call attempted).
 desk_extract_tool_uses() {
 	local stream_file="$1"

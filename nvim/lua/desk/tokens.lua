@@ -1,4 +1,4 @@
--- D7: the token → handler table. Reads
+-- the token → handler table. Reads
 -- the instantiation's `tokens` list from `$DESK_CONFIG` and classifies a
 -- token under the cursor into a handler — dotfiles ships no work patterns
 -- of its own, only this mechanism and a generic example in its tests.

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# D7 test: the `nvim -l` entry point onto desk.block (nvim/lua/desk/cli.lua)
+# the `nvim -l` entry point onto desk.block (nvim/lua/desk/cli.lua)
 # — exercised as the actual subprocess a non-Lua caller (the private
 # regression test, the runner) would run, against from-scratch fixtures.
 set -u

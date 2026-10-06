@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# D8 fix test (review item #8): desk-run's own judge branch builds the
+# desk-run's own judge branch builds the
 # allowed-URL set (desk_allowed_urls, the "an item's source must appear in
 # a real fetch's own raw tool_results" check) only from this pass's FETCH
 # steps' own tool-results files — never from J's own (a judge call's own

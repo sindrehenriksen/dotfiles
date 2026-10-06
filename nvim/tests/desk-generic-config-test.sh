@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# D8 fix test (review item #9): claude/desk-run no longer hardcodes this
+# claude/desk-run no longer hardcodes this
 # machine's tool names, timezone, or the step ids it special-cases for
 # ticket status and mail — timezone, ticket_search_tool, mail_search_tool,
 # ticket_status_step_id and mail_fetch_step_id are all required

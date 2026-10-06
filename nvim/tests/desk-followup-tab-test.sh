@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# D8 fix test (review item #3): claude/desk-lib/steps.sh's
+# claude/desk-lib/steps.sh's
 # desk_open_follow_up_tab —
-#   - a resolved session that's already LIVE is focused by tty (D7's own
+#   - a resolved session that's already LIVE is focused by tty (own
 #     mechanism) instead of a second `claude --resume` process being
 #     opened against it; a failed focus, or no recorded tty, means it
 #     skips entirely rather than resuming;

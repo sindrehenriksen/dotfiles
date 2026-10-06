@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# D8 fix test (review item #11): desk-run writes the rest of status.json
+# desk-run writes the rest of status.json
 # after every pass — proposal {state, partial, overflow, counts, untaken},
 # ticket_cache_age, and this pass's
 # own total_cost_usd — none of which the runner ever wrote before (status.
-# sh's own header comment: "D8a leaves them at their zero-ish defaults
-# where no such step runs" — no step ever did). Drives desk-run itself
+# sh's own header comment said they stay at their zero-ish defaults
+# where no such step runs — no step ever did). Drives desk-run itself
 # with a judge step whose two ACT-tier items overflow a cap of one, and a
 # fake claude that reports a real total_cost_usd on its own stream-json
 # result line.

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# D8 fix test (review item #2): claude/desk-lib/model-call.sh's
+# claude/desk-lib/model-call.sh's
 # desk_call_model exports DESK_HEADLESS=1 for EVERY non-restricted
 # (connector) call, not only a named/"visible" one. Before this fix an
 # EPHEMERAL connector call (F-private, W — no --name,

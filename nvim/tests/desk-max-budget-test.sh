@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# D8 fix test (review item #11, second half): claude/desk-lib/steps.sh's
+# claude/desk-lib/steps.sh's
 # desk_step_model_call passes --max-budget-usd on every call — a step's
 # own `max_budget_usd`, falling back to common.sh's own
 # DESK_DEFAULT_MAX_BUDGET_USD when a step doesn't name one. Before this

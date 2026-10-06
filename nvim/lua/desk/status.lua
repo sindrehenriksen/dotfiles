@@ -1,4 +1,4 @@
--- D7: the status line. Reads the
+-- the status line. Reads the
 -- runner-written status file and formats it for an nvim statusline
 -- component — wire `require("desk.status").summary()` into whatever
 -- statusline plugin is in use; this module doesn't install one itself,

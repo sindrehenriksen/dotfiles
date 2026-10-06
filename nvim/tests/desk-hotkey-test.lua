@@ -1,4 +1,4 @@
--- D7 test: the hotkey's decision logic (desk.hotkey) — the reader, the
+-- the hotkey's decision logic (desk.hotkey) — the reader, the
 -- Ghostty-tab helpers and URL-opening are all stubbed (never a real
 -- subprocess, never Hammerspoon, never a browser); the in-notes reference
 -- jump uses a real buffer/window, since that's what proves the jumplist
@@ -305,7 +305,7 @@ do
 end
 
 print()
-print("=== D7 done-check: following an in-notes reference to another section ===")
+print("=== following an in-notes reference to another section ===")
 print("=== jumps there internally, never touching the reader, jumplist-safe ===")
 
 do
@@ -363,7 +363,7 @@ do
 end
 
 print()
-print("=== D7 fix: a session pattern's own capture resolves by short id ===")
+print("=== a session pattern's own capture resolves by short id ===")
 
 do
 	-- A config whose session pattern wraps a short id in decoration his
@@ -390,7 +390,7 @@ do
 end
 
 print()
-print("=== D7 fix: two sections sharing one head never ping-pong ===")
+print("=== two sections sharing one head never ping-pong ===")
 
 do
 	local buf = new_buf({

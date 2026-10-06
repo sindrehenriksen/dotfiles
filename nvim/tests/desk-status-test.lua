@@ -1,4 +1,4 @@
--- D7 test: the status line (desk.status) — pure formatting, plus reading a
+-- the status line (desk.status) — pure formatting, plus reading a
 -- from-scratch fixture status.json off disk.
 --
 -- Run: nvim --headless -u nvim/tests/minimal_init.lua -l nvim/tests/desk-status-test.lua

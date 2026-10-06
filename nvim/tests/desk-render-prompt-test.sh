@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# D8 fix test (review item #5): claude/desk-lib/steps.sh's desk_render_prompt
+# claude/desk-lib/steps.sh's desk_render_prompt
 # treats a placeholder's value literally. Two ways bash's own
 # `${text//pat/repl}` (this function's previous implementation) breaks
 # that: bash 5.2+'s own `patsub_replacement` (on by default) treats an

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# D8 fix test (review item #6): claude/desk-lib/git-ops.sh's push behavior
+# claude/desk-lib/git-ops.sh's push behavior
 # — config's own `push_enabled` (default false: commit every day, never
 # push), a missing refs/desk/ledger never blocking main's own push — and
 # claude/desk-run's own weekday split: commit-and-push runs every day,

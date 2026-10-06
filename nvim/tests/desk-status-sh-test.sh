@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# D8 fix test (review item #1): claude/desk-lib/status.sh's `last_ok_run`
+# claude/desk-lib/status.sh's `last_ok_run`
 # field survives a fresh desk_status_set_running — before this fix,
 # desk_status_set_running replaced the whole per-pass record, so
 # desk_status_last_ok_run (keyed on "the current record's own result ==

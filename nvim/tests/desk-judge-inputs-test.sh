@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# D8b test (the runner's own gap #1: "render the {{name}} scalars and
-# scratch-dir input files each prompt expects"): claude/desk-lib/steps.sh's
+# claude/desk-lib/steps.sh's
 # desk_step_judge, exercised directly (not through desk-run) so the
 # placeholders_json/pass_ctx_json it's handed are fully under this test's
 # control. Verifies, against a real repo/ledger and a fake `claude` that

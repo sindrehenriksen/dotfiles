@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# D8 fix test: the `nvim -l` entry point onto desk.tokens/desk.annotate
+# the `nvim -l` entry point onto desk.tokens/desk.annotate
 # (nvim/lua/desk/cli.lua's `tokens` verb) — for the private regression test
 # to call, exercised here the same way: as the actual subprocess, against a
 # from-scratch fixture file and $DESK_CONFIG.

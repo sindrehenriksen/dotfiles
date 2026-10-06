@@ -1,4 +1,4 @@
--- D7 test: annotations (desk.annotate) — the pure formatting/scanning
+-- annotations (desk.annotate) — the pure formatting/scanning
 -- functions directly, and a from-scratch fixture for the async end-to-end
 -- path: the reader is a stub script ($DESK_READER), never the real one,
 -- and the ticket cache is a throwaway file ($DESK_TICKET_CACHE).
@@ -251,7 +251,7 @@ do
 end
 
 print()
-print("=== D7 fix: several tokens on one line are each labeled by name ===")
+print("=== several tokens on one line are each labeled by name ===")
 
 do
 	local ticket_cache_path = vim.fn.tempname()
@@ -298,7 +298,7 @@ do
 end
 
 print()
-print("=== D7 fix: no ticket cache yet still clears stale labels (no pile-up) ===")
+print("=== no ticket cache yet still clears stale labels (no pile-up) ===")
 
 do
 	local tmp_dir = vim.fn.tempname()
@@ -352,7 +352,7 @@ do
 end
 
 print()
-print("=== D7 fix: a BufEnter/FocusGained double-refresh never double-paints ===")
+print("=== a BufEnter/FocusGained double-refresh never double-paints ===")
 
 do
 	local tmp_dir = vim.fn.tempname()

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# D8 fix test (review item #4): claude/desk-lib/lock.sh's desk_lock_acquire/
+# claude/desk-lib/lock.sh's desk_lock_acquire/
 # desk_lock_release, rewritten so meta.json is built in a temp dir under the
 # lock's own parent and moved into place right after `mkdir` wins the race
 # (never written into the lock dir as a second, separate step), a waiter

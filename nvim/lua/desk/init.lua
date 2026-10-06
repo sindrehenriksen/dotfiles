@@ -1,4 +1,4 @@
--- Entry point: enables the desk review system (D6) and D7's annotations
+-- Entry point: enables the desk review system and annotations
 -- and hotkey, only in the notes files, detected by a local marker in the
 -- notes repo so this config never
 -- names where the notes repo lives.

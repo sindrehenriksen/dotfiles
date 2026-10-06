@@ -15,7 +15,7 @@
 # untaken is how many suggestions still wait on him), closes/refused_closes/
 # failed_closes/lockouts (plain counts; closed_names holds the last few
 # closed sessions' names), push (a plain status string),
-# ticket_cache_age. D8a writes the per-pass fields and the push/lockouts/
+# ticket_cache_age. The runner writes the per-pass fields and the push/lockouts/
 # closes counters; the proposal summary is read off the standing proposal
 # and the decision ledger once a pass is done.
 set -u

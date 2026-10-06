@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# D8 fix test (review item #10): claude/desk-lib/git-ops.sh's
+# claude/desk-lib/git-ops.sh's
 # desk_stage_and_write_proposal namespaces every new item's own (model-
 # assigned) id inside the proposal builder (desk.ledger.namespace_ids)
 # before anything is written into the proposal — a model's own promise of id uniqueness only ever holds within

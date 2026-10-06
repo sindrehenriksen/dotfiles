@@ -1,4 +1,4 @@
--- D7: nvim's one entry point onto claude/session-status.sh — every session lookup (annotations, the
+-- nvim's one entry point onto claude/session-status.sh — every session lookup (annotations, the
 -- hotkey) goes through here, never a second implementation of the join.
 -- Every call is async (vim.system with a callback, never :wait()): a
 -- reader call must never block typing.

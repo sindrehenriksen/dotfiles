@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# D7's additions to claude/session-status.sh: the `pid`
+# additions to claude/session-status.sh: the `pid`
 # and `tty` fields on a live session, and the `resolve <token>` mode the
 # notes hotkey uses to turn a session name into exactly one session (or
 # refuse). From-scratch fixtures only, never real Claude Code state — see
@@ -160,7 +160,7 @@ jq -cn --arg sid tie-b --arg cwd "$PROJ_DIR" --arg tp "$tp_tie2" \
 backdate "$tp_tie2" "$now"
 pid_tie_b=$(start_live tie-b "Tied Name" "$now")
 
-# --- dup-pid: two pid files sharing one sessionId (review item #6) — one
+# --- dup-pid: two pid files sharing one sessionId — one
 # genuinely live, one a stale leftover naming a pid that no longer runs.
 # The live one wins for pid/tty/status; duplicate_pids is set regardless.
 tp_dup_pid="$PROJ_DIR/dup-pid.jsonl"

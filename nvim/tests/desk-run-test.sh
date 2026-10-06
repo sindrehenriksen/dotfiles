@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# D8 test: `claude/desk-run` against from-scratch fixtures — a throwaway
+# `claude/desk-run` against from-scratch fixtures — a throwaway
 # notes repo, a local BARE remote standing in for the real one (never the
 # real remote), and a fake `claude` on PATH that behaves however each case
 # needs (hangs, fails, or succeeds) without ever making a real model call.
@@ -55,7 +55,7 @@ cat > "$FAKEBIN/claude" <<'FAKE'
 # a test never needs a real model call. $FAKE_CLAUDE_MODE selects it.
 # The project-folder name it simulates matches desk_project_folder_name's
 # own canonicalize-then-sanitize logic exactly (verified live against a
-# real call — see the D8 canary and model-call.sh's own comment) so the
+# real call — see the live canary and model-call.sh's own comment) so the
 # "tool-result spill is cleaned up" case below is a real regression guard
 # on that function, not just on this fake agreeing with itself.
 _desk_test_cwd="$(pwd -P)"

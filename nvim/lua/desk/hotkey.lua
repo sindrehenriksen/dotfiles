@@ -1,4 +1,4 @@
--- D7: the hotkey. Acts on
+-- the hotkey. Acts on
 -- the token under the cursor (letters, digits, `_`, `-`):
 --   - a url-handler token (e.g. a ticket key) opens its templated URL;
 --   - a session-handler token that's a plain in-notes mention of a section
@@ -90,8 +90,8 @@ function M.resume_command(session_id)
 	return "claude --resume " .. session_id
 end
 
---- The real dependencies: shells out to the reader (desk.reader), D7's
---- desk-focus-tab.sh, D4's desk-open-tab.sh, and `open` — each overridable
+--- The real dependencies: shells out to the reader (desk.reader),
+--- desk-focus-tab.sh, desk-open-tab.sh, and `open` — each overridable
 --- by an env var so an install can relocate them without a code change,
 --- and so a test can point at a stub instead of a real one. Every call is
 --- async.

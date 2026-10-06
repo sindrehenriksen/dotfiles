@@ -104,7 +104,7 @@ sess() { # id name name_source live has_start_event source ended end_reason [any
 	# tab and has been using it since) — the recorder's OWN
 	# any_desk_run_start still says this session started life under
 	# desk-run, so it must be excluded on that alone, never on the (now
-	# stale) last-event source (review item #1).
+	# stale) last-event source.
 	sess "sess-desk-run-then-resumed" "Later Resumed" "user" true true "resume" false "" true
 	# Excluded on its name alone (the runner's own visible-call naming
 	# convention), even with a plain "startup" source and any_desk_run_start

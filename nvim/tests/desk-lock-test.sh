@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# D8b test: claude/desk-lib/lock.sh's guard, keyed on the slot's *scheduled*
+# claude/desk-lib/lock.sh's guard, keyed on the slot's *scheduled*
 # date rather than the date desk-run happens to be invoked on.
 # Covers desk_scheduled_date_for directly (the wake-next-morning case, and its symmetric "same evening" case) plus
 # desk_guard_already_ok_today against a hand-written status file — never

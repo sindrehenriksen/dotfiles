@@ -1,4 +1,4 @@
--- Minimal headless init for the D6 tests: puts this repo's nvim/ (so
+-- Minimal headless init for the review tests: puts this repo's nvim/ (so
 -- require("desk.xxx") resolves the normal way, via 'runtimepath') and the
 -- already-installed gitsigns.nvim plugin on 'runtimepath', and nothing
 -- else — no lazy.nvim, no other plugins, no user options beyond what a

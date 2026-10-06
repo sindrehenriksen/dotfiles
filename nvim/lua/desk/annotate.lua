@@ -1,4 +1,4 @@
--- D7: annotations. Per-token
+-- annotations. Per-token
 -- virtual text: a session-name token shows live/idle/ended state from the
 -- reader, a ticket-like token (any token this instantiation's config
 -- classifies as a url handler) shows status from the ticket cache the

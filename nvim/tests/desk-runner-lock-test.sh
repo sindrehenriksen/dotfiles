@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# D8 fix test (review item #4): a single lock shared across every pass
+# a single lock shared across every pass
 # (claude/desk-lib/lock.sh's own DESK_LOCK_NAME), taken before the once-
 # a-day guard check and before any status.json write. Before this fix the
 # lock was keyed per pass name, so "morning" and "1630" — invoked

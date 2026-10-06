@@ -336,7 +336,7 @@ chosen_json=$(jq -cn --argjson groups "$pidfiles_grouped" --argjson live_idx "$l
 
 pidfiles_by_id=$(jq -c 'with_entries(.value = .value.pf)' <<< "$chosen_json" 2>/dev/null)
 live_by_id=$(jq -c 'with_entries(.value = .value.live)' <<< "$chosen_json" 2>/dev/null)
-# id -> pid / id -> tty, live sessions only (D7: the hotkey focuses a live
+# id -> pid / id -> tty, live sessions only (the hotkey focuses a live
 # session's Ghostty tab by tty rather than resuming it, so both need to
 # reach the join below).
 pid_by_id=$(jq -c '[to_entries[] | select(.value.pid != null) | {key, value: .value.pid}] | from_entries' <<< "$chosen_json" 2>/dev/null)

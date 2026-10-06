@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# D8b test (the runner's own gap #2): claude/desk-lib/steps.sh's
+# claude/desk-lib/steps.sh's
 # desk_step_open_tab — assembling the Wednesday tab's launch command from
 # its step config (cwd_outside, restricted, permission_mode, tools,
 # strict_mcp_config/mcp_config, settings, skill, the fixed prompt_text) and
@@ -203,7 +203,7 @@ assert_true "-n still names the session" \
 	"$(grep -qF "'-n' 'Weekly Update'" <<< "$command_line" && echo true || echo false)"
 assert_true "--settings still resolves, independent of restricted" \
 	"$(grep -qE -- "--settings' '$ROOT/workspace/desk/weekly/settings.json'" <<< "$command_line" && echo true || echo false)"
-assert_true "the command is tagged DESK_HEADLESS=1 (review item #1: the Wednesday tab's session is tagged desk-run too)" \
+assert_true "the command is tagged DESK_HEADLESS=1 (the Wednesday tab's session is tagged desk-run too)" \
 	"$([[ "$command_line" == DESK_HEADLESS=1\ * ]] && echo true || echo false)"
 
 echo

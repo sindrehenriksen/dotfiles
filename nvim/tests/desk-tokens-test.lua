@@ -1,4 +1,4 @@
--- D7 test: the token → handler table (desk.tokens) — pure, no reader or
+-- the token → handler table (desk.tokens) — pure, no reader or
 -- filesystem involved beyond desk.tokens.load's own path argument.
 --
 -- Run: nvim --headless -u nvim/tests/minimal_init.lua -l nvim/tests/desk-tokens-test.lua

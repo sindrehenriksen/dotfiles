@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# D8 fix test (review item #7): the allowlist deny-hook's fail-open edges.
+# the allowlist deny-hook's fail-open edges.
 # A --pinned file that's missing must deny (never silently skip the
 # pinning check), and desk_write_deny_hook_settings must build its own
 # hook command with proper shell quoting — a scratch dir or pinned-args

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# D8 fix test (review item #5): claude/desk-run's own Gmail/Slack fetch
+# claude/desk-run's own Gmail/Slack fetch
 # window is floored on a dedicated `last_fetch_ok` (claude/desk-lib/
 # status.sh), advanced only when a fetch step of THIS pass actually ran
 # and none failed — never on `last_ok_run`, which a weekend commit-only

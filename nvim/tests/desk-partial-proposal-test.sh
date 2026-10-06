@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# D8 fix test (review item #3): a fetch (source) step's own failure never
+# a fetch (source) step's own failure never
 # aborts the pass — desk-run's own step loop records it in failed_sources
 # and keeps going, J still runs and stages whatever it can (the pass
 # result reads "partial", not "failed" or "ok"), the day is never marked

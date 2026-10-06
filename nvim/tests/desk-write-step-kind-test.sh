@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# D8 fix test (review item #7): desk-run's own write-branch logic (the
+# desk-run's own write-branch logic (the
 # F-private-dependency check and the Gmail thread-id pinning derivation)
 # applies to any step of kind "write", never gated on its own `id`
 # happening to be the literal string "W" — an instantiation is free to

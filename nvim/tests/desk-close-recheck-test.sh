@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# D8 fix test (review item #9): claude/desk-lib/steps.sh's desk_step_close
+# claude/desk-lib/steps.sh's desk_step_close
 # re-checks IDLE, not just LIVE, immediately before SIGTERM — a session
 # that was idle when the candidate list was built (possibly minutes
 # earlier, other candidates' own model calls in between) may be active
@@ -183,7 +183,7 @@ kill "$pid2" "$pid2b" 2> /dev/null
 rm -rf "$PASS_SCRATCH"
 
 echo
-echo "=== duplicate_pids appears only by re-check time: refused, never guessed (review item #6) ==="
+echo "=== duplicate_pids appears only by re-check time: refused, never guessed ==="
 rm -rf "$STATE"
 git -C "$repo" update-ref -d refs/desk/proposal 2> /dev/null
 : > "$RECORDER_LOG"

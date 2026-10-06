@@ -4,8 +4,8 @@
 # arrangement for its kind and calls desk_call_model; none of them
 # interpret a model's actual output beyond generic shape (stream-json ->
 # tool_results/tool_uses). Turning that into Slack/Gmail/Jira-specific
-# facts, a validated proposal item, or a pinned exact-id write is D8b's
-# job — every such point is a clearly named stub below, not guessed at.
+# facts, a validated proposal item, or a pinned exact-id write is done by the
+# step functions below, each in its own clearly named place.
 set -u
 
 # ---------------------------------------------------------------------------
@@ -397,7 +397,7 @@ desk_fetch_cache_clear() {
 # fetch / judge / ticket_status: all "one model call, generic isolation"
 # kinds, differing only in a couple of flags — driven by one function.
 # `write` (the pinned single-tool call) is its own function below since it
-# also needs the deny-hook's pinned-label extension (D8b).
+# also needs the deny-hook's pinned-label extension.
 # ---------------------------------------------------------------------------
 
 # desk_step_model_call <pass> <step_json> <label> <placeholders_json>
@@ -1431,7 +1431,7 @@ desk_fresh_scratch_dir() {
 #
 # `repo` and `files` (the pass's own notes repo and configured file list —
 # desk-run's own `$repo`/`${files[@]}`) are optional: a caller with neither
-# to hand (the existing D8b test) gets the exact old behavior, since
+# to hand (the existing open-tab test) gets the exact old behavior, since
 # everything below is gated on the step's own `scratch_dir`/`notes_diff_file`/
 # `notes_diff_since` fields, absent from that fixture. When `scratch_dir` is
 # configured, a fresh directory under it becomes the tab's actual cwd in

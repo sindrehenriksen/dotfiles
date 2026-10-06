@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Focuses the Ghostty tab running a given tty, via the DeskFocusTab
 # Hammerspoon function (init.lua) — the shell-level entry point for the
-# notes hotkey's live-session case, alongside desk-open-tab.sh (D4) for
+# notes hotkey's live-session case, alongside desk-open-tab.sh for
 # resuming a non-live one.
 #
 # Unlike desk-open-tab.sh (fire-and-forget: opening a tab has nothing

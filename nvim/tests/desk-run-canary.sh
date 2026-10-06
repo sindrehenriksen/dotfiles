@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# D8 canary. The ONE real
+# Live canary. The ONE real
 # `claude -p` call this build makes: through the connector-call path (user
 # settings loaded, no --restricted — a claude.ai connector needs that),
 # with an allowlist of exactly one harmless read tool, asking the model to

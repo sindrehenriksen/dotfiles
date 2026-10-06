@@ -1,10 +1,10 @@
--- Offline test for the D4/D7 Ghostty-tab pieces in hammerspoon/init.lua:
+-- Offline test for the Ghostty-tab pieces in hammerspoon/init.lua:
 -- loads the real file against a minimal hs.* stub (just enough that its
 -- top-level calls — hs.hotkey.modal.new, the eventtaps, the watchers, the
 -- closing hs.alert.show — don't error), then exercises the pure parts with
 -- plain Lua: DeskTab.pick_target (slot geometry) and the UUID validation
--- gate on DeskOpenTab (D4), plus DeskTab.pick_tab_by_tty and DeskFocusTab's
--- early-exit paths (D7). Never touches a real screen, window or osascript
+-- gate on DeskOpenTab, plus DeskTab.pick_tab_by_tty and DeskFocusTab's
+-- early-exit paths. Never touches a real screen, window or osascript
 -- call — run with the system `lua`, not Hammerspoon.
 --
 -- Run: lua hammerspoon/tests/tab-function-test.lua
@@ -188,7 +188,7 @@ assert_eq("no ultrawide, no frontmost Ghostty window (this stub): no target", fa
 assert_eq("and never calls osascript either", 0, osascript_calls)
 
 -- ---------------------------------------------------------------------------
--- review item #8: every tab command runs through his login+interactive
+-- Every tab command runs through his login+interactive
 -- shell (/bin/zsh -lic '<command>'), never Ghostty's own command: field
 -- invoking it directly — CLAUDE_CONFIG_DIR and PATH have to come from his
 -- shell rc files. Reached via the laptop-only "front window is Ghostty"
@@ -223,7 +223,7 @@ assert_eq("its own content survives the re-quoting intact", true,
 hs.window.frontmostWindow = real_frontmost
 
 -- ---------------------------------------------------------------------------
--- D7: DeskTab.pick_tab_by_tty
+-- DeskTab.pick_tab_by_tty
 -- ---------------------------------------------------------------------------
 if type(DeskTab.pick_tab_by_tty) ~= "function" then
   bad("DeskTab.pick_tab_by_tty not defined after loading init.lua")
@@ -249,7 +249,7 @@ assert_eq("no matching tty returns nil", nil, found)
 found = DeskTab.pick_tab_by_tty({}, "ttys001")
 assert_eq("an empty tab list returns nil", nil, found)
 
--- review item #8: normalize_tty matches both "ttysNNN" and "/dev/ttysNNN"
+-- normalize_tty matches both "ttysNNN" and "/dev/ttysNNN"
 -- regardless of which form either side happens to report.
 local tabs_with_dev_prefix = {
   { window_id = 9, tab_index = 1, tty = "/dev/ttys003" },
@@ -262,7 +262,7 @@ assert_eq("normalize_tty strips a leading /dev/", "ttys003", DeskTab.normalize_t
 assert_eq("normalize_tty leaves a bare form untouched", "ttys003", DeskTab.normalize_tty("ttys003"))
 
 -- ---------------------------------------------------------------------------
--- D7: DeskFocusTab's early-exit paths — never reach osascript for any of
+-- DeskFocusTab's early-exit paths — never reach osascript for any of
 -- these, since the stub's hs.application.get always returns nil (as if
 -- Ghostty were never running) and DeskFocusTab must refuse before that.
 -- ---------------------------------------------------------------------------

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# D8 fix test (review item #2, second half): claude/desk-lib/timeout.sh's
+# claude/desk-lib/timeout.sh's
 # run_with_timeout keeps a command's stderr out of its own stdout outfile.
 # Before this fix both streams were merged (2>&1) into the same file —
 # fine for a human reading a log, but that file is also stream-json a
