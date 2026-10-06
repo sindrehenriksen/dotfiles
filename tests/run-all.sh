@@ -51,6 +51,7 @@ BASH_SUITES=(
 	nvim/tests/desk-deny-hook-test.sh
 	nvim/tests/desk-fetch-window-test.sh
 	nvim/tests/desk-followup-tab-test.sh
+	nvim/tests/desk-followup-upper-c-test.sh
 	nvim/tests/desk-generic-config-test.sh
 	nvim/tests/desk-headless-env-test.sh
 	nvim/tests/desk-judge-inputs-test.sh
