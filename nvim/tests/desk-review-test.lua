@@ -610,6 +610,78 @@ do
 	assert_eq("his notes have it", { "Section A", "  existing", "  - new under A", "Section B", "  other" }, lines_of(nb3))
 end
 
+print("\n=== reading.md: the review key and the overview cover both files and say what waits in the other ===")
+do
+	local function msgs_during(fn)
+		local got, orig = {}, vim.notify
+		vim.notify = function(m) got[#got + 1] = m end
+		local ok, res = pcall(fn)
+		vim.notify = orig
+		assert(ok, res)
+		return got, res
+	end
+	local r = new_repo(BASE)
+	build(r, "2026-10-01", {
+		item("rd", { file = "reading.md", kind = "new", after = "READ paper", headline = "read paper" }),
+	})
+	local nb = open_notes(r)
+	review.attach(nb)
+	local got, opened = msgs_during(function()
+		return review.open_review(nb)
+	end)
+	assert_true("the review key in notes.md goes to reading.md when that is where the suggestions are", opened)
+	local rb = review_buf_of(nb)
+	assert_true("a review split for reading.md is open", rb ~= nil and vim.api.nvim_buf_get_name(rb):match("reading.md$") ~= nil)
+	assert_true("and it says notes.md had nothing and reading.md has one", got[1] ~= nil and got[1]:match("reading.md") ~= nil)
+
+	-- both files have suggestions
+	local r2 = new_repo(BASE)
+	build(r2, "2026-10-01", {
+		item("n1"),
+		item("rd", { file = "reading.md", kind = "new", after = "READ paper", headline = "read paper" }),
+		item("rd2", { file = "reading.md", kind = "new", after = "READ other", headline = "read other" }),
+	})
+	local nb2 = open_notes(r2)
+	review.attach(nb2)
+	local got2 = msgs_during(function()
+		return review.open_review(nb2)
+	end)
+	assert_true("from notes.md it says how many wait in reading.md", got2[1] ~= nil and got2[1]:match("2 more suggestion%(s%) in reading.md") ~= nil)
+	assert_eq("the overview lists both files", { "headline n1", "reading.md: read other", "reading.md: read paper" }, (function()
+		local t = {}
+		review.overview(nb2)
+		for _, e in ipairs(vim.fn.getqflist()) do
+			t[#t + 1] = e.text
+		end
+		table.sort(t)
+		return t
+	end)())
+	vim.cmd("cclose")
+	-- jumping to a reading.md entry opens that file with its own review split
+	review.overview(nb2)
+	local q = vim.fn.getqflist()
+	local qw = vim.fn.getqflist({ winid = 0 }).winid
+	local idx
+	for i, e in ipairs(q) do
+		if e.text:match("^reading.md") then
+			idx = i
+		end
+	end
+	vim.api.nvim_set_current_win(qw)
+	vim.api.nvim_win_set_cursor(qw, { idx, 0 })
+	review.qf_jump()
+	assert_true("the jump lands in reading.md", vim.api.nvim_buf_get_name(0):match("reading.md$") ~= nil)
+
+	-- from reading.md: it says what waits in notes.md
+	local rd_buf = vim.api.nvim_get_current_buf()
+	vim.cmd("silent! cclose")
+	local got3 = msgs_during(function()
+		return review.open_review(rd_buf)
+	end)
+	assert_true("from reading.md it says how many wait in notes.md", #got3 == 0 or got3[1]:match("notes.md") ~= nil)
+	assert_eq("pending_elsewhere agrees", 1, (review.pending_elsewhere(r2, "reading.md"))[1].count)
+end
+
 print(string.format("\n=== summary: %d passed, %d failed ===", pass, fail))
 if fail > 0 then
 	os.exit(1)

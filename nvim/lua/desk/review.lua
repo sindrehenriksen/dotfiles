@@ -47,8 +47,13 @@ function M.repo_context(bufnr)
 	return vim.trim(out), vim.fn.fnamemodify(full, ":t")
 end
 
+-- A buffer's lines as the file's: an empty file loads as one empty line.
 local function buf_lines(buf)
-	return vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+	local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+	if #lines == 1 and lines[1] == "" then
+		return {}
+	end
+	return lines
 end
 
 -- ---------------------------------------------------------------------------
@@ -241,6 +246,130 @@ function M.save_review(s)
 	return true, #gone
 end
 
+-- Maps a row of one side of a diff to the other: `hunks` as vim.diff gives
+-- them for (a -> b), `swap` true to map a b-row to the a side instead.
+-- A row inside a changed hunk maps to the end of that hunk's other side.
+local function map_row(hunks, l, swap)
+	local sa, ca, sb, cb = 1, 2, 3, 4
+	if swap then
+		sa, ca, sb, cb = 3, 4, 1, 2
+	end
+	local shift = 0
+	for _, h in ipairs(hunks) do
+		if h[ca] > 0 then
+			local last = h[sa] + h[ca] - 1
+			if l > last then
+				shift = shift + h[cb] - h[ca]
+			elseif l >= h[sa] then
+				return h[cb] > 0 and h[sb] + h[cb] - 1 or h[sb]
+			else
+				break
+			end
+		elseif l >= h[sa] then
+			shift = shift + h[cb]
+		else
+			break
+		end
+	end
+	return l + shift
+end
+
+local function diff_indices(a, b)
+	return vim.diff(snippet.join_lines(a, true), snippet.join_lines(b, true), { result_type = "indices" })
+end
+
+-- ---------------------------------------------------------------------------
+-- The other file: the proposal holds suggestions for notes.md and reading.md
+-- alike. A review split covers one file, so the key and the overview say
+-- what waits in the other and can go there.
+-- ---------------------------------------------------------------------------
+
+local function file_ours(repo, file)
+	local path = repo .. "/" .. file
+	local b = vim.fn.bufnr(path)
+	if b ~= -1 and vim.api.nvim_buf_is_loaded(b) then
+		return buf_lines(b)
+	end
+	return proposal.lines_at(repo, "HEAD", file)
+end
+
+-- The line of `ours` a suggestion's hunk aligns with, for a file with no
+-- session of its own.
+local function entry_lnum(item, ours, merged)
+	local hunks = diff_indices(ours, merged)
+	local after = snippet.split_lines(item.after)
+	if #after > 0 then
+		for _, pos in ipairs(proposal.positions(merged, after)) do
+			for _, h in ipairs(hunks) do
+				if pos >= h[3] and pos <= h[3] + math.max(h[4], 1) - 1 then
+					return math.max(1, math.min(h[2] > 0 and h[1] or h[1] + 1, #ours))
+				end
+			end
+		end
+	else
+		for _, pos in ipairs(proposal.positions(ours, snippet.split_lines(item.before))) do
+			for _, h in ipairs(hunks) do
+				if h[2] > 0 and pos >= h[1] and pos <= h[1] + h[2] - 1 then
+					return pos
+				end
+			end
+		end
+	end
+	return 1
+end
+
+--- What waits in the proposal's other files than `file`: a list of
+--- { file, count, entries = { { item, lnum, conflict } } }, only files with
+--- something to show.
+function M.pending_elsewhere(repo, file, p)
+	p = p or proposal.read(repo)
+	local out = {}
+	if not p then
+		return out
+	end
+	local seen = { [file] = true }
+	for _, item in ipairs(p.items) do
+		local f = item.file
+		if f and not seen[f] then
+			seen[f] = true
+			local ours = file_ours(repo, f)
+			local r = proposal.reviewable(repo, p, f, ours)
+			if r and next(r.shown) ~= nil then
+				local entries = {}
+				for _, it in ipairs(p.items) do
+					if r.shown[it.id] then
+						entries[#entries + 1] = { item = it, lnum = entry_lnum(it, ours, r.merged), conflict = r.conflicts[it.id] }
+					end
+				end
+				out[#out + 1] = { file = f, count = #entries, entries = entries }
+			end
+		end
+	end
+	return out
+end
+
+local function say_elsewhere(repo, file, p)
+	for _, o in ipairs(M.pending_elsewhere(repo, file, p)) do
+		vim.notify(string.format("desk: %d more suggestion(s) in %s", o.count, o.file), vim.log.levels.INFO)
+	end
+end
+
+--- Opens `file` of the notes repo in a window above the current one (or
+--- focuses it) and attaches the review keys. Returns its buffer.
+local function open_file_buf(repo, file)
+	local b = vim.fn.bufadd(repo .. "/" .. file)
+	vim.fn.bufload(b)
+	local win = vim.fn.bufwinid(b)
+	if win == -1 then
+		vim.cmd("aboveleft split")
+		vim.api.nvim_win_set_buf(0, b)
+	else
+		vim.api.nvim_set_current_win(win)
+	end
+	M.attach(b)
+	return b
+end
+
 --- The review key: opens the merged view in a stacked split (or focuses
 --- the one already open for this proposal). Returns true, or false, why.
 function M.open_review(notes_buf)
@@ -272,7 +401,16 @@ function M.open_review(notes_buf)
 	local merged, shown, conflicts = r.merged, r.shown, r.conflicts
 	local base = proposal.base_lines(repo, p, file)
 	if next(shown) == nil then
-		return false, "no suggestions to review"
+		local elsewhere = M.pending_elsewhere(repo, file, p)
+		if #elsewhere == 0 then
+			return false, "no suggestions to review"
+		end
+		vim.notify(
+			string.format("desk: nothing to review in %s; %d in %s", file, elsewhere[1].count, elsewhere[1].file),
+			vim.log.levels.INFO
+		)
+		local other = open_file_buf(repo, elsewhere[1].file)
+		return M.open_review(other)
 	end
 
 	local notes_win = vim.fn.bufwinid(notes_buf)
@@ -384,6 +522,7 @@ function M.open_review(notes_buf)
 
 	vim.api.nvim_set_current_win(notes_win)
 	first_hunk(notes_win)
+	say_elsewhere(repo, file, p)
 	return true
 end
 
@@ -426,38 +565,6 @@ function M.place_marks(s, ours)
 			end
 		end
 	end
-end
-
--- Maps a row of one side of a diff to the other: `hunks` as vim.diff gives
--- them for (a -> b), `swap` true to map a b-row to the a side instead.
--- A row inside a changed hunk maps to the end of that hunk's other side.
-local function map_row(hunks, l, swap)
-	local sa, ca, sb, cb = 1, 2, 3, 4
-	if swap then
-		sa, ca, sb, cb = 3, 4, 1, 2
-	end
-	local shift = 0
-	for _, h in ipairs(hunks) do
-		if h[ca] > 0 then
-			local last = h[sa] + h[ca] - 1
-			if l > last then
-				shift = shift + h[cb] - h[ca]
-			elseif l >= h[sa] then
-				return h[cb] > 0 and h[sb] + h[cb] - 1 or h[sb]
-			else
-				break
-			end
-		elseif l >= h[sa] then
-			shift = shift + h[cb]
-		else
-			break
-		end
-	end
-	return l + shift
-end
-
-local function diff_indices(a, b)
-	return vim.diff(snippet.join_lines(a, true), snippet.join_lines(b, true), { result_type = "indices" })
 end
 
 -- The first row of the occurrence of `item.before` the proposal anchored,
@@ -783,14 +890,26 @@ function M.remaining(s)
 	return out
 end
 
-local function overview_items(s)
+local function overview_items(s, repo, file)
 	local qf = {}
-	for _, r in ipairs(M.remaining(s)) do
-		local text = r.item.headline or r.item.id
-		if r.conflict then
-			text = string.format("%s (near your edit at line %d)", text, r.conflict)
+	if s then
+		for _, r in ipairs(M.remaining(s)) do
+			local text = r.item.headline or r.item.id
+			if r.conflict then
+				text = string.format("%s (near your edit at line %d)", text, r.conflict)
+			end
+			qf[#qf + 1] = { bufnr = s.notes_buf, lnum = r.notes_lnum, col = 1, text = text }
 		end
-		qf[#qf + 1] = { bufnr = s.notes_buf, lnum = r.notes_lnum, col = 1, text = text }
+	end
+	for _, o in ipairs(M.pending_elsewhere(repo, file)) do
+		local b = vim.fn.bufadd(repo .. "/" .. o.file)
+		for _, e in ipairs(o.entries) do
+			local text = e.item.headline or e.item.id
+			if e.conflict then
+				text = string.format("%s (near your edit at line %d)", text, e.conflict)
+			end
+			qf[#qf + 1] = { bufnr = b, lnum = e.lnum, col = 1, text = o.file .. ": " .. text, user_data = { file = o.file } }
+		end
 	end
 	return qf
 end
@@ -801,7 +920,7 @@ function M.refresh_overview(s)
 	if info.title ~= M.OVERVIEW_TITLE or not (info.context and info.context.desk_review_buf == s.review_buf) then
 		return
 	end
-	vim.fn.setqflist({}, "r", { title = M.OVERVIEW_TITLE, items = overview_items(s), context = info.context })
+	vim.fn.setqflist({}, "r", { title = M.OVERVIEW_TITLE, items = overview_items(s, s.repo, s.file), context = info.context })
 end
 
 --- The overview key: opens the review split if needed, then a quickfix list
@@ -810,15 +929,20 @@ function M.overview(notes_buf)
 	local s = sessions[notes_buf]
 	if not s or not vim.api.nvim_buf_is_valid(s.review_buf) then
 		local ok, why = M.open_review(notes_buf)
+		s = sessions[notes_buf]
 		if not ok then
 			return false, why
 		end
-		s = sessions[notes_buf]
+	end
+	local repo, file = M.repo_context(notes_buf)
+	local items = overview_items(s, repo, file)
+	if #items == 0 then
+		return false, "no suggestions to review"
 	end
 	vim.fn.setqflist({}, " ", {
 		title = M.OVERVIEW_TITLE,
-		items = overview_items(s),
-		context = { desk_review_buf = s.review_buf },
+		items = items,
+		context = { desk_review_buf = s and s.review_buf, desk_repo = repo },
 	})
 	vim.cmd("copen")
 	return true
@@ -853,8 +977,18 @@ function M.qf_jump()
 	end
 	local win = vim.fn.bufwinid(item.bufnr)
 	if win == -1 then
-		vim.notify("desk: your notes are not showing in any window", vim.log.levels.WARN)
-		return
+		local ctx = vim.fn.getqflist({ context = 0 }).context
+		local repo = ctx and ctx.desk_repo
+		local file = type(item.user_data) == "table" and item.user_data.file
+		if not (repo and file) then
+			vim.notify("desk: your notes are not showing in any window", vim.log.levels.WARN)
+			return
+		end
+		-- The other file: open it above, with its own review split below.
+		local b = open_file_buf(repo, file)
+		M.open_review(b)
+		win = vim.fn.bufwinid(b)
+		item.bufnr = b
 	end
 	vim.api.nvim_set_current_win(win)
 	vim.cmd("normal! m'")
