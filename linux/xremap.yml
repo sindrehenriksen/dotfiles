@@ -74,6 +74,21 @@ modmap:
         alone_timeout_millis: 250
 
 keymap:
+  - name: Keep Escape-then-back-a-word working in the terminal
+    # caps->b is Escape then back-a-word in vim and readline, typed as one
+    # fast roll. The layer engages on hold time, so a slow roll reaches it and
+    # launches Files instead; no threshold separates the two, which
+    # ../linux/README.md records in full. Giving the motion the key is the
+    # narrow fix: it costs the Files jump from a terminal and nothing else,
+    # since Escape-then-b means nothing outside one.
+    #
+    # Must stay above the Caps layer below — xremap takes the first keymap
+    # that matches.
+    application:
+      only: [com.mitchellh.ghostty]
+    remap:
+      CapsLock-n: [Esc, n]  # b  back a word
+
   - name: Caps layer, focus a window and jump to an app
     remap:
       # Directional focus, handled by the window-grid Shell extension. The

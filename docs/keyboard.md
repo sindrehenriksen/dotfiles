@@ -44,6 +44,8 @@ The tap/hold split has to disambiguate a chord (letter released first) from a ro
 | `r` | Notes | *unmapped — see below* |
 | `l` | Slack | *pending — not installed* |
 
+On Linux `b` is exempted inside Ghostty, where it types Escape-then-b instead of jumping to Files. `Esc`→`b` is back-a-word in vim and readline, typed as one fast roll, and a layer that engages on hold time cannot tell that roll from a deliberate hold — so the motion gets the key and the app jump is given up in terminals only. Nothing else on the layer is exempted; `w` stays Claude.
+
 `r` stays unmapped on Linux rather than pointed at a replacement. Apple Notes has no Linux client, and iCloud web paints the note body into a canvas, so selection and copy are pixels the browser cannot reach. What keeps it in use regardless is iPhone Spotlight: pull down from the home screen, type a note's name, and it is there without opening an app. No third-party notes app does that — Core Spotlight is open to them, but Obsidian, Joplin and Notesnook have never shipped it, and the end-to-end encrypted ones structurally cannot. The trade has been weighed once already; don't re-suggest a replacement without a new argument.
 
 ### Copying out of iCloud Notes
@@ -133,6 +135,7 @@ A change on one machine should be mirrored on the other, unless there is a reaso
 - **Caps hold** is a software layer on macOS (Hammerspoon) and lives in the input remapper on Linux, but the bindings match.
 - **The modifier taps cost `Ctrl+click` and `Shift+click` on Linux**, and are kept regardless. See the section above.
 - **Super is on both sides of the space bar on macOS, only the left on Linux.** The right-hand key there has to stay AltGr for the Norwegian letters, and the key that would otherwise take AltGr is a Copilot key that cannot be remapped at all.
+- **`caps`+`b` is exempted inside Ghostty on Linux**, for the reason under the app jump keys above. macOS needs no exemption, since release order tells the roll from the hold.
 - **The Caps layer engages by hold time on Linux, by release order on macOS.** Hammerspoon waits to see which key comes up first and replays what it buffered, so a `caps`→`b` roll yields Escape then b with no delay. xremap cannot reorder, so it needs a hold threshold instead, and the layer costs a real wait before it engages.
 
 ## Status
