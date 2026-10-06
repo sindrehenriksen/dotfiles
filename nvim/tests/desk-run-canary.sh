@@ -44,7 +44,7 @@ bad() {
 	printf 'FAIL - %s\n' "$1"
 }
 
-export CLAUDE_CONFIG_DIR="$HOME/.claude-work"
+export CLAUDE_CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude-work}"
 
 SCRATCH="$(mktemp -d)"
 
