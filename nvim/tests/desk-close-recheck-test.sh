@@ -224,5 +224,46 @@ kill "$pid3" 2> /dev/null
 rm -rf "$PASS_SCRATCH"
 
 echo
+echo "=== idle is measured by his last human message, not by other activity ==="
+status_fake() { # <pid> <last_activity> <last_human_message>
+	cat > "$FAKEBIN/session-status.sh" <<FAKE
+#!/usr/bin/env bash
+jq -nc --argjson pid "$1" --arg tp "$ROOT/transcript4.jsonl" --argjson la "$2" --argjson lh "$3" \
+	'{id:"sess-1", name:"a-session", live:true, has_start_event:true, last_activity:\$la, last_human_message:\$lh, pid:\$pid, transcript_path:\$tp}'
+FAKE
+	chmod +x "$FAKEBIN/session-status.sh"
+}
+printf '{"uuid":"aaaaaaaa-0000-0000-0000-000000000000","type":"assistant"}\n' > "$ROOT/transcript4.jsonl"
+
+rm -rf "$STATE"
+: > "$RECORDER_LOG"
+PASS_SCRATCH="$(mktemp -d)"
+pid4="$(spawn_throwaway)"
+status_fake "$pid4" "$(date +%s)" 0
+write_items_reply
+result="$(desk_step_close "testpass" "$step_json" "$config_json" "$repo" "2026-09-28" "${files[@]}")"
+assert_eq "the step reports ok" "ok" "$result"
+sleep 1
+assert_true "recent status updates and tool results do not hold it open: signaled" \
+	"$(kill -0 "$pid4" 2> /dev/null && echo false || echo true)"
+assert_true "session-recorder was told to close it" "$([ -s "$RECORDER_LOG" ] && echo true || echo false)"
+kill "$pid4" 2> /dev/null
+rm -rf "$PASS_SCRATCH"
+
+rm -rf "$STATE"
+: > "$RECORDER_LOG"
+PASS_SCRATCH="$(mktemp -d)"
+pid5="$(spawn_throwaway)"
+status_fake "$pid5" 0 "$(date +%s)"
+write_items_reply
+result="$(desk_step_close "testpass" "$step_json" "$config_json" "$repo" "2026-09-28" "${files[@]}")"
+sleep 1
+assert_true "a recent human message keeps it open even with old other activity" \
+	"$(kill -0 "$pid5" 2> /dev/null && echo true || echo false)"
+assert_true "session-recorder was never told to close it" "$([ ! -s "$RECORDER_LOG" ] && echo true || echo false)"
+kill "$pid5" 2> /dev/null
+rm -rf "$PASS_SCRATCH"
+
+echo
 echo "=== summary: $pass passed, $fail failed ==="
 [ "$fail" -eq 0 ]

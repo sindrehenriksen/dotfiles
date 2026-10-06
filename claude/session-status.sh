@@ -19,6 +19,11 @@
 # Fields per line: id, name, name_source ("user" — a custom title, or a
 # live pid file's own user-set name — vs "ai_or_none": an ai-title fallback
 # or no name at all), older_names, cwd, live, status, last_activity,
+# last_human_message (epoch seconds: the latest transcript record that is text
+# he typed — not a tool_result, meta or compaction record, task
+# notification or command/bash/system wrapper — falling back to the
+# session's start; this, not last_activity, is the idle measure, since
+# last_activity also moves on status updates, resumes and tool results),
 # source (the recorder's own SessionStart "source" for the LAST start
 # event only, null with no start event — display purposes),
 # any_desk_run_start (true if ANY start event this session ever recorded
@@ -69,7 +74,7 @@ BATCH_RESCAN_THRESHOLD=5
 # Bumped whenever what a cache entry holds, or how it is scanned, changes:
 # an entry from an older version is rescanned from the start instead of
 # being trusted as unchanged.
-CACHE_VERSION=2
+CACHE_VERSION=3
 
 mkdir -p "$CACHE_DIR" 2>/dev/null
 
@@ -498,6 +503,64 @@ if [ "${#changed_paths[@]}" -gt 0 ]; then
 fi
 [ -n "$new_entries_json" ] || new_entries_json='{}'
 
+# The latest human message per changed transcript: a type-user record whose
+# content is text typed by him, not a tool_result, a meta/compaction record,
+# a task notification or a slash-command/bash/system wrapper. Scanned from
+# the cached human_offset like the titles, but on its own offset since only
+# whole lines are ever consumed. The rg prefilter drops tool_result records
+# (most of a transcript's bytes) before jq parses anything.
+HUMAN_RG='"role":"user","content":("|\[\{"type":"(text|image)")'
+HUMAN_JQ='
+    fromjson? | select(.type == "user" and (.isMeta | not) and (.isCompactSummary | not)
+        and ((.origin.kind // "human") == "human"))
+    | (.message.content
+        | if type == "string" then .
+          elif type == "array" then (map(select(.type == "text") | .text) | join("\n"))
+          else "" end) as $t
+    | select($t != "" and ($t | test("^\\s*(<(command-|local-command-|bash-|task-|system-reminder|user-prompt-submit-hook)|\\[Request interrupted)") | not))
+    | (.timestamp | sub("\\.[0-9]+"; "") | fromdateiso8601? // empty)
+'
+if [ "${#changed_paths[@]}" -gt "$BATCH_RESCAN_THRESHOLD" ]; then
+    # Many files at once (a cold or cleared cache): one rg pass over all of
+    # them, whole files from byte 0.
+    batch_tmp=$(mktemp -d)
+    printf '%s' "$sizes_mtimes_json" > "$batch_tmp/sizes.json"
+    rg -N --with-filename "$HUMAN_RG" "${changed_paths[@]}" 2>/dev/null \
+        | jq -R -c "index(\":\") as \$i | {f: .[0:\$i], r: (.[(\$i+1):] | $HUMAN_JQ)} | select(.r != null)" 2>/dev/null \
+        | jq -s -c 'group_by(.f) | map({key: .[0].f, value: (map(.r) | max)}) | from_entries' > "$batch_tmp/human.json" 2>/dev/null
+    [ -s "$batch_tmp/human.json" ] || echo '{}' > "$batch_tmp/human.json"
+    new_entries_json=$(jq -c --slurpfile h "$batch_tmp/human.json" --slurpfile sizes "$batch_tmp/sizes.json" '
+        with_entries(.value += {last_human: ($h[0][.key] // null), human_offset: ($sizes[0][.key].size // 0)})
+    ' <<< "$new_entries_json" 2>/dev/null)
+    rm -rf "$batch_tmp"
+else
+    for p in "${changed_paths[@]}"; do
+        hoff=$(jq -r --argjson ver "$CACHE_VERSION" --arg p "$p" 'if (.[$p].v // 0) == $ver then (.[$p].human_offset // 0) else 0 end' <<< "$cache_json" 2>/dev/null)
+        hprev=$(jq -r --argjson ver "$CACHE_VERSION" --arg p "$p" 'if (.[$p].v // 0) == $ver then (.[$p].last_human // 0) else 0 end' <<< "$cache_json" 2>/dev/null)
+        hsize="${t_size[$p]:-0}"
+        [ "$hsize" -ge "${hoff:-0}" ] 2>/dev/null || { hoff=0; hprev=0; }
+        # Streamed rather than held in a shell variable (transcripts reach
+        # tens of megabytes), bounded to the size stat saw; a final line
+        # without its newline is a write in progress and is left for later.
+        hnew=$hsize
+        if [ "$hsize" -gt 0 ] && [ "$(head -c "$hsize" "$p" | tail -c 1 | od -An -c | tr -d ' ')" != '\n' ]; then
+            hnew=$((hsize - $(head -c "$hsize" "$p" | tail -n 1 | wc -c | tr -d ' ')))
+        fi
+        hbest=$hprev
+        if [ "$hnew" -gt "$hoff" ]; then
+            hlatest=$(tail -c "+$((hoff + 1))" "$p" 2>/dev/null | head -c "$((hnew - hoff))" \
+                | rg -N "$HUMAN_RG" 2>/dev/null | jq -R -r "$HUMAN_JQ" 2>/dev/null | sort -n | tail -n 1)
+            [ -n "$hlatest" ] && [ "$hlatest" -gt "${hbest:-0}" ] 2>/dev/null && hbest=$hlatest
+        else
+            hnew=$hoff
+        fi
+        new_entries_json=$(jq -c --arg p "$p" --argjson lh "${hbest:-0}" --argjson ho "$hnew" '
+            .[$p] += {last_human: (if $lh > 0 then $lh else null end), human_offset: $ho}
+        ' <<< "$new_entries_json" 2>/dev/null)
+    done
+fi
+[ -n "$new_entries_json" ] || new_entries_json='{}'
+
 # Merge: kept-old entries (still-existing paths only, so a deleted
 # transcript's cache entry doesn't linger forever) overlaid with the fresh
 # ones just computed.
@@ -515,7 +578,7 @@ printf '%s' "$cache_json" > "$WORK_DIR/cache.json"
 titles_by_id=$(jq -c --slurpfile cachef "$WORK_DIR/cache.json" '
     $cachef[0] as $cache
     | map_values(. as $path | ($cache[$path] // {custom_titles: [], ai_title: ""})
-        | {custom_titles, ai_title})
+        | {custom_titles, ai_title, last_human: (.last_human // null)})
 ' <<< "$transcript_of_json" 2>/dev/null)
 [ -n "$titles_by_id" ] || titles_by_id='{}'
 
@@ -587,6 +650,7 @@ entries_ndjson=$(jq -n -c \
     | (if ($activity_candidates | length) > 0 then ($activity_candidates | max)
        else ($pf_started // $ev.start_time // null)
        end) as $last_activity
+    | ($ti.last_human // $pf_started // $ev.start_time // null) as $last_human_message
     | (if $name_count > 0 or ($is_live and $pf != null and $pf.nameSource == "user" and (($pf.name // "") != ""))
        then "user" else "ai_or_none" end) as $name_source
     | {
@@ -597,6 +661,7 @@ entries_ndjson=$(jq -n -c \
         live: $is_live,
         status: $status,
         last_activity: $last_activity,
+        last_human_message: $last_human_message,
         source: $ev.source,
         any_desk_run_start: ($ev.any_desk_run_start // false),
         ended: $ev.ended,

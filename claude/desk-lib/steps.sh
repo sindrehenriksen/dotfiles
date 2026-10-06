@@ -670,7 +670,10 @@ desk_step_commit_push_kind() {
 
 # Every session-status.sh entry that's a `close` candidate right now:
 # live, has a recorder start event, not on `keep_open`, and idle at least
-# `close_after_working_days` *working* days by last_activity (an exact
+# `close_after_working_days` *working* days by his last human message
+# (session-status.sh's last_human_message — status updates, resumes and
+# tool results do not count as him being there; last_activity is only a
+# fallback for a reader that does not report it) (an exact
 # Mon-Fri walk, desk-lib/lock.sh's desk_working_days_since — no longer the
 # calendar-day approximation this build started with). Design's other
 # guards (max_closes this pass, "not the first pass after more than N
@@ -688,7 +691,7 @@ desk_close_candidates() {
 			.live == true
 			and .has_start_event == true
 			and (.name as $n | ($keep | index($n)) | not)
-			and (.last_activity != null)
+			and ((.last_human_message // .last_activity) != null)
 			and (.duplicate_pids != true)
 		) ]
 	' <<< "$all")"
@@ -700,7 +703,7 @@ desk_close_candidates() {
 	for ((i = 0; i < n; i++)); do
 		local sess last_activity wd
 		sess="$(jq -c ".[$i]" <<< "$pre_filtered")"
-		last_activity="$(jq -r '.last_activity' <<< "$sess")"
+		last_activity="$(jq -r '.last_human_message // .last_activity' <<< "$sess")"
 		wd="$(desk_working_days_since "$last_activity" "$now")"
 		if [ "$wd" -ge "$close_after_working_days" ]; then
 			out="$(jq -c --argjson s "$sess" '. + [$s]' <<< "$out")"
@@ -1087,9 +1090,9 @@ desk_step_close() {
 		fi
 
 		local recheck_last_activity recheck_working_days
-		recheck_last_activity="$(jq -r '.last_activity // empty' <<< "$recheck")"
+		recheck_last_activity="$(jq -r '.last_human_message // .last_activity // empty' <<< "$recheck")"
 		if [ -z "$recheck_last_activity" ]; then
-			desk_log "$pass" "close: session $name has no last_activity on re-check — not signaling"
+			desk_log "$pass" "close: session $name has no last human message on re-check — not signaling"
 			continue
 		fi
 		recheck_working_days="$(desk_working_days_since "$recheck_last_activity" "$(desk_now)")"

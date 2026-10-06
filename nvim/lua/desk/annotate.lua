@@ -111,7 +111,8 @@ end
 function M.session_text(entry, now)
 	now = now or os.time()
 	if entry.live then
-		local days = entry.last_activity and math.floor((now - entry.last_activity) / 86400) or 0
+		local since = entry.last_human_message or entry.last_activity
+		local days = since and math.floor((now - since) / 86400) or 0
 		if days >= 1 then
 			return string.format("live · idle %dd", days)
 		end

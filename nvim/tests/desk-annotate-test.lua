@@ -29,6 +29,12 @@ local now = os.time()
 
 print("=== session_text ===")
 
+assert_eq(
+	"idle counts from his last human message, not from other recent activity",
+	"live · idle 4d",
+	annotate.session_text({ live = true, last_activity = now, last_human_message = now - 4 * DAY }, now)
+)
+
 assert_eq("live and recently active: just 'live'", "live", annotate.session_text({ live = true, last_activity = now }, now))
 assert_eq(
 	"live but quiet for days: 'live · idle Nd'",
