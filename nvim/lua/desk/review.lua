@@ -259,6 +259,18 @@ function M.open_review(notes_buf)
 			end
 		end,
 	})
+	-- Plain `do` on the last line does nothing when a suggestion is appended
+	-- after it and another hunk precedes it; the range form works, so fall
+	-- back to it when `do` changed nothing there.
+	vim.keymap.set("n", "do", function()
+		local tick = vim.api.nvim_buf_get_changedtick(notes_buf)
+		local count = vim.v.count > 0 and tostring(vim.v.count) or ""
+		pcall(vim.cmd, "normal! " .. count .. "do")
+		local line = vim.api.nvim_win_get_cursor(0)[1]
+		if vim.api.nvim_buf_get_changedtick(notes_buf) == tick and count == "" and line == vim.api.nvim_buf_line_count(notes_buf) then
+			pcall(vim.cmd, string.format("%d,%ddiffget", line, line + 1))
+		end
+	end, { buffer = notes_buf, desc = "Take the hunk under the cursor (also at the end of the file)" })
 	vim.keymap.set("n", "<leader>gD", function()
 		local ok, why = M.decline(review_buf)
 		if not ok then
@@ -374,7 +386,8 @@ M.DECLINED_WINDOW_DAYS = 14
 
 --- The suggestions still left as hunks right now: shown at open, still
 --- proposed in the review buffer, not yet in his notes. Each with the review
---- buffer line to jump to, sorted by position.
+--- buffer line (`lnum`) and the line of HIS notes window the hunk aligns
+--- with (`notes_lnum`, where `do` takes it in diff mode), sorted by position.
 function M.remaining(s)
 	local review_lines = buf_lines(s.review_buf)
 	local notes_lines = buf_lines(s.notes_buf)
@@ -386,7 +399,7 @@ function M.remaining(s)
 	local out = {}
 	for _, item in pairs(s.shown) do
 		if proposal.proposed_in(item, review_lines, s.base) and not proposal.proposed_in(item, notes_lines, s.base) then
-			local lnum = 1
+			local lnum, notes_lnum = 1, 1
 			local after = snippet.split_lines(item.after)
 			if #after > 0 then
 				local positions = find_all(review_lines, after)
@@ -395,6 +408,7 @@ function M.remaining(s)
 					for _, h in ipairs(hunks) do
 						if pos >= h[3] and pos <= h[3] + math.max(h[4], 1) - 1 then
 							lnum = pos
+							notes_lnum = h[2] > 0 and h[1] or h[1] + 1
 						end
 					end
 				end
@@ -404,11 +418,16 @@ function M.remaining(s)
 					for _, h in ipairs(hunks) do
 						if pos >= h[1] and pos <= h[1] + math.max(h[2], 1) - 1 then
 							lnum = math.max(h[3], 1)
+							notes_lnum = pos
 						end
 					end
 				end
 			end
-			out[#out + 1] = { item = item, lnum = math.min(lnum, math.max(#review_lines, 1)) }
+			out[#out + 1] = {
+				item = item,
+				lnum = math.min(lnum, math.max(#review_lines, 1)),
+				notes_lnum = math.max(1, math.min(notes_lnum, #notes_lines)),
+			}
 		end
 	end
 	table.sort(out, function(a, b)
@@ -423,7 +442,7 @@ end
 local function overview_items(s)
 	local qf = {}
 	for _, r in ipairs(M.remaining(s)) do
-		qf[#qf + 1] = { bufnr = s.review_buf, lnum = r.lnum, col = 1, text = r.item.headline or r.item.id }
+		qf[#qf + 1] = { bufnr = s.notes_buf, lnum = r.notes_lnum, col = 1, text = r.item.headline or r.item.id }
 	end
 	return qf
 end
@@ -468,9 +487,9 @@ end
 
 --- The quickfix `<CR>` handler for every quickfix buffer (installed once,
 --- globally): anything that isn't desk's own overview falls through to the
---- ordinary jump. An overview entry jumps in the review split — through the
---- jumplist (`m'` first), so Ctrl-O/Ctrl-I work there afterward — from
---- wherever the overview was opened, including its own split.
+--- ordinary jump. An overview entry jumps in HIS NOTES window, to the line
+--- aligned with the hunk (so `do` there takes it) — through the jumplist
+--- (`m'` first), so Ctrl-O returns to where he was in his notes.
 function M.qf_jump()
 	if is_loclist_win(vim.api.nvim_get_current_win()) then
 		vim.cmd(vim.fn.line(".") .. "ll")
@@ -486,11 +505,12 @@ function M.qf_jump()
 	end
 	local win = vim.fn.bufwinid(item.bufnr)
 	if win == -1 then
-		vim.notify("desk: the review split is closed — press the review key again", vim.log.levels.WARN)
+		vim.notify("desk: your notes are not showing in any window", vim.log.levels.WARN)
 		return
 	end
 	vim.api.nvim_set_current_win(win)
 	vim.cmd("normal! m'")
+	vim.cmd("diffupdate")
 	vim.api.nvim_win_set_cursor(win, { math.max(item.lnum, 1), 0 })
 end
 

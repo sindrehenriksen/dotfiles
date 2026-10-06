@@ -370,24 +370,25 @@ table.sort(texts)
 assert_eq("the headlines", { "add under B", "drop more", "headline n1" }, texts)
 rb = review_buf_of(nb7)
 review_win = vim.fn.bufwinid(rb)
-assert_true("entries point into the review buffer", qf[1].bufnr == rb)
+local notes_win = vim.fn.bufwinid(nb7)
+assert_true("entries point into HIS notes buffer", qf[1].bufnr == nb7)
 for i = 2, #qf do
 	assert_true("sorted by position", qf[i].lnum >= qf[i - 1].lnum)
 end
 -- from the overview's own split: put the cursor on the last entry, press <CR>
 local qf_win = vim.fn.getqflist({ winid = 0 }).winid
 assert_true("the overview is in its own window", qf_win ~= 0 and qf_win ~= review_win)
-vim.api.nvim_set_current_win(review_win)
-vim.api.nvim_win_set_cursor(review_win, { 1, 0 })
+vim.api.nvim_set_current_win(notes_win)
+vim.api.nvim_win_set_cursor(notes_win, { 2, 0 })
 vim.api.nvim_set_current_win(qf_win)
 vim.api.nvim_win_set_cursor(qf_win, { #qf, 0 })
 review.qf_jump()
-assert_eq("the jump lands in the review split", review_win, vim.api.nvim_get_current_win())
-assert_eq("on the hunk's line", qf[#qf].lnum, vim.api.nvim_win_get_cursor(review_win)[1])
+assert_eq("the jump lands in his notes window", notes_win, vim.api.nvim_get_current_win())
+assert_eq("on the line aligned with the hunk", qf[#qf].lnum, vim.api.nvim_win_get_cursor(notes_win)[1])
 vim.cmd([[execute "normal! 1\<C-o>"]])
-assert_eq("Ctrl-O goes back through the jumplist", 1, vim.api.nvim_win_get_cursor(review_win)[1])
+assert_eq("Ctrl-O returns to where he was in his notes", 2, vim.api.nvim_win_get_cursor(notes_win)[1])
 vim.cmd([[execute "normal! 1\<C-i>"]])
-assert_eq("Ctrl-I goes forward again", qf[#qf].lnum, vim.api.nvim_win_get_cursor(review_win)[1])
+assert_eq("Ctrl-I goes forward again", qf[#qf].lnum, vim.api.nvim_win_get_cursor(notes_win)[1])
 
 print("\n=== overview drops a hunk once it is declined or taken ===")
 go_to(review_win, rb, "  added under B")
@@ -425,6 +426,30 @@ assert_true("take-one is mapped in the review buffer only", mapped(rb, "<leader>
 print("\n=== format_source: a short, honest label, never the raw field ===")
 assert_eq("nil source: notes", "notes", review.format_source(nil))
 assert_eq("a URL: just its host", "github.com", review.format_source("https://github.com/foo/bar/pull/1"))
+
+print("\n=== from the overview, `do` takes the hunk the jump landed on ===")
+do
+	local r = new_repo({ "Section A", "  existing", "Section B", "  other", "Section C", "  more" })
+	build(r, "2026-10-01", {
+		item("n1"),
+		item("a1", { kind = "add", target = { under = "Section B" }, after = "  added under B", source = "", headline = "add under B" }),
+		item("a2", { kind = "add", target = { under = "Section C" }, after = "  added under C", source = "", headline = "add under C" }),
+	})
+	local nb = open_notes(r)
+	review.attach(nb)
+	assert_true("overview opens", review.overview(nb))
+	local q = vim.fn.getqflist()
+	local qw = vim.fn.getqflist({ winid = 0 }).winid
+	local nw = vim.fn.bufwinid(nb)
+	for i = #q, 1, -1 do
+		vim.api.nvim_set_current_win(qw)
+		vim.api.nvim_win_set_cursor(qw, { i, 0 })
+		review.qf_jump()
+		vim.cmd("normal do")
+	end
+	local got = vim.api.nvim_buf_get_lines(nb, 0, -1, false)
+	assert_true("every overview entry was takeable by do from where it landed", vim.tbl_contains(got, "  added under B") and vim.tbl_contains(got, "  added under C") and got[1]:match("^NEWS"))
+end
 
 print(string.format("\n=== summary: %d passed, %d failed ===", pass, fail))
 if fail > 0 then
