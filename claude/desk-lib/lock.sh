@@ -186,6 +186,45 @@ desk_lock_dir_mtime() {
 	fi
 }
 
+# Called by a waiter that has judged the lock's owner dead, just before it
+# acts on that judgement. A no-op; a test overrides it to hold a waiter at
+# exactly the point where another waiter may win the race.
+desk_lock_pre_break() { :; }
+
+# Breaks the lock at $1, which the caller read as owned by the dead $2 (pid).
+# Only one waiter may do it, and never to a lock someone else has since taken:
+#   - a waiter first wins `mkdir "$1.break"`; a loser does nothing and
+#     re-reads the lock on its next iteration;
+#   - the winner re-reads the owner under that guard (the lock it judged dead
+#     may meanwhile have been broken and re-taken), and breaks only if it is
+#     still $2;
+#   - the break is an atomic rename of the lock dir to a unique stale name,
+#     then a remove. A failed rename means another waiter already did it.
+# A guard left by a waiter that died mid-break is removed once it is older
+# than the no-meta grace period.
+desk_lock_break_dead() {
+	local lockdir="$1" dead_pid="$2" guard="$1.break"
+	if ! mkdir "$guard" 2> /dev/null; then
+		local gm now
+		gm="$(desk_lock_dir_mtime "$guard" 2> /dev/null)" || gm=""
+		now="$(desk_now)"
+		if [ -n "$gm" ] && [ "$((now - gm))" -ge "$DESK_LOCK_NO_META_GRACE_SECS" ]; then
+			rmdir "$guard" 2> /dev/null
+		fi
+		return 1
+	fi
+	local current
+	current="$(jq -r '.pid // empty' "$lockdir/meta.json" 2> /dev/null)"
+	if [ "$current" = "$dead_pid" ]; then
+		local stale="$lockdir.stale.$$.$RANDOM"
+		if mv "$lockdir" "$stale" 2> /dev/null; then
+			rm -rf "$stale" 2> /dev/null
+		fi
+	fi
+	rmdir "$guard" 2> /dev/null
+	return 0
+}
+
 # Acquires the mkdir-based runner lock, waiting out a live holder up to
 # $DESK_LOCK_MAX_WAIT_SECS and breaking a dead one immediately. Prints the
 # lock directory and returns 0 on success; returns 1 (prints nothing) if it
@@ -279,8 +318,8 @@ desk_lock_acquire() {
 				# different process since (start-time mismatch): break the
 				# lock and retry the mkdir immediately, never counting this
 				# iteration against the wait budget.
-				rm -rf "$lockdir" 2>/dev/null
-				continue
+				desk_lock_pre_break
+				desk_lock_break_dead "$lockdir" "$owner_pid" && continue
 			fi
 		fi
 

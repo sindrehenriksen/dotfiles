@@ -123,5 +123,46 @@ assert_true "a lock owned by a different pid is left alone" "$([ -d "$lockdir" ]
 rm -rf "$lockdir"
 
 echo
+echo "=== two waiters see the same dead owner: only one breaks it, never the lock the other then takes ==="
+mkdir -p "$lockdir"
+dead_pid=999999
+while kill -0 "$dead_pid" 2> /dev/null; do dead_pid=$((dead_pid + 1)); done
+jq -n --arg pass otherpass --argjson pid "$dead_pid" --argjson started_at 1 --argjson owner_start 1 \
+	'{pass: $pass, pid: $pid, started_at: $started_at, owner_start: $owner_start}' \
+	> "$lockdir/meta.json"
+rm -f "$ROOT/b-judged" "$ROOT/a-holds" "$ROOT/b-result"
+wait_for_file() { local n=0; while [ ! -e "$1" ] && [ "$n" -lt 100 ]; do sleep 0.1; n=$((n + 1)); done; }
+# Waiter B has judged the owner dead and is held just before it acts, while
+# waiter A breaks the lock, takes it and holds it.
+(
+	desk_lock_pre_break() { : > "$ROOT/b-judged"; wait_for_file "$ROOT/a-holds"; sleep 0.3; }
+	DESK_LOCK_MAX_WAIT_SECS=0
+	got_b="$(desk_lock_acquire waiter-b)"
+	echo "${got_b:-none}" > "$ROOT/b-result"
+) &
+b_pid=$!
+wait_for_file "$ROOT/b-judged"
+(
+	got_a="$(desk_lock_acquire waiter-a)"
+	if [ -n "$got_a" ]; then
+		: > "$ROOT/a-holds"
+		sleep 1
+		if [ "$(jq -r '.pass' "$got_a/meta.json" 2> /dev/null)" = "waiter-a" ]; then
+			echo intact > "$ROOT/a-result"
+		else
+			echo destroyed > "$ROOT/a-result"
+		fi
+		desk_lock_release
+	fi
+) &
+a_pid=$!
+wait "$a_pid" "$b_pid" 2> /dev/null
+assert_eq "the lock A took was still its own after B acted on its stale judgement" "intact" "$(cat "$ROOT/a-result" 2> /dev/null)"
+assert_eq "B never got the lock A held" "none" "$(cat "$ROOT/b-result" 2> /dev/null)"
+assert_true "no stale or guard dir is left behind" \
+	"$([ -z "$(find "$DESK_LOCK_DIR" -maxdepth 1 \( -name '*.stale.*' -o -name '*.break' \) 2> /dev/null)" ] && echo true || echo false)"
+rm -rf "$lockdir"
+
+echo
 echo "=== summary: $pass passed, $fail failed ==="
 [ "$fail" -eq 0 ]
