@@ -66,6 +66,10 @@ LIVENESS_TOLERANCE_SECS="${CLAUDE_SESSION_LIVENESS_TOLERANCE:-3}"
 # instead of one tail+rg per file — the shape of a first-ever run, or of the
 # cache having been cleared, not of ordinary incremental use.
 BATCH_RESCAN_THRESHOLD=5
+# Bumped whenever what a cache entry holds, or how it is scanned, changes:
+# an entry from an older version is rescanned from the start instead of
+# being trusted as unchanged.
+CACHE_VERSION=2
 
 mkdir -p "$CACHE_DIR" 2>/dev/null
 
@@ -387,9 +391,10 @@ changed_paths=()
 if [ "${#transcript_paths[@]}" -gt 0 ]; then
     while IFS= read -r p; do
         [ -n "$p" ] && changed_paths+=("$p")
-    done < <(jq -r --argjson cache "$cache_json" --argjson cur "$sizes_mtimes_json" '
+    done < <(jq -r --argjson ver "$CACHE_VERSION" --argjson cache "$cache_json" --argjson cur "$sizes_mtimes_json" '
         $cur | to_entries[]
-        | select(($cache[.key].size // -1) != .value.size or ($cache[.key].mtime // -1) != .value.mtime)
+        | select(($cache[.key].size // -1) != .value.size or ($cache[.key].mtime // -1) != .value.mtime
+                 or ($cache[.key].v // 0) != $ver)
         | .key
     ' <<< 'null' 2>/dev/null)
 fi
@@ -404,7 +409,7 @@ if [ "${#changed_paths[@]}" -gt 0 ]; then
         # "path:{...json...}" per line, come in as a single --arg since jq
         # only slurps one stream.
         new_entries_json=$(printf '%s\n' "${changed_paths[@]}" | jq -R -s -c --arg raw "$titles_raw" \
-            --argjson sizes "$sizes_mtimes_json" '
+            --argjson sizes "$sizes_mtimes_json" --argjson ver "$CACHE_VERSION" '
             (split("\n") | map(select(length>0))) as $paths
             | ($raw | split("\n") | map(select(length>0))) as $lines
             | ($lines | map(
@@ -425,25 +430,32 @@ if [ "${#changed_paths[@]}" -gt 0 ]; then
             | $titled | with_entries(.value += {
                   size: ($sizes[.key].size // 0),
                   mtime: ($sizes[.key].mtime // 0),
-                  offset: ($sizes[.key].size // 0)
+                  offset: ($sizes[.key].size // 0),
+                  v: $ver
               })
         ' 2>/dev/null)
     else
         # A handful of files actually changed: read only the bytes appended
         # since each one's cached offset.
         for p in "${changed_paths[@]}"; do
-            offset=$(jq -r --arg p "$p" '.[$p].offset // 0' <<< "$cache_json" 2>/dev/null)
-            ct=$(jq -c --arg p "$p" '.[$p].custom_titles // []' <<< "$cache_json" 2>/dev/null)
-            ai=$(jq -r --arg p "$p" '.[$p].ai_title // ""' <<< "$cache_json" 2>/dev/null)
+            # An entry from an older cache version starts over from byte 0.
+            offset=$(jq -r --argjson ver "$CACHE_VERSION" --arg p "$p" 'if (.[$p].v // 0) == $ver then (.[$p].offset // 0) else 0 end' <<< "$cache_json" 2>/dev/null)
+            ct=$(jq -c --argjson ver "$CACHE_VERSION" --arg p "$p" 'if (.[$p].v // 0) == $ver then (.[$p].custom_titles // []) else [] end' <<< "$cache_json" 2>/dev/null)
+            ai=$(jq -r --argjson ver "$CACHE_VERSION" --arg p "$p" 'if (.[$p].v // 0) == $ver then (.[$p].ai_title // "") else "" end' <<< "$cache_json" 2>/dev/null)
             size="${t_size[$p]:-0}"
             [ "$size" -ge "${offset:-0}" ] 2>/dev/null || offset=0
-            raw_tail=$(tail -c "+$((offset + 1))" "$p" 2>/dev/null)
+            # The trailing "x" survives $(...)'s newline stripping, so a
+            # complete final line (the usual place a rename lands) is still
+            # seen as complete rather than mistaken for a partial write.
+            raw_tail=$(tail -c "+$((offset + 1))" "$p" 2>/dev/null; printf x)
+            raw_tail=${raw_tail%x}
             new_offset=$offset
             result=""
             if [ -n "$raw_tail" ]; then
                 case "$raw_tail" in
                     *$'\n') consumed=$raw_tail ;;
-                    *) consumed="${raw_tail%$'\n'*}"$'\n' ;;
+                    *$'\n'*) consumed="${raw_tail%$'\n'*}"$'\n' ;;
+                    *) consumed='' ;;
                 esac
                 case "$consumed" in $'\n'|'') consumed='' ;; esac
                 if [ -n "$consumed" ]; then
@@ -462,8 +474,8 @@ if [ "${#changed_paths[@]}" -gt 0 ]; then
             fi
             [ -n "$result" ] || result=$(jq -cn --argjson ct "$ct" --arg ai "$ai" '{custom_titles:$ct, ai_title:$ai}')
             new_entries_json=$(jq -c --arg p "$p" --argjson size "${t_size[$p]:-0}" --argjson mtime "${t_mtime[$p]:-0}" \
-                --argjson offset "$new_offset" --argjson body "$result" '
-                .[$p] = ($body + {size:$size, mtime:$mtime, offset:$offset})
+                --argjson offset "$new_offset" --argjson ver "$CACHE_VERSION" --argjson body "$result" '
+                .[$p] = ($body + {size:$size, mtime:$mtime, offset:$offset, v:$ver})
             ' <<< "$new_entries_json" 2>/dev/null)
         done
     fi

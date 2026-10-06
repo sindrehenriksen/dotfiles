@@ -83,6 +83,7 @@ BASH_SUITES=(
 	nvim/tests/desk-write-step-kind-test.sh
 	claude/tests/session-recorder-test.sh
 	claude/tests/session-status-resolve-test.sh
+	claude/tests/session-status-title-test.sh
 	git-hooks/test-commit-msg.sh
 	git-hooks/test-desk-denylist.sh
 )
