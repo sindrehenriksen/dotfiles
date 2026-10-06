@@ -97,9 +97,17 @@ end
 --- the runner's own staging step (via `nvim -l`'s `namespace-ids` verb,
 --- desk.cli); wiring the runner to actually call it is separate work —
 --- this only has to exist and behave correctly.
-function M.namespace_ids(repo_dir, pass, scheduled_date, items)
+function M.namespace_ids(repo_dir, pass, scheduled_date, items, extra_used_ids)
 	local used = {}
 	for id in pairs(M.items_by_id(M.read(repo_dir))) do
+		used[id] = true
+	end
+	for _, rec in ipairs(M.read(repo_dir)) do
+		if rec.id then
+			used[rec.id] = true
+		end
+	end
+	for _, id in ipairs(extra_used_ids or {}) do
 		used[id] = true
 	end
 	local out = {}
@@ -309,6 +317,143 @@ function M.declined_recently(repo_dir, file, index_lines, worktree_lines, days)
 		end
 	end
 	return out
+end
+
+-- ---------------------------------------------------------------------------
+-- Decisions (stateless diff review): the ledger now holds only what he
+-- decided, never a copy of what was proposed. `decline` records carry the
+-- whole item so a restore can put it back; `restore` records (his undo from
+-- the declined-recently list) hand an item back to the next pass, which
+-- notes it with `restore_applied` once it has re-proposed it; `taken`
+-- records are provenance for the weekly's agent-text exclusion (the item's
+-- `after` — or, for a removal, its `before` — by content hash, plus the
+-- lines themselves).
+-- ---------------------------------------------------------------------------
+
+--- sha256 of an item's agent-owned text: its `after`, or its `before` for a
+--- removal (which has no `after`).
+function M.content_hash(item)
+	local text = item.after
+	if text == nil or text == "" then
+		text = item.before or ""
+	end
+	return vim.fn.sha256(text)
+end
+
+--- Per id, the latest decision among decline / restore / restore_applied
+--- (append order is chronological, last wins). Returns id -> record.
+function M.decisions(records)
+	local out = {}
+	for _, rec in ipairs(records) do
+		if rec.id and (rec.type == "decline" or rec.type == "restore" or rec.type == "restore_applied") then
+			out[rec.id] = rec
+		end
+	end
+	return out
+end
+
+--- Currently declined: { ids = {id -> record}, sources = {source -> true},
+--- list = ordered records }.
+function M.declined(records)
+	local ids, sources, list = {}, {}, {}
+	for id, rec in pairs(M.decisions(records)) do
+		if rec.type == "decline" then
+			ids[id] = rec
+			if rec.source and rec.source ~= "" then
+				sources[rec.source] = true
+			end
+		end
+	end
+	for _, rec in ipairs(records) do
+		if rec.type == "decline" and ids[rec.id] == rec then
+			list[#list + 1] = rec
+		end
+	end
+	return { ids = ids, sources = sources, list = list }
+end
+
+--- Items he restored that no pass has re-proposed yet.
+function M.restored(records)
+	local out = {}
+	local latest = M.decisions(records)
+	for _, rec in ipairs(records) do
+		if rec.type == "restore" and latest[rec.id] == rec then
+			out[#out + 1] = rec.item
+		end
+	end
+	return out
+end
+
+--- id -> `taken` record, for every item ever recorded as taken.
+function M.taken_by_id(records)
+	local out = {}
+	for _, rec in ipairs(records) do
+		if rec.type == "taken" and rec.id then
+			out[rec.id] = rec
+		end
+	end
+	return out
+end
+
+--- Records `items` as declined. Items already declined are skipped.
+function M.record_declines(repo_dir, items)
+	local declined = M.declined(M.read(repo_dir)).ids
+	local records = {}
+	for _, item in ipairs(items) do
+		if not declined[item.id] then
+			records[#records + 1] = {
+				type = "decline",
+				id = item.id,
+				file = item.file,
+				source = item.source,
+				headline = item.headline,
+				at = os.time(),
+				item = item,
+			}
+		end
+	end
+	if #records == 0 then
+		return true
+	end
+	return M.append_many(repo_dir, records) ~= nil
+end
+
+--- Restores the declined item `id`: it leaves the declined set (so its
+--- source is no longer blocked) and the next pass proposes it again.
+function M.restore_declined(repo_dir, id)
+	local rec = M.declined(M.read(repo_dir)).ids[id]
+	if not rec then
+		return false, "not declined"
+	end
+	return M.append(repo_dir, { type = "restore", id = id, at = os.time(), item = rec.item }) ~= nil
+end
+
+--- Records `items` as taken (skipping any already recorded).
+function M.record_taken(repo_dir, items)
+	local have = M.taken_by_id(M.read(repo_dir))
+	local records = {}
+	for _, item in ipairs(items) do
+		if not have[item.id] then
+			records[#records + 1] = {
+				type = "taken",
+				id = item.id,
+				file = item.file,
+				kind = item.kind,
+				hash = M.content_hash(item),
+				before = item.before,
+				after = item.after,
+				source = item.source,
+				headline = item.headline,
+				session_id = item.session_id,
+				capture_kind = item.capture_kind,
+				at = os.time(),
+			}
+		end
+	end
+	if #records == 0 then
+		return true
+	end
+	return M.append_many(repo_dir, records) ~= nil
 end
 
 return M

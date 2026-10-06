@@ -93,6 +93,7 @@ LUA_SUITES=(
 	nvim/tests/desk-histext-test.lua
 	nvim/tests/desk-hotkey-test.lua
 	nvim/tests/desk-ledger-test.lua
+	nvim/tests/desk-proposal-test.lua
 	nvim/tests/desk-review-test.lua
 	nvim/tests/desk-status-test.lua
 	nvim/tests/desk-tokens-test.lua
