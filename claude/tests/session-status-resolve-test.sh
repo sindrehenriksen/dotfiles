@@ -177,6 +177,15 @@ jq -n --arg pid "$dead_pid_for_dup" --arg sid dup-pid --arg cwd "$PROJ_DIR" \
       name:$name, nameSource:"user", status:"idle", updatedAt:$updated}' \
     > "$CONFIG_DIR/sessions/$dead_pid_for_dup.json"
 
+# --- unnamed sessions with long ids, for resolving by id or id prefix ------
+for sid in deadbeef-0001 deadbeef-0002 cafe1234-0003; do
+    tp="$PROJ_DIR/$sid.jsonl"
+    printf '{"type":"ai-title","aiTitle":"Auto %s","sessionId":"%s"}\n' "$sid" "$sid" > "$tp"
+    jq -cn --arg sid "$sid" --arg cwd "$PROJ_DIR" --arg tp "$tp" \
+        '{session_id:$sid, cwd:$cwd, transcript_path:$tp, source:"startup"}' \
+        | "$HERE/../hooks/session-recorder.sh" start
+done
+
 echo "=== pid / tty fields ==="
 out=$("$READER")
 field() { printf '%s' "$out" | jq -r "select(.id == \"$1\") | $2"; }
@@ -238,6 +247,26 @@ tie_count=$(printf '%s' "$out_tie" | jq 'length')
 assert_eq "resolve lists both tied candidates" "2" "$tie_count"
 tie_ids=$(printf '%s' "$out_tie" | jq -r '.[].id' | sort | tr '\n' ',')
 assert_eq "the tied candidates are exactly tie-a and tie-b" "tie-a,tie-b," "$tie_ids"
+
+echo
+echo "=== resolve: an unnamed session by its full id or a unique 8+ character id prefix ==="
+resolved=$("$READER" resolve "cafe1234-0003")
+status=$?
+assert_eq "a full id resolves" "0" "$status"
+assert_eq "to that session" "cafe1234-0003" "$(printf '%s' "$resolved" | jq -r '.id')"
+resolved=$("$READER" resolve "cafe1234")
+status=$?
+assert_eq "a unique 8-character prefix resolves" "0" "$status"
+assert_eq "to that session" "cafe1234-0003" "$(printf '%s' "$resolved" | jq -r '.id')"
+out_amb=$("$READER" resolve "deadbeef")
+status=$?
+[ "$status" -ne 0 ] && ok "a prefix shared by two sessions is refused" || bad "a prefix shared by two sessions is refused (exited 0)"
+assert_eq "both candidates are listed, unranked" "deadbeef-0001,deadbeef-0002," "$(printf '%s' "$out_amb" | jq -r '.[].id' | sort | tr '\n' ',')"
+"$READER" resolve "cafe123" > /dev/null
+status=$?
+[ "$status" -ne 0 ] && ok "a prefix shorter than 8 characters never resolves" || bad "a prefix shorter than 8 characters never resolves (exited 0)"
+resolved=$("$READER" resolve "Alpha Session")
+assert_eq "a name still resolves by name" "alpha" "$(printf '%s' "$resolved" | jq -r '.id')"
 
 echo
 echo "=== summary: $pass passed, $fail failed ==="

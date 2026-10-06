@@ -47,9 +47,13 @@
 # Two modes:
 #   session-status.sh            one JSON line per session, as above.
 #   session-status.sh resolve <token>
-#       Exact match against a session's *user-set* name only (a custom
+#       Exact match against a session's *user-set* name (a custom
 #       title, or a live session whose pid file says nameSource "user") —
-#       never an ai-title fallback, which isn't a name he chose. Zero or
+#       never an ai-title fallback, which isn't a name he chose. When no
+#       name matches, the token may instead be a session id or a unique
+#       prefix of one (8+ characters): the short id an unnamed capture
+#       carries. An id match is never ranked; several are reported as
+#       ambiguous. For a name: zero or
 #       one match after narrowing prints that one entry and exits 0.
 #       Several: narrow to the live ones (if any are live), then to
 #       whichever of those has the latest last_activity; a genuine tie (or
@@ -687,6 +691,25 @@ case "${1:-}" in
         matches=$(printf '%s\n' "$entries_ndjson" | jq -s -c --arg token "$token" '
             map(select(._name_source == "user" and .name == $token) | del(._name_source))
         ')
+        if [ "$(printf '%s' "$matches" | jq 'length')" = "0" ] && [ -n "$token" ]; then
+            # Not a name he set: an unnamed capture is labelled by its short
+            # session id, so a full id or a unique 8+-character id prefix
+            # resolves too. Never a guess: several matches are reported as
+            # candidates, not ranked.
+            by_id=$(printf '%s\n' "$entries_ndjson" | jq -s -c --arg token "$token" '
+                ( map(select(.id == $token)) ) as $exact
+                | if ($exact | length) > 0 then $exact
+                  elif ($token | length) >= 8 then map(select(.id | startswith($token)))
+                  else [] end
+                | map(del(._name_source))
+            ')
+            if [ "$(printf '%s' "$by_id" | jq 'length')" = "1" ]; then
+                printf '%s\n' "$by_id" | jq -c '.[0]'
+                exit 0
+            fi
+            printf '%s\n' "$by_id"
+            exit 1
+        fi
         if [ "$(printf '%s' "$matches" | jq 'length')" = "1" ]; then
             printf '%s\n' "$matches" | jq -c '.[0]'
             exit 0
