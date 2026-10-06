@@ -1114,6 +1114,7 @@ desk_step_close() {
 		if [ "$close_result" = "closed" ]; then
 			closes_this_pass=$((closes_this_pass + 1))
 			desk_status_bump closes
+			desk_status_note_closed "$name"
 			desk_log "$pass" "close: session $name closed"
 		else
 			desk_status_bump failed_closes

@@ -63,16 +63,20 @@ end
 --- The proposal segment: "proposal pending", "proposal partial", and any
 --- "+N more ACT → brief" / worth_knowing / wildcard overflow counts. Only
 --- shown while at least one suggestion still waits on him (`untaken`).
-local function proposal_segments(status)
+local function proposal_segments(status, opts)
 	local out = {}
-	local p = status.proposal
-	if not p or not p.state or p.state == "none" then
+	local p = status.proposal or {}
+	local untaken = opts and opts.untaken
+	if untaken == nil then
+		untaken = p.untaken or 0
+		if not p.state or p.state == "none" then
+			return out
+		end
+	end
+	if untaken <= 0 then
 		return out
 	end
-	if (p.untaken or 0) <= 0 then
-		return out
-	end
-	out[#out + 1] = "proposal " .. p.state
+	out[#out + 1] = string.format("proposal %s (%d untaken)", (p.state and p.state ~= "none") and p.state or "pending", untaken)
 	local tier_labels = { act = "ACT", worth_knowing = "worth knowing", wildcard = "wildcard" }
 	for _, tier in ipairs({ "act", "worth_knowing", "wildcard" }) do
 		local n = p.overflow and p.overflow[tier]
@@ -84,7 +88,8 @@ local function proposal_segments(status)
 end
 
 --- Segments for any closes/refusals/lockouts — each only shown when it's
---- actually nonzero, so a clean status line stays a clean status line.
+--- actually nonzero, so a clean status line stays a clean status line. The
+--- real closes name the sessions closed most recently (`closed_names`).
 local function counts_segments(status)
 	local out = {}
 	-- "closes" (real, successful closes) never had a segment at all —
@@ -93,7 +98,13 @@ local function counts_segments(status)
 	for _, field in ipairs({ "closes", "refused_closes", "failed_closes", "lockouts" }) do
 		local n = status[field]
 		if n and n > 0 then
-			out[#out + 1] = string.format("%d %s", n, (field:gsub("_", " ")))
+			local label = string.format("%d %s", n, (field:gsub("_", " ")))
+			local names = field == "closes" and status.closed_names
+			if type(names) == "table" and #names > 0 then
+				local shown = vim.list_slice(names, math.max(1, #names - 2))
+				label = label .. " (" .. table.concat(shown, ", ") .. ")"
+			end
+			out[#out + 1] = label
 		end
 	end
 	return out
@@ -102,15 +113,22 @@ end
 --- A single-line summary, segments joined with " · ", or "" if the status
 --- file is missing/empty (so a statusline component can just show nothing
 --- rather than a placeholder).
-function M.summary(status)
+--- `opts.untaken` is the live count of suggestions still waiting on him
+--- (what a review would show); without it the runner's own `untaken`
+--- applies, which only moves when a pass runs.
+function M.summary(status, opts)
 	if not status then
-		return ""
+		if opts and opts.untaken and opts.untaken > 0 then
+			status = {}
+		else
+			return ""
+		end
 	end
 	local segments = {}
 	for _, s in ipairs(pass_segments(status)) do
 		segments[#segments + 1] = s
 	end
-	for _, s in ipairs(proposal_segments(status)) do
+	for _, s in ipairs(proposal_segments(status, opts)) do
 		segments[#segments + 1] = s
 	end
 	for _, s in ipairs(counts_segments(status)) do
@@ -121,8 +139,8 @@ end
 
 --- Reads the status file and formats it in one call — the function a
 --- statusline component actually wires in.
-function M.statusline()
-	return M.summary(M.read())
+function M.statusline(opts)
+	return M.summary(M.read(), opts)
 end
 
 return M

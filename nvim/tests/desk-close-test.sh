@@ -162,6 +162,7 @@ sleep 1
 assert_true "the throwaway process is dead" "$(kill -0 "$pid1" 2> /dev/null && echo false || echo true)"
 assert_true "session-recorder was told to close sess-1" "$(grep -q 'close sess-1' "$RECORDER_LOG" && echo true || echo false)"
 assert_eq "status.closes was bumped" "1" "$(jq -r '.closes // 0' "$DESK_STATUS_FILE")"
+assert_eq "status.closed_names names the closed session" "a-session" "$(jq -r '(.closed_names // []) | join(",")' "$DESK_STATUS_FILE")"
 proposal_blob="$(git -C "$repo" show refs/desk/proposal:proposal.json 2> /dev/null)"
 # Staging namespaces every item's own model-assigned id (desk_stage_and_
 # write_proposal, via cli.lua's namespace-ids), so "c1" survives only as

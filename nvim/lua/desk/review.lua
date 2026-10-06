@@ -495,6 +495,7 @@ function M.open_review(notes_buf)
 				vim.notify("desk: declined " .. n_or_err .. " suggestion(s)", vim.log.levels.INFO)
 			end
 			M.refresh_overview(s)
+			M.refresh_status_line(notes_buf)
 		end,
 	})
 	vim.api.nvim_create_autocmd("BufWipeout", {
@@ -1138,6 +1139,7 @@ function M.commit(bufnr)
 	end
 	M.flush_taken(bufnr)
 	local taken = proposal.sync_taken(repo)
+	M.refresh_status_line(bufnr)
 	return true, { taken = #taken }
 end
 
@@ -1145,15 +1147,20 @@ end
 -- Status line: the runner's status.json summary in the notes buffer's winbar.
 -- ---------------------------------------------------------------------------
 
-function M.status_line()
-	return status.summary(status.read())
+function M.status_line(bufnr)
+	local opts
+	local repo = bufnr and M.repo_context(bufnr)
+	if repo then
+		opts = { untaken = #proposal.open_items(repo) }
+	end
+	return status.summary(status.read(), opts)
 end
 
 function M.refresh_status_line(bufnr)
 	if not vim.api.nvim_buf_is_valid(bufnr) then
 		return
 	end
-	local line = M.status_line()
+	local line = M.status_line(bufnr)
 	for _, win in ipairs(vim.fn.win_findbuf(bufnr)) do
 		vim.wo[win].winbar = line
 	end

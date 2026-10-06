@@ -714,6 +714,28 @@ do
 	review.confirm = orig
 end
 
+print("\n=== the status line tracks the live untaken count and refreshes after a review save or his commit ===")
+do
+	local r = new_repo(BASE)
+	build(r, "2026-10-01", { item("n1"), item("n2") })
+	local nb = open_notes(r)
+	review.attach(nb)
+	local win = vim.fn.bufwinid(nb)
+	assert_true("the winbar counts both", vim.wo[win].winbar:match("%(2 untaken%)") ~= nil)
+	assert_true("review opens", review.open_review(nb))
+	local rb = review_buf_of(nb)
+	go_to(vim.fn.bufwinid(rb), rb, "NEWS n1")
+	review.decline(rb)
+	vim.cmd("write")
+	assert_true("after a review save it counts one", vim.wo[win].winbar:match("%(1 untaken%)") ~= nil)
+	go_to(win, nb, "Section A")
+	vim.api.nvim_win_set_cursor(win, { 1, 0 })
+	vim.cmd("diffupdate")
+	vim.cmd("normal do")
+	review.commit(nb)
+	assert_eq("after his commit nothing is untaken: silent", "", vim.wo[win].winbar)
+end
+
 print(string.format("\n=== summary: %d passed, %d failed ===", pass, fail))
 if fail > 0 then
 	os.exit(1)

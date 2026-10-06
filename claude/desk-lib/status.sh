@@ -13,7 +13,8 @@
 # desk_scheduled_date_for, not necessarily last_run's own calendar date).
 # Top-level: proposal ({state, partial, overflow, counts, untaken} —
 # untaken is how many suggestions still wait on him), closes/refused_closes/
-# failed_closes/lockouts (plain counts), push (a plain status string),
+# failed_closes/lockouts (plain counts; closed_names holds the last few
+# closed sessions' names), push (a plain status string),
 # ticket_cache_age. D8a writes the per-pass fields and the push/lockouts/
 # closes counters; the proposal summary is read off the standing proposal
 # and the decision ledger once a pass is done.
@@ -138,6 +139,12 @@ desk_status_set_fetch_ok() {
 desk_status_bump() {
 	local field="$1" by="${2:-1}"
 	desk_status_update '.[$field] = ((.[$field] // 0) + $by)' --arg field "$field" --argjson by "$by"
+}
+
+# Appends a session's name to .closed_names (the last ten are kept), so the
+# status line can say which sessions the real closes were.
+desk_status_note_closed() {
+	desk_status_update '.closed_names = (((.closed_names // []) + [$name]) | .[-10:])' --arg name "$1"
 }
 
 desk_status_set_field() {
