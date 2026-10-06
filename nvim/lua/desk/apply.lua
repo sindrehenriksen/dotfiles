@@ -1,4 +1,4 @@
--- The apply function (design.md §9(e)): turns a validated proposal into
+-- The apply function: turns a validated proposal into
 -- file text (desk.proposal applies it onto his HEAD). Each item's `target` is the pinned wire-format anchor
 -- (`"top"` | `{under=...}` | `{after=...}` | `{at=...}`, or — for
 -- `merge`/`move` — a two-element list of these), parsed via

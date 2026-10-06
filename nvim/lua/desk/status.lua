@@ -1,4 +1,4 @@
--- D7: the status line (design.md §2 "Status line", §9(f)). Reads the
+-- D7: the status line. Reads the
 -- runner-written status file and formats it for an nvim statusline
 -- component — wire `require("desk.status").summary()` into whatever
 -- statusline plugin is in use; this module doesn't install one itself,
@@ -25,9 +25,7 @@ function M.path()
 end
 
 --- Reads and parses the status file, or nil if it's absent/invalid — a
---- caller shows nothing rather than erroring (design.md's own "a pass
---- that didn't finish says so" is about the file's *content*, not about
---- this reader surviving the file not existing yet at all).
+--- caller shows nothing rather than erroring.
 function M.read(path)
 	path = path or M.path()
 	local fd = io.open(path, "r")

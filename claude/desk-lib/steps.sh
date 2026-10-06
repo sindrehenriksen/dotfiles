@@ -667,8 +667,8 @@ desk_step_commit_push_kind() {
 # (session-status.sh's last_human_message — status updates, resumes and
 # tool results do not count as him being there; last_activity is only a
 # fallback for a reader that does not report it) (an exact
-# Mon-Fri walk, desk-lib/lock.sh's desk_working_days_since — no longer the
-# calendar-day approximation this build started with). Design's other
+# Mon-Fri walk, desk-lib/lock.sh's desk_working_days_since — not a
+# calendar-day approximation). The other
 # guards (max_closes this pass, "not the first pass after more than N
 # days away", a live re-check "just before" SIGTERM) are applied by the
 # caller around this list, not inside it.
@@ -1115,7 +1115,7 @@ desk_step_close() {
 # desk_open_follow_up_tab <pass> <scheduled_date> <follow_up_step>
 # After this pass
 # FINISHES (desk-run calls this once, after the step loop, whatever the
-# pass's own result — "a failed pass still opens the tab on what exists"),
+# pass's own result: a failed pass still opens the tab on what exists),
 # open one Ghostty tab resuming the pass's own `follow_up_step` call — the
 # morning pass's J (which holds his notes plus the fetched material), or
 # 16:30's most recently-run close call, the config's own per-pass

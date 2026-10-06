@@ -1,8 +1,6 @@
 -- Occurrence-aware plain-text line matching. Every snippet comparison in
 -- the desk system happens through here — never a bare substring search and
--- never a Lua pattern on the snippet's own text (design.md §2: an `after`
--- equal to some unrelated line elsewhere must not count, and a repeated
--- `before` must match only at its recorded anchor).
+-- never a Lua pattern on the snippet's own text.
 local M = {}
 
 --- Splits `text` into a list of lines, and whether it ended in a newline.

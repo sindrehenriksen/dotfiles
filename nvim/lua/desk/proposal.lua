@@ -122,8 +122,7 @@ local function removal_done(item, lines, base, before)
 end
 
 --- Whether `item`'s proposed change is present in `lines`, judged at the
---- place it applies to rather than anywhere in the file (design.md §2's
---- occurrence rule): an insertion's `after` within the block of its landing
+--- place it applies to rather than anywhere in the file: an insertion's `after` within the block of its landing
 --- anchor (a move or merge at its landing side, not where its `before`
 --- sits), a removal's anchored occurrence of `before` gone (`base`, his text
 --- at the proposal's pass time, pins which occurrence), an edit's `after`

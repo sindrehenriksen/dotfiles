@@ -1,4 +1,4 @@
--- D7: the token → handler table (design.md §9(c), §2 "the hotkey"). Reads
+-- D7: the token → handler table. Reads
 -- the instantiation's `tokens` list from `$DESK_CONFIG` and classifies a
 -- token under the cursor into a handler — dotfiles ships no work patterns
 -- of its own, only this mechanism and a generic example in its tests.
@@ -14,8 +14,7 @@
 -- `TICKET%-([0-9]+)` — or, as a config author naturally writes it without
 -- the escape, `TICKET-([0-9]+)`), and matches how the same string reads as an
 -- ordinary regex, which is the dialect the runner's own reader uses on the
--- same config entries (design.md §9(c): "a Lua-pattern reader (nvim) and a
--- regex reader (the runner) need to apply it the same way"). Write `%-?`
+-- same config entries. Write `%-?`
 -- explicitly for an actual lazy-quantifier hyphen; nothing here needs one.
 --
 -- `case_insensitive` is implemented by turning each literal letter into a

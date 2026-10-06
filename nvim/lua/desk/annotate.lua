@@ -1,14 +1,12 @@
--- D7: annotations (design.md §2 "Annotations and the hotkey"). Per-token
+-- D7: annotations. Per-token
 -- virtual text: a session-name token shows live/idle/ended state from the
--- reader (§3), a ticket-like token (any token this instantiation's config
+-- reader, a ticket-like token (any token this instantiation's config
 -- classifies as a url handler) shows status from the ticket cache the
 -- runner writes. Both are computed async, via the reader as an external
 -- process — never blocking typing — and repainted on BufEnter/FocusGained.
 --
--- The ticket cache's path and shape are this module's to define (design.md
--- §6: dotfiles owns each format the runner instantiates against); neither
--- design.md nor the runner side pins one yet. Assumed shape, read-only
--- here: `{"checked_at": <unix seconds>, "tickets": {"<TOKEN>": {"status":
+-- The ticket cache's path and shape are this module's to define; the
+-- runner's ticket-cache step writes this shape. Read-only here: `{"checked_at": <unix seconds>, "tickets": {"<TOKEN>": {"status":
 -- "..."}, ...}}`, keyed by the token text itself (case-insensitive lookup —
 -- his notes mix casing on a ticket key) rather than by anything Jira-specific,
 -- so this stays generic across whatever url-handler tokens an instantiation
@@ -102,8 +100,7 @@ function M.ticket_text(cache, token, now)
 end
 
 --- The display text for a session-name token, from one reader entry
---- (design.md §2: "live / idle / ended, last activity and 'closed by
---- 16:30'" — here "closed idle", the pass isn't named in dotfiles):
+---:
 ---   "live"                                 — live, active recently
 ---   "live · idle Nd"                       — live, but quiet N days
 ---   "done · last active <date>"            — he ended it himself (an end

@@ -1,13 +1,11 @@
--- The block rule and anchor resolution (design.md §2, "The block rule").
+-- The block rule and anchor resolution.
 -- One shared reader for where a block starts and ends, used to place a
 -- proposal item at an anchor and to re-resolve a pending item's position
 -- fresh each run (so drift from his own edits elsewhere in the file doesn't
 -- go stale).
 --
 -- What this module deliberately does NOT implement: recognizing a block as
--- a *section* by a session-name token (design.md's "section" is a block
--- whose first line starts with a session-name token from the runner's
--- `tokens` config). That recognition belongs with the annotations/hotkey
+-- a *section* by a session-name token. That recognition belongs with the annotations/hotkey
 -- piece, which owns the token table; it isn't needed to resolve an anchor,
 -- since every anchor already carries which kind it is (`under`, `after`,
 -- `top`, or `at` for an edit/removal/move's own `before`).
@@ -31,8 +29,7 @@ local function is_separator(line)
 end
 
 -- A column-0 line whose content (after only whitespace) opens with a list
--- dash, per design.md: "following column-0 `- ` lines if the head isn't a
--- dash line".
+-- dash (a block whose head isn't a dash line is followed by column-0 `- ` lines).
 local function is_dash_line(line)
 	return line:match("^%-%s") ~= nil or line:match("^%-$") ~= nil
 end
@@ -90,8 +87,7 @@ function M.find_line(lines, quote)
 	return nil
 end
 
---- Parses one wire-shape anchor (design.md §9(e), the pinned proposal
---- shape) — the string `"top"`, or a single-key table `{under=...}` |
+--- Parses one wire-shape anchor — the string `"top"`, or a single-key table `{under=...}` |
 --- `{after=...}` | `{at=...}` — into this module's internal `{kind=...,
 --- quote=...}` shape. Returns nil for anything else (an invalid anchor).
 function M.parse_anchor(t)
@@ -116,7 +112,7 @@ end
 --- Parses a proposal item's `target` field (or a ledger item's `anchor`,
 --- which carries the same shape): a single anchor for most kinds, or —
 --- for `merge`/`move` — a two-element list `[{"at": "<before's first
---- line>"}, <where after lands>]` (design.md's morning-J prompt spec).
+--- line>"}, <where after lands>]`.
 --- Returns leave_anchor, land_anchor; for a single (non-list) target both
 --- are the same parsed anchor, since there is only one location.
 function M.parse_target(target)
@@ -136,8 +132,8 @@ end
 --- not the end of its block.
 ---
 --- Returns nil when the anchor can't be resolved (a bad quote, or one that
---- doesn't appear) — design.md §2: "goes on top and is counted", which the
---- caller does with the nil.
+--- doesn't appear) — the caller puts the item on top
+--- and counts it.
 function M.find_anchor(lines, anchor)
 	if not anchor or anchor.kind == "top" then
 		return 0

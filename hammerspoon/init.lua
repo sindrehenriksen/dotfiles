@@ -365,7 +365,7 @@ end
 -- Every tab command (the follow-up tab, the hotkey's resume, the
 -- Wednesday tab) runs through his own login+interactive shell rather than
 -- however Ghostty's own `command:` field would otherwise invoke it —
--- design.md's own launch envelope assumes CLAUDE_CONFIG_DIR and PATH
+-- the desk launch envelope assumes CLAUDE_CONFIG_DIR and PATH
 -- (~/.local/bin, mise shims, ...) come from his shell rc files, which a
 -- bare exec of the command never sources.
 local function wrap_in_login_shell(cmd)
@@ -461,10 +461,8 @@ end
 
 -- ---------------------------------------------------------------------------
 -- Desk: focus an existing Ghostty tab by the tty of the process running in
--- it — the notes hotkey's live-session case (design.md §2/§3: "focuses the
--- Ghostty tab by tty"), so it never opens a second tab against a session
--- that's already live. Unverified against real Ghostty (Phase-0, design.md
--- §8, "Ghostty tab focus by tty"): that its AppleScript dictionary actually
+-- it — the notes hotkey's live-session case, so it never opens a second tab against a session
+-- that's already live. Unverified against real Ghostty: that its AppleScript dictionary actually
 -- exposes a per-tab `tty`, and that selecting a tab and activating its
 -- window raises the right one on screen. Pure selection logic is on
 -- DeskTab.pick_tab_by_tty so it's testable without osascript at all — see

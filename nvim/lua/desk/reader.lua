@@ -1,5 +1,4 @@
--- D7: nvim's one entry point onto claude/session-status.sh (the one
--- reader, design.md §9(a)) — every session lookup (annotations, the
+-- D7: nvim's one entry point onto claude/session-status.sh — every session lookup (annotations, the
 -- hotkey) goes through here, never a second implementation of the join.
 -- Every call is async (vim.system with a callback, never :wait()): a
 -- reader call must never block typing.
@@ -33,7 +32,7 @@ function M.run(args, callback)
 	end)
 end
 
---- Every known session, as entries per design.md §9(a) (plus D7's `pid` /
+--- Every known session, as entries (see the header of claude/session-status.sh, plus `pid` /
 --- `tty`). `callback(ok, entries)`.
 function M.all(callback)
 	M.run({}, function(ok, lines)

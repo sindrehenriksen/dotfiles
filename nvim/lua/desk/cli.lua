@@ -38,7 +38,7 @@ local function print_json(v)
 	io.write(vim.json.encode(v) .. "\n")
 end
 
---- The blocks in `lines` (design.md §2's "The block rule"), in file order.
+--- The blocks in `lines`, in file order.
 local function compute_blocks(lines)
 	local blocks = {}
 	local i, n = 1, #lines

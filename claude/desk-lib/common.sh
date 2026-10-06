@@ -49,8 +49,7 @@ DESK_STALE_RUNNING_MINUTES="${DESK_STALE_RUNNING_MINUTES:-60}"
 DESK_KILL_GRACE_SECS="${DESK_KILL_GRACE_SECS:-5}"
 # How long a waiter tolerates a lock dir with no meta.json yet before
 # treating it as a crash rather than another acquirer mid-publish (lock.sh's
-# desk_lock_acquire: "a lock with no meta held for a short grace period,
-# never as dead" straight away) — and the pid-reuse tolerance for comparing
+# desk_lock_acquire holds off a lock with no meta for a short grace period) — and the pid-reuse tolerance for comparing
 # a lock's recorded owner start time against the same pid's current one
 # (same idea as session-status.sh's own LIVENESS_TOLERANCE_SECS, duplicated
 # in lock.sh since it's sourced standalone, without that script loaded).
