@@ -232,6 +232,7 @@ When the system framework suggests saving a memory, route the content to the rig
 - Defer to any repo-specific commit conventions
 - Don't hand-roll the attribution trailer. Each session is handed the exact text to end a commit message with, model name and session link already filled in: use it verbatim, because nothing appends it for you. `attribution` in `~/.claude/settings.json` changes what gets handed over.
 - Pushing your own unmerged ticket/feature branch is fine — including `--force-with-lease` after a rebase or autosquash — when the workflow you're following calls for it. Everything else needs an explicit ask: pushing to `main` or any protected or shared branch, force-pushing a branch someone else may have based work on, pushing tags, and pushing in a repo you weren't asked to touch.
+- A push is not finished until CI for that commit is green. Check it (`gh run list` / `gh run watch`) and treat a red run as the next task, not as someone else's news.
 
 ## Output Formatting
 
