@@ -133,6 +133,13 @@ function M.decisions(records)
 	return out
 end
 
+--- Only a URL source stands for one story, so only a URL source can block
+--- other items: `notes`, `ticket:KEY` and `session:<id>` each cover many
+--- unrelated items and are declined by item id alone.
+function M.is_url_source(source)
+	return type(source) == "string" and (source:match("^https?://") ~= nil)
+end
+
 --- Currently declined: { ids = {id -> record}, sources = {source -> true},
 --- list = ordered records }.
 function M.declined(records)
@@ -140,7 +147,7 @@ function M.declined(records)
 	for id, rec in pairs(M.decisions(records)) do
 		if rec.type == "decline" then
 			ids[id] = rec
-			if rec.source and rec.source ~= "" then
+			if M.is_url_source(rec.source) then
 				sources[rec.source] = true
 			end
 		end

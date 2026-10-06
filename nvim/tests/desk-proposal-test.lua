@@ -227,6 +227,23 @@ write(repo4, "notes.md", { "Section A", "  keep" })
 commit_all(repo4, "he removed it")
 assert_eq("sync takes it", 1, #proposal.sync_taken(repo4))
 
+print("\n=== declining a non-URL-sourced item never blocks other items by source ===")
+do
+	local r = new_repo({ "Section A", "  existing" })
+	local running = item("c1", { after = "sess-foo: running", source = "session:11111111-1111-1111-1111-111111111111", headline = "capture running" })
+	proposal.build(r, "1630", "2026-10-01", { running, item("t1", { after = "ticket one", source = "ticket:ABC-12", headline = "t one" }) }, FILES)
+	local items = proposal.read(r).items
+	ledger.record_declines(r, items)
+	assert_eq("non-URL sources never enter the blocked-source set", 0, #vim.tbl_keys(ledger.declined(ledger.read(r)).sources))
+	proposal.build(r, "1630", "2026-10-02", {
+		item("c2", { after = "sess-foo: closed", source = "session:11111111-1111-1111-1111-111111111111", headline = "capture closed" }),
+		item("t2", { after = "ticket two", source = "ticket:ABC-12", headline = "t two" }),
+	}, FILES)
+	local hs = vim.tbl_map(function(it) return it.headline end, proposal.read(r).items)
+	table.sort(hs)
+	assert_eq("a later close capture and a later ticket item are still proposed", { "capture closed", "t two" }, hs)
+end
+
 print(string.format("\n=== summary: %d passed, %d failed ===", pass, fail))
 if fail > 0 then
 	os.exit(1)
