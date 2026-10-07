@@ -386,21 +386,19 @@ open_tab() { # id cwd -> sets open_detail; returns 0 when the opener reported su
 	printed="$(cat "$out" "$out.stderr" 2> /dev/null | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
 	rm -f "$out" "$out.stderr"
 	if [ "$rc" -eq 124 ]; then
-		open_detail="opener timed out after ${TAB_TIMEOUT}s (a tab may still appear; re-run --dry-run before retrying)"
+		open_detail="opener timed out (its own limit on hs, or this command's ${TAB_TIMEOUT}s); a tab may still appear, so re-run --dry-run before retrying"
 		return 1
 	fi
 	if [ "$rc" -ne 0 ]; then
-		open_detail="opener failed (exit $rc)${printed:+: $printed}"
+		# desk-open-tab.sh exits non-zero whenever DeskOpenTab did not open
+		# the tab, printing why; a locked screen is the one refusal worth
+		# naming, since unlocking and re-running is the whole fix.
+		case "$printed" in
+			*"screen locked"*) open_detail="the screen is locked, so the opener refused; unlock and re-run" ;;
+			*) open_detail="opener failed (exit $rc)${printed:+: $printed}" ;;
+		esac
 		return 1
 	fi
-	# The helper exits 0 even when DeskOpenTab returns false (Hammerspoon's CLI
-	# reports only Lua errors); it prints the return value last.
-	case "$printed" in
-		false | *" false")
-			open_detail="opener declined${printed:+: $printed}"
-			return 1
-			;;
-	esac
 	open_detail=""
 	return 0
 }

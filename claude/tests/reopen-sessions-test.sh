@@ -67,7 +67,8 @@ case "\$mode" in
 	block-on-stdin) cat > /dev/null ;;
 	hang-first)
 		if [ ! -f "$TMP/hung" ]; then echo \$\$ > "$TMP/hung"; sleep 60; fi ;;
-	decline) echo "DeskOpenTab: no ultrawide screen and no frontmost Ghostty window"; echo false; exit 0 ;;
+	decline) printf 'DeskOpenTab: no ultrawide screen and no frontmost Ghostty window\nfalse\n' >&2; exit 1 ;;
+	locked) printf "DeskOpenTab: Ghostty's windows are not visible (screen locked?); not opening\nfalse\n" >&2; exit 1 ;;
 esac
 printf '%s\n' "\${2:-}" >> "$TMP/opened-ids"
 echo true
@@ -309,7 +310,7 @@ assert_eq "a session that came up meanwhile reports running" running "$(status_o
 assert_eq "and is not opened" 0 "$(opener_calls)"
 
 echo
-echo "=== the opener declining (DeskOpenTab returned false) is a failure ==="
+echo "=== the opener declining (exit 1: DeskOpenTab returned false) is a failure ==="
 reset_fixtures
 ev_start "$PREV_BOOT" 1790100000 > "$CLAUDE_SESSION_STORE/$ACTIVE.jsonl"
 reader_line "$ACTIVE" 2026-10-06T09:00:00Z
@@ -319,6 +320,9 @@ rc=$?
 assert_eq "reported failed" failed "$(status_of "$out" "$ACTIVE")"
 assert_eq "with the opener's message" true "$(detail_of "$out" "$ACTIVE" | grep -q 'no ultrawide' && echo true || echo false)"
 assert_eq "exit 1" 1 "$rc"
+echo locked > "$TMP/opener-mode"
+out=$("$CLI")
+assert_eq "a locked screen is named as the reason" true "$(detail_of "$out" "$ACTIVE" | grep -q 'screen is locked' && echo true || echo false)"
 
 echo
 echo "=== --session opens a chosen idle one; an unknown one fails ==="
