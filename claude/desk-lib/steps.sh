@@ -78,6 +78,18 @@ desk_step_allowed_tools() {
 	fi
 }
 
+# desk_pass_caps_json <pass> <pass_config_json> <config_json>
+# The caps entry a pass's capped items use: the pass's own `caps` key names
+# an entry of the top-level `caps` table; absent, a pass named `weekly` uses
+# "weekly", every other pass "daily".
+desk_pass_caps_json() {
+	local pass="$1" pass_config="$2" config="$3"
+	local caps_default="daily" caps_key
+	[ "$pass" = "weekly" ] && caps_default="weekly"
+	caps_key="$(jq -r --arg d "$caps_default" '.caps // $d' <<< "$pass_config")"
+	jq -c --arg k "$caps_key" '.caps[$k] // {}' <<< "$config"
+}
+
 # ---------------------------------------------------------------------------
 # Pass-level context and named producers (the prompt contract in
 # docs/desk.md: every call's {{placeholders}} and scratch-dir input files, keyed by name
@@ -781,6 +793,14 @@ desk_name_in_notes() {
 	' <<< "$head_content"
 }
 
+# The capture step's three-ground exclusion of the runner's own sessions
+# (described there), as a jq definition for every step that selects
+# sessions. Needs `$runs_root` bound to $DESK_RUNS_ROOT.
+DESK_JQ_IS_DESK_RUN='def is_desk_run:
+	(.any_desk_run_start == true)
+	or ((.name // "") | startswith("desk-"))
+	or (($runs_root != "") and ((.cwd // "") | startswith($runs_root)));'
+
 # True (exit 0) if $1 (ledger-state's own JSON) already holds an item for
 # (session_id $2, capture_kind $3) . Captures dedup on
 # (session id, kind), not content: whatever that item's own state (still
@@ -853,11 +873,7 @@ desk_step_capture_sessions() {
 	# somehow both wrong (an old recorder record predating this field, a
 	# session renamed away from the convention).
 	local candidates
-	candidates="$(jq -c --arg runs_root "$DESK_RUNS_ROOT" '
-		def is_desk_run:
-			(.any_desk_run_start == true)
-			or ((.name // "") | startswith("desk-"))
-			or (($runs_root != "") and ((.cwd // "") | startswith($runs_root)));
+	candidates="$(jq -c --arg runs_root "$DESK_RUNS_ROOT" "$DESK_JQ_IS_DESK_RUN"'
 		[ .[] | select(.has_start_event == true and (is_desk_run | not)) ] as $eligible
 		| [ $eligible[] | select(.live == true) | . + {capture_kind: "running"} ]
 		+ [ $eligible[] | select(.live == false and (.ended == false or .end_reason == "other")) | . + {capture_kind: "dropped"} ]
@@ -931,6 +947,61 @@ desk_write_transcript_tail() {
 	fi
 }
 
+# desk_session_capture_call <pass> <step_json> <repo> <scheduled_date>
+#   <session_json> <call_id> <label> <placeholders_json>
+# The one per-session capture call the close and retention kinds share: seeds
+# the call's cwd with `session.json` (the reader entry), the capped end of the
+# session's transcript (the step's `cap`, default 200 lines) and the marked
+# captures file for placement; makes the call under the step's own tools and
+# prompt with the step id replaced by `call_id`; and turns the reply into
+# items: the pinned shape, every turn citation checked against the tail it
+# was given and stripped, then the generic validation (no URL is allowed,
+# since a capture call has no fetch results). Prints the items as a JSON
+# array and returns 0 when at least one survives; logs why and returns 1
+# otherwise. The transcript itself is only ever read here (`tail`): a write
+# to it would move its mtime, which is what Claude Code's retention sweep
+# measures.
+desk_session_capture_call() {
+	local pass="$1" step_json="$2" repo="$3" scheduled_date="$4" sess="$5" call_id="$6" label="$7" placeholders="$8"
+	local cap transcript_path captures
+	cap="$(jq -r '.cap // 200' <<< "$step_json")"
+	transcript_path="$(jq -r '.transcript_path // empty' <<< "$sess")"
+	captures="${DESK_CAPTURES_FILE:-notes.md}"
+
+	# Copied into the call's own cwd by desk_step_model_call, which is the one
+	# directory a scoped Read can reach.
+	local seed="$PASS_SCRATCH/$call_id-seed" tail_copy="$PASS_SCRATCH/$call_id-transcript-tail.jsonl"
+	mkdir -p "$seed"
+	echo "$sess" > "$seed/session.json"
+	desk_write_transcript_tail "$transcript_path" "$seed/transcript-tail.jsonl" "$cap"
+	cp -f "$seed/transcript-tail.jsonl" "$tail_copy" 2> /dev/null
+	# The marked copy, as J gets: the marks keep a line the call echoes back
+	# from carrying them into the notes.
+	desk_write_marked_head_copy "$repo" "$captures" "$seed/$captures"
+
+	local call_step call_result
+	call_step="$(jq -c --arg id "$call_id" '.id = $id' <<< "$step_json")"
+	call_result="$(desk_step_model_call "$pass" "$call_step" "$label" "$placeholders" "$seed" "" "$scheduled_date")"
+	desk_log "$pass" "$label: call -> $call_result"
+	[ "$call_result" = "ok" ] || return 1
+
+	local final_text items_json
+	final_text="$(desk_extract_final_text "$PASS_SCRATCH/$call_id-stream.jsonl")"
+	items_json="$(jq -c 'if type == "object" and has("items") then .items else . end' \
+		<<< "$final_text" 2> /dev/null)"
+	if [ -z "$items_json" ] || ! jq -e 'type == "array"' > /dev/null 2>&1 <<< "$items_json"; then
+		desk_log "$pass" "$label: reply wasn't the pinned items shape — no capture"
+		return 1
+	fi
+	items_json="$(desk_verify_and_strip_turn_citations "$items_json" "$tail_copy")"
+	items_json="$(desk_validate_items "$items_json" "")"
+	if [ "$(jq 'length' <<< "$items_json")" -eq 0 ]; then
+		desk_log "$pass" "$label: no valid capture item (invalid citation, or none returned)"
+		return 1
+	fi
+	printf '%s' "$items_json"
+}
+
 # desk_step_close <pass> <step_json> <config_json> <repo> <file>...
 # The composite close step.
 # Skips every candidate (closes nothing) on the first pass after more than
@@ -957,7 +1028,7 @@ desk_step_close() {
 	shift 5
 	local files=("$@")
 
-	local close_after keep_open max_closes away_days log_only cap
+	local close_after keep_open max_closes away_days log_only
 	close_after="$(jq -r '.close_after_working_days // 3' <<< "$config_json")"
 	keep_open="$(jq -c '.keep_open // []' <<< "$config_json")"
 	max_closes="$(jq -r '.max_closes // 3' <<< "$config_json")"
@@ -966,7 +1037,6 @@ desk_step_close() {
 	# too, so that spelling would silently ignore an explicit
 	# "log_only": false and always come back "true".
 	log_only="$(jq -r 'if .log_only == null then true else .log_only end' <<< "$config_json")"
-	cap="$(jq -r '.cap // 200' <<< "$step_json")"
 
 	local last_ok now away_gap
 	now="$(desk_now)"
@@ -1000,11 +1070,10 @@ desk_step_close() {
 
 	local i
 	for ((i = 0; i < n; i++)); do
-		local sess id name transcript_path
+		local sess id name
 		sess="$(jq -c ".[$i]" <<< "$candidates")"
 		id="$(jq -r '.id' <<< "$sess")"
 		name="$(jq -r '.name // .id' <<< "$sess")"
-		transcript_path="$(jq -r '.transcript_path // empty' <<< "$sess")"
 
 		# Real closing needs BOTH log_only off and this pass still under
 		# its K cap; either one missing means queue the capture (as a
@@ -1025,47 +1094,11 @@ desk_step_close() {
 			continue
 		fi
 
-		# This call's own seed dir — desk_step_model_call copies its
-		# content into whatever it computes as this call's own actual cwd
-		# (call_scratch), never a separate location: nothing here needs to
-		# point the prompt at this seed dir manually since call_scratch is always the one directory a
-		# scoped Read can actually reach.
-		local seed
-		seed="$PASS_SCRATCH/close-seed-$id"
-		mkdir -p "$seed"
-		echo "$sess" > "$seed/session.json"
-		desk_write_transcript_tail "$transcript_path" "$seed/transcript-tail.jsonl" "$cap"
-		cp -f "$seed/transcript-tail.jsonl" "$PASS_SCRATCH/close-$id-transcript-tail.jsonl" 2> /dev/null
-		# "notes.md: the user's committed notes, for placement only" — the marked copy, same as J's, though a
-		# 1630 call never anchors an *edit* on a marked line the way J's own
-		# in-place suggestions might, only ever placing new bullets under or
-		# after one.
-		desk_write_marked_head_copy "$repo" "${DESK_CAPTURES_FILE:-notes.md}" "$seed/${DESK_CAPTURES_FILE:-notes.md}"
-
-		local per_session_step
-		per_session_step="$(jq -c --arg id "$id" '.id = ("close-" + $id)' <<< "$step_json")"
-		local placeholders
+		local placeholders items_json
 		placeholders="$(jq -n --arg sn "$name" --arg sid "$id" --arg today "$(date +%F)" \
 			'{session_name: $sn, session_id: $sid, today: $today}')"
-		local call_result
-		call_result="$(desk_step_model_call "$pass" "$per_session_step" "close:$name" "$placeholders" "$seed" "" "$scheduled_date")"
-		desk_log "$pass" "close: session $name call -> $call_result"
-		[ "$call_result" = "ok" ] || continue
-
-		local final_text items_json
-		final_text="$(desk_extract_final_text "$PASS_SCRATCH/close-${id}-stream.jsonl")"
-		items_json="$(jq -c 'if type == "object" and has("items") then .items else . end' \
-			<<< "$final_text" 2> /dev/null)"
-		if [ -z "$items_json" ] || ! jq -e . > /dev/null 2>&1 <<< "$items_json"; then
-			desk_log "$pass" "close: session $name reply wasn't the pinned items shape — no capture"
-			continue
-		fi
-		items_json="$(desk_verify_and_strip_turn_citations "$items_json" "$PASS_SCRATCH/close-$id-transcript-tail.jsonl")"
-		items_json="$(desk_validate_items "$items_json" "")" # no fetch tool results: no URL is ever allowed
-		if [ "$(jq 'length' <<< "$items_json")" -eq 0 ]; then
-			desk_log "$pass" "close: session $name — no valid closure-note item (invalid citation, or none returned)"
-			continue
-		fi
+		items_json="$(desk_session_capture_call "$pass" "$step_json" "$repo" "$scheduled_date" \
+			"$sess" "close-$id" "close:$name" "$placeholders")" || continue
 
 		items_json="$(jq -c --arg sid "$id" --arg ck "$capture_kind" \
 			'map(.session_id = $sid | .capture_kind = $ck)' <<< "$items_json")"

@@ -407,13 +407,7 @@ $(git -C "$repo" show "HEAD:$f" 2> /dev/null)"
 			;;
 
 		judge)
-			# The pass's own `caps` names which entry of the top-level `caps`
-			# table it uses; absent, a pass named `weekly` uses "weekly",
-			# every other pass "daily".
-			caps_default="daily"
-			[ "$pass" = "weekly" ] && caps_default="weekly"
-			caps_key="$(jq -r --arg d "$caps_default" '.caps // $d' <<< "$pass_config")"
-			caps_json="$(jq -c --arg k "$caps_key" '.caps[$k] // {}' <<< "$config")"
+			caps_json="$(desk_pass_caps_json "$pass" "$pass_config" "$config")"
 			caps_str="$(desk_caps_string "$caps_json")"
 			judge_placeholders="$(jq -c --arg caps "$caps_str" '. + {caps: $caps}' <<< "$common_placeholders")"
 			result="$(desk_step_judge "$pass" "$step_json" "$repo" "$judge_placeholders" "$pass_ctx" "${files[@]}")"
