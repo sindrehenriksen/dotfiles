@@ -19,10 +19,6 @@ set -u
 # reference: "Default: 30"), used when the settings file doesn't set it.
 DESK_CLAUDE_DEFAULT_CLEANUP_DAYS=30
 
-# Session end reasons the user chose (the marks show these as "done"), so a
-# session ended this way is finished and gets no warning.
-DESK_JQ_USER_EXIT_REASONS='["prompt_input_exit", "clear", "logout"]'
-
 # desk_cleanup_period_days
 # Prints `cleanupPeriodDays` from $CLAUDE_CONFIG_DIR/settings.json, or the
 # documented default when the file or the key is absent. Refuses (logs,
@@ -89,7 +85,9 @@ desk_sessions_in_notes() {
 
 # desk_retention_candidates <cutoff_days> <warn_days> <repo> <file>...
 # Every session the notes still name (desk_sessions_in_notes), not
-# live (being written to), not the runner's own, not ended as done, whose
+# live (being written to), not the runner's own, not ended as done (the
+# reader's end_deliberate, except a close by a pass, which the user did not
+# choose and which leaves the work the notes name unfinished), whose
 # transcript sits under $CLAUDE_CONFIG_DIR/projects (the one the settings
 # file read above governs) and is due for deletion within `warn_days`. Each
 # gains `deletes_at` (epoch), `deletion_date` (local YYYY-MM-DD, today for
@@ -103,11 +101,11 @@ desk_retention_candidates() {
 	local projects="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects/"
 	local eligible
 	eligible="$(jq -c --arg runs_root "$DESK_RUNS_ROOT" --arg projects "$projects" \
-		--argjson done_reasons "$DESK_JQ_USER_EXIT_REASONS" "$DESK_JQ_IS_DESK_RUN"'
+		"$DESK_JQ_IS_DESK_RUN"'
 		[ .[] | select(
 			(.live != true)
 			and (is_desk_run | not)
-			and ((.end_reason // "") as $r | $done_reasons | index($r) | not)
+			and ((.end_deliberate == true and .end_reason != "closed-by-pass") | not)
 			and ((.transcript_path // "") | startswith($projects))
 		) ]
 	' <<< "$all")" || return 1

@@ -141,12 +141,24 @@ set_mtime "$outside_tp" $((NOW - 110 * day))
 	entry eeeeeeee-0003 edge-work 106           # exactly 14 days left, named in reading.md
 	entry cccccccc-0004 gamma-work 110 '{"live":true}'
 	entry dddddddd-0005 deskrun-work 110 '{"any_desk_run_start":true}'
-	entry ffffffff-0006 done-work 110 '{"ended":true,"end_reason":"prompt_input_exit"}'
+	entry ffffffff-0006 done-work 110 '{"ended":true,"end_reason":"prompt_input_exit","end_deliberate":true}'
 	entry 99999999-0007 unmentioned-work 110
 	entry 0000aaaa-0008 "Some auto title" 111 '{"name_source":"ai_or_none"}'
 	entry 77777777-0009 past-work 125           # already past due
 	jq -cn --arg tp "$outside_tp" '{id:"88888888-0010", name:"elsewhere-work", name_source:"user", live:false, transcript_path:$tp}'
 } > "$SESSION_STATUS_FIXTURE"
+# Done is the reader's end_deliberate, minus a close by a pass: a resumed-away
+# session is done, a pass-closed or shut-down one still gets its warning.
+{
+	entry 11111111-0011 alpha-work 110 '{"ended":true,"end_reason":"resume","end_deliberate":true}'
+	entry 22222222-0012 alpha-work 110 '{"ended":true,"end_reason":"closed-by-pass","end_deliberate":true}'
+	entry 33333333-0013 alpha-work 110 '{"ended":true,"end_reason":"other","end_deliberate":false}'
+} > "$ROOT/end-reasons.jsonl"
+cp "$SESSION_STATUS_FIXTURE" "$ROOT/main-fixture.jsonl"
+cp "$ROOT/end-reasons.jsonl" "$SESSION_STATUS_FIXTURE"
+ended_ids="$(desk_retention_candidates 120 14 "$repo" "${files[@]}" | jq -r '[.[].id] | sort | join(" ")')"
+cp "$ROOT/main-fixture.jsonl" "$SESSION_STATUS_FIXTURE"
+assert_eq "a resume is done; a close by a pass and a shutdown are not" "22222222-0012 33333333-0013" "$ended_ids"
 hash_transcripts() {
 	find "$CLAUDE_CONFIG_DIR/projects" "$outside_tp" -type f -exec perl -e 'for (@ARGV) { my @s = stat; print "$_ $s[9]\n" }' {} + | sort
 	find "$CLAUDE_CONFIG_DIR/projects" -type f -exec shasum {} + | sort
