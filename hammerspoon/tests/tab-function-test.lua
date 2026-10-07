@@ -324,14 +324,16 @@ osascript_calls, timers_started, last_osascript_script = 0, 0, nil
 DeskOpenTab("echo hi", nil, nil, { background = true })
 assert_eq("background: the tab goes into the other window, by Ghostty's own id", true,
   last_osascript_script ~= nil
-    and last_osascript_script:find('new tab in window id "tab-group-6"', 1, true) ~= nil)
+    and last_osascript_script:find('set w to window id "tab-group-6"', 1, true) ~= nil
+    and last_osascript_script:find("new tab in w with configuration", 1, true) ~= nil)
 assert_eq("background: the focus guard is started", 1, timers_started)
 
 osascript_calls, timers_started, last_osascript_script = 0, 0, nil
 DeskOpenTab("echo hi", nil, nil)
 assert_eq("hotkey (no background): the front window gets the tab, as asked", true,
   last_osascript_script ~= nil
-    and last_osascript_script:find('new tab in window id "tab-group-5"', 1, true) ~= nil)
+    and last_osascript_script:find('set w to window id "tab-group-5"', 1, true) ~= nil
+    and last_osascript_script:find("new tab in w with configuration", 1, true) ~= nil)
 assert_eq("hotkey: no focus guard", 0, timers_started)
 
 script_windows_reply = { { "tab-group-5", "tab-group-6" }, { "typing here", "renamed" } }
@@ -340,6 +342,55 @@ DeskOpenTab("echo hi", nil, nil, { background = true })
 assert_eq("target window not identifiable to Ghostty: a new window, never an untargeted tab", true,
   last_osascript_script ~= nil
     and last_osascript_script:find("new window with configuration", 1, true) ~= nil)
+
+-- How DeskOpenTab reads hs.osascript.applescript's ok, result, descriptor:
+-- success is ok, whatever the result; a failure's message is in the
+-- descriptor, never the (nil) result.
+assert_eq("osascript_error reads the message key", "Ghostty got an error: x.",
+  DeskTab.osascript_error({ OSAScriptErrorMessageKey = "Ghostty got an error: x." }))
+assert_eq("osascript_error falls back to the localized description", "y",
+  DeskTab.osascript_error({ NSLocalizedDescription = "y" }))
+
+local real_applescript = hs.osascript.applescript
+local next_reply
+hs.osascript.applescript = function(script)
+  if script:find("get {id, name} of every window", 1, true) then
+    return true, script_windows_reply, ""
+  end
+  last_osascript_script = script
+  return table.unpack(next_reply, 1, 3)
+end
+local printed = {}
+local real_print = print
+local function open_capturing(reply)
+  next_reply, printed = reply, {}
+  print = function(...) printed[#printed + 1] = table.concat({ ... }, " ") end
+  local r = DeskOpenTab("echo hi", nil, nil)
+  print = real_print
+  return r
+end
+local function printed_has(text)
+  for _, line in ipairs(printed) do
+    if line:find(text, 1, true) then return true end
+  end
+  return false
+end
+script_windows_reply = { { "tab-group-5", "tab-group-6" }, { "typing here", "other" } }
+
+assert_eq("ok with a result is success", true, open_capturing({ true, "opened", "" }))
+assert_eq("ok with no result at all is success too", true, open_capturing({ true, nil, "" }))
+assert_eq("...and logs no failure", false, printed_has("failed"))
+assert_eq("created though Ghostty raised afterwards: success", true,
+  open_capturing({ true, "opened despite: Can't get tab.", "" }))
+assert_eq("...noting what Ghostty said", true, printed_has("opened despite: Can't get tab."))
+assert_eq("a real failure is a failure", false, open_capturing({ false, nil,
+  { OSAScriptErrorMessageKey = "Ghostty got an error: Target window is no longer available." } }))
+assert_eq("...reporting Ghostty's own message, not nil", true,
+  printed_has("osascript failed: Ghostty got an error: Target window is no longer available."))
+assert_eq("the script judges creation by the tab count, re-raising when nothing was made", true,
+  last_osascript_script:find("set countBefore to count of tabs of w", 1, true) ~= nil
+    and last_osascript_script:find("error errMsg number errNum", 1, true) ~= nil)
+hs.osascript.applescript = real_applescript
 
 hs.window.frontmostWindow = real_frontmost
 hs.window.focusedWindow = function() return nil end

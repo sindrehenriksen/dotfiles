@@ -449,6 +449,40 @@ local function tab_configuration(cmd, cwd)
   return "{" .. table.concat(fields, ", ") .. "}"
 end
 
+-- hs.osascript.applescript returns ok, result, descriptor; on failure the
+-- result is nil and the error is a table in the descriptor.
+function DeskTab.osascript_error(descriptor)
+  if type(descriptor) == "table" then
+    return tostring(descriptor.OSAScriptErrorMessageKey
+      or descriptor.NSLocalizedDescription
+      or descriptor.OSAScriptErrorBriefMessageKey
+      or "unknown error")
+  end
+  return tostring(descriptor)
+end
+
+-- An AppleScript that runs `create` in Ghostty and judges it by whether
+-- `count` went up, not by whether the command raised: Ghostty can create
+-- the tab or window and still fail to hand back a reference to it. A real
+-- failure (nothing created) re-raises with Ghostty's own message. Returns
+-- "opened", or "opened despite: <message>". `setup` is an optional first
+-- statement, e.g. binding the target window.
+function DeskTab.created_or_error_script(setup, count, create)
+  return table.concat({
+    'tell application "Ghostty"',
+    setup or "",
+    "set countBefore to " .. count,
+    "try",
+    create,
+    "on error errMsg number errNum",
+    "if (" .. count .. ") > countBefore then return \"opened despite: \" & errMsg",
+    "error errMsg number errNum",
+    "end try",
+    'return "opened"',
+    "end tell",
+  }, "\n")
+end
+
 -- Ghostty's visible windows, front to back (one per tab group: a native
 -- tab bar shows as the selected tab's own window).
 local function ghostty_app_windows()
@@ -562,9 +596,10 @@ function DeskOpenTab(cmd, session_id, cwd, opts)
     local script_id = script_windows
       and DeskTab.match_script_window(decision.window_id, windows, script_windows)
     if script_id then
-      script = string.format(
-        'tell application "Ghostty" to new tab in window id %s with configuration %s',
-        as_string_literal(script_id), tab_configuration(cmd, cwd)
+      script = DeskTab.created_or_error_script(
+        string.format("set w to window id %s", as_string_literal(script_id)),
+        "count of tabs of w",
+        "new tab in w with configuration " .. tab_configuration(cmd, cwd)
       )
     else
       -- Without `in`, Ghostty adds the tab to its own last-focused window,
@@ -581,31 +616,40 @@ function DeskOpenTab(cmd, session_id, cwd, opts)
     return false
   end
   if decision.mode == "new_window" then
-    -- Unverified against real Ghostty: that its result is the new window's
-    -- id, usable below to place it.
-    script = string.format(
-      'tell application "Ghostty" to new window with configuration %s',
-      tab_configuration(cmd, cwd)
+    script = DeskTab.created_or_error_script(
+      nil, "count of windows", "new window with configuration " .. tab_configuration(cmd, cwd)
     )
   end
 
-  local ok, result = hs.osascript.applescript(script)
+  local ok, result, descriptor = hs.osascript.applescript(script)
   -- Ghostty may already have taken focus even when the call reports an
   -- error, so the guard runs either way.
   if before then restore_focus_when_taken(before) end
   if not ok then
-    print("DeskOpenTab: osascript failed: " .. tostring(result))
+    print("DeskOpenTab: osascript failed: " .. DeskTab.osascript_error(descriptor))
     return false
   end
+  if type(result) == "string" and result:find("^opened despite: ") then
+    print("DeskOpenTab: " .. result)
+  end
 
-  if decision.mode == "new_window" then
-    local win = tonumber(result) and hs.window.get(tonumber(result))
-    local scr = decision.screen_id and screens_by_id[decision.screen_id]
-    if win and scr then
-      win:setFrame(slot_frame(scr, "upper_C"))
-    else
-      print("DeskOpenTab: opened a new window but could not place it (id " .. tostring(result) .. ")")
-    end
+  local scr = decision.mode == "new_window" and decision.screen_id and screens_by_id[decision.screen_id]
+  if scr then
+    -- Ghostty's result names the window by its own id, which Hammerspoon
+    -- cannot look up, and the window only appears on a later run-loop
+    -- tick: so it is found as the Ghostty window that was not there before.
+    local known = {}
+    for _, w in ipairs(windows) do known[w.id] = true end
+    hs.timer.doAfter(0.3, function()
+      for _, w in ipairs(ghostty_app_windows()) do
+        if not known[w.id] then
+          local win = hs.window.get(w.id)
+          if win then win:setFrame(slot_frame(scr, "upper_C")) end
+          return
+        end
+      end
+      print("DeskOpenTab: opened a new window but could not find it to place it")
+    end)
   end
 
   return true
@@ -717,9 +761,9 @@ function DeskFocusTab(tty)
     'end tell',
     target.window_id, target.tab_index
   )
-  local ok, result = hs.osascript.applescript(script)
+  local ok, _, descriptor = hs.osascript.applescript(script)
   if not ok then
-    print("DeskFocusTab: osascript failed: " .. tostring(result))
+    print("DeskFocusTab: osascript failed: " .. DeskTab.osascript_error(descriptor))
     return false
   end
   return true
