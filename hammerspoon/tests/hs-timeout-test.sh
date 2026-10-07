@@ -95,5 +95,21 @@ assert_eq "a true from DeskFocusTab is exit 0" "0" "$status"
 assert_eq "hs is given its own IPC timeout too" "-t" "$(head -n1 "$ROOT/argv")"
 
 echo
+echo "=== the flags argument ==="
+stub_hs 'for a in "$@"; do last=$a; done; printf "%s\n" "$last" > "'"$ROOT"'/expr"; echo true'
+"$OPEN_TAB_SH" "echo hi" "" "" background,close < /dev/null > /dev/null 2>&1
+assert_true "background and close both reach DeskOpenTab" \
+	"$(grep -qF '{ background = true,close_on_exit = true })' "$ROOT/expr" && echo true || echo false)"
+"$OPEN_TAB_SH" "echo hi" "" "" background < /dev/null > /dev/null 2>&1
+assert_true "background alone leaves the tab open after exit (the default)" \
+	"$(grep -qF '{ background = true })' "$ROOT/expr" && echo true || echo false)"
+"$OPEN_TAB_SH" "echo hi" < /dev/null > /dev/null 2>&1
+assert_true "no flags: plain options" "$(grep -qF ', nil, nil, nil)' "$ROOT/expr" && echo true || echo false)"
+"$OPEN_TAB_SH" "echo hi" "" "" bogus < /dev/null > /dev/null 2>&1
+assert_eq "an unknown flag is refused" "2" "$?"
+/bin/bash "$OPEN_TAB_SH" "echo hi" < /dev/null > /dev/null 2>&1
+assert_eq "macOS's bash 3.2 runs it with no flags too" "0" "$?"
+
+echo
 echo "=== summary: $pass passed, $fail failed ==="
 [ "$fail" -eq 0 ]

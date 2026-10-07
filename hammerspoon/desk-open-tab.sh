@@ -4,22 +4,35 @@
 # anything that wants a tab opened (the notes hotkey, a scheduled pass) does
 # not have to hand-quote a Lua expression itself.
 #
-# Usage: desk-open-tab.sh <command> [session-id] [cwd] [background]
+# Usage: desk-open-tab.sh <command> [session-id] [cwd] [flags]
 # `session-id` and `cwd` are optional; pass "" to skip session-id and still
-# give a cwd. `background` (what a scheduled pass passes) opens the tab
-# without taking focus from wherever the user is typing; without it the new
-# tab is focused, as the notes hotkey wants.
+# give a cwd. `flags` is a comma-separated list:
+#   background  open without taking focus from wherever the user is typing
+#               (what a scheduled pass passes); without it the new tab is
+#               focused, as the notes hotkey wants;
+#   close       close the tab when its command exits (a check or one-shot
+#               tab); without it the tab stays open after the command ends,
+#               so a finished session can still be read.
 set -u
 
-usage='usage: desk-open-tab.sh <command> [session-id] [cwd] [background]'
+usage='usage: desk-open-tab.sh <command> [session-id] [cwd] [background,close]'
 cmd=${1:?$usage}
 session_id=${2:-}
 cwd=${3:-}
-case ${4:-} in
-    "") opts=nil ;;
-    background) opts='{ background = true }' ;;
-    *) printf '%s\n' "$usage" >&2; exit 2 ;;
-esac
+fields=()
+IFS=, read -r -a flags <<< "${4:-}"
+for flag in ${flags[@]+"${flags[@]}"}; do
+    case $flag in
+        background) fields+=("background = true") ;;
+        close) fields+=("close_on_exit = true") ;;
+        *) printf '%s\n' "$usage" >&2; exit 2 ;;
+    esac
+done
+if [ "${#fields[@]}" -eq 0 ]; then
+    opts=nil
+else
+    opts="{ $(IFS=,; printf '%s' "${fields[*]}") }"
+fi
 
 # A string literal for the Lua expression `hs -c` evaluates — never for the
 # shell, which already sees these as ordinary argv strings.
