@@ -1289,10 +1289,11 @@ desk_follow_up_summary() {
 # names, when more than one resolves, are logged only (their
 # names go in status); the most recently active one is what
 # actually gets a tab. With no `follow_up_step` configured there is no tab.
-# Otherwise there always is one, and it is always an interactive `claude`:
-# when no call of that step ran this pass (a weekend slot, a failure before
-# it) or its session cannot be found, a fresh status session opens instead,
-# whose first turn tells the user how the pass went.
+# Otherwise there is exactly one per (pass, scheduled date), except on the
+# weekend slot of a weekdays-only pass, which gets none, and it is always an
+# interactive `claude`: when no call of that step ran this pass (a failure
+# before it) or its session cannot be found, a fresh status session opens
+# instead, whose first turn tells the user how the pass went.
 #
 # At most one tab is ever opened per (pass, scheduled_date) — a guard
 # stamp under $DESK_GUARD_DIR, written only once this function has
@@ -1321,6 +1322,14 @@ desk_follow_up_summary() {
 desk_open_follow_up_tab() {
 	local pass="$1" scheduled_date="$2" follow_up_step="$3" repo="${4:-}"
 	if [ -z "$follow_up_step" ]; then
+		echo "ok"
+		return
+	fi
+
+	# A weekend slot of a weekdays-only pass ran only the commit: nothing
+	# to follow up, and the user is not at this machine then.
+	if [ "${DESK_PASS_WEEKEND_SKIP:-false}" = "true" ]; then
+		desk_log "$pass" "follow-up tab: weekend slot — no tab"
 		echo "ok"
 		return
 	fi
@@ -1369,8 +1378,8 @@ desk_open_follow_up_tab() {
 	local helper="${DESK_OPEN_TAB_BIN:-${DESK_OPEN_TAB:-desk-open-tab.sh}}"
 	local command
 	if [ -z "$id" ] || [ -z "$cwd" ]; then
-		# No session of this pass to resume: no model call ran (a weekend slot,
-		# a failure before the step), or its session cannot be found. The user
+		# No session of this pass to resume: no model call ran (a failure
+		# before the step), or its session cannot be found. The user
 		# still gets an interactive session, a fresh one told the pass's status.
 		desk_log "$pass" "follow-up tab: no $follow_up_step session to resume — opening a status session instead"
 		local status_cwd="$runs_dir/status"
@@ -1415,8 +1424,7 @@ desk_open_follow_up_tab() {
 # desk_follow_up_run_status <pass>
 # One paragraph on how this pass's run went, from the status file the pass
 # has just written and the pass's step list: which steps it has, and whether
-# they all ran, which sources failed, where it stopped, or that a weekend slot
-# ran only the commit (desk-run exports DESK_PASS_WEEKEND_SKIP for that).
+# they all ran, which sources failed, or where it stopped.
 desk_follow_up_run_status() {
 	local pass="$1" steps
 	# Each step as "<id> (<what it does>)", so a reply can name it in words.
@@ -1429,12 +1437,11 @@ desk_follow_up_run_status() {
 				write: "marking the fetched mail read", capture: "session capture", close: "closing idle sessions",
 				retention: "transcript deletion warnings", open_tab: "tab"}[.kind] // .kind end) + ")"]
 		| join(", ")' "$DESK_CONFIG" 2> /dev/null)"
-	desk_status_read | jq -r --arg p "$pass" --arg steps "$steps" --arg weekend "${DESK_PASS_WEEKEND_SKIP:-false}" '
+	desk_status_read | jq -r --arg p "$pass" --arg steps "$steps" '
 		(.passes[$p] // {}) as $s
 		| (($s.failed_sources // []) | join(", ")) as $failed
 		| "Its steps, in order: \($steps). "
-		+ (if $weekend == "true" then "This was a weekend slot, so only the commit step ran; the model steps run on weekdays."
-			elif $s.result == "ok" then "It finished ok: every step ran."
+		+ (if $s.result == "ok" then "It finished ok: every step ran."
 			elif $s.result == "partial" then "It finished partial: these sources failed and are retried at the next slot: \($failed). Every other step ran."
 			elif $s.result == "failed" then "It failed at step \($s.stopped_at // "unknown"), so the steps after that did not run."
 				+ (if $failed != "" then " These sources had failed too: \($failed)." else "" end)

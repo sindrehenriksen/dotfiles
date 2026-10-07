@@ -268,12 +268,42 @@ assert_true "the command reads its prompt from that file, on one line" \
 	"$(grep -qF "\"\$(cat '$status_prompt')\"" <<< "$cmd" && [ "$(printf '%s\n' "$cmd" | wc -l | tr -d ' ')" = "1" ] && echo true || echo false)"
 
 echo
-echo "=== a weekend slot that ran no model step says so ==="
+echo "=== a weekend slot opens no tab, even with a session to resume ==="
 : > "$OPEN_TAB_LOG"
+: > "$ARGV_LOG"
+seed_judge_session morning 2026-10-17 "88888888-8888-4888-8888-888888888888" > /dev/null
 desk_status_set_result morning ok "" '[]' 2026-10-17
-DESK_PASS_WEEKEND_SKIP=true desk_open_follow_up_tab morning 2026-10-17 J "$repo" > /dev/null 2>&1
-assert_true "the status session's prompt names the weekend skip" \
-	"$(grep -qF 'This was a weekend slot' "$DESK_RUNS_ROOT/morning-2026-10-17/status/prompt.txt" && echo true || echo false)"
+result="$(DESK_PASS_WEEKEND_SKIP=true desk_open_follow_up_tab morning 2026-10-17 J "$repo" 2> /dev/null)"
+assert_eq "reports ok" "ok" "$result"
+assert_eq "no tab" "0" "$(wc -l < "$OPEN_TAB_LOG" | tr -d ' ')"
+assert_eq "no summary call" "0" "$(wc -l < "$ARGV_LOG" | tr -d ' ')"
+
+echo
+echo "=== one tab per pass a day: visible close calls and same-day retries add none ==="
+: > "$OPEN_TAB_LOG"
+d=2026-10-19
+sid9="99999999-9999-4999-8999-999999999999"
+seed_judge_session morning "$d" "$sid9" > /dev/null
+for c in aaaa1111 bbbb2222; do
+	mkdir -p "$DESK_RUNS_ROOT/morning-$d/close-$c"
+	echo "$c-0000-4000-8000-000000000000" > "$DESK_RUNS_ROOT/morning-$d/close-$c.session-id"
+	jq -cn --arg s "$c-0000-4000-8000-000000000000" --arg cwd "$DESK_RUNS_ROOT/morning-$d/close-$c" \
+		'{id:$s, name:"desk-morning-close", cwd:$cwd, last_activity:9, live:false}' >> "$SESSIONS_FIXTURE"
+done
+desk_status_set_result morning partial "" '["F-web"]' "$d"
+desk_open_follow_up_tab morning "$d" J "$repo" > /dev/null 2>&1
+desk_status_set_result morning ok "" '[]' "$d"
+desk_open_follow_up_tab morning "$d" J "$repo" > /dev/null 2>&1
+assert_eq "one tab across the partial run and its retry" "1" "$(wc -l < "$OPEN_TAB_LOG" | tr -d ' ')"
+assert_eq "and it is J's, not a close call's" "claude --resume '$sid9'" "$(cat "$OPEN_TAB_LOG")"
+: > "$OPEN_TAB_LOG"
+d=2026-10-20
+desk_status_set_result morning failed commit-push '[]' "$d"
+desk_open_follow_up_tab morning "$d" J "$repo" > /dev/null 2>&1
+seed_judge_session morning "$d" "aaaaaaaa-9999-4999-8999-999999999999" > /dev/null
+desk_status_set_result morning ok "" '[]' "$d"
+desk_open_follow_up_tab morning "$d" J "$repo" > /dev/null 2>&1
+assert_eq "a status session, then a later J the same day: still one tab" "1" "$(wc -l < "$OPEN_TAB_LOG" | tr -d ' ')"
 
 echo
 echo "=== summary: $pass passed, $fail failed ==="
