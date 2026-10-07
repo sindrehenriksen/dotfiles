@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # last_human_message is the timestamp of the latest transcript record that
-# is text he typed: not a tool_result, not meta, not a compaction summary,
+# is text the user typed: not a tool_result, not meta, not a compaction summary,
 # not a task notification or a command/bash/system wrapper. Recent tool
 # results, status updates and other activity after an old human message
 # must not move it. Falls back to the session's start. From-scratch
