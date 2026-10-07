@@ -781,6 +781,7 @@ do
 		assert_eq(desc .. ": the review bar starts with the same text", text .. " · " .. review.KEY_HINT, review_bar)
 	end
 	assert_true("before a review: the recorded count, both files", vim.wo[win].winbar:match("%(4 untaken%)") ~= nil)
+	assert_true("then the keys still being learned, right-aligned", vim.wo[win].winbar:match("%%=" .. vim.pesc(review.NOTES_IDLE_HINT) .. "$") ~= nil)
 	assert_true("review opens", review.open_review(nb))
 	local rb = review_buf_of(nb)
 	local rw = vim.fn.bufwinid(rb)
@@ -821,7 +822,7 @@ do
 	counts("a save of the split records them all", 0, 0)
 	vim.cmd("wq")
 	assert_true("after the review, the recorded count again: the takes were recorded at the save", vim.wo[win].winbar:match("%(1 untaken%)") ~= nil)
-	assert_true("and no keys", vim.wo[win].winbar:match("%%=") == nil)
+	assert_true("and the keys for outside a review", vim.wo[win].winbar:match("%%=" .. vim.pesc(review.NOTES_IDLE_HINT) .. "$") ~= nil)
 end
 
 print("\n=== a removal is taken from the review split: ]c lands below its filler, where dp takes it ===")
@@ -1057,7 +1058,7 @@ do
 		assert_eq(desc .. ": showing the notes", nb, vim.api.nvim_win_get_buf(wins[1]))
 		assert_true(desc .. ": diff off", not vim.wo[wins[1]].diff)
 		assert_eq(desc .. ": no review colours", "", vim.wo[wins[1]].winhighlight)
-		assert_true(desc .. ": the status line, not the keys", vim.wo[wins[1]].winbar ~= review.KEY_HINT)
+		assert_true(desc .. ": the status line with the keys for outside a review", vim.wo[wins[1]].winbar:match("%%=" .. vim.pesc(review.NOTES_IDLE_HINT) .. "$") ~= nil)
 		assert_true(desc .. ": no review buffer remains", review_buf_of(nb) == nil)
 	end
 	local orig = review.confirm

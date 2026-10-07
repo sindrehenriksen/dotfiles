@@ -655,6 +655,8 @@ M.KEY_HINT = "dp take · ␣gA one · ␣gD decline · u undo · zo/zc fold · z
 -- The notes window's keys while a review is open, right-aligned after its
 -- status line. `u` there is plain undo, which is right in that buffer.
 M.NOTES_KEY_HINT = "do take · u undo · C-t up"
+-- And with no review open, the desk keys still being learned.
+M.NOTES_IDLE_HINT = "␣gR review · ␣gx open/jump · ␣go list"
 
 --- The review key: opens the merged view in a split above the notes window,
 --- and focuses it (or focuses the one already open for this proposal).
@@ -1632,10 +1634,7 @@ function M.refresh_status_line(bufnr, recount)
 		M.recount_saved(s)
 	end
 	local left = s and M.left(s)
-	local line = bar_text(M.status_line(bufnr, left))
-	if s then
-		line = line .. "%=" .. M.NOTES_KEY_HINT
-	end
+	local line = bar_text(M.status_line(bufnr, left)) .. "%=" .. (s and M.NOTES_KEY_HINT or M.NOTES_IDLE_HINT)
 	for _, win in ipairs(vim.fn.win_findbuf(bufnr)) do
 		vim.wo[win].winbar = line
 	end
