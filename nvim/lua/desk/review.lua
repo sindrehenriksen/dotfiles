@@ -514,19 +514,46 @@ local function clear_winhl(win)
 	end
 end
 
--- Turns diff mode and the review's colours off in every window showing the
--- notes, and puts the status line back over them.
-local function tidy_notes_windows(notes_buf)
+-- Soft wrap while reviewing: `diffthis` turns 'wrap' off, which runs long
+-- prose lines off-screen, and bullets wrap under their own text. Diff mode
+-- doesn't restore what it never set, and `diffoff` leaves a 'wrap' set after
+-- `diffthis` on, so the notes window's own values are kept and put back.
+local SOFT_WRAP = { wrap = true, linebreak = true, breakindent = true }
+
+local function wrap_opts(win)
+	local t = {}
+	for o in pairs(SOFT_WRAP) do
+		t[o] = vim.wo[win][o]
+	end
+	return t
+end
+
+local function set_wrap_opts(win, t)
+	for o, v in pairs(t) do
+		vim.api.nvim_set_option_value(o, v, { scope = "local", win = win })
+	end
+end
+
+-- Turns diff mode, the review's colours and its soft wrap off in every window
+-- showing the notes as part of the review, and puts the status line back over
+-- them.
+local function tidy_notes_windows(s)
+	local notes_buf = s.notes_buf
 	if not vim.api.nvim_buf_is_valid(notes_buf) then
 		return
 	end
 	for _, win in ipairs(vim.fn.win_findbuf(notes_buf)) do
+		local hl = vim.wo[win].winhighlight
+		local in_review = vim.wo[win].diff or hl == M.NOTES_WINHL or hl == M.REVIEW_WINHL
 		if vim.wo[win].diff then
 			vim.api.nvim_win_call(win, function()
 				vim.cmd("diffoff")
 			end)
 		end
 		clear_winhl(win)
+		if in_review and s.notes_wrap then
+			set_wrap_opts(win, s.notes_wrap)
+		end
 	end
 	M.refresh_status_line(notes_buf)
 end
@@ -571,6 +598,7 @@ local function end_from_notes(s)
 				vim.api.nvim_win_call(win, function()
 					vim.cmd("diffthis")
 				end)
+				set_wrap_opts(win, SOFT_WRAP)
 				set_winhl(win, M.NOTES_WINHL)
 				s.notes_win = win
 				watch_notes_window(s, win)
@@ -584,7 +612,7 @@ local function end_from_notes(s)
 		vim.api.nvim_win_set_buf(review_win, s.notes_buf)
 	end
 	close_session(s)
-	tidy_notes_windows(s.notes_buf)
+	tidy_notes_windows(s)
 end
 
 -- The events run inside a window being closed, where the layout can't
@@ -714,12 +742,15 @@ function M.open_review(notes_buf)
 	M.place_marks(s, ours)
 	M.place_del_marks(s)
 
+	s.notes_wrap = wrap_opts(notes_win)
 	vim.api.nvim_win_call(review_win, function()
 		vim.cmd("diffthis")
 	end)
 	vim.api.nvim_win_call(notes_win, function()
 		vim.cmd("diffthis")
 	end)
+	set_wrap_opts(review_win, SOFT_WRAP)
+	set_wrap_opts(notes_win, SOFT_WRAP)
 	install_colours()
 	set_winhl(review_win, M.REVIEW_WINHL)
 	set_winhl(notes_win, M.NOTES_WINHL)
@@ -759,7 +790,7 @@ function M.open_review(notes_buf)
 			if sessions[notes_buf] == nil then
 				pcall(vim.api.nvim_del_augroup_by_name, "desk_review_notes_" .. notes_buf)
 			end
-			tidy_notes_windows(notes_buf)
+			tidy_notes_windows(s)
 		end,
 	})
 	-- Plain `do` on the last line does nothing when a suggestion is appended

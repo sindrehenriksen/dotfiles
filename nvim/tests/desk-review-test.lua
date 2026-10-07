@@ -1074,6 +1074,38 @@ do
 	review.confirm = orig
 end
 
+print("\n=== soft wrap while reviewing, the notes window's own values back after ===")
+do
+	local function opts(win)
+		return { vim.wo[win].wrap, vim.wo[win].linebreak, vim.wo[win].breakindent }
+	end
+	local function setup()
+		local r = new_repo(BASE)
+		build(r, "2026-10-01", { item("n1") })
+		local nb = open_notes(r)
+		review.attach(nb)
+		local nw = vim.fn.bufwinid(nb)
+		vim.wo[nw].wrap, vim.wo[nw].linebreak, vim.wo[nw].breakindent = false, false, false
+		assert_true("review opens", review.open_review(nb))
+		local rb = review_buf_of(nb)
+		return nb, rb, vim.fn.bufwinid(rb), nw
+	end
+	local nb, _, rw, nw = setup()
+	assert_eq("the review window wraps, at word breaks, indented", { true, true, true }, opts(rw))
+	assert_eq("so does the notes window", { true, true, true }, opts(nw))
+	vim.api.nvim_set_current_win(rw)
+	vim.cmd("quit")
+	assert_eq(":q in the review window puts the notes window's own values back", { false, false, false }, opts(vim.fn.bufwinid(nb)))
+
+	local nb2, _, _, nw2 = setup()
+	vim.api.nvim_set_current_win(nw2)
+	vim.cmd("quit")
+	vim.wait(20, function()
+		return false
+	end)
+	assert_eq(":q in the notes window: the window left showing them has their own values", { false, false, false }, opts(vim.fn.bufwinid(nb2)))
+end
+
 print(string.format("\n=== summary: %d passed, %d failed ===", pass, fail))
 if fail > 0 then
 	os.exit(1)
