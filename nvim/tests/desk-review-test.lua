@@ -436,6 +436,12 @@ end
 assert_true("the decline key is mapped in the review buffer", mapped(rb, "<leader>gD"))
 assert_true("and not in the notes buffer", not mapped(nb7, "<leader>gD"))
 assert_true("take-one is mapped in the review buffer only", mapped(rb, "<leader>gA") and not mapped(nb7, "<leader>gA"))
+assert_true("dp is the take in the review buffer", vim.api.nvim_buf_call(rb, function()
+	return vim.fn.maparg("dp", "n", false, true).buffer == 1
+end))
+assert_true("and do in the notes buffer", vim.api.nvim_buf_call(nb7, function()
+	return vim.fn.maparg("do", "n", false, true).buffer == 1
+end))
 
 print("\n=== format_source: a short, honest label, never the raw field ===")
 assert_eq("nil source: notes", "notes", review.format_source(nil))
@@ -741,6 +747,82 @@ do
 	vim.cmd("normal do")
 	review.commit(nb)
 	assert_eq("after the user's commit nothing is untaken: silent", "", vim.wo[win].winbar)
+end
+
+print("\n=== dp in the review split takes the hunk, recorded like do from the notes side ===")
+do
+	local function taken_headlines(r)
+		local t = {}
+		for _, rec in pairs(ledger.taken_by_id(ledger.read(r))) do
+			t[#t + 1] = rec.headline
+		end
+		table.sort(t)
+		return t
+	end
+	local function open(r)
+		local nb = open_notes(r)
+		review.attach(nb)
+		assert_true("review opens", review.open_review(nb))
+		local rb = review_buf_of(nb)
+		return nb, rb, vim.fn.bufwinid(rb), vim.fn.bufwinid(nb)
+	end
+
+	-- dp, then commit the notes
+	local r = new_repo(BASE)
+	build(r, "2026-10-01", {
+		item("n1"),
+		item("a1", { kind = "add", target = { under = "Section A" }, after = "  added", source = "", headline = "add A" }),
+	})
+	local nb, rb, rw = open(r)
+	go_to(rw, rb, "NEWS n1")
+	vim.cmd("normal dp")
+	assert_eq("the news line reached the user's buffer", "NEWS n1", lines_of(nb)[1])
+	assert_true("and only that hunk", line_of(nb, "  added") == nil)
+	assert_eq("the review buffer is unchanged by a take", false, vim.bo[rb].modified)
+	review.commit(nb)
+	assert_eq("commit records it taken", { "headline n1" }, taken_headlines(r))
+
+	-- dp, edit the taken line in the notes, save the split
+	local r2 = new_repo(BASE)
+	build(r2, "2026-10-01", { item("a1", { kind = "add", target = { under = "Section A" }, after = "  - read RFC", source = "https://example.invalid/rfc", headline = "read rfc" }) })
+	local nb2, rb2, rw2 = open(r2)
+	go_to(rw2, rb2, "  - read RFC")
+	vim.cmd("normal dp")
+	local k = assert(line_of(nb2, "  - read RFC"), "dp took the add")
+	vim.api.nvim_buf_set_lines(nb2, k - 1, k, false, { "  - read RFC (skim)" })
+	vim.api.nvim_set_current_win(rw2)
+	vim.cmd("write")
+	assert_eq("saving the split does not decline a suggestion taken with dp and edited", {}, declined_ids(r2))
+	assert_eq("it is recorded taken at that save", { "read rfc" }, taken_headlines(r2))
+
+	-- dp, then u in the notes window, then save: not taken
+	local r3 = new_repo(BASE)
+	build(r3, "2026-10-01", { item("n1") })
+	local nb3, rb3, rw3, nw3 = open(r3)
+	go_to(rw3, rb3, "NEWS n1")
+	vim.cmd("normal dp")
+	assert_eq("taken into the notes", "NEWS n1", lines_of(nb3)[1])
+	vim.api.nvim_set_current_win(nw3)
+	vim.cmd("normal u")
+	assert_eq("u in the notes window undoes it", BASE, lines_of(nb3))
+	vim.cmd("write")
+	assert_eq("an undone dp take is not recorded", {}, taken_headlines(r3))
+
+	-- dp on the split's last line: a removal of the notes' last line, with
+	-- another hunk above it
+	local r4 = new_repo({ "Section A", "  existing", "Section B", "  - stale" })
+	build(r4, "2026-10-01", {
+		item("n1"),
+		item("rm", { kind = "remove", target = { at = "  - stale" }, before = "  - stale", after = "", source = "notes", headline = "drop stale" }),
+	})
+	local nb4, rb4, rw4 = open(r4)
+	vim.api.nvim_set_current_win(rw4)
+	vim.api.nvim_win_set_cursor(rw4, { vim.api.nvim_buf_line_count(rb4), 0 })
+	vim.cmd("diffupdate")
+	vim.cmd("normal dp")
+	assert_eq("dp on the last line takes the removal after it", { "Section A", "  existing", "Section B" }, lines_of(nb4))
+	review.commit(nb4)
+	assert_eq("and it is recorded taken", { "drop stale" }, taken_headlines(r4))
 end
 
 print(string.format("\n=== summary: %d passed, %d failed ===", pass, fail))

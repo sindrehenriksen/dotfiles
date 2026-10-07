@@ -296,6 +296,7 @@ In the review split:
 
 | Key | Action |
 |---|---|
+| `dp` | Take the diff hunk under the cursor into your notes buffer: every adjacent suggestion in it, as `do` from the notes window does. `u` in the notes window undoes a take. |
 | `<leader>gA` | Take just the suggestion under the cursor into your notes buffer. |
 | `<leader>gD` | Decline the suggestion under the cursor; `u` undoes it. |
 | `<leader>go` | The overview. |
