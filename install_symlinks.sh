@@ -81,6 +81,13 @@ if [[ "$(uname)" == "Darwin" ]]; then
     link ~/dotfiles/claude/session-status.sh ~/.local/bin/session-status.sh
     link ~/dotfiles/hammerspoon/desk-open-tab.sh ~/.local/bin/desk-open-tab.sh
     link ~/dotfiles/hammerspoon/desk-focus-tab.sh ~/.local/bin/desk-focus-tab.sh
+    # Reopening sessions after a restart, and the skill that runs it: macOS
+    # only, since it opens Ghostty tabs through Hammerspoon, so the skill is
+    # linked here rather than listed in generic_skills.
+    link ~/dotfiles/claude/reopen-sessions.sh ~/.local/bin/reopen-sessions.sh
+    for dir in ~/.agents/skills ~/.claude/skills ~/.claude-work/skills; do
+        link ~/dotfiles/agents/skills/reopen-sessions "$dir"/reopen-sessions
+    done
 
     # macOS: keyboard remapping at login — see macos/README.md
     mkdir -p ~/Library/LaunchAgents
