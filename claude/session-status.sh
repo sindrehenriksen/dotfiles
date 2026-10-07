@@ -35,7 +35,10 @@
 # it), ended (true only when no process for the session is live and its
 # latest run has an end event; see EVENTS_REDUCE for how ends are matched to
 # processes), end_reason (that end's reason, null unless ended),
-# close_failed, close_failed_at, transcript_path,
+# close_failed, close_failed_at, transcript_path (the path the last start
+# event recorded when that file exists, else the transcript found by id:
+# Claude Code can record a path that never existed for a session resumed
+# from another directory),
 # has_start_event, pid, tty (the last two null unless live), duplicate_pids
 # (true when more than one $CLAUDE_CONFIG_DIR/sessions/*.json pid file
 # names this session id — the session open in two processes at once, a
@@ -214,6 +217,26 @@ if [ -d "$STORE_DIR" ]; then
     fi
 fi
 [ -n "$events_by_id" ] || events_by_id='{}'
+
+# Which recorded transcript paths exist on disk. Claude Code can hand a
+# SessionStart a path that doesn't exist: resumed from another directory, it
+# names the project folder for that directory while the transcript stays in
+# the one it was started in. Checked here rather than looked up in the scan
+# below, since a desk-run call's transcript sits under its own config dir,
+# which this reader doesn't scan.
+existing_event_paths='{}'
+if [ "$events_by_id" != '{}' ]; then
+    existing_lines=()
+    while IFS= read -r p; do
+        [ -n "$p" ] && [ -f "$p" ] && existing_lines+=("$p")
+    done < <(jq -r '.[] | .transcript_path // empty' <<< "$events_by_id" 2>/dev/null)
+    if [ "${#existing_lines[@]}" -gt 0 ]; then
+        existing_event_paths=$(printf '%s\n' "${existing_lines[@]}" | jq -R -s -c '
+            split("\n") | map(select(length>0) | {key: ., value: true}) | from_entries
+        ' 2>/dev/null)
+    fi
+fi
+[ -n "$existing_event_paths" ] || existing_event_paths='{}'
 
 # --------------------------------------------------------------------------
 # 2. Pid files: always Claude Code's own valid JSON, so one batched read is
@@ -635,6 +658,7 @@ fi
 printf '%s' "$titles_by_id" > "$WORK_DIR/titles.json"
 entries_ndjson=$(jq -n -c \
     --argjson events "$events_by_id" \
+    --argjson existing "$existing_event_paths" \
     --argjson pidfiles "$pidfiles_by_id" \
     --argjson live "$live_by_id" \
     --argjson pids "$pid_by_id" \
@@ -673,9 +697,12 @@ entries_ndjson=$(jq -n -c \
         else "unknown"
         end
       ) as $status
-    | (if ($ev.transcript_path // "") != "" then $ev.transcript_path
+    # The recorded path only when it exists, else the transcript found by
+    # id, else the recorded path anyway (a new session whose transcript
+    # is not written yet).
+    | (if ($ev.transcript_path // "") != "" and ($existing[$ev.transcript_path] // false) then $ev.transcript_path
        elif $tp_path != null then $tp_path
-       else "" end) as $transcript_path
+       else ($ev.transcript_path // "") end) as $transcript_path
     | (if ($ev.cwd // "") != "" then $ev.cwd
        elif $pf != null then ($pf.cwd // "")
        else "" end) as $cwd

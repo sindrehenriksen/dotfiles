@@ -164,6 +164,21 @@ printf '{"type":"ai-title","aiTitle":"Old Auto F","sessionId":"sess-f"}\n' > "$t
 printf '{"type":"ai-title","aiTitle":"Ghost","sessionId":"sess-ghost"}\n' \
     > "$PROJ_DIR/subagents/sess-ghost.jsonl"
 
+# --- sess-w: resumed from another directory, the hook names a transcript in
+# that directory's project folder that doesn't exist; the real one stays in
+# the folder it was started in ----------------------------------------------
+tp_w="$PROJ_DIR/sess-w.jsonl"
+printf '{"type":"ai-title","aiTitle":"Auto W","sessionId":"sess-w"}\n' > "$tp_w"
+rec_start sess-w "$PROJ_DIR" "$tp_w" startup
+rec_start sess-w /tmp/fixture "$CONFIG_DIR/projects/-tmp-fixture/sess-w.jsonl" resume
+
+# --- sess-x: a transcript under a config dir the reader doesn't scan (a
+# desk-run call's own) -------------------------------------------------------
+tp_x="$TMP/other-config/projects/-tmp-x/sess-x.jsonl"
+mkdir -p "$(dirname "$tp_x")"
+: > "$tp_x"
+rec_start sess-x /tmp/x "$tp_x" startup
+
 echo "=== recorder never logged an error ==="
 if [ -s "$LOG_FILE" ]; then
     bad "recorder log is empty (nothing swallowed)"
@@ -224,11 +239,24 @@ assert_eq "sess-i: reader surfaces the hook's own source untouched" "startup" "$
 
 assert_eq "subagent transcript never surfaces as its own session" "" "$(get sess-ghost)"
 
+assert_eq "sess-w: transcript_path is the one that exists, not the hook's" "$tp_w" "$(field sess-w .transcript_path)"
+assert_eq "sess-x: an existing recorded path outside the scanned config dir stands" "$tp_x" "$(field sess-x .transcript_path)"
+assert_eq "sess-b: an existing recorded path stands" "$tp_b" "$(field sess-b .transcript_path)"
+
 echo "=== reader cache actually caches (second run reuses it, doesn't grow) ==="
 cache_files_before=$(find "$CACHE_DIR" -type f | wc -l | tr -d ' ')
 "$READER" > /dev/null
 cache_files_after=$(find "$CACHE_DIR" -type f | wc -l | tr -d ' ')
 assert_eq "cache file count stable across a second run" "$cache_files_before" "$cache_files_after"
+
+echo "=== prune keeps a record whose recorded path is wrong but whose transcript exists ==="
+# A stale boot marker makes the next start run the once-per-boot prune.
+printf 'stale' > "$STORE_DIR/.last-pruned-boot"
+jq -cn '{event:"start", time:1, source:"startup", cwd:"/gone", transcript_path:"/nonexistent/projects/-gone/sess-gone.jsonl", boot:"0"}' \
+    > "$STORE_DIR/sess-gone.jsonl"
+rec_start sess-prune-trigger "$PROJ_DIR" "$PROJ_DIR/sess-prune-trigger.jsonl" startup
+assert_eq "sess-w's record survives the prune" "true" "$([ -f "$STORE_DIR/sess-w.jsonl" ] && echo true || echo false)"
+assert_eq "a record whose transcript is gone everywhere is pruned" "false" "$([ -f "$STORE_DIR/sess-gone.jsonl" ] && echo true || echo false)"
 
 kill "$c_pid" 2>/dev/null
 wait "$c_pid" 2>/dev/null

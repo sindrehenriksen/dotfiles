@@ -52,17 +52,25 @@ boot_id() {
 # Deletes a session's record once its transcript is gone — Claude Code's own
 # retention already decided the record isn't worth keeping. Gated on a boot
 # marker so the full scan runs at most once per boot, never on every session
-# start.
+# start. A recorded path can name a transcript that never existed (a session
+# resumed from another directory is given that directory's project folder),
+# so the transcript counts as present if any start's path exists, or the
+# session's transcript sits in a sibling project folder of one.
 maybe_prune() {
-    local boot=$1 last_boot="" f tp
+    local boot=$1 last_boot="" f tp sid g keep
     [ -f "$BOOT_MARKER" ] && last_boot=$(cat "$BOOT_MARKER" 2>/dev/null)
     [ "$last_boot" = "$boot" ] && return 0
     for f in "$STORE_DIR"/*.jsonl; do
         [ -f "$f" ] || continue
-        tp=$(jq -r 'select(.event=="start") | .transcript_path' "$f" 2>/dev/null | tail -1)
-        if [ -z "$tp" ] || [ ! -e "$tp" ]; then
-            rm -f "$f"
-        fi
+        sid=$(basename "$f" .jsonl)
+        keep=""
+        while IFS= read -r tp; do
+            [ -e "$tp" ] && { keep=1; break; }
+            for g in "$(dirname "$(dirname "$tp")")"/*/"$sid.jsonl"; do
+                [ -e "$g" ] && { keep=1; break 2; }
+            done
+        done < <(jq -r 'select(.event=="start") | .transcript_path // empty | select(. != "")' "$f" 2>/dev/null)
+        [ -n "$keep" ] || rm -f "$f"
     done
     printf '%s' "$boot" > "$BOOT_MARKER" 2>/dev/null
 }
