@@ -42,6 +42,7 @@
       "weekdays_only": true,
       "caps": "daily",
       "trigger": {
+        "same_day_only": true,
         "start_calendar_interval": [
           { "hour": 8, "minute": 30 },
           { "hour": 10, "minute": 0 }
@@ -85,7 +86,7 @@
     "weekly": {
       "weekdays_only": false,
       "caps": "weekly",
-      "trigger": { "start_calendar_interval": [{ "hour": 9, "minute": 0, "weekday": 3 }] },
+      "trigger": { "same_day_only": true, "start_calendar_interval": [{ "hour": 9, "minute": 0, "weekday": 3 }] },
       "steps": [
         {
           "id": "review-week",

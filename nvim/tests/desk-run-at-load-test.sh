@@ -4,8 +4,10 @@
 # login run after the day's first slot time, then the next slot the same
 # morning, makes one pass; the next day's login runs again. A login before
 # the day's first slot belongs to the previous day's last slot, so it is a
-# no-op once that day finished ok. Drives desk-run itself with the clock
-# pinned through $DESK_NOW and a fake claude that counts calls.
+# no-op once that day finished ok. A pass with `trigger.same_day_only` only
+# ever runs a slot of the current day, which keeps the weekly pass to the
+# Wednesday it missed. Drives desk-run itself with the clock pinned through
+# $DESK_NOW and a fake claude that counts calls.
 set -u
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -78,6 +80,15 @@ jq -n --arg repo "$repo" --arg prompt "$prompt" '{
 				{ hour: 9, minute: 0 }, { hour: 10, minute: 0 }, { hour: 11, minute: 0 }
 			] },
 			steps: [ { id: "F", kind: "fetch", prompt: $prompt, tools: ["Read"], connector: false, timeout: 30 } ]
+		},
+		"morning-today": {
+			weekdays_only: true,
+			trigger: { same_day_only: true, start_calendar_interval: [ { hour: 6, minute: 0 }, { hour: 9, minute: 0 } ] },
+			steps: [ { id: "F", kind: "fetch", prompt: $prompt, tools: ["Read"], connector: false, timeout: 30 } ]
+		},
+		weekly: {
+			trigger: { same_day_only: true, start_calendar_interval: [ { weekday: 3, hour: 7, minute: 0 } ] },
+			steps: [ { id: "F", kind: "fetch", prompt: $prompt, tools: ["Read"], connector: false, timeout: 30 } ]
 		}
 	}
 }' > "$cfg"
@@ -86,7 +97,7 @@ export DESK_CONFIG="$cfg"
 at() { # YYYY-MM-DD HH:MM, local time -> epoch
 	if [ -r /proc/stat ]; then date -d "$1 $2:00" +%s; else date -j -f '%Y-%m-%d %H:%M:%S' "$1 $2:00" +%s; fi
 }
-run_at() { DESK_NOW="$(at "$1" "$2")" "$DESK_RUN" morning >> "$ROOT/runs.log" 2>&1; }
+run_at() { DESK_NOW="$(at "$1" "$2")" "$DESK_RUN" "${3:-morning}" >> "$ROOT/runs.log" 2>&1; }
 calls() { wc -l < "$CALLS" | tr -d ' '; }
 
 # 2026-10-14 and -15 are a Wednesday and a Thursday: weekdays, so the
@@ -110,6 +121,29 @@ run_at 2026-10-16 05:30
 assert_eq "no call: the 15th already finished ok" "2" "$(calls)"
 run_at 2026-10-16 06:00
 assert_eq "the first slot runs the 16th" "3" "$(calls)"
+
+echo
+echo "=== same_day_only: a login before the day's first slot waits for it ==="
+run_at 2026-10-14 09:30 morning-today
+assert_eq "Wednesday's run" "4" "$(calls)"
+run_at 2026-10-15 05:30 morning-today
+assert_eq "Thursday 05:30 is Wednesday's last slot, so a no-op" "4" "$(calls)"
+run_at 2026-10-15 06:00 morning-today
+assert_eq "the 06:00 slot runs Thursday" "5" "$(calls)"
+
+# 2026-10-14, -21 and -28 are Wednesdays.
+echo
+echo "=== the weekly pass at login: only on the Wednesday it missed, and once ==="
+run_at 2026-10-14 09:30 weekly
+assert_eq "a Wednesday login after the 07:00 slot runs it" "6" "$(calls)"
+run_at 2026-10-14 13:00 weekly
+assert_eq "a second login that Wednesday does not" "6" "$(calls)"
+run_at 2026-10-22 08:00 weekly
+assert_eq "a Thursday login after a missed Wednesday does not" "6" "$(calls)"
+run_at 2026-10-28 06:30 weekly
+assert_eq "a Wednesday login before 07:00 does not run last week's" "6" "$(calls)"
+run_at 2026-10-28 07:00 weekly
+assert_eq "and the 07:00 slot runs this week's" "7" "$(calls)"
 
 echo
 echo "=== summary: $pass passed, $fail failed ==="

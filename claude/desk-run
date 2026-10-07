@@ -165,6 +165,17 @@ scheduled_dow="$(desk_weekday_of_date "$scheduled_date")"
 [ -n "$scheduled_dow" ] || scheduled_dow="$(date +%u)"
 [ "$scheduled_dow" -ge 6 ] && is_weekend="true"
 
+# `trigger.same_day_only`: a run whose slot falls on an earlier day than
+# today is a no-op, so a login or a wake catches up only today's slot.
+same_day_only="$(jq -r '.trigger.same_day_only == true' <<< "$pass_config")"
+if [ "$same_day_only" = "true" ]; then
+	run_date="$(if desk_is_linux; then date -d "@$(desk_now)" +%F; else date -j -r "$(desk_now)" +%F; fi)"
+	if [ "$scheduled_date" != "$run_date" ]; then
+		desk_log "$pass" "slot of $scheduled_date, not today ($run_date), and same_day_only: no-op"
+		exit 0
+	fi
+fi
+
 # The once-a-day guard: a slot firing after this scheduled date's pass
 # already finished ok is a no-op.
 if desk_guard_already_ok_today "$pass" "$scheduled_date"; then
