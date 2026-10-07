@@ -204,12 +204,15 @@ desk_test_guard_not_real_repo() {
 # rewrites an existing file in place (a reader cache, a ledger, a status
 # file) is caught as well as one that adds or removes files. Directory
 # mtimes are deliberately not part of it.
-# Three things are written by Claude Code itself while a test run is in
-# flight, whenever a session is open: its per-version lock files (`locks/`,
-# skipped), and the recorder hook's event files and log, which every live
-# session appends to (compared by path only). Everything else is compared by
-# content.
-_DESK_TEST_STATE_LIVE_APPENDED=(-path '*/session-events/*' -o -path '*/live-sessions/*' -o -name session-recorder.log)
+# Some real state changes during any test run on a machine in use: Claude
+# Code's per-version lock files (`locks/`, skipped), the recorder hook's
+# event files and log, which every live session appends to, and the
+# reader's cache, which the nvim marks, the status line and any `resolve`
+# rewrite in place. Those are compared by path only. The reader cache is
+# keyed by config dir, so a test that reached the real cache with its own
+# temp config dir still shows up as a new path. Everything else is compared
+# by content.
+_DESK_TEST_STATE_LIVE_APPENDED=(-path '*/session-events/*' -o -path '*/live-sessions/*' -o -path '*/session-reader-cache/*' -o -name session-recorder.log)
 DESK_TEST_STATE_GUARD_DIRS=("$HOME/.local/state/claude" "$HOME/.local/state/desk")
 
 # desk_test_state_guard_snapshot <dest_dir> <suffix>: writes each guarded
