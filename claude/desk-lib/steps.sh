@@ -819,12 +819,9 @@ desk_capture_already_ledgered() {
 
 # desk_step_capture_sessions <pass> <repo> <scheduled_date> <file>...
 # The two kinds: "running" (live right now) and "dropped"
-# (has a start event, isn't live, and its last run never got a deliberate
-# end — prompt_input_exit/clear/logout/resume all surface as `ended: true`
-# with exactly that reason, which the filter below excludes outright;
-# whether that's because the machine rebooted since or the process itself
-# crashed within the same boot, session-status.sh's own liveness check
-# already tells the two apart, so "not live" is all this needs). Only
+# (session-status.sh's `left_open`: has a start event, isn't live, and its
+# last run never got a deliberate end, whichever way it stopped; the reader
+# is the one place that judges an end). Only
 # sessions with a recorder start event qualify (excludes both pre-recorder
 # transcripts and a scheduled desk-run call, source-tagged and excluded by
 # name) ; pre-recorder transcripts and headless calls never
@@ -876,7 +873,7 @@ desk_step_capture_sessions() {
 	candidates="$(jq -c --arg runs_root "$DESK_RUNS_ROOT" "$DESK_JQ_IS_DESK_RUN"'
 		[ .[] | select(.has_start_event == true and (is_desk_run | not)) ] as $eligible
 		| [ $eligible[] | select(.live == true) | . + {capture_kind: "running"} ]
-		+ [ $eligible[] | select(.live == false and (.ended == false or .end_reason == "other")) | . + {capture_kind: "dropped"} ]
+		+ [ $eligible[] | select(.left_open == true) | . + {capture_kind: "dropped"} ]
 	' <<< "$all")"
 
 	local n items_json

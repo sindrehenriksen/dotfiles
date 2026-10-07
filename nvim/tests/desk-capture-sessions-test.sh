@@ -81,13 +81,15 @@ source "$LIB/validate.sh"
 # shellcheck source=../../claude/desk-lib/steps.sh
 source "$LIB/steps.sh"
 
-sess() { # id name name_source live has_start_event source ended end_reason [any_desk_run] [cwd]
+# left_open is what the reader reports for the row; the step takes it as
+# given rather than judging the end itself.
+sess() { # id name name_source live has_start_event source ended end_reason [any_desk_run] [cwd] [left_open]
 	jq -cn --arg id "$1" --arg name "$2" --arg ns "$3" --argjson live "$4" \
 		--argjson hse "$5" --arg src "$6" --argjson ended "$7" --arg er "$8" \
-		--argjson adr "${9:-false}" --arg cwd "${10:-/home/user/somewhere}" '
+		--argjson adr "${9:-false}" --arg cwd "${10:-/home/user/somewhere}" --argjson lo "${11:-false}" '
 		{id:$id, name:$name, name_source:$ns, live:$live, has_start_event:$hse,
 		 source:$src, any_desk_run_start:$adr, cwd:$cwd,
-		 ended:$ended, end_reason:(if $er == "" then null else $er end)}
+		 ended:$ended, end_reason:(if $er == "" then null else $er end), left_open:$lo}
 	'
 }
 
@@ -95,9 +97,11 @@ sess() { # id name name_source live has_start_event source ended end_reason [any
 	sess "sess-running" "Running One" "user" true true "startup" false ""
 	sess "sess-already-noted" "Already Noted" "user" true true "startup" false ""
 	sess "sess-unnamed-running" "Auto Title X" "ai_or_none" true true "startup" false ""
-	sess "sess-dropped-never-ended" "Dropped Never Ended" "user" false true "startup" false ""
-	sess "sess-dropped-other" "Dropped Other" "user" false true "startup" true "other"
+	sess "sess-dropped-never-ended" "Dropped Never Ended" "user" false true "startup" false "" false "" true
+	sess "sess-dropped-other" "Dropped Other" "user" false true "startup" true "other" false "" true
+	sess "sess-dropped-unknown" "Dropped Unknown" "user" false true "startup" true "some_later_reason" false "" true
 	sess "sess-deliberate-end" "Deliberate End" "user" false true "startup" true "prompt_input_exit"
+	sess "sess-closed-by-pass" "Closed By Pass" "user" false true "startup" true "closed-by-pass"
 	sess "sess-desk-run" "Scheduled Run" "user" true true "desk-run" false "" true
 	sess "sess-no-start-event" "No Start Event" "user" true false "startup" false ""
 	# The last start event's own source is "resume" (the user opened the follow-up
@@ -146,6 +150,12 @@ assert_eq "its capture_kind is dropped" "dropped" "$(by_sid sess-dropped-never-e
 
 assert_true "an end_reason 'other', not-live session is captured as dropped" \
 	"$([ -n "$(by_sid sess-dropped-other)" ] && echo true || echo false)"
+
+assert_true "an end the reader does not count as deliberate (an unknown reason) is captured as dropped" \
+	"$([ "$(by_sid sess-dropped-unknown | jq -r '.capture_kind')" = dropped ] && echo true || echo false)"
+
+assert_true "a close step's close is never captured" \
+	"$([ -z "$(by_sid sess-closed-by-pass)" ] && echo true || echo false)"
 
 assert_true "a deliberate end (prompt_input_exit) is never captured" \
 	"$([ -z "$(by_sid sess-deliberate-end)" ] && echo true || echo false)"
