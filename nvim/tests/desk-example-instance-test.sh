@@ -170,9 +170,13 @@ assert_eq "push_enabled is false, so nothing was pushed" "disabled" "$(jq -r '.p
 
 echo
 echo "=== the weekly tab ==="
-assert_eq "exactly one tab was asked for" "1" "$(wc -l < "$TABS_LOG" | tr -d ' ')"
-tab_cmd="$(cut -f1 "$TABS_LOG")"
-tab_cwd="$(cut -f3 "$TABS_LOG")"
+# Two tabs: the morning pass's follow-up, a status session here since the
+# fake reader resolves no session, and the weekly one.
+assert_eq "two tabs were asked for" "2" "$(wc -l < "$TABS_LOG" | tr -d ' ')"
+assert_true "the morning follow-up is an interactive status session" \
+	"$(grep -q "^DESK_HEADLESS=1 claude -n 'desk-example-morning-[0-9-]*-status'" "$TABS_LOG" && echo true || echo false)"
+tab_cmd="$(grep -F weekly-review "$TABS_LOG" | cut -f1)"
+tab_cwd="$(grep -F weekly-review "$TABS_LOG" | cut -f3)"
 assert_true "it opens claude named weekly-review" \
 	"$(grep -qF "'-n' 'weekly-review'" <<< "$tab_cmd" && echo true || echo false)"
 assert_true "its cwd is a fresh dir under scratch_dir" \

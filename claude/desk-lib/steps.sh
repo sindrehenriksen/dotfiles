@@ -1194,9 +1194,8 @@ desk_step_close() {
 # headless from its own cwd under the same id, with no tools at all, no MCP
 # servers and --restricted, so the turn can only write its reply. The prompt
 # is `follow_up_summary_prompt` from the config (relative to it), else this
-# repo's generic one beside this file; it is handed this pass's items as the
-# runner staged them (open items whose id carries `<pass>-<scheduled_date>-`)
-# and a count of the older ones still waiting, read from <repo>'s proposal.
+# repo's generic one beside this file; it is handed how the run went and this
+# pass's items as the runner staged them (desk_follow_up_placeholders).
 # Prints "ok", or "failed" when the call failed or its reply is empty or
 # still JSON.
 desk_follow_up_summary() {
@@ -1222,24 +1221,8 @@ desk_follow_up_summary() {
 		return
 	fi
 
-	local open='{"items":[]}'
-	if [ -n "$repo" ]; then
-		open="$(desk_nvim_cli proposal-open "$repo" 2> /dev/null)"
-		jq -e '.items | type == "array"' > /dev/null 2>&1 <<< "$open" || open='{"items":[]}'
-	fi
 	local placeholders
-	placeholders="$(jq -c --arg prefix "$pass-$scheduled_date-" --arg today "$(date +%F)" '
-		[.items[] | select(.id | startswith($prefix))] as $mine
-		| ((.items | length) - ($mine | length)) as $older
-		| {
-			today: $today,
-			item_count: ($mine | length | tostring),
-			items: ($mine | map({file, kind, headline, tier, source, before, after}
-				| with_entries(select(.value != null and .value != ""))) | tojson),
-			open_note: (if $older > 0
-				then "\($older) earlier suggestion(s) from previous passes also still wait for review; say so in one line."
-				else "" end)
-		}' <<< "$open")"
+	placeholders="$(desk_follow_up_placeholders "$pass" "$scheduled_date" "$repo")"
 
 	local work="${PASS_SCRATCH:-$DESK_SCRATCH_ROOT}"
 	local prompt_file="$work/follow-up-summary-prompt.txt" out="$work/follow-up-summary-stream.jsonl"
@@ -1302,12 +1285,14 @@ desk_follow_up_summary() {
 # per-session ids, "close-<session id>" — several may exist in one pass);
 # each match's runner-generated --session-id (recorded beside its run
 # directory) is resolved back to a session through session-status.sh's own
-# `resolve` mode (its id lookup, never re-derived here). Nothing configured, nothing that
-# actually ran this pass, or nothing that resolves to a real session are
-# all "ok", not "failed" — there was simply nothing to open. The other
+# `resolve` mode (its id lookup, never re-derived here). The other
 # names, when more than one resolves, are logged only (their
 # names go in status); the most recently active one is what
-# actually gets a tab.
+# actually gets a tab. With no `follow_up_step` configured there is no tab.
+# Otherwise there always is one, and it is always an interactive `claude`:
+# when no call of that step ran this pass (a weekend slot, a failure before
+# it) or its session cannot be found, a fresh status session opens instead,
+# whose first turn tells the user how the pass went.
 #
 # At most one tab is ever opened per (pass, scheduled_date) — a guard
 # stamp under $DESK_GUARD_DIR, written only once this function has
@@ -1347,16 +1332,10 @@ desk_open_follow_up_tab() {
 		return
 	fi
 
-	local runs_dir="$DESK_RUNS_ROOT/$pass-$scheduled_date"
-	if [ ! -d "$runs_dir" ]; then
-		desk_log "$pass" "follow-up tab: no runs directory for $pass-$scheduled_date — nothing to open"
-		echo "ok"
-		return
-	fi
-
 	# Each call recorded the --session-id the runner generated beside its run
 	# directory (<step dir>.session-id); a session is found by that id, never by
 	# its display name, which anyone may reuse.
+	local runs_dir="$DESK_RUNS_ROOT/$pass-$scheduled_date"
 	local -a candidate_ids=()
 	local d base sid_file
 	for d in "$runs_dir"/*; do
@@ -1369,35 +1348,45 @@ desk_open_follow_up_tab() {
 				;;
 		esac
 	done
-	if [ "${#candidate_ids[@]}" -eq 0 ]; then
-		desk_log "$pass" "follow-up tab: no $follow_up_step call ran this pass — nothing to open"
-		echo "ok"
-		return
-	fi
 
 	local -a resolved=()
 	local sid entry
 	for sid in "${candidate_ids[@]}"; do
 		entry="$(session-status.sh resolve "$sid" 2> /dev/null)" && [ -n "$entry" ] && resolved+=("$entry")
 	done
-	if [ "${#resolved[@]}" -eq 0 ]; then
-		desk_log "$pass" "follow-up tab: $follow_up_step ran but no session resolved by id — nothing to open"
-		echo "ok"
-		return
-	fi
 
 	# Most recently active wins; the rest are named in the log only.
-	local sorted best id cwd others
-	sorted="$(printf '%s\n' "${resolved[@]}" | jq -s 'sort_by(.last_activity // 0)')"
-	best="$(jq -c '.[-1]' <<< "$sorted")"
-	others="$(jq -r '.[0:-1][] | .name' <<< "$sorted" | tr '\n' ',' | sed 's/,$//')"
-	[ -n "$others" ] && desk_log "$pass" "follow-up tab: also ran this pass: $others"
+	local best="" id="" cwd="" sorted others
+	if [ "${#resolved[@]}" -gt 0 ]; then
+		sorted="$(printf '%s\n' "${resolved[@]}" | jq -s 'sort_by(.last_activity // 0)')"
+		best="$(jq -c '.[-1]' <<< "$sorted")"
+		others="$(jq -r '.[0:-1][] | .name' <<< "$sorted" | tr '\n' ',' | sed 's/,$//')"
+		[ -n "$others" ] && desk_log "$pass" "follow-up tab: also ran this pass: $others"
+		id="$(jq -r '.id // empty' <<< "$best")"
+		cwd="$(jq -r '.cwd // empty' <<< "$best")"
+	fi
 
-	id="$(jq -r '.id // empty' <<< "$best")"
-	cwd="$(jq -r '.cwd // empty' <<< "$best")"
+	local helper="${DESK_OPEN_TAB_BIN:-${DESK_OPEN_TAB:-desk-open-tab.sh}}"
+	local command
 	if [ -z "$id" ] || [ -z "$cwd" ]; then
-		desk_log "$pass" "follow-up tab: resolved session missing id/cwd — not opening"
-		echo "failed"
+		# No session of this pass to resume: no model call ran (a weekend slot,
+		# a failure before the step), or its session cannot be found. The user
+		# still gets an interactive session, a fresh one told the pass's status.
+		desk_log "$pass" "follow-up tab: no $follow_up_step session to resume — opening a status session instead"
+		local status_cwd="$runs_dir/status"
+		mkdir -p "$status_cwd"
+		if ! command="$(desk_follow_up_status_command "$pass" "$scheduled_date" "$status_cwd" "$repo")"; then
+			echo "failed"
+			return
+		fi
+		if "$helper" "$command" "" "$status_cwd" background > /dev/null 2>&1; then
+			desk_log "$pass" "follow-up tab: opened a status session in $status_cwd"
+			desk_write_atomic "$guard_marker" ""
+			echo "ok"
+		else
+			desk_log "$pass" "follow-up tab: $helper failed"
+			echo "failed"
+		fi
 		return
 	fi
 
@@ -1412,9 +1401,7 @@ desk_open_follow_up_tab() {
 		desk_log "$pass" "follow-up tab: no plain-language summary added — opening on the step's own reply"
 	fi
 
-	local command
 	command="claude --resume $(desk_shq "$id")"
-	local helper="${DESK_OPEN_TAB_BIN:-${DESK_OPEN_TAB:-desk-open-tab.sh}}"
 	if "$helper" "$command" "$id" "$cwd" background > /dev/null 2>&1; then
 		desk_log "$pass" "follow-up tab: opened $follow_up_step ($id) in $cwd"
 		desk_write_atomic "$guard_marker" ""
@@ -1423,6 +1410,94 @@ desk_open_follow_up_tab() {
 		desk_log "$pass" "follow-up tab: $helper failed"
 		echo "failed"
 	fi
+}
+
+# desk_follow_up_run_status <pass>
+# One paragraph on how this pass's run went, from the status file the pass
+# has just written and the pass's step list: which steps it has, and whether
+# they all ran, which sources failed, where it stopped, or that a weekend slot
+# ran only the commit (desk-run exports DESK_PASS_WEEKEND_SKIP for that).
+desk_follow_up_run_status() {
+	local pass="$1" steps
+	# Each step as "<id> (<what it does>)", so a reply can name it in words.
+	steps="$(jq -r --arg p "$pass" '
+		.ticket_status_step_id as $t | .mail_fetch_step_id as $m
+		| [.passes[$p].steps[]? | .id + " (" + (
+			if .id == $t then "ticket status check"
+			elif .id == $m then "mail and chat fetch"
+			else {commit_push: "commit of the notes", fetch: "fetch", judge: "judge, which proposes the suggestions",
+				write: "marking the fetched mail read", capture: "session capture", close: "closing idle sessions",
+				retention: "transcript deletion warnings", open_tab: "tab"}[.kind] // .kind end) + ")"]
+		| join(", ")' "$DESK_CONFIG" 2> /dev/null)"
+	desk_status_read | jq -r --arg p "$pass" --arg steps "$steps" --arg weekend "${DESK_PASS_WEEKEND_SKIP:-false}" '
+		(.passes[$p] // {}) as $s
+		| (($s.failed_sources // []) | join(", ")) as $failed
+		| "Its steps, in order: \($steps). "
+		+ (if $weekend == "true" then "This was a weekend slot, so only the commit step ran; the model steps run on weekdays."
+			elif $s.result == "ok" then "It finished ok: every step ran."
+			elif $s.result == "partial" then "It finished partial: these sources failed and are retried at the next slot: \($failed). Every other step ran."
+			elif $s.result == "failed" then "It failed at step \($s.stopped_at // "unknown"), so the steps after that did not run."
+				+ (if $failed != "" then " These sources had failed too: \($failed)." else "" end)
+			else "Its result was not recorded." end)'
+}
+
+# desk_follow_up_status_command <pass> <scheduled_date> <dir> [<repo>]
+# The command line for the status session a follow-up tab opens when the
+# pass left no session to resume: an interactive `claude`, named
+# desk-<pass>-<date>-status and tagged as the runner's (DESK_HEADLESS), whose
+# first turn is the status prompt (`follow_up_status_prompt` from the config,
+# else the generic one beside this file) rendered with the run's status and
+# this pass's staged items, if any. The rendered prompt is written to
+# <dir>/prompt.txt and read by the command itself, since the tab helper
+# passes the command on as a one-line Lua string.
+desk_follow_up_status_command() {
+	local pass="$1" scheduled_date="$2" dir="$3" repo="${4:-}"
+	local prompt_rel prompt_path
+	prompt_rel="$(jq -r '.follow_up_status_prompt // empty' "$DESK_CONFIG" 2> /dev/null)"
+	if [ -n "$prompt_rel" ]; then
+		prompt_path="$(desk_prompt_path "$prompt_rel")"
+	else
+		prompt_path="$DESK_LIB_DIR/follow-up-status.md"
+	fi
+	if [ ! -f "$prompt_path" ]; then
+		desk_log "$pass" "follow-up tab: status prompt not found ($prompt_path)"
+		return 1
+	fi
+	local placeholders
+	placeholders="$(desk_follow_up_placeholders "$pass" "$scheduled_date" "$repo")"
+	desk_render_prompt "$prompt_path" "$placeholders" > "$dir/prompt.txt" || return 1
+	printf 'DESK_HEADLESS=1 claude -n %s -- "$(cat %s)"' \
+		"$(desk_shq "desk-$pass-$scheduled_date-status")" "$(desk_shq "$dir/prompt.txt")"
+}
+
+# desk_follow_up_placeholders <pass> <scheduled_date> [<repo>]
+# The placeholders both follow-up prompts get: `pass`, `today`, `run_status`
+# (desk_follow_up_run_status), this pass's items as the runner staged them
+# (open items whose id carries `<pass>-<scheduled_date>-`, read from <repo>'s
+# proposal) as `items` and `item_count`, and `open_note`, a line about older
+# items still waiting.
+desk_follow_up_placeholders() {
+	local pass="$1" scheduled_date="$2" repo="${3:-}"
+	local open='{"items":[]}'
+	if [ -n "$repo" ]; then
+		open="$(desk_nvim_cli proposal-open "$repo" 2> /dev/null)"
+		jq -e '.items | type == "array"' > /dev/null 2>&1 <<< "$open" || open='{"items":[]}'
+	fi
+	jq -c --arg prefix "$pass-$scheduled_date-" --arg today "$(date +%F)" --arg pass "$pass" \
+		--arg run_status "$(desk_follow_up_run_status "$pass")" '
+		[.items[] | select(.id | startswith($prefix))] as $mine
+		| ((.items | length) - ($mine | length)) as $older
+		| {
+			pass: $pass,
+			today: $today,
+			run_status: $run_status,
+			item_count: ($mine | length | tostring),
+			items: ($mine | map({file, kind, headline, tier, source, before, after}
+				| with_entries(select(.value != null and .value != ""))) | tojson),
+			open_note: (if $older > 0
+				then "\($older) earlier suggestion(s) from previous passes also still wait for review; say so in one line."
+				else "" end)
+		}' <<< "$open"
 }
 
 # desk_notes_diff_since_epoch <notes_diff_since>

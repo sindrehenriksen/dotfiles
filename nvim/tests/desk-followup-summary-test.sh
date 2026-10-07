@@ -6,8 +6,10 @@
 # JSON. The fake `claude` keeps a real-shaped transcript file in a temp
 # CLAUDE_CONFIG_DIR: the judge call's reply is already in it, and a resume
 # appends to the same file, as a real headless resume does. Also: the
-# prompt carries this pass's staged items, an instance override replaces
-# the generic prompt, and a failed summary still opens the tab.
+# prompt carries this pass's staged items and how the run went, an instance
+# override replaces the generic prompt, a failed summary still opens the
+# tab, a quiet and a partial run open one like any other, and with no
+# session to resume the tab is a fresh interactive status session.
 set -u
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -213,6 +215,65 @@ seed_judge_session morning 2026-10-13 "$sid5" > /dev/null
 sed -i.bak "s/\"id\":\"$sid5\"\\(.*\\)\"live\":false/\"id\":\"$sid5\"\\1\"live\":true/" "$SESSIONS_FIXTURE"
 desk_open_follow_up_tab morning 2026-10-13 J "$repo" > /dev/null 2>&1
 assert_eq "no model call against a live session" "0" "$(wc -l < "$ARGV_LOG" | tr -d ' ')"
+
+echo
+echo "=== a quiet run: no suggestions, still an interactive tab ending in plain words ==="
+: > "$OPEN_TAB_LOG"
+sid6="66666666-6666-4666-8666-666666666666"
+judge_reply='{"items":[]}'
+transcript6="$(seed_judge_session morning 2026-10-14 "$sid6")"
+desk_status_set_result morning ok "" '[]' 2026-10-14
+desk_open_follow_up_tab morning 2026-10-14 J "$repo" > /dev/null 2>&1
+assert_eq "the tab opened, resuming the pass's session" "claude --resume '$sid6'" "$(cat "$OPEN_TAB_LOG")"
+last="$(last_assistant_text "$transcript6")"
+assert_true "its last assistant message is not the judge's JSON" \
+	"$(jq -e 'type == "object" or type == "array"' > /dev/null 2>&1 <<< "$last" && echo false || echo true)"
+assert_true "the prompt says there were no suggestions" "$(grep -qF '0 suggestion(s)' "$PROMPT_COPY" && echo true || echo false)"
+assert_true "and that every step ran" "$(grep -qF 'It finished ok: every step ran.' "$PROMPT_COPY" && echo true || echo false)"
+
+echo
+echo "=== a partial run: the same, and the prompt names the failed source ==="
+: > "$OPEN_TAB_LOG"
+sid7="77777777-7777-4777-8777-777777777777"
+judge_reply='{"items":[]}'
+echo '{"passes":{"morning":{"steps":[{"id":"commit-push","kind":"commit_push"},{"id":"F-web","kind":"fetch"},{"id":"J","kind":"judge"}]}}}' > "$DESK_CONFIG"
+transcript7="$(seed_judge_session morning 2026-10-15 "$sid7")"
+desk_status_set_result morning partial "" '["F-web"]' 2026-10-15
+desk_open_follow_up_tab morning 2026-10-15 J "$repo" > /dev/null 2>&1
+assert_eq "the tab opened, resuming the pass's session" "claude --resume '$sid7'" "$(cat "$OPEN_TAB_LOG")"
+last="$(last_assistant_text "$transcript7")"
+assert_true "its last assistant message is not the judge's JSON" \
+	"$(jq -e 'type == "object" or type == "array"' > /dev/null 2>&1 <<< "$last" && echo false || echo true)"
+assert_true "the prompt names the failed source and the steps" \
+	"$(grep -qF 'these sources failed and are retried at the next slot: F-web' "$PROMPT_COPY" \
+		&& grep -qF 'Its steps, in order: commit-push (commit of the notes), F-web (fetch), J (judge, which proposes the suggestions).' "$PROMPT_COPY" && echo true || echo false)"
+
+echo
+echo "=== no session to resume: a fresh interactive status session, never a plain command ==="
+: > "$OPEN_TAB_LOG"
+: > "$ARGV_LOG"
+desk_status_set_result morning failed commit-push '[]' 2026-10-16
+desk_open_follow_up_tab morning 2026-10-16 J "$repo" > /dev/null 2>&1
+cmd="$(cat "$OPEN_TAB_LOG")"
+assert_true "an interactive claude, named for the pass" \
+	"$(grep -q "^DESK_HEADLESS=1 claude -n 'desk-morning-2026-10-16-status' -- " <<< "$cmd" && echo true || echo false)"
+assert_true "never a -p call" "$(grep -qE -- '(^| )-p( |$)|--print' <<< "$cmd" && echo false || echo true)"
+assert_eq "no headless call was made for it" "0" "$(wc -l < "$ARGV_LOG" | tr -d ' ')"
+status_prompt="$DESK_RUNS_ROOT/morning-2026-10-16/status/prompt.txt"
+assert_true "its first turn says where the pass stopped" \
+	"$(grep -qF 'It failed at step commit-push, so the steps after that did not run.' "$status_prompt" && echo true || echo false)"
+assert_true "every placeholder of the status prompt was filled" \
+	"$(grep -qE '\{\{[a-z_]+\}\}' "$status_prompt" && echo false || echo true)"
+assert_true "the command reads its prompt from that file, on one line" \
+	"$(grep -qF "\"\$(cat '$status_prompt')\"" <<< "$cmd" && [ "$(printf '%s\n' "$cmd" | wc -l | tr -d ' ')" = "1" ] && echo true || echo false)"
+
+echo
+echo "=== a weekend slot that ran no model step says so ==="
+: > "$OPEN_TAB_LOG"
+desk_status_set_result morning ok "" '[]' 2026-10-17
+DESK_PASS_WEEKEND_SKIP=true desk_open_follow_up_tab morning 2026-10-17 J "$repo" > /dev/null 2>&1
+assert_true "the status session's prompt names the weekend skip" \
+	"$(grep -qF 'This was a weekend slot' "$DESK_RUNS_ROOT/morning-2026-10-17/status/prompt.txt" && echo true || echo false)"
 
 echo
 echo "=== summary: $pass passed, $fail failed ==="

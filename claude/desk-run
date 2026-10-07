@@ -638,6 +638,10 @@ desk_status_set_result "$pass" "$overall_result" "$stopped_at" "$failed_sources_
 # Visible run sessions: opens once the pass is done, whatever its own
 # result — a failed pass still opens the tab on whatever visible calls did
 # get made.
+# Tells the follow-up's status line that the model steps were skipped.
+DESK_PASS_WEEKEND_SKIP="false"
+[ "$weekday_only_pass" = "true" ] && [ "$is_weekend" = "true" ] && DESK_PASS_WEEKEND_SKIP="true"
+export DESK_PASS_WEEKEND_SKIP
 desk_open_follow_up_tab "$pass" "$scheduled_date" "$follow_up_step" "$repo" > /dev/null
 
 # -----------------------------------------------------------------------
