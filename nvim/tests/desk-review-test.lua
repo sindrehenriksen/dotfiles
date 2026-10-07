@@ -757,6 +757,69 @@ do
 	review.confirm = orig
 end
 
+print("\n=== overview keys: take and decline from the list, without leaving it ===")
+do
+	local r = new_repo({ "Section A", "  existing", "Section B", "  other", "Section C", "  more" })
+	build(r, "2026-10-01", {
+		item("n1"),
+		item("a1", { kind = "add", target = { under = "Section B" }, after = "  added under B", source = "", headline = "add under B" }),
+		item("r1", { kind = "remove", target = { at = "  more" }, before = "  more", after = "", source = "", headline = "drop more" }),
+	})
+	local nb = open_notes(r)
+	review.attach(nb)
+	assert_true("overview opens", review.overview(nb))
+	local rb = review_buf_of(nb)
+	local rw = vim.fn.bufwinid(rb)
+	local qw = vim.fn.getqflist({ winid = 0 }).winid
+	assert_true("the title names the keys", review.OVERVIEW_TITLE:match("t/dp take") and review.OVERVIEW_TITLE:match("x/gD decline"))
+	local function entry(headline)
+		for i, e in ipairs(vim.fn.getqflist()) do
+			if e.text == headline then
+				return i
+			end
+		end
+	end
+	local function on(headline, keys)
+		vim.api.nvim_set_current_win(qw)
+		vim.api.nvim_win_set_cursor(qw, { assert(entry(headline), "no entry " .. headline), 0 })
+		vim.cmd("normal " .. keys)
+	end
+	on("add under B", "t")
+	assert_true("t takes the entry's suggestion into the notes", line_of(nb, "  added under B") ~= nil)
+	assert_eq("and only that one", nil, line_of(nb, "NEWS n1"))
+	assert_eq("the cursor stays in the list", qw, vim.api.nvim_get_current_win())
+	assert_eq("the list drops it", 2, #vim.fn.getqflist())
+	assert_eq("the split's cursor is on it", line_of(rb, "  added under B"), vim.api.nvim_win_get_cursor(rw)[1])
+	assert_true("the count moves", vim.wo[rw].winbar:match("^2 left %(3 saved%)") ~= nil)
+	on("drop more", "x")
+	assert_true("x declines it: the split keeps the line", line_of(rb, "  more") ~= nil)
+	assert_true("and the notes too", line_of(nb, "  more") ~= nil)
+	assert_eq("the cursor stays in the list", qw, vim.api.nvim_get_current_win())
+	assert_eq("the list drops it", 1, #vim.fn.getqflist())
+	assert_true("the count moves", vim.wo[rw].winbar:match("^1 left %(3 saved%)") ~= nil)
+
+	vim.api.nvim_set_current_win(rw)
+	vim.cmd("normal u")
+	assert_eq("u in the split undoes the decline, and the list has it again", 2, #vim.fn.getqflist())
+	vim.cmd("normal u")
+	assert_eq("u again undoes the take in the notes", nil, line_of(nb, "  added under B"))
+	assert_eq("and the list has that again too", 3, #vim.fn.getqflist())
+
+	on("drop more", "gD")
+	assert_eq("gD declines too", 2, #vim.fn.getqflist())
+	on("add under B", "dp")
+	assert_eq("dp takes too", 1, #vim.fn.getqflist())
+	assert_true("into the notes", line_of(nb, "  added under B") ~= nil)
+	vim.api.nvim_set_current_win(rw)
+	vim.cmd("write")
+	local a1, r1 = id_by_headline(r, "add under B"), id_by_headline(r, "drop more")
+	assert_true("the save records the take, as from the split", ledger.taken_by_id(ledger.read(r))[a1] ~= nil)
+	assert_eq("and the decline", { r1 }, declined_ids(r))
+
+	vim.fn.setqflist({}, " ", { title = "something else", items = { { bufnr = nb, lnum = 1, text = "x" } } })
+	assert_eq("in any other list the keys do nothing of desk's", false, (review.qf_act("take")))
+end
+
 print("\n=== the bars: one live count in both while a review is open, the recorded one otherwise ===")
 do
 	local r = new_repo(BASE)

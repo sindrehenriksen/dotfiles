@@ -288,7 +288,7 @@ In a notes buffer:
 | `<leader>gR` | Open the review split above your notes and focus it, or focus the one already open. Reopening over a split with unsaved declines asks to save, discard or cancel. |
 | `do` | (notes window, while a review is open) Take the diff hunk under the cursor: every adjacent suggestion in it. |
 | `<leader>gc` | Save the buffer, commit the file, and record suggestions now in `HEAD` as taken. |
-| `<leader>go` | Overview: a quickfix list with one headline per remaining diff hunk; `<CR>` jumps to it in the review split, where `dp` takes it, or in your notes window when no review is open. |
+| `<leader>go` | Overview: a quickfix list with one headline per remaining diff hunk; `<CR>` jumps to it in the review split, where `dp` takes it, or in your notes window when no review is open. Without leaving the list, `t` or `dp` takes the entry's suggestion and `x` or `gD` declines it, as `<leader>gA` and `<leader>gD` do in the split: recorded on the split's save, undone with `u` there. An entry in the other file needs its review open first, which `<CR>` does. The list's title names these keys. |
 | `<leader>gd` | Declined in the last 14 days (also `:DeskDeclined`); `r` on an entry restores it, so the next pass proposes it again. |
 | `<leader>gx` | The hotkey: act on the token under the cursor. |
 
@@ -299,7 +299,7 @@ In the review split:
 | `dp` | Take the diff hunk under the cursor into your notes buffer: every adjacent suggestion in it, as `do` from the notes window does. For a suggestion that only removes lines, the cursor goes on the line just above or just below its grey filler; `]c` lands below. |
 | `<leader>gA` | Take just the suggestion under the cursor into your notes buffer. |
 | `<leader>gD` | Decline the suggestion under the cursor. |
-| `u` | Undo the latest take or decline made here. A take is undone in your notes buffer, unless you have edited your notes since, when it says so and leaves them alone; anything else is plain undo. |
+| `u` | Undo the latest take or decline made here or from the overview. A take is undone in your notes buffer, unless you have edited your notes since, when it says so and leaves them alone; anything else is plain undo. |
 | `<leader>go` | The overview. |
 | `zo`/`zc`, `zR`/`zM` | Open or close the fold of unchanged lines under the cursor; open or close them all. |
 | `:w` | The commit point: records as declined every suggestion whose lines are gone from both the split and your notes, restores any declined this session whose lines are back, and records pending takes. |

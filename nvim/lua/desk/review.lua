@@ -1136,17 +1136,8 @@ local function diff_act(s, verb)
 	return true
 end
 
--- Declines or takes the one suggestion under the cursor. Returns nil when
--- the cursor is on no known suggestion (the caller falls back to the hunk).
-local function act_on_item(s, verb)
-	local win = vim.fn.bufwinid(s.review_buf)
-	if win == -1 then
-		return false, "review buffer has no window"
-	end
-	local item = M.item_at(s, vim.api.nvim_win_get_cursor(win)[1])
-	if not item then
-		return nil
-	end
+-- Declines or takes `item`, as the decline and take-one keys do.
+local function act_on(s, item, verb)
 	if verb == "decline" then
 		if not decline_item(s, item) then
 			return false, "nothing to decline here"
@@ -1159,6 +1150,20 @@ local function act_on_item(s, verb)
 	end
 	note_takes(s, pre, item)
 	return true
+end
+
+-- Declines or takes the one suggestion under the cursor. Returns nil when
+-- the cursor is on no known suggestion (the caller falls back to the hunk).
+local function act_on_item(s, verb)
+	local win = vim.fn.bufwinid(s.review_buf)
+	if win == -1 then
+		return false, "review buffer has no window"
+	end
+	local item = M.item_at(s, vim.api.nvim_win_get_cursor(win)[1])
+	if not item then
+		return nil
+	end
+	return act_on(s, item, verb)
 end
 
 --- The decline key: makes the suggestion under the cursor in the review
@@ -1214,6 +1219,7 @@ function M.undo(review_buf)
 			vim.cmd("normal! " .. count .. "u")
 		end)
 		if s then
+			M.refresh_overview(s)
 			M.refresh_status_line(s.notes_buf)
 		end
 		return true
@@ -1243,7 +1249,9 @@ end
 -- Overview: one quickfix entry per remaining hunk
 -- ---------------------------------------------------------------------------
 
-M.OVERVIEW_TITLE = "Desk overview"
+-- The title is the list's identity too, and the qf window's status line
+-- shows it, so it carries the list's own keys.
+M.OVERVIEW_TITLE = "Desk overview: ⏎ jump · t/dp take · x/gD decline"
 M.DECLINED_TITLE = "Desk declined recently"
 M.DECLINED_WINDOW_DAYS = 14
 
@@ -1429,6 +1437,54 @@ function M.qf_jump()
 	vim.cmd("normal! m'")
 	vim.cmd("diffupdate")
 	vim.api.nvim_win_set_cursor(win, { math.max(lnum, 1), 0 })
+end
+
+--- The overview's take and decline keys (`verb` "take" or "decline"): act
+--- on the entry's one suggestion as the review split's take-one and decline
+--- keys do, recorded the same way and undone with `u` there, while the
+--- cursor stays in the list. The split's cursor moves to it, so the change
+--- shows. Returns true, or false, why.
+function M.qf_act(verb)
+	local info = vim.fn.getqflist({ title = 0, items = 0 })
+	if info.title ~= M.OVERVIEW_TITLE then
+		return false, "not the desk overview"
+	end
+	local entry = info.items[vim.fn.line(".")]
+	local data = entry and type(entry.user_data) == "table" and entry.user_data or {}
+	if not data.id then
+		return false, "no suggestion on this line"
+	end
+	if data.file then
+		return false, string.format("that one is in %s: ⏎ opens its review", data.file)
+	end
+	local s = sessions[entry.bufnr]
+	if not (s and vim.api.nvim_buf_is_valid(s.review_buf)) then
+		return false, "its review is closed: ⏎ opens it"
+	end
+	local found
+	for _, r in ipairs(M.remaining(s)) do
+		if r.item.id == data.id then
+			found = r
+		end
+	end
+	if not found then
+		return false, "already taken or declined"
+	end
+	local rw = vim.fn.bufwinid(s.review_buf)
+	if rw ~= -1 then
+		vim.api.nvim_win_set_cursor(rw, { found.lnum, 0 })
+	end
+	local t = verb == "take" and begin_take(s)
+	local ok, why = act_on(s, found.item, verb)
+	if not ok then
+		return false, why
+	end
+	if t then
+		end_take(s, t)
+	end
+	M.refresh_overview(s)
+	M.refresh_status_line(s.notes_buf)
+	return true
 end
 
 -- ---------------------------------------------------------------------------
@@ -1682,6 +1738,12 @@ M.KEYMAPS = {
 
 local qf_autocmd_installed = false
 
+local function report(ok, err_or_result)
+	if not ok then
+		vim.notify("desk: " .. tostring(err_or_result), vim.log.levels.WARN)
+	end
+end
+
 local function install_qf_autocmd()
 	if qf_autocmd_installed then
 		return
@@ -1692,14 +1754,18 @@ local function install_qf_autocmd()
 		callback = function(args)
 			vim.keymap.set("n", "<CR>", M.qf_jump, { buffer = args.buf, desc = "Desk: jump (jumplist-safe)" })
 			vim.keymap.set("n", "r", M.qf_restore, { buffer = args.buf, desc = "Desk: restore this declined item" })
+			-- The overview's own keys; in any other list they keep their meaning.
+			for lhs, verb in pairs({ t = "take", dp = "take", x = "decline", gD = "decline" }) do
+				vim.keymap.set("n", lhs, function()
+					if vim.fn.getqflist({ title = 0 }).title ~= M.OVERVIEW_TITLE or is_loclist_win(vim.api.nvim_get_current_win()) then
+						vim.api.nvim_feedkeys(vim.v.count > 0 and vim.v.count .. lhs or lhs, "n", false)
+						return
+					end
+					report(M.qf_act(verb))
+				end, { buffer = args.buf, desc = "Desk overview: " .. verb .. " this suggestion" })
+			end
 		end,
 	})
-end
-
-local function report(ok, err_or_result)
-	if not ok then
-		vim.notify("desk: " .. tostring(err_or_result), vim.log.levels.WARN)
-	end
 end
 
 --- Attaches the review keymaps to `bufnr`. Safe to call more than once for
