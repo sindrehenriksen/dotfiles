@@ -434,6 +434,56 @@ function DeskTab.saved_position_is(saved, frame, primary_height)
      and math.abs(saved.w - frame.w) < 1 and math.abs(saved.h - frame.h) < 1
 end
 
+-- The one window a new-window open created, as Hammerspoon's id, or nil
+-- whenever that is not certain; only that window is ever given a frame.
+-- Certain means: Ghostty counts exactly one more window than before, and
+-- exactly one Hammerspoon id is new while every id from before is still
+-- there. An existing window's id changes when its selected tab does, so a
+-- vanished id means the new id could be an existing window, never to be
+-- moved.
+--   before_ids: set of Ghostty window ids before the open
+--   after: list of { id } now
+--   groups_before, groups_after: Ghostty's own window counts
+function DeskTab.created_window(before_ids, after, groups_before, groups_after)
+  if groups_before == nil or groups_after ~= groups_before + 1 then return nil end
+  local seen, created = {}, {}
+  for _, w in ipairs(after) do
+    seen[w.id] = true
+    if not before_ids[w.id] then created[#created + 1] = w.id end
+  end
+  for id in pairs(before_ids) do
+    if not seen[id] then return nil end
+  end
+  if #created ~= 1 then return nil end
+  return created[1]
+end
+
+function DeskTab.frames_overlap(a, b)
+  return a.x < b.x + b.w and b.x < a.x + a.w and a.y < b.y + b.h and b.y < a.y + a.h
+end
+
+-- Where a newly created window goes so it is not over the window the user
+-- is working in (Ghostty shows it right on top of that one): the first
+-- candidate slot that does not overlap `focused` and holds no other
+-- window's centre, else the first that at least does not overlap
+-- `focused`, else nil (left where Ghostty put it).
+--   candidates: ordered list of frames; occupied: frames of the other
+--   visible windows; focused: the frame of the window that had focus, or nil
+function DeskTab.pick_free_slot(candidates, occupied, focused)
+  local away = {}
+  for _, c in ipairs(candidates) do
+    if not (focused and DeskTab.frames_overlap(c, focused)) then away[#away + 1] = c end
+  end
+  for _, c in ipairs(away) do
+    local free = true
+    for _, o in ipairs(occupied) do
+      if DeskTab.point_in_frame(DeskTab.frame_center(o), c) then free = false break end
+    end
+    if free then return c end
+  end
+  return away[1]
+end
+
 local function as_string_literal(s)
   return '"' .. tostring(s):gsub("\\", "\\\\"):gsub('"', '\\"') .. '"'
 end
@@ -555,6 +605,22 @@ local function primary_height()
   return p and p:fullFrame().h or nil
 end
 
+-- Candidate frames for a new window, in order: the ultrawide's half slots
+-- off the middle column, then its middle ones, then every other screen.
+local NEW_WINDOW_SLOTS = { "upper_L", "lower_L", "upper_R", "lower_R", "upper_C", "lower_C" }
+local function new_window_slots(screens_by_id)
+  local out, others = {}, {}
+  for _, scr in pairs(screens_by_id) do
+    if screen_kind(scr) == "wide" then
+      for _, name in ipairs(NEW_WINDOW_SLOTS) do out[#out + 1] = slot_frame(scr, name) end
+    else
+      others[#others + 1] = scr:frame()
+    end
+  end
+  for _, f in ipairs(others) do out[#out + 1] = f end
+  return out
+end
+
 -- Makes `frame` (the target window's) Ghostty's saved position, so a tab
 -- added to that window cannot move it: already so, or after `activate
 -- window` makes it Ghostty's focused window, which saves its frame. Waits
@@ -648,10 +714,40 @@ end
 -- target onto it; so focus there is left alone until the new tab has been
 -- seen, which is after that move would have happened, or OWN_GRACE_SECS.
 local FOCUS_WATCH_SECS, FOCUS_POLL_SECS, OWN_GRACE_SECS = 4, 0.05, 1
-local function restore_focus_when_taken(before, known, own_id)
+-- `place`, for a new-window open, gives the new window a slot away from
+-- the window that had focus (DeskTab.pick_free_slot), once
+-- DeskTab.created_window names it for certain. It is done in the tick
+-- that hands focus back, just before: a frame set on the new window makes
+-- it Ghostty's saved position, and handing focus back to a Ghostty window
+-- through `activate window` saves that window's frame again, so a tab the
+-- user opens next in it cannot drag it. Nothing is placed when focus is
+-- never seen on the new window.
+local function place_new_window(place, now)
+  local script_windows = ghostty_script_windows()
+  local id = DeskTab.created_window(place.known, ghostty_app_windows(), place.groups_before,
+    script_windows and #script_windows)
+  if not id or id ~= now.window_id then return false end
+  local occupied = {}
+  for _, w in ipairs(hs.window.orderedWindows()) do
+    if w:id() ~= id then occupied[#occupied + 1] = w:frame() end
+  end
+  local frame = DeskTab.pick_free_slot(place.candidates, occupied, place.focused_frame)
+  local win = hs.window.get(id)
+  if frame and win then
+    win:setFrame(frame)
+    console_print(string.format("DeskOpenTab: placed the new window %s at %d,%d away from the focused window",
+      tostring(id), frame.x, frame.y))
+  else
+    console_print("DeskOpenTab: no slot away from the focused window; the new window stays where Ghostty put it")
+  end
+  return true
+end
+
+local function restore_focus_when_taken(before, known, own_id, place)
   local started = hs.timer.secondsSinceEpoch()
   local handed_back = 0
   local seen_new = false
+  local placed = place == nil
   every_until_done(FOCUS_POLL_SECS, function()
     local now = focus_snapshot()
     local taken = DeskTab.focus_was_taken(before, now, known)
@@ -663,7 +759,14 @@ local function restore_focus_when_taken(before, known, own_id)
     if hs.timer.secondsSinceEpoch() - started > FOCUS_WATCH_SECS then
       console_print(string.format("DeskOpenTab: focus watch done: handed back %d time(s); focus on %s window %s%s",
         handed_back, tostring(now.app), tostring(now.window_id), taken and " (STILL the new one)" or ""))
+      if before.app == "Ghostty" and before.win_obj
+          and not DeskTab.saved_position_is(ghostty_saved_position(), before.win_obj:frame(), primary_height()) then
+        console_print("DeskOpenTab: WARNING Ghostty's saved position is not the focused window's; a tab opened there next could move it")
+      end
       return true
+    end
+    if taken and not placed then
+      placed = place_new_window(place, now)
     end
     if taken then
       handed_back = handed_back + 1
@@ -766,10 +869,22 @@ function DeskOpenTab(cmd, session_id, cwd, opts)
     script = DeskTab.created_or_error_script(nil, "count of windows", "new window with configuration " .. config)
   end
 
+  local place
+  if before and not tab_in then
+    local before_ids = {}
+    for _, w in ipairs(windows) do before_ids[w.id] = true end
+    place = {
+      known = before_ids,
+      groups_before = script_windows and #script_windows,
+      candidates = new_window_slots(screens_by_id),
+      focused_frame = before.win_obj and before.win_obj:frame() or nil,
+    }
+  end
+
   local ok, result, descriptor = hs.osascript.applescript(script)
   -- Ghostty may already have taken focus even when the call reports an
   -- error, so the guard runs either way.
-  if before then restore_focus_when_taken(before, known, own_id) end
+  if before then restore_focus_when_taken(before, known, own_id, place) end
   if not ok then
     print("DeskOpenTab: osascript failed: " .. DeskTab.osascript_error(descriptor))
     return false

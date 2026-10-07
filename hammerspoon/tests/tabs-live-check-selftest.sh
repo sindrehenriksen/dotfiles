@@ -65,10 +65,11 @@ B="Ghostty|2663,212,1136,690"
 C="Safari|0,33,1512,949"
 N="Ghostty|1600,-400,900,600"
 
-# snap <app> <focused> <visible-json> <tabs-json> [ghostty-ids-json]
+# snap <app> <focused> <visible-json> <tabs-json> [ghostty-ids-json] [saved-is-focused]
+# The focused window's frame is A's.
 snap() {
-	printf 'DESK_SNAPSHOT {"app":"%s","focused":%s,"ghostty_front":"tab-group-a","ghostty_ids":%s,"ghostty_seen":2,"visible":%s,"by_ghostty":["tab-group-a|%s","tab-group-b|%s"],"tabs":%s}\n' \
-		"$1" "$2" "${5:-[\"tab-group-a\",\"tab-group-b\"]}" "$3" "${A#Ghostty|}" "${B#Ghostty|}" "$4"
+	printf 'DESK_SNAPSHOT {"app":"%s","focused":%s,"focused_frame":"%s","saved_is_focused":%s,"ghostty_front":"tab-group-a","ghostty_ids":%s,"ghostty_seen":2,"visible":%s,"by_ghostty":["tab-group-a|%s","tab-group-b|%s"],"tabs":%s}\n' \
+		"$1" "$2" "${A#Ghostty|}" "${6:-true}" "${5:-[\"tab-group-a\",\"tab-group-b\"]}" "$3" "${A#Ghostty|}" "${B#Ghostty|}" "$4"
 }
 V0="[\"$A\",\"$B\",\"$C\"]"
 T0='["tab-group-a tab-1"]'
@@ -131,6 +132,25 @@ rm -f "$ROOT/old-opener"
 assert_eq "exits 2" "2" "$(status oldopener)"
 assert_eq "the opener was never called" "0" "$(opened)"
 assert_eq "it says why" "1" "$(has oldopener '^ABORT: the opener Hammerspoon has loaded predates')"
+
+echo
+echo "=== the new window came up over the focused one ==="
+OVER="Ghostty|2700,-450,900,600"
+snap Ghostty 175 "$V0" "$T0" > "$ROOT/snap.1"
+snap Ghostty 175 "[\"$A\",\"$B\",\"$C\",\"$OVER\"]" '["tab-group-a tab-1","tab-group-n tab-9"]' '["tab-group-a","tab-group-b","tab-group-n"]' > "$ROOT/snap.2"
+snap Ghostty 175 "$V0" "$T0" > "$ROOT/snap.3"
+run_case over
+assert_eq "exits 1" "1" "$(status over)"
+assert_eq "says so" "1" "$(has over '^FAIL - a new window is over the window that had focus')"
+
+echo
+echo "=== Ghostty's saved position left on another window ==="
+snap Ghostty 175 "$V0" "$T0" > "$ROOT/snap.1"
+snap Ghostty 175 "$V0" "$T1" '["tab-group-a","tab-group-b"]' false > "$ROOT/snap.2"
+snap Ghostty 175 "$V0" "$T0" > "$ROOT/snap.3"
+run_case saved
+assert_eq "exits 1" "1" "$(status saved)"
+assert_eq "says so" "1" "$(has saved "^FAIL - Ghostty's saved position is the focused window's again")"
 
 echo
 echo "=== focus moved ==="

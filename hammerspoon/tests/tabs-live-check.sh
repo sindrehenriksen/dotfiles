@@ -11,7 +11,8 @@
 #
 # It records the focused window and the frame of every visible window, opens
 # a close-on-exit tab that says what it is and ends after 10s, then asserts:
-# focus is where it was; no window anywhere moved, resized or vanished
+# focus is where it was; no window anywhere moved, resized or vanished; a
+# new window, if one was needed, is not over the window that had focus;
 # (compared by position across all apps, and by Ghostty's own window id
 # where Ghostty can name it); and the tab it opened is gone by the end, by
 # that tab's own id. A tab that lingers is a failure, and that one tab,
@@ -67,6 +68,11 @@ MARKER="DESK_SNAPSHOT "
 SNAPSHOT_LUA='
 local front = hs.application.frontmostApplication()
 local fw = hs.window.focusedWindow()
+local ff = fw and fw:frame()
+local saved_out = hs.execute("/usr/bin/defaults read com.mitchellh.ghostty NSWindowLastPosition 2> /dev/null")
+local primary = hs.screen.primaryScreen()
+local saved_ok = ff ~= nil and primary ~= nil
+  and DeskTab.saved_position_is(DeskTab.parse_saved_position(saved_out), ff, primary:fullFrame().h)
 local hs_list, visible = {}, {}
 for _, w in ipairs(hs.window.orderedWindows()) do
   local app = w:application()
@@ -103,6 +109,8 @@ end tell]])
 return "DESK_SNAPSHOT " .. hs.json.encode({
   app = front and front:name() or "",
   focused = fw and fw:id() or 0,
+  focused_frame = ff and string.format("%d,%d,%d,%d", ff.x, ff.y, ff.w, ff.h) or "",
+  saved_is_focused = saved_ok and true or false,
   ghostty_front = okf and front_gid or "",
   ghostty_ids = ids,
   ghostty_seen = #hs_list,
@@ -140,10 +148,10 @@ lines() { jq -r ".$1[]" <<< "$2" | sort; }
 
 # The check drives the opener that Hammerspoon has loaded, which is
 # whatever init.lua it last read, not this checkout. An opener from before
-# DeskTab.saved_position_is can add a tab to a window whose frame is not
-# Ghostty's saved position, which moves that window on screen, so the check
-# refuses to drive it.
-if [ "$(hs_lua 'return "DESK_OPENER " .. type(DeskTab and DeskTab.saved_position_is)' 2> /dev/null | grep '^DESK_OPENER ' | tail -n1)" != "DESK_OPENER function" ]; then
+# DeskTab.pick_free_slot can add a tab to a window whose frame is not
+# Ghostty's saved position, which moves that window on screen, or leave a
+# new window over the focused one, so the check refuses to drive it.
+if [ "$(hs_lua 'return "DESK_OPENER " .. type(DeskTab and DeskTab.pick_free_slot)' 2> /dev/null | grep '^DESK_OPENER ' | tail -n1)" != "DESK_OPENER function" ]; then
 	echo "ABORT: the opener Hammerspoon has loaded predates this check; merge and reload Hammerspoon first. Nothing was opened"
 	exit 2
 fi
@@ -201,6 +209,21 @@ extra_other=$(printf '%s\n' "$extra" | grep -v '^Ghostty|' | grep -c . || true)
 extra_ghostty=$(printf '%s\n' "$extra" | grep -c '^Ghostty|' || true)
 assert_eq "no other app gained a window" "0" "$extra_other"
 assert_eq "Ghostty gained a frame only for a window it newly created" "$new_windows" "$extra_ghostty"
+# A new window must come up clear of the window that had focus.
+focused_frame=$(jq -r '.focused_frame' <<< "$before")
+overlapping=$(printf '%s\n' "$extra" | grep '^Ghostty|' | sed 's/^Ghostty|//' | awk -F, -v f="$focused_frame" '
+	BEGIN { split(f, g, ",") }
+	f != "" && $1 < g[1] + g[3] && g[1] < $1 + $3 && $2 < g[2] + g[4] && g[2] < $2 + $4 { print }')
+if [ -z "$overlapping" ]; then
+	ok "no new window is over the window that had focus"
+else
+	bad "a new window is over the window that had focus: $(printf '%s' "$overlapping" | tr '\n' ';')"
+fi
+# Ghostty moves every window it shows to its saved position, so that must
+# again be the user's own Ghostty window, or the next tab there drags it.
+if [ "$before_app" = "Ghostty" ]; then
+	assert_eq "Ghostty's saved position is the focused window's again" "true" "$(jq -r '.saved_is_focused' <<< "$after")"
+fi
 changed=$(comm -23 <(lines by_ghostty "$before") <(lines by_ghostty "$after") | while IFS='|' read -r gid frame; do
 	jq -e --arg g "$gid" '.by_ghostty[] | select(startswith($g + "|"))' <<< "$after" > /dev/null && echo "$gid"
 done)

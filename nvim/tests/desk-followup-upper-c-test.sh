@@ -141,7 +141,7 @@ assert_eq "the tab opener ran after every model call" "hs" "$(tail -n1 "$ORDER_L
 assert_eq "the pass's status was already final when it ran" "ok" "$(jq -r '.passes.testpass.result' "$HS_STATUS_LOG")"
 
 echo
-echo "=== the opener only ever targets upper_C, or lower_C as its fallback, and never sets a frame ==="
+echo "=== the opener only ever targets upper_C, or lower_C as its fallback, and sets no existing window's frame ==="
 body="$(awk '/^function DeskOpenTab\(/{f=1} f{print} f && /^end$/{exit}' "$INIT_LUA")"
 assert_true "found DeskOpenTab's body" "$([ -n "$body" ] && echo true || echo false)"
 slot_body="$(awk '/^function DeskTab.slot_windows\(/{f=1} f{print} f && /^end$/{exit}' "$INIT_LUA")"
@@ -151,8 +151,13 @@ assert_eq "DeskOpenTab names no slot of its own" "" \
 	"$(printf '%s\n' "$body" | rg -o '"(upper|lower|full|mid)[A-Za-z_]*"' | sort -u | tr '\n' ' ')"
 desk_section="$(awk '/^DeskTab = \{\}/{f=1} f{print} /^-- Dual-function Caps Lock/{exit}' "$INIT_LUA")"
 assert_true "found the desk section" "$([ -n "$desk_section" ] && echo true || echo false)"
-assert_eq "nothing in the desk section sets, moves or resizes a window" "0" \
+assert_eq "the desk section sets one frame, and nothing else moves or resizes a window" "1" \
 	"$(printf '%s\n' "$desk_section" | grep -cE 'setFrame|setTopLeft|setSize|move[A-Z]|centerOnScreen')"
+place_fn="$(awk '/^local function place_new_window\(/{f=1} f{print} f && /^end$/{exit}' "$INIT_LUA")"
+assert_eq "that one is in place_new_window" "1" "$(printf '%s\n' "$place_fn" | grep -c 'setFrame')"
+assert_true "which sets it only on the window DeskTab.created_window names, and only while it has focus" \
+	"$(printf '%s\n' "$place_fn" | grep -q 'DeskTab.created_window' \
+		&& printf '%s\n' "$place_fn" | grep -q 'id ~= now.window_id then return false' && echo true || echo false)"
 
 echo
 echo "=== nothing else under claude/ opens a terminal tab ==="

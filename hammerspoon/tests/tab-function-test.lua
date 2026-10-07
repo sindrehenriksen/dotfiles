@@ -188,6 +188,35 @@ plan = DeskTab.plan_open(42, 43, 42, false)
 assert_eq("the hotkey, typing in upper_C: still upper_C (it wants the focus)", 42, plan.window_id)
 
 -- ---------------------------------------------------------------------------
+-- A new window: identified only for certain, and placed clear of focus
+-- ---------------------------------------------------------------------------
+local before_12 = { [1] = true, [2] = true }
+assert_eq("one new id and one more Ghostty window: that one", 3,
+  DeskTab.created_window(before_12, { { id = 1 }, { id = 2 }, { id = 3 } }, 2, 3))
+assert_eq("Ghostty's count unchanged: not certain", nil,
+  DeskTab.created_window(before_12, { { id = 1 }, { id = 2 }, { id = 3 } }, 2, 2))
+assert_eq("an existing id vanished (its selected tab changed): not certain", nil,
+  DeskTab.created_window(before_12, { { id = 2 }, { id = 3 } }, 2, 3))
+assert_eq("two new ids: not certain", nil,
+  DeskTab.created_window(before_12, { { id = 1 }, { id = 2 }, { id = 3 }, { id = 4 } }, 2, 3))
+assert_eq("no count from before: not certain", nil,
+  DeskTab.created_window(before_12, { { id = 1 }, { id = 2 }, { id = 3 } }, nil, 3))
+
+local A = { x = 0, y = 0, w = 100, h = 100 }
+assert_eq("overlapping frames overlap", true, DeskTab.frames_overlap(A, { x = 50, y = 50, w = 100, h = 100 }))
+assert_eq("frames that only touch do not", false, DeskTab.frames_overlap(A, { x = 100, y = 0, w = 100, h = 100 }))
+local slot_a, slot_b, slot_c = { x = 0, y = 0, w = 100, h = 100 }, { x = 200, y = 0, w = 100, h = 100 },
+  { x = 400, y = 0, w = 100, h = 100 }
+assert_eq("a slot over the focused window is never picked", slot_b,
+  DeskTab.pick_free_slot({ slot_a, slot_b }, {}, slot_a))
+assert_eq("a free slot beats one holding another window", slot_c,
+  DeskTab.pick_free_slot({ slot_b, slot_c }, { { x = 210, y = 10, w = 80, h = 80 } }, slot_a))
+assert_eq("no free slot: one at least clear of the focused window", slot_b,
+  DeskTab.pick_free_slot({ slot_a, slot_b }, { { x = 210, y = 10, w = 80, h = 80 } }, slot_a))
+assert_eq("every slot over the focused window: none", nil,
+  DeskTab.pick_free_slot({ slot_a }, {}, slot_a))
+
+-- ---------------------------------------------------------------------------
 -- Ghostty's saved last window position
 -- ---------------------------------------------------------------------------
 local saved = DeskTab.parse_saved_position("(\n    2663,\n    780,\n    1136,\n    700\n)\n")
@@ -564,6 +593,8 @@ local function new_world(recs, focused, front_app)
       setFrame = function(_, f)
         world.set_frames[#world.set_frames + 1] = { id = r.id, frame = f }
         r.frame = f
+        -- Ghostty saves a window's frame whenever it moves or resizes.
+        if r.app == "Ghostty" and not world.freeze_saved then world.saved = f end
       end,
       focus = function() focus_rec(r) end,
     }
@@ -660,8 +691,11 @@ local function new_world(recs, focused, front_app)
       end
       if script:find("new window with configuration", 1, true) then
         world.opened_window = true
+        -- Ghostty shows a new window at its saved position: right over the
+        -- window the user was working in.
+        local sv = world.saved or CASCADE
         local r = { id = world.next_id, script_id = "tab-group-new", title = "👻",
-          frame = CASCADE, app = "Ghostty" }
+          frame = { x = sv.x, y = sv.y, w = 900, h = 600 }, app = "Ghostty" }
         world.next_id = world.next_id + 1
         world.created_id = r.id
         at(0.15, function() table.insert(world.recs, 1, r) end)
@@ -712,6 +746,34 @@ local function frames_unchanged(desc, before_frames, world, except_key)
     end
   end
   assert_eq(desc, true, same)
+end
+
+local function new_window_rec(world)
+  for _, r in ipairs(world.recs) do
+    if r.script_id == "tab-group-new" then return r end
+  end
+end
+local function overlaps(a, b)
+  return a.x < b.x + b.w and b.x < a.x + a.w and a.y < b.y + b.h and b.y < a.y + a.h
+end
+-- After a new-window open: the new window is clear of the window that had
+-- focus, only it was given a frame, and Ghostty's saved position is the
+-- user's own window's (when it is Ghostty's), so the next tab cannot drag.
+local function new_window_checks(desc, world, focused_frame, user_ghostty_frame)
+  local nw = new_window_rec(world)
+  assert_eq(desc .. ": a new window exists", true, nw ~= nil)
+  assert_eq(desc .. ": it does not overlap the window that had focus", false,
+    nw ~= nil and overlaps(nw.frame, focused_frame))
+  local only_new = true
+  for _, sf in ipairs(world.set_frames) do
+    if sf.id ~= world.created_id then only_new = false end
+  end
+  assert_eq(desc .. ": only the new window was given a frame", true, only_new)
+  if user_ghostty_frame then
+    local sv = world.saved
+    assert_eq(desc .. ": Ghostty's saved position is the user's window's again", true,
+      sv ~= nil and sv.x == user_ghostty_frame.x and sv.y == user_ghostty_frame.y)
+  end
 end
 
 local function silently(fn)
@@ -796,6 +858,7 @@ silently(function() return DeskOpenTab("echo hi", nil, nil, { background = true 
 w.run(6)
 assert_eq("the saved position never becomes the target's: a new window, no tab", true,
   w.opened_window and w.tab_target == nil)
+new_window_checks("...that new window", w, UPPER_C, nil)
 assert_eq("...no window moved on screen", 0, #w.moved)
 assert_eq("...focus is back on upper_C", 1138, w.focused)
 frames_unchanged("...every window's frame is unchanged", frames0, w, "tab-group-new")
@@ -811,6 +874,31 @@ w.run(6)
 assert_eq("typing in upper_C, no lower_C: a new window", true, w.opened_window and w.tab_target == nil)
 assert_eq("...focus is back on upper_C", 1138, w.focused)
 frames_unchanged("...every window's frame is unchanged", frames0, w, "tab-group-new")
+new_window_checks("...that new window", w, UPPER_C, UPPER_C)
+-- The next open finds Ghostty's saved position where it belongs: a tab
+-- the user (or the hotkey) adds to upper_C now moves nothing.
+local frames1 = w.frames()
+silently(function() return DeskOpenTab("echo again", nil, nil) end)
+w.run(3)
+assert_eq("...and the next tab into upper_C moves nothing", 0, #w.moved)
+frames_unchanged("...every window's frame still unchanged", frames1, w, "tab-group-new")
+
+-- Another app frontmost and no Ghostty window in either middle slot: the
+-- new window goes clear of that app's focused window too.
+w = new_world({
+  { id = 9, title = "page", frame = UPPER_C, app = "Safari" },
+  { id = 510, script_id = "tab-group-c", title = "notes", frame = UPPER_R, app = "Ghostty" },
+}, 9, "Safari")
+w.saved = UPPER_C
+frames0 = w.frames()
+silently(function() return DeskOpenTab("echo hi", nil, nil, { background = true }) end)
+w.run(6)
+assert_eq("another app, no middle-slot window: a new window", true, w.opened_window and w.tab_target == nil)
+assert_eq("...focus is back in that app", "Safari", w.front_app)
+frames_unchanged("...every window's frame is unchanged", frames0, w, "tab-group-new")
+new_window_checks("...that new window", w, UPPER_C, nil)
+local nw = new_window_rec(w)
+assert_eq("...and it took a free slot, not the occupied upper_R", false, nw ~= nil and overlaps(nw.frame, UPPER_R))
 
 -- The notes hotkey from a window that isn't upper_C: upper_C is focused
 -- first, so it does not move, and focus stays on the new tab, as asked.
