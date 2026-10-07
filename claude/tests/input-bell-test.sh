@@ -4,6 +4,7 @@
 set -u
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export XDG_STATE_HOME="$(mktemp -d)"
 HOOK="${INPUT_BELL_HOOK:-$HERE/../hooks/input-bell.sh}"
 SETTINGS="$HERE/../settings.json"
 pass=0
@@ -98,6 +99,63 @@ elapsed=$(( $(date +%s) - start ))
 [ "$out" = "$BELL" ] && ok "large transcript: question rings" || bad "large transcript (got [$out])"
 [ "$elapsed" -lt 5 ] && ok "large transcript finishes inside the 5s timeout (${elapsed}s)" || bad "large transcript took ${elapsed}s"
 
+# Mid-turn: a marker rings on the tool event that follows it, once.
+SID="sess-1"
+STATE="$XDG_STATE_HOME/claude/input-bell-$SID"
+mid() { # event [transcript]
+	jq -nc --arg ev "$1" --arg p "${2:-$TMP/m.jsonl}" --arg s "$SID" '{hook_event_name:$ev, tool_name:"Bash", session_id:$s, transcript_path:$p}'
+}
+arec() { jq -nc --arg u "$1" --arg t "$2" '{type:"assistant", uuid:$u, message:{role:"assistant", content:[{type:"text", text:$t},{type:"tool_use", id:"x", name:"Bash", input:{}}]}}'; }
+rm -f "$STATE"; : >"$TMP/m.jsonl"
+expect "mid: first call on an empty transcript is quiet" "" "$(mid PreToolUse)"
+arec u1 "Checking things." >>"$TMP/m.jsonl"
+expect "mid: no marker is quiet" "" "$(mid PostToolUse)"
+off1="$(head -n 1 "$STATE")"
+arec u2 $'[needs-you] Need the API key, carrying on meanwhile.' >>"$TMP/m.jsonl"
+expect "mid: marker rings" "$BELL" "$(mid PreToolUse)"
+off2="$(head -n 1 "$STATE")"
+[ "$off2" -gt "$off1" ] && [ "$off2" = "$(wc -c <"$TMP/m.jsonl" | tr -d ' ')" ] && ok "mid: offset advanced to the end" || bad "mid: offset ($off1 -> $off2)"
+expect "mid: second call on unchanged input is quiet" "" "$(mid PostToolUse)"
+printf '%s\n' "$(cat "$STATE")" >"$TMP/state.before"
+expect "mid: unchanged input again is quiet" "" "$(mid PreToolUse)"
+cmp -s "$STATE" "$TMP/state.before" && ok "mid: unchanged input leaves state untouched" || bad "mid: state changed"
+# Same turn: a final reply repeating the ask does not ring at turn end.
+{ jq -nc --arg pid "$PID" '{type:"user", promptId:$pid, message:{role:"user", content:"go"}}'
+  arec u2 $'[needs-you] Need the API key, carrying on meanwhile.'
+  jq -nc '{type:"assistant", uuid:"u3", message:{role:"assistant", content:[{type:"text", text:"[needs-you] Still need the API key. Which one?"}]}}'
+} >"$TMP/turn2.jsonl"
+expect "mid: final reply repeating the ask does not ring again" "" "$(idle "$TMP/turn2.jsonl" | jq -c --arg s "$SID" '.session_id=$s')"
+# A new turn with a new marker rings.
+{ jq -nc '{type:"user", promptId:"new-turn", message:{role:"user", content:"next"}}'
+  jq -nc '{type:"assistant", uuid:"u9", message:{role:"assistant", content:[{type:"text", text:"[needs-you] Different question."}]}}'
+} >"$TMP/turn3.jsonl"
+expect "mid: new turn with a new marker rings at turn end" "$BELL" "$(idle "$TMP/turn3.jsonl" new-turn | jq -c --arg s "$SID" '.session_id=$s')"
+# Code blocks and quotes do not count.
+arec u4 $'Example:\n```\n[needs-you] inside code\n```' >>"$TMP/m.jsonl"
+arec u5 $'He wrote:\n> [needs-you] quoted' >>"$TMP/m.jsonl"
+expect "mid: marker in a code block or quote is quiet" "" "$(mid PostToolUse)"
+# Truncated/rotated transcript: offset past EOF recovers quietly, then works.
+arec r1 "fresh start" >"$TMP/m.jsonl"
+expect "mid: offset past EOF recovers quietly" "" "$(mid PreToolUse)"
+[ "$(head -n 1 "$STATE")" = "$(wc -c <"$TMP/m.jsonl" | tr -d ' ')" ] && ok "mid: offset reset to the new end" || bad "mid: offset after rotation"
+arec r2 "[needs-you] after rotation" >>"$TMP/m.jsonl"
+expect "mid: marker after rotation rings" "$BELL" "$(mid PreToolUse)"
+expect "mid: unreadable state dir is quiet, exit 0" "" "$(mid PreToolUse "$TMP/none.jsonl")"
+# Blocked-tool events still ring and a missing session id is quiet.
+expect "mid: no session id is quiet" "" "$(mid PreToolUse | jq -c 'del(.session_id)')"
+
+# Per-call cost on a ~20 MB transcript.
+bigsz=$(wc -c <"$big")
+cp "$big" "$TMP/bigm.jsonl"; SID=big; STATE="$XDG_STATE_HOME/claude/input-bell-big"
+t0=$(date +%s%N 2>/dev/null || echo 0)
+out="$(mid PreToolUse "$TMP/bigm.jsonl" | "$HOOK")"; t1=$(date +%s%N 2>/dev/null || echo 0)
+out2="$(mid PreToolUse "$TMP/bigm.jsonl" | "$HOOK")"; t2=$(date +%s%N 2>/dev/null || echo 0)
+arec b1 "[needs-you] big" >>"$TMP/bigm.jsonl"
+out3="$(mid PreToolUse "$TMP/bigm.jsonl" | "$HOOK")"; t3=$(date +%s%N 2>/dev/null || echo 0)
+[ -z "$out" ] && [ -z "$out2" ] && [ "$out3" = "$BELL" ] && ok "mid: large transcript behaves ($bigsz bytes)" || bad "mid: large transcript ([$out] [$out2] [$out3])"
+echo "# mid-turn cost: first call $(( (t1 - t0) / 1000000 )) ms, unchanged $(( (t2 - t1) / 1000000 )) ms, one new record $(( (t3 - t2) / 1000000 )) ms"
+[ $(( (t3 - t0) / 1000000 )) -lt 5000 ] && ok "mid: all large-transcript calls inside the timeout" || bad "mid: too slow"
+
 # The emitted value must decode to exactly BEL.
 decoded="$(printf '%s' '{"hook_event_name":"Notification","notification_type":"permission_prompt"}' | "$HOOK" | jq -r .terminalSequence | od -An -c | tr -d ' ')"
 [ "$decoded" = '\a\n' ] && ok "bell decodes to BEL" || bad "bell decodes to BEL (got [$decoded])"
@@ -109,8 +167,11 @@ case "$m" in
 	*permission_prompt*idle_prompt*|*idle_prompt*permission_prompt*) ok "Notification matcher is limited ($m)" ;;
 	*) bad "Notification matcher missing or unlimited ([$m])" ;;
 esac
-m="$(jq -r '.hooks.PreToolUse[] | select(.hooks[].command | test("input-bell")) | .matcher' "$SETTINGS")"
-[ "$m" = "AskUserQuestion|ExitPlanMode" ] && ok "PreToolUse matcher is limited" || bad "PreToolUse matcher ([$m])"
+for ev in PreToolUse PostToolUse; do
+	n="$(jq -r --arg ev "$ev" '[.hooks[$ev][] | select(.hooks[].command | test("input-bell"))] | length' "$SETTINGS")"
+	m="$(jq -r --arg ev "$ev" '.hooks[$ev][] | select(.hooks[].command | test("input-bell")) | .matcher // "all"' "$SETTINGS")"
+	[ "$n" = 1 ] && [ "$m" = all ] && ok "$ev wired once for all tools" || bad "$ev wiring (n=$n matcher=[$m])"
+done
 
 echo "$pass passed, $fail failed"
 [ "$fail" -eq 0 ]

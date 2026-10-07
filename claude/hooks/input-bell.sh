@@ -10,9 +10,25 @@
 # prepends a marker to that tab's title until it is focused; Claude's own
 # title is never touched.
 #
+# Mid-turn: on every `PreToolUse` and `PostToolUse` the hook scans the
+# transcript bytes appended since its last call for an assistant text with
+# a line starting `[needs-you]` (outside code fences) and rings at once,
+# so a session that flags a block and carries on does not make him wait
+# for the turn to end. Per session it keeps a state file under
+# `${XDG_STATE_HOME:-~/.local/state}/claude/input-bell-<session id>`: the
+# byte offset scanned so far (first call: the last 64 KB; an offset past
+# EOF restarts there) and the uuids of the assistant records already
+# rung. An unchanged transcript costs one `jq` call and a `wc`.
+# Dedup: the idle check stays quiet when any assistant record of its turn
+# was rung mid-turn, so a final reply repeating the same ask is the same
+# ask and does not ring again; a new turn with a new marker rings.
+# Both events are scanned because the text may reach the transcript only
+# after `PreToolUse`; the uuid record makes the second scan harmless.
+#
 # Wired from settings.json on `Notification` (matcher limited to the
-# needs-you types below) and on `PreToolUse` for the tools that block on
-# the user. Hook JSON on stdin. The bell goes out through the hook JSON
+# needs-you types below) and on `PreToolUse`/`PostToolUse` for every tool
+# (AskUserQuestion and ExitPlanMode ring directly). Hook JSON on stdin.
+# The bell goes out through the hook JSON
 # field `terminalSequence`, which Claude Code writes itself: a hook has no
 # controlling terminal, so writing BEL to stdout or /dev/tty would not
 # reach one. The field is ignored in `-p` print mode, so headless runs
@@ -24,18 +40,79 @@ set -u
 input="$(cat)"
 command -v jq >/dev/null 2>&1 || exit 0
 
-kind="$(printf '%s' "$input" | jq -r '
-    if .hook_event_name == "Notification" then
+# One jq call yields everything: kind, session id, transcript path, prompt id.
+fields="$(printf '%s' "$input" | jq -r '
+    (if .hook_event_name == "Notification" then
         (.notification_type // "" ) as $t
         | if ($t | IN("permission_prompt", "elicitation_dialog",
                       "elicitation_url_dialog", "agent_needs_input"))
           then "ring"
           elif $t == "idle_prompt" then "idle"
           else "quiet" end
-    elif .hook_event_name == "PreToolUse" then
+    elif .hook_event_name == "PreToolUse" or .hook_event_name == "PostToolUse" then
         if (.tool_name // "" | IN("AskUserQuestion", "ExitPlanMode"))
-        then "ring" else "quiet" end
-    else "quiet" end' 2>/dev/null)" || exit 0
+        then "ring" else "midturn" end
+    else "quiet" end),
+    (.session_id // ""), (.transcript_path // ""), (.prompt_id // "")
+    | gsub("[\\t\\n]"; " ")' 2>/dev/null)" || exit 0
+{ IFS= read -r kind; IFS= read -r sid; IFS= read -r tpath; IFS= read -r pid; } <<<"$fields"
+
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/claude"
+sid_safe="${sid//[^A-Za-z0-9_-]/}"
+state_file=""
+[ -n "$sid_safe" ] && state_file="$STATE_DIR/input-bell-$sid_safe"
+
+# Offset and rung uuids live in the state file: line 1 is the byte offset
+# already scanned, the rest are uuids of assistant records already rung.
+rung_list() { [ -n "$state_file" ] && [ -r "$state_file" ] && tail -n +2 "$state_file" 2>/dev/null | tr '\n' ' '; }
+
+# Mid-turn marker scan. Reads only the bytes appended since the last call
+# (the last 64 KB on the first call or after the file shrank), stops at the
+# last complete line, and prints "ring" for an assistant record carrying a
+# line that starts with `[needs-you]`, outside code fences, not rung yet.
+midturn_verdict() {
+    [ -n "$state_file" ] && [ -n "$tpath" ] && [ -r "$tpath" ] || return 0
+    local size off="" start first=0 chunk body consumed found rung new
+    size="$(wc -c <"$tpath" 2>/dev/null | tr -d ' ')" || return 0
+    [ -n "$size" ] || return 0
+    [ -r "$state_file" ] && off="$(head -n 1 "$state_file" 2>/dev/null)"
+    case "$off" in ''|*[!0-9]*) off="" ;; esac
+    if [ -z "$off" ] || [ "$off" -gt "$size" ]; then
+        first=1; start=$((size > 65536 ? size - 65536 : 0))
+    else
+        start="$off"
+    fi
+    [ "$size" -gt "$start" ] || return 0
+    chunk="$(tail -c +$((start + 1)) "$tpath" 2>/dev/null | head -c $((size - start)); printf x)" || return 0
+    chunk="${chunk%x}"
+    case "$chunk" in *$'\n'*) ;; *) return 0 ;; esac
+    body="${chunk%$'\n'*}"
+    consumed=$(( $(printf '%s\n' "$body" | wc -c) ))
+    # A tail read that starts mid-file begins inside a line: drop it.
+    if [ "$first" = 1 ] && [ "$start" -gt 0 ]; then
+        case "$body" in *$'\n'*) body="${body#*$'\n'}" ;; *) body="" ;; esac
+    fi
+    rung="$(rung_list)"
+    found="$(printf '%s\n' "$body" | jq -nrR --arg rung "$rung" '
+        ($rung | split(" ")) as $done
+        | [inputs | fromjson? | select(type == "object" and .type == "assistant")
+           | select((.uuid // "") as $u | ($done | index($u)) | not)
+           | select([.message.content | if type == "array" then .[] else empty end
+                     | select(.type == "text") | .text
+                     | split("\n")
+                     | reduce .[] as $l ({f: false, hit: false};
+                         if ($l | test("^\\s*(```|~~~)")) then .f |= not
+                         elif .f then .
+                         elif ($l | test("^\\s*\\[needs-you\\]")) then .hit = true
+                         else . end) | .hit] | any)
+           | .uuid // "x"] | .[]' 2>/dev/null)" || return 0
+    new="$(printf '%s\n' "$rung" | tr ' ' '\n' | grep -v '^$'; printf '%s\n' "$found" | grep -v '^$')"
+    new="$((start + consumed))
+$(printf '%s\n' "$new" | grep -v '^$' | tail -n 20)"
+    mkdir -p "$STATE_DIR" 2>/dev/null && printf '%s\n' "$new" >"$state_file" 2>/dev/null
+    [ -n "$found" ] && printf ring
+    return 0
+}
 
 # Prints ring or quiet for the turn `prompt_id`, from the transcript tail.
 # Tool-result user records carry the turn's promptId too, so the turn is
@@ -45,10 +122,15 @@ idle_verdict() {
     [ -n "$path" ] && [ -n "$pid" ] && [ -r "$path" ] || return 0
     size="$(wc -c <"$path" 2>/dev/null | tr -d ' ')" || return 0
     for bytes in 524288 8388608; do
-        v="$(tail -c "$bytes" "$path" 2>/dev/null | jq -nrR --arg pid "$pid" '
-            [inputs | fromjson? | select(type == "object")] as $r
+        v="$(tail -c "$bytes" "$path" 2>/dev/null | jq -nrR --arg pid "$pid" --arg rung "$(rung_list)" '
+            ($rung | split(" ")) as $done
+            | [inputs | fromjson? | select(type == "object")] as $r
             | ([$r | to_entries[] | select(.value.type == "user" and .value.promptId == $pid) | .key] | last) as $i
             | if $i == null then "missing"
+              elif ([label $out | $r[$i + 1:][]
+                  | if .type == "user" and .promptId != null and .promptId != $pid then break $out else . end
+                  | select(.type == "assistant") | (.uuid // "x") as $u | ($done | index($u))] | any)
+              then "quiet"
               else
                 ([label $out | $r[$i + 1:][]
                   | if .type == "user" and .promptId != null and .promptId != $pid then break $out else . end
@@ -74,9 +156,9 @@ idle_verdict() {
 }
 
 if [ "$kind" = idle ]; then
-    kind="$(idle_verdict \
-        "$(printf '%s' "$input" | jq -r '.transcript_path // empty' 2>/dev/null)" \
-        "$(printf '%s' "$input" | jq -r '.prompt_id // empty' 2>/dev/null)")"
+    kind="$(idle_verdict "$tpath" "$pid")"
+elif [ "$kind" = midturn ]; then
+    kind="$(midturn_verdict)"
 fi
 
 [ "$kind" = "ring" ] && printf '{"terminalSequence":"\\u0007"}\n'
