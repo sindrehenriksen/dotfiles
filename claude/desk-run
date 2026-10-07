@@ -56,9 +56,9 @@ for _tool in jq realpath nvim git; do
 	fi
 done
 
-DESK_CONFIG="${DESK_CONFIG:-}"
+desk_resolve_config
 if [ -z "$DESK_CONFIG" ]; then
-	desk_log "$pass" '$DESK_CONFIG is not set'
+	desk_log "$pass" "\$DESK_CONFIG is not set, and there is no ${XDG_CONFIG_HOME:-$HOME/.config}/desk/config.json"
 	exit 2
 fi
 if [ ! -f "$DESK_CONFIG" ]; then

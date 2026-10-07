@@ -64,6 +64,22 @@ DESK_DEFAULT_MAX_BUDGET_USD="${DESK_DEFAULT_MAX_BUDGET_USD:-2}"
 
 mkdir -p "$DESK_STATE_DIR" "$DESK_LOCK_DIR" "$DESK_GUARD_DIR" "$DESK_SCRATCH_ROOT" "$DESK_LOG_DIR" "$DESK_RUNS_ROOT" 2>/dev/null
 
+# $DESK_CONFIG, or when it is unset, the machine-local default
+# ${XDG_CONFIG_HOME:-~/.config}/desk/config.json if that exists: a shell
+# started before the variable was exported, or an agent's Bash tool, still
+# finds the instance. The default is a path an instance's own installer
+# links, never one this repo names. $DESK_CONFIG_DEFAULT overrides that
+# path, which is how the test suite keeps a real instance out of reach.
+desk_resolve_config() {
+	if [ -z "${DESK_CONFIG:-}" ]; then
+		local fallback="${DESK_CONFIG_DEFAULT:-${XDG_CONFIG_HOME:-$HOME/.config}/desk/config.json}"
+		# Resolved, since the config's own paths are relative to the
+		# directory it really lives in, not the link's.
+		[ -e "$fallback" ] && DESK_CONFIG="$(realpath "$fallback")"
+	fi
+	DESK_CONFIG="${DESK_CONFIG:-}"
+}
+
 desk_log() {
 	# $1: pass name (or "-" outside any pass); rest: message. Goes to
 	# stderr only — launchd's own per-pass log redirect is what actually persists it; this never writes a log file

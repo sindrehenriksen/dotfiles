@@ -12,7 +12,7 @@ The mechanism is in `~/dotfiles/docs/desk.md`, under "The watch pass". This skil
 
 ## Before the first change
 
-- `command -v desk-watch` must succeed, and `$DESK_CONFIG` must name a config with a pass of kind `watch`. If either is missing, the watcher is not set up on this machine. Say so instead of improvising.
+- `command -v desk-watch` must succeed. `desk-watch run` also needs the instance's config: `$DESK_CONFIG`, or, when that is unset (as it often is in a Bash tool), the machine-local link `${XDG_CONFIG_HOME:-~/.config}/desk/config.json`, with a pass of kind `watch`. Adding, removing and listing need neither. If the command or the config is missing, the watcher is not set up on this machine. Say so instead of improvising.
 - **This session's id is `$CLAUDE_CODE_SESSION_ID`**, which Claude Code sets in the Bash tool's environment. A subagent's Bash sees its parent session's id, which is the right session to watch. `desk-watch` uses that id when `--session` is not given. To watch a *different* session, pass `--session <its name, or its id>`. The name is resolved through the reader (`session-status.sh resolve`).
 - Which tickets: take the keys the user names. If they say "this epic" or "these", use the keys this conversation has been about, and name them back in your reply. If that is not clear, ask once.
 

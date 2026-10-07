@@ -407,6 +407,19 @@ echo
 echo "=== the message stays under its cap ==="
 q="$(jq -n '{changes: [range(0; 60) | {at: 1800000000, ref: "ABC-\(.)", title: "t", context: "", what: ("x" * 300)}], dropped: 3}')"
 m="$(desk_watch_message '{"label":"L"}' "$q" n "$INST/prompts/watch-preamble.md" 4000 UTC)"
+echo
+echo "=== with DESK_CONFIG unset, the machine-local default is used ==="
+mkdir -p "$ROOT/xdg/desk"
+ln -s "$INST/config.json" "$ROOT/xdg/desk/config.json"
+out="$(env -u DESK_CONFIG -u DESK_CONFIG_DEFAULT XDG_CONFIG_HOME="$ROOT/xdg" "$CLI" run --dry-run 2>&1)"
+assert_contains "desk-watch run finds the instance through the default link" "watch: dry run" "$out"
+assert_not_contains "and its prompts resolve beside the real config, not the link" "Could not open file" "$out"
+out="$(env -u DESK_CONFIG -u DESK_CONFIG_DEFAULT XDG_CONFIG_HOME="$ROOT/xdg" "$RUN" watch --dry-run 2>&1)"
+assert_contains "so does desk-run" "watch: dry run" "$out"
+out="$(env -u DESK_CONFIG -u DESK_CONFIG_DEFAULT XDG_CONFIG_HOME="$ROOT/no-xdg" "$CLI" run --dry-run 2>&1)"; rc=$?
+assert_eq "with neither, it refuses" "2" "$rc"
+assert_contains "and names the default it looked for" "$ROOT/no-xdg/desk/config.json" "$out"
+
 [ "${#m}" -le 4000 ] && ok "a long queue fits the cap (${#m} chars)" || bad "a long queue fits the cap (${#m} chars)"
 assert_contains "the rest are named, not lost" "more, too long to include" "$m"
 assert_contains "dropped changes are counted" "Plus 3 older changes" "$m"

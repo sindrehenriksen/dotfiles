@@ -11,7 +11,8 @@
 # its Bash tool's environment, so a session can register itself. `remove`
 # without keys stops the whole watch; with keys, drops only those.
 # `run` runs the watch pass now (`desk-run <pass>`, the pass of kind
-# "watch" in $DESK_CONFIG), outside its schedule.
+# "watch" in $DESK_CONFIG), outside its schedule. With $DESK_CONFIG unset,
+# `run` uses ${XDG_CONFIG_HOME:-~/.config}/desk/config.json if it exists.
 set -u
 
 _src="${BASH_SOURCE[0]}"
@@ -73,7 +74,9 @@ case "$cmd" in
 		;;
 	list) desk_watch_cli_list "$json" ;;
 	run)
-		[ -n "${DESK_CONFIG:-}" ] && [ -f "$DESK_CONFIG" ] || { echo "desk-watch: \$DESK_CONFIG is not set or missing" >&2; exit 2; }
+		desk_resolve_config
+		[ -n "$DESK_CONFIG" ] && [ -f "$DESK_CONFIG" ] || { echo "desk-watch: \$DESK_CONFIG is not set or missing, and there is no ${XDG_CONFIG_HOME:-$HOME/.config}/desk/config.json" >&2; exit 2; }
+		export DESK_CONFIG
 		pass="$(jq -r '.passes | to_entries[] | select(.value.kind == "watch") | .key' "$DESK_CONFIG" | head -n1)"
 		[ -n "$pass" ] || { echo "desk-watch: no pass of kind \"watch\" in $DESK_CONFIG" >&2; exit 2; }
 		exec "$DESK_WATCH_DIR/desk-run" "$pass" "${run_args[@]+"${run_args[@]}"}"

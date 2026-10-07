@@ -311,4 +311,6 @@ desk_test_safe_env_init() {
 	export DESK_CLAUDE_BIN="$dest/bin/claude"
 	export DESK_OPEN_TAB_BIN="$dest/bin/desk-open-tab.sh"
 	export DESK_OPEN_URL="$dest/bin/open-url"
+	# Never the machine-local default config, which names a real instance.
+	export DESK_CONFIG_DEFAULT="$dest/no-desk-config.json"
 }
