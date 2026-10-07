@@ -296,9 +296,10 @@ In the review split:
 
 | Key | Action |
 |---|---|
-| `dp` | Take the diff hunk under the cursor into your notes buffer: every adjacent suggestion in it, as `do` from the notes window does. `u` in the notes window undoes a take. |
+| `dp` | Take the diff hunk under the cursor into your notes buffer: every adjacent suggestion in it, as `do` from the notes window does. |
 | `<leader>gA` | Take just the suggestion under the cursor into your notes buffer. |
-| `<leader>gD` | Decline the suggestion under the cursor; `u` undoes it. |
+| `<leader>gD` | Decline the suggestion under the cursor. |
+| `u` | Undo the latest take or decline made here. A take is undone in your notes buffer, unless you have edited your notes since, when it says so and leaves them alone; anything else is plain undo. |
 | `<leader>go` | The overview. |
 | `:w` | The commit point: records as declined every suggestion whose lines are gone from both the split and your notes, restores any declined this session whose lines are back, and records pending takes. Closing the split without saving records nothing. |
 

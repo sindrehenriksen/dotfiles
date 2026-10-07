@@ -825,6 +825,84 @@ do
 	assert_eq("and it is recorded taken", { "drop stale" }, taken_headlines(r4))
 end
 
+print("\n=== u in the review split undoes the latest take or decline, in either order ===")
+do
+	local function setup()
+		local r = new_repo(BASE)
+		build(r, "2026-10-01", {
+			item("n1"),
+			item("a1", { kind = "add", target = { under = "Section A" }, after = "  added", source = "", headline = "add A" }),
+		})
+		local nb = open_notes(r)
+		review.attach(nb)
+		assert_true("review opens", review.open_review(nb))
+		local rb = review_buf_of(nb)
+		return r, nb, rb, vim.fn.bufwinid(rb)
+	end
+	local function u(rw)
+		vim.api.nvim_set_current_win(rw)
+		vim.cmd("normal u")
+	end
+	local function taken_count(r)
+		return vim.tbl_count(ledger.taken_by_id(ledger.read(r)))
+	end
+
+	-- take, then decline: u undoes the decline first, then the take
+	local r, nb, rb, rw = setup()
+	go_to(rw, rb, "NEWS n1")
+	vim.cmd("normal dp")
+	go_to(rw, rb, "  added")
+	assert_true("decline", review.decline(rb))
+	u(rw)
+	assert_true("the first u brings the declined suggestion back", line_of(rb, "  added") ~= nil)
+	assert_eq("and leaves the take in the notes", "NEWS n1", lines_of(nb)[1])
+	u(rw)
+	assert_eq("the second u undoes the take in the notes buffer", BASE, lines_of(nb))
+	local merged = lines_of(rb)
+	u(rw)
+	assert_eq("a third u, with nothing left, is plain undo: nothing to undo", merged, lines_of(rb))
+	vim.cmd("write")
+	assert_eq("nothing taken after the undone take", 0, taken_count(r))
+	assert_eq("nothing declined after the undone decline", {}, declined_ids(r))
+
+	-- decline, then take: u undoes the take first, then the decline
+	local r2, nb2, rb2, rw2 = setup()
+	go_to(rw2, rb2, "  added")
+	assert_true("decline", review.decline(rb2))
+	go_to(rw2, rb2, "NEWS n1")
+	assert_true("take one with the take key", review.take(rb2))
+	assert_eq("taken into the notes", "NEWS n1", lines_of(nb2)[1])
+	u(rw2)
+	assert_eq("the first u undoes the take in the notes buffer", BASE, lines_of(nb2))
+	assert_true("and leaves the decline", line_of(rb2, "  added") == nil)
+	u(rw2)
+	assert_true("the second u undoes the decline", line_of(rb2, "  added") ~= nil)
+	assert_eq("the notes stay as they were", BASE, lines_of(nb2))
+	vim.cmd("write")
+	assert_eq("nothing taken", 0, taken_count(r2))
+	assert_eq("nothing declined", {}, declined_ids(r2))
+
+	-- notes edited after the take: u in the split leaves the notes alone
+	local _, nb3, rb3, rw3 = setup()
+	go_to(rw3, rb3, "NEWS n1")
+	vim.cmd("normal dp")
+	-- a later edit is its own undo step, as typed text is
+	vim.api.nvim_buf_call(nb3, function()
+		vim.cmd("let &l:undolevels = &l:undolevels")
+	end)
+	vim.api.nvim_buf_set_lines(nb3, 1, 1, false, { "the user's own line" })
+	local before = lines_of(nb3)
+	local orig = vim.notify
+	local said
+	vim.notify = function(m)
+		said = m
+	end
+	u(rw3)
+	vim.notify = orig
+	assert_eq("the user's later edit and the take both stay", before, lines_of(nb3))
+	assert_true("and it says why", said ~= nil and said:match("notes changed") ~= nil)
+end
+
 print(string.format("\n=== summary: %d passed, %d failed ===", pass, fail))
 if fail > 0 then
 	os.exit(1)

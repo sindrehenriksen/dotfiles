@@ -9,10 +9,10 @@
 -- as an `acwrite` scratch buffer, both windows in diff mode, the cursor in the
 -- split. The user takes a hunk with `dp` there or `do` in the notes window
 -- (editing first is fine) and leaves one alone to mean "not now" (the next
--- pass carries it). The decline key makes the hunk
--- under the cursor in the review split equal the user's text — an ordinary edit, so
--- plain `u` undoes it. Nothing is recorded until the user SAVES the review split:
--- that is the commit point, recording every suggestion whose lines are gone
+-- pass carries it). The decline key makes the hunk under the cursor in the
+-- review split equal the user's text — an ordinary edit, so plain `u` undoes
+-- it; `u` in the split undoes a take made there too. Nothing is recorded
+-- until the user SAVES the review split: that is the commit point, recording every suggestion whose lines are gone
 -- from the review buffer and not in the user's notes as declined. A discarded
 -- review buffer records nothing. Adjacent suggestions are one diff hunk, so
 -- the decline key (and `<leader>gA`, which takes one) act on a single
@@ -184,6 +184,39 @@ end
 local function pending_ids(notes_buf)
 	local pend = pending_taken[notes_buf]
 	return pend and pend.ids or {}
+end
+
+-- ---------------------------------------------------------------------------
+-- Undo from the review split: a take made there (`dp`, the take key) changed
+-- the notes buffer, not the split's, so plain `u` in the split would skip
+-- it. Each such take is stacked with both buffers' undo states. A decline
+-- (or any typing) is the split's own edit and so advances the split's undo
+-- state: when the split has changed since the newest take, that edit is the
+-- more recent one, and plain `u` undoes it.
+-- ---------------------------------------------------------------------------
+
+local function begin_take(s)
+	return {
+		tick = vim.api.nvim_buf_get_changedtick(s.notes_buf),
+		notes_pre = undo_seq(s.notes_buf),
+		review_seq = undo_seq(s.review_buf),
+		pending = vim.deepcopy(pending_ids(s.notes_buf)),
+	}
+end
+
+local function end_take(s, t)
+	if vim.api.nvim_buf_get_changedtick(s.notes_buf) == t.tick then
+		return
+	end
+	t.notes_post = undo_seq(s.notes_buf)
+	t.ids = {}
+	for id, p in pairs(pending_ids(s.notes_buf)) do
+		if not t.pending[id] or p.seq ~= t.pending[id].seq then
+			t.ids[#t.ids + 1] = id
+		end
+	end
+	t.pending = nil
+	s.takes[#s.takes + 1] = t
 end
 
 local function first_hunk(win)
@@ -379,7 +412,7 @@ end
 
 -- The review split's winbar: the keys in one line, so the table in the
 -- desk guide doesn't have to be open beside it.
-M.KEY_HINT = "]c/[c next/prev · dp take · ␣gA take one · ␣gD decline (u undoes) · C-t/C-n up/down · ␣go list · :wq done"
+M.KEY_HINT = "]c/[c next/prev · dp take · ␣gA take one · ␣gD decline · u undo · C-t/C-n up/down · ␣go list · :wq done"
 
 --- The review key: opens the merged view in a split above the notes window,
 --- and focuses it (or focuses the one already open for this proposal).
@@ -474,6 +507,7 @@ function M.open_review(notes_buf)
 		shown = shown,
 		conflicts = conflicts,
 		base = base,
+		takes = {},
 	}
 	sessions[notes_buf] = s
 	M.place_marks(s, ours)
@@ -544,6 +578,7 @@ function M.open_review(notes_buf)
 	-- notes side instead.
 	vim.keymap.set("n", "dp", function()
 		local tick = vim.api.nvim_buf_get_changedtick(notes_buf)
+		local t = begin_take(s)
 		local pre = buf_lines(notes_buf)
 		local count = vim.v.count > 0 and tostring(vim.v.count) or ""
 		pcall(vim.cmd, "normal! " .. count .. "dp")
@@ -564,7 +599,14 @@ function M.open_review(notes_buf)
 			end
 		end
 		note_takes(s, pre)
+		end_take(s, t)
 	end, { buffer = review_buf, desc = "Take the hunk under the cursor into your notes (also at the end of the file)" })
+	vim.keymap.set("n", "u", function()
+		local ok, why = M.undo(review_buf)
+		if not ok then
+			vim.notify("desk: " .. tostring(why), vim.log.levels.WARN)
+		end
+	end, { buffer = review_buf, desc = "Undo the latest take or decline" })
 	vim.keymap.set("n", "<leader>gD", function()
 		local ok, why = M.decline(review_buf)
 		if not ok then
@@ -877,14 +919,49 @@ function M.take(review_buf)
 	if not s then
 		return false, "not a desk review buffer"
 	end
+	local t = begin_take(s)
 	local ok, why = act_on_item(s, "take")
 	if ok == nil then
 		ok, why = diff_act(s, "diffput")
 	end
 	if ok then
+		end_take(s, t)
 		M.refresh_overview(s)
 	end
 	return ok, why
+end
+
+--- `u` in the review split: undoes the latest take made from the split in
+--- the notes buffer (and forgets it as a pending take), or, when the split's
+--- own latest edit (a decline) came after it, undoes that as plain `u` does.
+function M.undo(review_buf)
+	local s = session_for_review_buf(review_buf)
+	local t = s and s.takes[#s.takes]
+	if not (t and undo_seq(review_buf) == t.review_seq) then
+		local count = vim.v.count > 0 and tostring(vim.v.count) or ""
+		vim.api.nvim_buf_call(review_buf, function()
+			vim.cmd("normal! " .. count .. "u")
+		end)
+		return true
+	end
+	table.remove(s.takes)
+	if not vim.api.nvim_buf_is_valid(s.notes_buf) or undo_seq(s.notes_buf) ~= t.notes_post then
+		return false, "your notes changed after that take: undo it in the notes window"
+	end
+	vim.api.nvim_buf_call(s.notes_buf, function()
+		vim.cmd("silent undo " .. t.notes_pre)
+	end)
+	local pend = pending_taken[s.notes_buf]
+	for _, id in ipairs(t.ids) do
+		if pend and pend.ids[id] and pend.ids[id].seq == t.notes_post then
+			pend.ids[id] = nil
+		end
+	end
+	vim.api.nvim_buf_call(review_buf, function()
+		vim.cmd("diffupdate")
+	end)
+	M.refresh_overview(s)
+	return true
 end
 
 -- ---------------------------------------------------------------------------
