@@ -30,7 +30,7 @@ local now = os.time()
 print("=== session_text ===")
 
 assert_eq(
-	"idle counts from his last human message, not from other recent activity",
+	"idle counts from the user's last human message, not from other recent activity",
 	"live · idle 4d",
 	annotate.session_text({ live = true, last_activity = now, last_human_message = now - 4 * DAY }, now)
 )
@@ -48,7 +48,7 @@ assert_eq(
 )
 for _, reason in ipairs({ "prompt_input_exit", "clear", "logout" }) do
 	assert_eq(
-		"he ended it himself (" .. reason .. "): done, with the date",
+		"the user ended it themselves (" .. reason .. "): done, with the date",
 		"done · last active " .. os.date("%Y-%m-%d", now - 2 * DAY),
 		annotate.session_text({ live = false, end_reason = reason, last_activity = now - 2 * DAY }, now)
 	)
@@ -70,7 +70,7 @@ print("=== ticket_text ===")
 
 local cache = { checked_at = now - 90, tickets = { ["TICKET-1"] = { status = "In Review" } } }
 assert_eq("an exact-case match", "In Review · status from last pass · 1 minute ago", annotate.ticket_text(cache, "TICKET-1", now))
-assert_eq("a case-insensitive match (his notes mix cases)", "In Review · status from last pass · 1 minute ago", annotate.ticket_text(cache, "ticket-1", now))
+assert_eq("a case-insensitive match (the user's notes mix cases)", "In Review · status from last pass · 1 minute ago", annotate.ticket_text(cache, "ticket-1", now))
 assert_eq("no cache entry for the token: no annotation, not a blank one", nil, annotate.ticket_text(cache, "TICKET-2", now))
 assert_eq("no cache at all: nil, never an error", nil, annotate.ticket_text(nil, "TICKET-1", now))
 

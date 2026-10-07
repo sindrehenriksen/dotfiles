@@ -111,7 +111,7 @@ assert_eq "overflow.act: 1 (cap of 1, two ACT items)" "1" "$(jq -r '.proposal.ov
 # Overflow is counted in the status file only; the proposal holds just the
 # showable items.
 assert_eq "counts.by_kind.new counts the one showable item" "1" "$(jq -r '.proposal.counts.by_kind.new' <<< "$status")"
-assert_eq "untaken: the one showable item still waits on him" "1" "$(jq -r '.proposal.untaken' <<< "$status")"
+assert_eq "untaken: the one showable item still waits on the user" "1" "$(jq -r '.proposal.untaken' <<< "$status")"
 assert_true "the retired queue/classify fields are gone" \
 	"$(jq -e '(.proposal | has("queued") or has("deferred")) or has("accepted_by_accident") or has("waiting_edits")' > /dev/null 2>&1 <<< "$status" && echo false || echo true)"
 

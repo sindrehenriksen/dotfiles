@@ -149,9 +149,9 @@ printf 'Alpha: existing block\n' > "$notes_repo/notes.md"
 git -C "$notes_repo" add notes.md
 GIT_AUTHOR_DATE="2020-01-01T00:00:00" GIT_COMMITTER_DATE="2020-01-01T00:00:00" \
 	git -C "$notes_repo" commit -q -m initial
-printf 'Alpha: existing block\nHis own new line\n' > "$notes_repo/notes.md"
+printf 'Alpha: existing block\nOwn new line\n' > "$notes_repo/notes.md"
 git -C "$notes_repo" add notes.md
-git -C "$notes_repo" commit -q -m "his own edit"
+git -C "$notes_repo" commit -q -m "the user's own edit"
 : > "$notes_repo/reading.md"
 git -C "$notes_repo" add reading.md
 git -C "$notes_repo" commit -q -m "add reading.md"
@@ -176,11 +176,11 @@ assert_true "the tab's cwd is a fresh dir under scratch_dir, not cwd_outside" \
 assert_true "the fresh scratch dir actually exists" "$([ -d "$scratch_cwd_arg" ] && echo true || echo false)"
 diff_file="$scratch_cwd_arg/notes-diff.md"
 assert_true "notes-diff.md was seeded into it" "$([ -s "$diff_file" ] && echo true || echo false)"
-assert_true "it carries his own edit" "$(grep -qF '+ His own new line' "$diff_file" 2> /dev/null && echo true || echo false)"
+assert_true "it carries the user's own edit" "$(grep -qF '+ Own new line' "$diff_file" 2> /dev/null && echo true || echo false)"
 assert_true "the diff body is fenced" "$(grep -q '^```$' "$diff_file" 2> /dev/null && echo true || echo false)"
 
 echo
-echo "=== restricted: false — his default permissions, no isolation flags ==="
+echo "=== restricted: false — the user's default permissions, no isolation flags ==="
 default_perms_step_json='{
 	"id": "open-tab", "kind": "open_tab",
 	"cwd_outside": "~/dev/example-workspace",

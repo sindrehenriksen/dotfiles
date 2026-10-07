@@ -253,7 +253,7 @@ desk_test_state_guard_check() {
 # override would otherwise let a test actually run for real (DESK_CLAUDE_BIN
 # — a live model call; DESK_OPEN_TAB_BIN/DESK_FOCUS_TAB_BIN/DESK_OPEN_URL —
 # a real tab focused or URL opened) and an empty reader for DESK_READER, so
-# a lookup that was never stubbed sees no sessions instead of his real ones.
+# a lookup that was never stubbed sees no sessions instead of the user's real ones.
 # Call once, before the first suite/test runs; every value here is still just a default; a suite that
 # sets its own (as most already do) overrides it the ordinary way.
 desk_test_safe_env_init() {

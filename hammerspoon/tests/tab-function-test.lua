@@ -207,9 +207,9 @@ assert_eq("no ultrawide, no frontmost Ghostty window (this stub): no target", fa
 assert_eq("and never calls osascript either", 0, osascript_calls)
 
 -- ---------------------------------------------------------------------------
--- Every tab command runs through his login+interactive
+-- Every tab command runs through the user's login+interactive
 -- shell (/bin/zsh -lic '<command>'), never Ghostty's own command: field
--- invoking it directly — CLAUDE_CONFIG_DIR and PATH have to come from his
+-- invoking it directly — CLAUDE_CONFIG_DIR and PATH have to come from the user's
 -- shell rc files. Reached via the laptop-only "front window is Ghostty"
 -- path (the stub's screens list stays empty), so the script actually
 -- reaches hs.osascript.applescript this time and its argument can be

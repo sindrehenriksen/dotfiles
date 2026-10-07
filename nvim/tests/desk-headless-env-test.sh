@@ -3,10 +3,10 @@
 # desk_call_model exports DESK_HEADLESS=1 for EVERY non-restricted
 # (connector) call, not only a named/"visible" one. Before this fix an
 # EPHEMERAL connector call (F-private, W — no --name,
-# --no-session-persistence) still loaded his real settings and hooks
+# --no-session-persistence) still loaded the user's real settings and hooks
 # exactly like a visible one does, but never got DESK_HEADLESS set, so its
 # own genuine SessionStart/SessionEnd would land source "startup", reason
-# "other" — indistinguishable from a session he actually opened, and
+# "other" — indistinguishable from a session the user actually opened, and
 # exactly the 16:30 capture's own "dropped" criteria. No live model call:
 # a fake `claude` on PATH records its own env.
 set -u

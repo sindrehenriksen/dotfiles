@@ -4,8 +4,8 @@
 # desk.snippet rather than a second normalization here) and
 # claude/desk-lib/steps.sh's desk_write_notes_diff/desk_last_weekday_epoch
 # (the since-commit resolution and rendering around it). From-scratch-repo
-# scenarios drive the verb directly: his own edit is kept, an agent line he
-# took is excluded even after he moved it elsewhere in the file, and a taken
+# scenarios drive the verb directly: the user's own edit is kept, an agent line the user
+# took is excluded even after the user moved it elsewhere in the file, and a taken
 # agent removal is excluded — exclusions come from what the ledger recorded
 # as taken (by content), never from positions. No live model call, nothing
 # pushed anywhere.
@@ -36,8 +36,8 @@ source "$HERE/../../tests/lib/git-safety.sh"
 desk_test_git_safety_init "$ROOT"
 
 # ---------------------------------------------------------------------------
-# The from-scratch repo: an agent-suggested line he took, then moved; an
-# agent-suggested removal he took; and a line only he ever touched.
+# The from-scratch repo: an agent-suggested line the user took, then moved; an
+# agent-suggested removal the user took; and a line only the user ever touched.
 # ---------------------------------------------------------------------------
 repo="$ROOT/notes"
 desk_test_assert_repo_under_root "$repo" "$ROOT"
@@ -67,16 +67,16 @@ cat > "$items" <<'EOF'
 EOF
 nvim -l "$CLI" proposal-build "$repo" morning 2026-10-01 "$items" notes.md > /dev/null
 
-# He takes both (plus a line of his own) and commits; later he moves the
+# The user takes both (plus a line of the user's own) and commits; later the user moves the
 # agent line elsewhere.
-printf 'Alpha: existing block\nBeta: existing block\nGamma: agent-suggested content\nHis own new line\n' \
+printf 'Alpha: existing block\nBeta: existing block\nGamma: agent-suggested content\nOwn new line\n' \
 	> "$repo/notes.md"
 git -C "$repo" add notes.md
-git -C "$repo" commit -q -m "his edit plus the taken suggestions"
-printf 'Alpha: existing block\nGamma: agent-suggested content\nBeta: existing block\nHis own new line\n' \
+git -C "$repo" commit -q -m "the user's edit plus the taken suggestions"
+printf 'Alpha: existing block\nGamma: agent-suggested content\nBeta: existing block\nOwn new line\n' \
 	> "$repo/notes.md"
 git -C "$repo" add notes.md
-git -C "$repo" commit -q -m "he moved the agent line"
+git -C "$repo" commit -q -m "the user moved the agent line"
 
 echo "=== cli.lua notes-diff: the three scenarios ==="
 out="$(nvim -l "$CLI" notes-diff "$repo" notes.md "$since_sha")"
@@ -85,8 +85,8 @@ assert_true "valid JSON" "$(jq -e . > /dev/null 2>&1 <<< "$out" && echo true || 
 additions="$(jq -c '.additions' <<< "$out")"
 removals="$(jq -c '.removals' <<< "$out")"
 
-assert_true "his own new line is kept as an addition" \
-	"$(jq -e '. == ["His own new line"]' > /dev/null 2>&1 <<< "$additions" && echo true || echo false)"
+assert_true "the user's own new line is kept as an addition" \
+	"$(jq -e '. == ["Own new line"]' > /dev/null 2>&1 <<< "$additions" && echo true || echo false)"
 assert_true "the taken, later-moved agent line never shows up as an addition" \
 	"$(jq -e 'index("Gamma: agent-suggested content") == null' > /dev/null 2>&1 <<< "$additions" && echo true || echo false)"
 assert_true "the taken, later-moved agent line never shows up as a removal either" \
@@ -144,7 +144,7 @@ content="$(cat "$out_file")"
 assert_true "opens with the fenced header" "$(head -1 "$out_file" | grep -q '^# Notes diff' && echo true || echo false)"
 assert_true "notes.md section present" "$(grep -q '^== notes.md ==' "$out_file" && echo true || echo false)"
 assert_true "reading.md section present" "$(grep -q '^== reading.md ==' "$out_file" && echo true || echo false)"
-assert_true "his own new line rendered as an addition" "$(grep -qF '+ His own new line' "$out_file" && echo true || echo false)"
+assert_true "the user's own new line rendered as an addition" "$(grep -qF '+ Own new line' "$out_file" && echo true || echo false)"
 assert_true "the moved agent line is nowhere in the file" \
 	"$([ ! "$(grep -F 'Gamma: agent-suggested content' "$out_file")" ] && echo true || echo false)"
 assert_true "the removed agent line is nowhere in the file" \
@@ -165,7 +165,7 @@ assert_true "a bad weekday is rejected" "$(desk_notes_diff_since_epoch '{"weekda
 assert_true "a bad time is rejected" "$(desk_notes_diff_since_epoch '{"weekday":"wed","time":"8am"}' > /dev/null 2>&1 && echo false || echo true)"
 out_obj="$ROOT/notes-diff-obj.md"
 desk_write_notes_diff "$repo" "$out_obj" '{"weekday":"wed","time":"08:00"}' notes.md 2> /dev/null
-assert_true "the object form drives a real diff" "$(grep -qF '+ His own new line' "$out_obj" && echo true || echo false)"
+assert_true "the object form drives a real diff" "$(grep -qF '+ Own new line' "$out_obj" && echo true || echo false)"
 
 echo
 echo "=== desk_write_notes_diff: an unknown notes_diff_since falls back to the empty tree, never fails ==="

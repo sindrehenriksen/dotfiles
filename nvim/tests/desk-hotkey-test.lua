@@ -333,7 +333,7 @@ do
 
 	vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<C-o>", true, false, true), "x", false)
 	local after_ctrl_o = vim.api.nvim_win_get_cursor(win)
-	assert_eq("Ctrl-O returns to the line he was reading", 5, after_ctrl_o[1])
+	assert_eq("Ctrl-O returns to the line the user was reading", 5, after_ctrl_o[1])
 
 	vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<C-i>", true, false, true), "x", false)
 	local after_ctrl_i = vim.api.nvim_win_get_cursor(win)
@@ -366,7 +366,7 @@ print()
 print("=== a session pattern's own capture resolves by short id ===")
 
 do
-	-- A config whose session pattern wraps a short id in decoration his
+	-- A config whose session pattern wraps a short id in decoration the user's
 	-- notes actually use — the reader indexes sessions by "42", never by
 	-- the decorated token "S-42" typed in the buffer.
 	local capture_config = {

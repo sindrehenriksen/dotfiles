@@ -1,5 +1,5 @@
 -- The stateless diff review (desk.review), headless against throwaway repos,
--- never his real notes: the merged view in a stacked diff split, taking a
+-- never the user's real notes: the merged view in a stacked diff split, taking a
 -- hunk with `do`, the decline key with plain-`u` undo and save as the commit
 -- point, "not now" as leaving a hunk, the overview with jumplist-safe jumps,
 -- and restoring from the declined-recently list.
@@ -153,16 +153,16 @@ assert_true("both windows are in diff mode", vim.wo[review_win].diff and vim.wo[
 assert_true("review is below the notes window", vim.fn.win_screenpos(review_win)[1] > vim.fn.win_screenpos(notes_win)[1])
 assert_true("the merged view has the news on top", lines_of(rb)[1]:match("^NEWS ") ~= nil)
 assert_true("and the in-place add", line_of(rb, "  added") ~= nil)
-assert_eq("his buffer is untouched", BASE, lines_of(nb))
-assert_eq("his HEAD is untouched", BASE, head_lines(repo))
-assert_eq("his buffer is not modified", false, vim.bo[nb].modified)
+assert_eq("the user's buffer is untouched", BASE, lines_of(nb))
+assert_eq("the user's HEAD is untouched", BASE, head_lines(repo))
+assert_eq("the user's buffer is not modified", false, vim.bo[nb].modified)
 
 print("\n=== take a hunk with do in the notes window, then commit: taken is recorded ===")
 go_to(notes_win, nb, "Section A")
 vim.api.nvim_win_set_cursor(notes_win, { 1, 0 })
--- the news hunk is a deletion on his side: do on the line it precedes
+-- the news hunk is a deletion on the user's side: do on the line it precedes
 vim.cmd("normal! do")
-assert_true("his buffer now holds the news line", line_of(nb, "NEWS n1") ~= nil or lines_of(nb)[1]:match("^NEWS ") ~= nil)
+assert_true("the user's buffer now holds the news line", line_of(nb, "NEWS n1") ~= nil or lines_of(nb)[1]:match("^NEWS ") ~= nil)
 assert_true("still no commit", #head_lines(repo) == #BASE)
 local cok, cres = review.commit(nb)
 assert_true("commit succeeds", cok)
@@ -171,7 +171,7 @@ local n1_id = id_by_headline(repo, "headline n1")
 assert_true("the taken item is recorded as taken", ledger.taken_by_id(ledger.read(repo))[n1_id] ~= nil)
 assert_eq("the other suggestion is not taken", false, ledger.taken_by_id(ledger.read(repo))[id_by_headline(repo, "headline a1")] ~= nil)
 assert_eq("one taken reported", 1, cres.taken)
-assert_eq("his buffer is saved", false, vim.bo[nb].modified)
+assert_eq("the user's buffer is saved", false, vim.bo[nb].modified)
 
 print("\n=== not now: a hunk left alone is carried by the next pass, batched with new items ===")
 build(repo, "2026-10-02", { item("n2") })
@@ -181,7 +181,7 @@ local heads = vim.tbl_map(function(it)
 end, p.items)
 table.sort(heads)
 assert_eq("the left hunk and the new item; the taken one is gone", { "headline a1", "headline n2" }, heads)
-assert_eq("parent is his newest HEAD", vim.trim(select(2, git.run(repo, { "rev-parse", "HEAD" }))), p.parent)
+assert_eq("parent is the user's newest HEAD", vim.trim(select(2, git.run(repo, { "rev-parse", "HEAD" }))), p.parent)
 
 print("\n=== decline then u: nothing changes, nothing recorded ===")
 local nb2 = open_notes(repo)
@@ -194,7 +194,7 @@ local merged_before = lines_of(rb)
 go_to(review_win, rb, "  added")
 local dok = review.decline(rb)
 assert_true("decline succeeds", dok)
-assert_true("the declined hunk now equals his text", line_of(rb, "  added") == nil)
+assert_true("the declined hunk now equals the user's text", line_of(rb, "  added") == nil)
 vim.api.nvim_set_current_win(review_win)
 vim.cmd("normal! u")
 assert_eq("plain u restores the review buffer", merged_before, lines_of(rb))
@@ -254,10 +254,10 @@ for _, l in ipairs(lines_of(rb)) do
 	end
 end
 assert_eq("both suggestions are hunks", 2, news)
-assert_eq("still a single proposal commit on his HEAD", vim.trim(select(2, git.run(repo3, { "rev-parse", "HEAD" }))), proposal.read(repo3).parent)
+assert_eq("still a single proposal commit on the user's HEAD", vim.trim(select(2, git.run(repo3, { "rev-parse", "HEAD" }))), proposal.read(repo3).parent)
 
-print("\n=== his own edits after the pass do not appear as hunks ===")
-vim.api.nvim_buf_set_lines(nb4, 3, 4, false, { "  other, edited by him" })
+print("\n=== the user's own edits after the pass do not appear as hunks ===")
+vim.api.nvim_buf_set_lines(nb4, 3, 4, false, { "  other, edited by the user" })
 vim.cmd("silent! only")
 rb = review_buf_of(nb4)
 if rb then
@@ -265,7 +265,7 @@ if rb then
 end
 assert_true("re-open", review.open_review(nb4))
 rb = review_buf_of(nb4)
-assert_true("his edit is in the merged view", line_of(rb, "  other, edited by him") ~= nil)
+assert_true("the user's edit is in the merged view", line_of(rb, "  other, edited by the user") ~= nil)
 local hunks = vim.diff(
 	snippet.join_lines(lines_of(nb4), true),
 	snippet.join_lines(lines_of(rb), true),
@@ -273,20 +273,20 @@ local hunks = vim.diff(
 )
 assert_eq("the two adjacent suggestions form one hunk", 1, #hunks)
 local hunk_text = table.concat(vim.list_slice(lines_of(rb), hunks[1][3], hunks[1][3] + hunks[1][4] - 1), "\n")
-assert_true("the hunk is the suggestions, not his edit", hunk_text:match("^NEWS [^\n]*\nNEWS [^\n]*$") ~= nil)
+assert_true("the hunk is the suggestions, not the user's edit", hunk_text:match("^NEWS [^\n]*\nNEWS [^\n]*$") ~= nil)
 
-print("\n=== a suggestion conflicting with his edit is still shown, marked as near his edit ===")
+print("\n=== a suggestion conflicting with the user's edit is still shown, marked as near the user's edit ===")
 local repo4 = new_repo({ "Section A", "  keep this" })
 build(repo4, "2026-10-01", {
 	item("e1", { kind = "edit", target = { at = "  keep this" }, before = "  keep this", after = "  agent rewrite", source = "" }),
 })
 local nb5 = open_notes(repo4)
 review.attach(nb5)
-vim.api.nvim_buf_set_lines(nb5, 1, 2, false, { "  his rewrite" })
+vim.api.nvim_buf_set_lines(nb5, 1, 2, false, { "  the user's rewrite" })
 local cok2, why = review.open_review(nb5)
 assert_true("the conflicting suggestion is still reviewable", cok2)
 local rb5 = review_buf_of(nb5)
-assert_true("his edit is in the review buffer", line_of(rb5, "  his rewrite") ~= nil)
+assert_true("the user's edit is in the review buffer", line_of(rb5, "  the user's rewrite") ~= nil)
 assert_true("and so is the suggestion", line_of(rb5, "  agent rewrite") ~= nil)
 assert_eq("it counts as open", 1, #proposal.open_items(repo4))
 review.overview(nb5)
@@ -307,8 +307,8 @@ review_win = vim.fn.bufwinid(rb)
 local top, second = lines_of(rb)[1], lines_of(rb)[2]
 go_to(review_win, rb, top)
 assert_true("take the first", review.take(rb))
-assert_eq("only that one reached his buffer", { top }, vim.list_slice(lines_of(nb8), 1, 1))
-assert_true("the other is not in his buffer", line_of(nb8, second) == nil)
+assert_eq("only that one reached the user's buffer", { top }, vim.list_slice(lines_of(nb8), 1, 1))
+assert_true("the other is not in the user's buffer", line_of(nb8, second) == nil)
 go_to(review_win, rb, second)
 assert_true("decline the other", review.decline(rb))
 vim.api.nvim_set_current_win(review_win)
@@ -378,7 +378,7 @@ assert_eq("the headlines", { "add under B", "drop more", "headline n1" }, texts)
 rb = review_buf_of(nb7)
 review_win = vim.fn.bufwinid(rb)
 local notes_win = vim.fn.bufwinid(nb7)
-assert_true("entries point into HIS notes buffer", qf[1].bufnr == nb7)
+assert_true("entries point into THE USER'S notes buffer", qf[1].bufnr == nb7)
 for i = 2, #qf do
 	assert_true("sorted by position", qf[i].lnum >= qf[i - 1].lnum)
 end
@@ -390,10 +390,10 @@ vim.api.nvim_win_set_cursor(notes_win, { 2, 0 })
 vim.api.nvim_set_current_win(qf_win)
 vim.api.nvim_win_set_cursor(qf_win, { #qf, 0 })
 review.qf_jump()
-assert_eq("the jump lands in his notes window", notes_win, vim.api.nvim_get_current_win())
+assert_eq("the jump lands in the user's notes window", notes_win, vim.api.nvim_get_current_win())
 assert_eq("on the line aligned with the hunk", qf[#qf].lnum, vim.api.nvim_win_get_cursor(notes_win)[1])
 vim.cmd([[execute "normal! 1\<C-o>"]])
-assert_eq("Ctrl-O returns to where he was in his notes", 2, vim.api.nvim_win_get_cursor(notes_win)[1])
+assert_eq("Ctrl-O returns to where the user was in the user's notes", 2, vim.api.nvim_win_get_cursor(notes_win)[1])
 vim.cmd([[execute "normal! 1\<C-i>"]])
 assert_eq("Ctrl-I goes forward again", qf[#qf].lnum, vim.api.nvim_win_get_cursor(notes_win)[1])
 
@@ -500,7 +500,7 @@ do
 	vim.cmd("diffupdate")
 	review.take(rb2)
 	vim.cmd("write")
-	assert_eq("saving the split does not decline a suggestion he took edited", {}, declined_ids(r2))
+	assert_eq("saving the split does not decline a suggestion the user took edited", {}, declined_ids(r2))
 	assert_eq("it is recorded taken at that save", { "read rfc" }, taken_headlines(r2))
 
 	-- take then undo, then save: not taken
@@ -519,13 +519,13 @@ do
 	assert_eq("an undone take is not recorded", {}, taken_headlines(r3))
 end
 
-print("\n=== his line appended where an add lands never makes the suggestion vanish ===")
+print("\n=== the user's line appended where an add lands never makes the suggestion vanish ===")
 do
 	local r = new_repo({ "Section A", "  existing", "Section B", "  other" })
 	build(r, "2026-10-01", { item("a1", { kind = "add", target = { under = "Section B" }, after = "  added under B", source = "", headline = "add under B" }) })
 	local nb = open_notes(r)
 	review.attach(nb)
-	vim.api.nvim_buf_set_lines(nb, 4, 4, false, { "  his line at the end of B" })
+	vim.api.nvim_buf_set_lines(nb, 4, 4, false, { "  the user's line at the end of B" })
 	assert_true("the review still opens", review.open_review(nb))
 	assert_true("with the suggestion in it", line_of(review_buf_of(nb), "  added under B") ~= nil)
 	assert_eq("and the committed state counts it as open", 1, #proposal.open_items(r))
@@ -602,12 +602,12 @@ do
 	local rw3 = vim.fn.bufwinid(rb3)
 	go_to(rw3, rb3, "  existing")
 	assert_true("take the removal", review.take(rb3))
-	assert_eq("his notes lose only the stale line", { "Section A", "  existing", "Section B", "  other" }, lines_of(nb3))
+	assert_eq("the user's notes lose only the stale line", { "Section A", "  existing", "Section B", "  other" }, lines_of(nb3))
 	assert_eq("the add is still a hunk", 1, #vim.diff(
 		snippet.join_lines(lines_of(nb3), true), snippet.join_lines(lines_of(rb3), true), { result_type = "indices" }))
 	go_to(rw3, rb3, "  - new under A")
 	assert_true("then take the add", review.take(rb3))
-	assert_eq("his notes have it", { "Section A", "  existing", "  - new under A", "Section B", "  other" }, lines_of(nb3))
+	assert_eq("the user's notes have it", { "Section A", "  existing", "  - new under A", "Section B", "  other" }, lines_of(nb3))
 end
 
 print("\n=== reading.md: the review key and the overview cover both files and say what waits in the other ===")
@@ -714,7 +714,7 @@ do
 	review.confirm = orig
 end
 
-print("\n=== the status line tracks the live untaken count and refreshes after a review save or his commit ===")
+print("\n=== the status line tracks the live untaken count and refreshes after a review save or the user's commit ===")
 do
 	local r = new_repo(BASE)
 	build(r, "2026-10-01", { item("n1"), item("n2") })
@@ -733,7 +733,7 @@ do
 	vim.cmd("diffupdate")
 	vim.cmd("normal do")
 	review.commit(nb)
-	assert_eq("after his commit nothing is untaken: silent", "", vim.wo[win].winbar)
+	assert_eq("after the user's commit nothing is untaken: silent", "", vim.wo[win].winbar)
 end
 
 print(string.format("\n=== summary: %d passed, %d failed ===", pass, fail))

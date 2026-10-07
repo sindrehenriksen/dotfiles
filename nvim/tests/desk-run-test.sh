@@ -215,7 +215,7 @@ write_commit_push_config "$cfg" "$repo"
 # Make a real change so there's something to commit, then diverge the
 # remote so the push is rejected (non-fast-forward) — never touched via
 # pull/fetch by desk-run itself.
-printf 'Section A\n  detail\n  a change only he could have made\n' > "$repo/notes.md"
+printf 'Section A\n  detail\n  a change only the user could have made\n' > "$repo/notes.md"
 clone="$ROOT/case3/other-clone"
 git clone -q "$ROOT/case3/remote.git" "$clone"
 git -C "$clone" config user.email test@example.invalid
@@ -228,8 +228,8 @@ rc=$?
 assert_eq "a rejected push doesn't fail the pass" "0" "$rc"
 push_status="$(jq -r '.push' "$DESK_STATUS_FILE")"
 assert_eq "status.push records the rejection" "failed" "$push_status"
-assert_eq "local HEAD still has his committed text (not reset, not merged)" "1" \
-	"$(git -C "$repo" show HEAD:notes.md | grep -c 'a change only he could have made')"
+assert_eq "local HEAD still has the user's committed text (not reset, not merged)" "1" \
+	"$(git -C "$repo" show HEAD:notes.md | grep -c 'a change only the user could have made')"
 assert_eq "desk-run never fetched/pulled — no FETCH_HEAD written" "1" \
 	"$([ ! -e "$repo/.git/FETCH_HEAD" ] && echo 1 || echo 0)"
 
@@ -307,19 +307,19 @@ assert_true "it says a rebase is in progress" \
 	"$([ "$(grep -c 'a rebase is in progress' "$ROOT/case6.out")" -ge 1 ] && echo true || echo false)"
 
 echo
-echo "=== commits his on-disk files exactly as they are, and records a taken suggestion ==="
+echo "=== commits the user's on-disk files exactly as they are, and records a taken suggestion ==="
 rm -rf "$STATE"
 repo="$(new_notes_repo "$ROOT/case7")"
 cfg="$ROOT/case7/config.json"
 write_commit_push_config "$cfg" "$repo"
-# A proposal whose one suggestion he has since taken (its text is in his
-# on-disk notes, uncommitted) alongside a line of his own.
+# A proposal whose one suggestion the user has since taken (its text is in the user's
+# on-disk notes, uncommitted) alongside a line of the user's own.
 CLI="$HERE/../lua/desk/cli.lua"
 cat > "$ROOT/case7-items.json" <<EOF
 {"items":[{"id":"p1","file":"notes.md","kind":"add","target":{"under":"Section A"},"before":"","after":"  a taken suggestion","source":"test","headline":"h"}]}
 EOF
 nvim -l "$CLI" proposal-build "$repo" morning 2026-10-01 "$ROOT/case7-items.json" notes.md reading.md > /dev/null
-printf 'Section A\n  detail\n  a taken suggestion\n  his own new line\n' > "$repo/notes.md"
+printf 'Section A\n  detail\n  a taken suggestion\n  own new line\n' > "$repo/notes.md"
 worktree_before="$(cat "$repo/notes.md")"
 run_desk "$cfg" > "$ROOT/case7.out" 2>&1
 worktree_after="$(cat "$repo/notes.md")"

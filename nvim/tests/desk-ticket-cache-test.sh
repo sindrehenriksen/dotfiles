@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # claude/desk-lib/ticket-cache.sh — T's own two jobs: building the `key in (...)` JQL from
-# ticket-like tokens in his notes, and parsing T's raw search results
+# ticket-like tokens in the user's notes, and parsing T's raw search results
 # into the ticket
 # cache nvim/lua/desk/annotate.lua reads. Fixtures throughout — no live
 # Jira call.

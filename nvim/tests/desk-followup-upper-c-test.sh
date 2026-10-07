@@ -2,7 +2,7 @@
 # Every pass's follow-up tab goes through hammerspoon/desk-open-tab.sh ->
 # DeskOpenTab (which places only in the ultrawide's upper_C slot), opens
 # only once the pass has finished (status already final, no later model
-# call), and is a plain resumed session with his own default permissions.
+# call), and is a plain resumed session with the user's own default permissions.
 # Nothing else under claude/ opens a terminal tab. The Hammerspoon `hs`
 # binary is stubbed; desk-open-tab.sh itself is the real script.
 set -u
@@ -127,7 +127,7 @@ assert_true "the expression is a DeskOpenTab call resuming F's session id" \
 	"$(case "$expr" in "DeskOpenTab(\"claude --resume '$sid'\", \"$sid\", \""*) echo true ;; *) echo false ;; esac)"
 assert_true "it asks for a background open, never taking focus" \
 	"$(case "$expr" in *", { background = true })") echo true ;; *) echo false ;; esac)"
-assert_true "it is a plain resume: his default permissions, no restricted envelope" \
+assert_true "it is a plain resume: the user's default permissions, no restricted envelope" \
 	"$(case "$expr" in *--restricted* | *--permission-mode* | *--tools* | *--strict-mcp-config*) echo false ;; *) echo true ;; esac)"
 
 echo

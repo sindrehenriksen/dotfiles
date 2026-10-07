@@ -108,7 +108,7 @@ printf 'Section A\n  detail\n' > "$repo/notes.md"
 git -C "$repo" add notes.md reading.md
 git -C "$repo" commit -q -m initial
 
-# A suggestion he took: proposed, then its text lands in HEAD.
+# A suggestion the user took: proposed, then its text lands in HEAD.
 acc_items="$ROOT/acc-items.json"
 cat > "$acc_items" <<'EOF'
 {"items":[{"id":"acc1","file":"notes.md","kind":"new","target":"top","before":"","after":"accepted line","source":"test","headline":"already accepted"}]}
@@ -116,17 +116,17 @@ EOF
 nvim -l "$CLI" proposal-build "$repo" morning 2026-10-01 "$acc_items" notes.md reading.md > /dev/null
 printf 'accepted line\nSection A\n  detail\n' > "$repo/notes.md"
 git -C "$repo" add notes.md
-git -C "$repo" commit -q -m "he took it"
+git -C "$repo" commit -q -m "the user took it"
 nvim -l "$CLI" taken-sync "$repo" > /dev/null
 
-# A suggestion still waiting on him.
+# A suggestion still waiting on the user.
 q_items="$ROOT/q-items.json"
 cat > "$q_items" <<'EOF'
 {"items":[{"id":"q1","file":"notes.md","kind":"add","target":{"under":"Section A"},"before":"","after":"  a queued suggestion","source":"notes","also_sources":["https://example.invalid/also"],"headline":"still open"}]}
 EOF
 nvim -l "$CLI" proposal-build "$repo" morning 2026-10-02 "$q_items" notes.md reading.md > /dev/null
 
-# A suggestion he declined.
+# A suggestion the user declined.
 d_items="$ROOT/d-items.json"
 cat > "$d_items" << 'EOF'
 {"items":[{"id":"d1","file":"notes.md","kind":"new","target":"top","before":"","after":"  a declined suggestion","source":"notes","headline":"turned down"}]}
@@ -237,7 +237,7 @@ assert_true "acc1 (already taken) is absent" \
 	"$(jq -e '[.[] | select(.headline == "already accepted")] | length == 0' > /dev/null 2>&1 "$CAPTURE/open-items.json" && echo true || echo false)"
 
 echo
-echo "=== declined.json: what he turned down, so the judge does not regenerate it ==="
+echo "=== declined.json: what the user turned down, so the judge does not regenerate it ==="
 assert_true "the declined suggestion is listed" \
 	"$(jq -e '[.[] | select(.headline == "turned down")] | length == 1' > /dev/null 2>&1 "$CAPTURE/declined.json" && echo true || echo false)"
 assert_true "a still-open suggestion is not" \

@@ -122,7 +122,7 @@ transcript1="$ROOT/transcript1.jsonl"
 printf '{"uuid":"aaaaaaaa-0000-0000-0000-000000000000","type":"assistant"}\n' > "$transcript1"
 # The candidate-list read: idle since epoch 0 (well past the 3-working-day
 # threshold). The RE-CHECK read (session-status.sh called a second time)
-# reports last_activity = now instead — "he's using it again right now".
+# reports last_activity = now instead — "the user is using it again right now".
 CALL_COUNT_FILE="$ROOT/call-count"
 echo 0 > "$CALL_COUNT_FILE"
 cat > "$FAKEBIN/session-status.sh" <<FAKE
@@ -195,7 +195,7 @@ printf '{"uuid":"aaaaaaaa-0000-0000-0000-000000000000","type":"assistant"}\n' > 
 # by desk_close_candidates's own duplicate_pids guard before ever reaching
 # the model call). The RE-CHECK read reports duplicate_pids:true instead —
 # a second pid file for this same session id showed up in the meantime
-# (e.g. he resumed it himself between the listing and the SIGTERM).
+# (e.g. the user resumed it themselves between the listing and the SIGTERM).
 CALL_COUNT_FILE3="$ROOT/call-count-3"
 echo 0 > "$CALL_COUNT_FILE3"
 cat > "$FAKEBIN/session-status.sh" <<FAKE
@@ -226,7 +226,7 @@ kill "$pid3" 2> /dev/null
 rm -rf "$PASS_SCRATCH"
 
 echo
-echo "=== idle is measured by his last human message, not by other activity ==="
+echo "=== idle is measured by the user's last human message, not by other activity ==="
 status_fake() { # <pid> <last_activity> <last_human_message>
 	cat > "$FAKEBIN/session-status.sh" <<FAKE
 #!/usr/bin/env bash

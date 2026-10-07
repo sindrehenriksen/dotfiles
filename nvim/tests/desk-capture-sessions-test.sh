@@ -84,7 +84,7 @@ source "$LIB/steps.sh"
 sess() { # id name name_source live has_start_event source ended end_reason [any_desk_run] [cwd]
 	jq -cn --arg id "$1" --arg name "$2" --arg ns "$3" --argjson live "$4" \
 		--argjson hse "$5" --arg src "$6" --argjson ended "$7" --arg er "$8" \
-		--argjson adr "${9:-false}" --arg cwd "${10:-/home/him/somewhere}" '
+		--argjson adr "${9:-false}" --arg cwd "${10:-/home/user/somewhere}" '
 		{id:$id, name:$name, name_source:$ns, live:$live, has_start_event:$hse,
 		 source:$src, any_desk_run_start:$adr, cwd:$cwd,
 		 ended:$ended, end_reason:(if $er == "" then null else $er end)}
@@ -100,7 +100,7 @@ sess() { # id name name_source live has_start_event source ended end_reason [any
 	sess "sess-deliberate-end" "Deliberate End" "user" false true "startup" true "prompt_input_exit"
 	sess "sess-desk-run" "Scheduled Run" "user" true true "desk-run" false "" true
 	sess "sess-no-start-event" "No Start Event" "user" true false "startup" false ""
-	# The last start event's own source is "resume" (he opened the follow-up
+	# The last start event's own source is "resume" (the user opened the follow-up
 	# tab and has been using it since) — the recorder's OWN
 	# any_desk_run_start still says this session started life under
 	# desk-run, so it must be excluded on that alone, never on the (now

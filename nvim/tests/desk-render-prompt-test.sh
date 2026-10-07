@@ -47,7 +47,7 @@ EOF
 # later iteration — a single-pass substitution never gives it the chance.
 placeholders='{
 	"amp": "a & b, c & d",
-	"container": "quotes his own {{zzreferenced}} literally",
+	"container": "quotes its own {{zzreferenced}} literally",
 	"zzreferenced": "REAL"
 }'
 out="$(desk_render_prompt "$template" "$placeholders")"
@@ -55,7 +55,7 @@ out="$(desk_render_prompt "$template" "$placeholders")"
 assert_eq "a literal & in a value survives untouched (not the matched token)" \
 	"amp=a & b, c & d" "$(grep '^amp=' <<< "$out")"
 assert_eq "a {{...}}-shaped substring inside a value is never itself substituted" \
-	"container=quotes his own {{zzreferenced}} literally" "$(grep '^container=' <<< "$out")"
+	"container=quotes its own {{zzreferenced}} literally" "$(grep '^container=' <<< "$out")"
 assert_eq "the template's own placeholder for that same key still renders normally" \
 	"zzreferenced=REAL" "$(grep '^zzreferenced=' <<< "$out")"
 assert_eq "a {{name}} with no matching key is left exactly as written" \
