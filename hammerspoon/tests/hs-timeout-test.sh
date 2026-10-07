@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# hammerspoon/desk-open-tab.sh and desk-focus-tab.sh never hang on `hs`,
+# hammerspoon/desk-open-tab.sh, desk-focus-tab.sh and desk-close-tab.sh never
+# hang on `hs`,
 # and report the Lua call's own true/false as their exit status:
 #   - hs gets /dev/null on stdin, so a caller whose own stdin never closes
 #     (an agent's shell) cannot leave it waiting for more commands;
@@ -11,6 +12,7 @@ set -u
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 OPEN_TAB_SH="$HERE/../desk-open-tab.sh"
 FOCUS_TAB_SH="$HERE/../desk-focus-tab.sh"
+CLOSE_TAB_SH="$HERE/../desk-close-tab.sh"
 
 pass=0
 fail=0
@@ -93,6 +95,31 @@ stub_hs 'printf "%s\n" "$@" > "'"$ROOT"'/argv"; echo true'
 read -r status _ < <(timed "$FOCUS_TAB_SH" ttys001 < /dev/null)
 assert_eq "a true from DeskFocusTab is exit 0" "0" "$status"
 assert_eq "hs is given its own IPC timeout too" "-t" "$(head -n1 "$ROOT/argv")"
+
+echo
+echo "=== desk-close-tab.sh ==="
+stub_hs 'exec sleep 30'
+read -r status _ < <(timed "$CLOSE_TAB_SH" close T1 < /dev/null)
+assert_eq "close-tab reports the timeout as a failure" "124" "$status"
+stub_hs 'for a in "$@"; do last=$a; done; printf "%s\n" "$last" > "'"$ROOT"'/expr"; echo "terminal T 1"'
+"$CLOSE_TAB_SH" find ttys007 4242 < /dev/null > "$ROOT/out" 2> /dev/null
+assert_eq "find exits 0 on a named terminal" "0" "$?"
+assert_eq "...printing just its id" "T 1" "$(cat "$ROOT/out")"
+assert_eq "...having asked for that tty and pid" 'DeskTabTerminal("ttys007", 4242)' "$(cat "$ROOT/expr")"
+stub_hs 'echo "DeskTabTerminal: no Ghostty terminal is on ttys007"; echo false'
+"$CLOSE_TAB_SH" find ttys007 4242 < /dev/null > "$ROOT/out" 2> "$ROOT/err"
+assert_eq "find exits 1 when Hammerspoon says no" "1" "$?"
+assert_true "...passing its reason on" "$(grep -q 'no Ghostty terminal is on ttys007' "$ROOT/err" && echo true || echo false)"
+assert_eq "...and prints no id" "" "$(cat "$ROOT/out")"
+stub_hs 'for a in "$@"; do last=$a; done; printf "%s\n" "$last" > "'"$ROOT"'/expr"; echo true'
+"$CLOSE_TAB_SH" close 'T"1' < /dev/null > /dev/null 2>&1
+assert_eq "close exits 0 on a closed tab" "0" "$?"
+assert_eq "...the id quoted for Lua" 'DeskCloseTerminalTab("T\"1")' "$(cat "$ROOT/expr")"
+stub_hs 'echo "DeskCloseTerminalTab: not closed: its tab holds other terminals too"; echo false'
+"$CLOSE_TAB_SH" close T1 < /dev/null > /dev/null 2>&1
+assert_eq "close exits 1 when the tab was left" "1" "$?"
+"$CLOSE_TAB_SH" find ttys007 notapid < /dev/null > /dev/null 2>&1
+assert_eq "a pid that is not a number is a usage error" "2" "$?"
 
 echo
 echo "=== the flags argument ==="

@@ -22,7 +22,7 @@ trap 'rm -rf "$ROOT"' EXIT
 (
 	export HOME="$ROOT/home"
 	mkdir -p "$HOME/.local/state/claude" "$HOME/.local/state/desk"
-	unset CLAUDE_SESSION_READER_CACHE DESK_FOCUS_TAB_BIN DESK_READER
+	unset CLAUDE_SESSION_READER_CACHE DESK_FOCUS_TAB_BIN DESK_CLOSE_TAB_BIN DESK_READER
 	# shellcheck source=../../tests/lib/git-safety.sh
 	source "$HERE/../../tests/lib/git-safety.sh"
 	desk_test_safe_env_init "$ROOT/safe"
@@ -31,6 +31,8 @@ trap 'rm -rf "$ROOT"' EXIT
 	assert_true "the reader cache is scoped to the temp dir" "$(under "${CLAUDE_SESSION_READER_CACHE:-}")"
 	assert_true "the focus-tab helper is a stub under the temp dir" "$(under "${DESK_FOCUS_TAB_BIN:-}")"
 	assert_true "the focus-tab stub refuses" "$("$DESK_FOCUS_TAB_BIN" /dev/ttys000 > /dev/null 2>&1 && echo false || echo true)"
+	assert_true "the close-tab helper is a stub under the temp dir" "$(under "${DESK_CLOSE_TAB_BIN:-}")"
+	assert_true "the close-tab stub refuses" "$("$DESK_CLOSE_TAB_BIN" close T1 > /dev/null 2>&1 && echo false || echo true)"
 	assert_true "the reader stub is under the temp dir" "$(under "${DESK_READER:-}")"
 	assert_true "the reader stub sees no sessions" "$([ -z "$("$DESK_READER")" ] && echo true || echo false)"
 

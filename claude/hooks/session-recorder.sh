@@ -22,7 +22,9 @@
 # process that fired it, since one session id can be open in two processes
 # at once; session-status.sh matches each end to its own process's start.
 # Events written any other way (`close`, a desk-run call's own start/end)
-# carry none.
+# carry none. A start with a pid also records that process's terminal
+# (`tty`, as `ps` names it) when it has one, so the session's tab can be told
+# apart later (claude/close-session.sh).
 #
 # Must never fail the session it's hooked into: every path exits 0, and
 # whatever goes wrong is logged instead of surfaced.
@@ -158,11 +160,17 @@ start_event() {
     local source_override="" pid
     [ -n "${DESK_HEADLESS:-}" ] && source_override="desk-run"
     pid=$(hook_pid "$input") || pid=""
-    printf '%s' "$input" | jq -c --arg boot "$(boot_id)" --argjson time "$(date +%s)" --arg override "$source_override" --arg pid "$pid" '
+    local tty=""
+    if [ -n "$pid" ]; then
+        tty=$(ps -o tty= -p "$pid" 2>/dev/null | tr -d ' ')
+        case "$tty" in '?'|'??') tty="" ;; esac
+    fi
+    printf '%s' "$input" | jq -c --arg boot "$(boot_id)" --argjson time "$(date +%s)" --arg override "$source_override" --arg pid "$pid" --arg tty "$tty" '
         {event:"start", time:$time,
          source:(if $override != "" then $override else (.source // "unknown") end),
          cwd:(.cwd // ""), transcript_path:(.transcript_path // ""), boot:$boot}
         + (if $pid != "" then {pid: ($pid | tonumber)} else {} end)
+        + (if $tty != "" then {tty: $tty} else {} end)
     ' >> "$file" 2>>"$LOG_FILE"
     [ -z "$pid" ] || warn_if_open_elsewhere "$sid" "$pid" 2>>"$LOG_FILE"
 }

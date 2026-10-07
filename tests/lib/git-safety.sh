@@ -277,8 +277,8 @@ desk_test_state_guard_check() {
 # CLAUDE_SESSION_READER_CACHE, DESK_TICKET_CACHE, DESK_STATUS_FILE,
 # CLAUDE_CONFIG_DIR), plus refusing stubs for the executables a forgotten
 # override would otherwise let a test actually run for real (DESK_CLAUDE_BIN
-# — a live model call; DESK_OPEN_TAB_BIN/DESK_FOCUS_TAB_BIN/DESK_OPEN_URL —
-# a real tab focused or URL opened) and an empty reader for DESK_READER, so
+# — a live model call; DESK_OPEN_TAB_BIN/DESK_FOCUS_TAB_BIN/DESK_CLOSE_TAB_BIN/
+# DESK_OPEN_URL — a real tab focused or closed, or a URL opened) and an empty reader for DESK_READER, so
 # a lookup that was never stubbed sees no sessions instead of the user's real ones.
 # Call once, before the first suite/test runs; every value here is still just a default; a suite that
 # sets its own (as most already do) overrides it the ordinary way.
@@ -287,7 +287,7 @@ desk_test_safe_env_init() {
 	mkdir -p "$dest/state" "$dest/claude-config" "$dest/bin"
 
 	local stub
-	for stub in claude desk-open-tab.sh desk-focus-tab.sh open-url; do
+	for stub in claude desk-open-tab.sh desk-focus-tab.sh desk-close-tab.sh open-url; do
 		{
 			printf '#!/usr/bin/env bash\n'
 			printf 'echo "refusing stub ($0): this test never overrode the env var pointing at it — refusing to run for real" >&2\n'
@@ -303,6 +303,7 @@ desk_test_safe_env_init() {
 	export CLAUDE_SESSION_READER_CACHE="$dest/state/session-reader-cache"
 	export DESK_READER="$dest/bin/session-status.sh"
 	export DESK_FOCUS_TAB_BIN="$dest/bin/desk-focus-tab.sh"
+	export DESK_CLOSE_TAB_BIN="$dest/bin/desk-close-tab.sh"
 	export CLAUDE_SESSION_STORE="$dest/state/session-events"
 	export CLAUDE_SESSION_RECORDER_LOG="$dest/state/session-recorder.log"
 	export DESK_TICKET_CACHE="$dest/state/ticket-status.json"

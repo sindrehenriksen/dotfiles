@@ -219,6 +219,20 @@ assert_eq "end_reason stays closed-by-pass" "closed-by-pass" "$(read_field close
 assert_eq "a close is deliberate" "true" "$(read_field closed .end_deliberate)"
 assert_eq "a closed session is not left open" "false" "$(read_field closed .left_open)"
 
+echo "=== a start records its process's terminal ==="
+# `script` gives the stand-in a terminal of its own, as a tab gives Claude Code.
+: > "$PROJ_DIR/ttyrec.jsonl"
+jq -cn --arg cwd "$PROJ_DIR" --arg tp "$PROJ_DIR/ttyrec.jsonl" \
+    '{session_id:"ttyrec", cwd:$cwd, transcript_path:$tp, source:"startup", hook_event_name:"SessionStart"}' \
+    > "$TMP/ttyrec.start.json"
+stand_in_tty=$(script -q /dev/null "$fakebin/claude" -c '"$1" start < "$2" > /dev/null; ps -o tty= -p $$; :' \
+    _ "$RECORDER" "$TMP/ttyrec.start.json" < /dev/null | grep -oE 'tty[[:alnum:]]+' | tail -n 1)
+case "$stand_in_tty" in tty*) ok "the stand-in ran on a terminal ($stand_in_tty)" ;; *) bad "the stand-in ran on a terminal (got [$stand_in_tty])" ;; esac
+assert_eq "the start event carries that terminal" "$stand_in_tty" \
+    "$(jq -rs 'map(select(.event=="start")) | last | .tty' "$STORE_DIR/ttyrec.jsonl")"
+assert_eq "the reader reports it as recorded_tty" "$stand_in_tty" "$(read_field ttyrec .recorded_tty)"
+assert_eq "a start recorded without a hook has none" "null" "$(read_field legacy .recorded_tty)"
+
 echo "=== a close from outside still wins over runs left open before it ==="
 # Event logs in the shapes real sessions had when a close was followed by
 # the process's own SessionEnd: earlier runs that never recorded an end

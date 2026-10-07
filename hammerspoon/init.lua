@@ -957,6 +957,151 @@ function DeskFocusTab(tty)
   return true
 end
 
+-- ---------------------------------------------------------------------------
+-- Desk: close the Ghostty tab a session ran in, once the session has ended
+-- (claude/close-session.sh). Two calls, so the tab is named while the
+-- session's process still holds it and closed only after that process is
+-- gone: DeskTabTerminal(tty, pid) finds the one terminal on `tty` whose
+-- foreground process is `pid` and returns its id, which Ghostty keeps for the
+-- terminal's life and, unlike a tty, never hands to another;
+-- DeskCloseTerminalTab(id) closes the tab holding that terminal when it holds
+-- nothing else. Anything short of certain leaves the tab open and says why.
+-- ---------------------------------------------------------------------------
+
+-- The terminal on `tty`, as "<foreground pid> <terminal id>", or "none" or
+-- "many".
+function DeskTab.terminal_on_tty_script(tty)
+  return table.concat({
+    'tell application "Ghostty"',
+    "set matches to every terminal whose tty is " .. as_string_literal("/dev/" .. DeskTab.normalize_tty(tty)),
+    'if (count of matches) = 0 then return "none"',
+    'if (count of matches) > 1 then return "many"',
+    "set term to item 1 of matches",
+    'return ((pid of term) as text) & " " & (id of term)',
+    "end tell",
+  }, "\n")
+end
+
+function DeskTab.parse_terminal_reply(reply)
+  local pid, id = tostring(reply or ""):match("^(%d+) (%S.*)$")
+  if not pid then return nil end
+  return tonumber(pid), id
+end
+
+-- Closes the tab holding terminal `terminal_id` when it is the only tab
+-- that does and the terminal is its only one: "closed", else "gone",
+-- "ambiguous" or "split", having closed nothing.
+function DeskTab.close_terminal_tab_script(terminal_id)
+  return table.concat({
+    'tell application "Ghostty"',
+    "set found to {}",
+    "repeat with w in windows",
+    "repeat with t in tabs of w",
+    "if (id of terminals of t) contains " .. as_string_literal(terminal_id) .. " then set end of found to contents of t",
+    "end repeat",
+    "end repeat",
+    'if (count of found) = 0 then return "gone"',
+    'if (count of found) > 1 then return "ambiguous"',
+    "set t to item 1 of found",
+    'if (count of terminals of t) > 1 then return "split"',
+    "close tab t",
+    'return "closed"',
+    "end tell",
+  }, "\n")
+end
+
+local CLOSE_REFUSALS = {
+  gone = "no tab holds that terminal any more",
+  ambiguous = "more than one tab reports that terminal",
+  split = "its tab holds other terminals too",
+}
+
+-- Whether focus moved because of the close rather than by the user's hand:
+-- onto Ghostty from another app, or onto another Ghostty window than the
+-- one being typed in (by Ghostty's own window id, which a tab change keeps).
+function DeskTab.close_took_focus(before, now, now_script_id)
+  if now == nil or now.app ~= "Ghostty" then return false end
+  if before.app ~= "Ghostty" then return true end
+  return before.script_id ~= nil and now_script_id ~= nil and now_script_id ~= before.script_id
+end
+
+-- Returns "terminal <id>" for the terminal on `tty` running `pid` in the
+-- foreground, else false (printed, so `hs -c` surfaces why).
+function DeskTabTerminal(tty, pid)
+  if type(tty) ~= "string" or tty == "" or tonumber(pid) == nil then
+    print("DeskTabTerminal: needs a tty and a pid")
+    return false
+  end
+  if not hs.application.get("Ghostty") then
+    print("DeskTabTerminal: Ghostty is not running")
+    return false
+  end
+  local ok, result, descriptor = hs.osascript.applescript(DeskTab.terminal_on_tty_script(tty))
+  if not ok then
+    print("DeskTabTerminal: osascript failed: " .. DeskTab.osascript_error(descriptor))
+    return false
+  end
+  if result == "none" then
+    print("DeskTabTerminal: no Ghostty terminal is on " .. tty)
+    return false
+  end
+  if result == "many" then
+    print("DeskTabTerminal: more than one Ghostty terminal reports " .. tty)
+    return false
+  end
+  local fg, id = DeskTab.parse_terminal_reply(result)
+  if not fg then
+    print("DeskTabTerminal: unexpected reply from Ghostty: " .. tostring(result))
+    return false
+  end
+  if fg ~= tonumber(pid) then
+    print(string.format("DeskTabTerminal: the terminal on %s runs pid %d in the foreground, not %s", tty, fg, tostring(pid)))
+    return false
+  end
+  return "terminal " .. id
+end
+
+-- Closes the tab holding terminal `terminal_id` (from DeskTabTerminal).
+-- True when closed; false, printed, when it was not. Focus stays where the
+-- user had it: for CLOSE_WATCH_SECS afterwards, focus the close moved is
+-- handed back the way a background open hands it back.
+local CLOSE_WATCH_SECS = 1.5
+function DeskCloseTerminalTab(terminal_id)
+  if type(terminal_id) ~= "string" or terminal_id == "" then
+    print("DeskCloseTerminalTab: no terminal id given")
+    return false
+  end
+  if not hs.application.get("Ghostty") then
+    print("DeskCloseTerminalTab: Ghostty is not running")
+    return false
+  end
+  local before = focus_snapshot()
+  if before.app == "Ghostty" then before.script_id = ghostty_front_window_id() end
+  local ok, result, descriptor = hs.osascript.applescript(DeskTab.close_terminal_tab_script(terminal_id))
+  if not ok then
+    print("DeskCloseTerminalTab: osascript failed: " .. DeskTab.osascript_error(descriptor))
+    return false
+  end
+  if result ~= "closed" then
+    print("DeskCloseTerminalTab: not closed: " .. (CLOSE_REFUSALS[result] or tostring(result)))
+    return false
+  end
+  local started, handed_back = hs.timer.secondsSinceEpoch(), 0
+  every_until_done(FOCUS_POLL_SECS, function()
+    local now = focus_snapshot()
+    local now_script_id = now.app == "Ghostty" and before.app == "Ghostty" and ghostty_front_window_id() or nil
+    -- Capped, since a window that went with the tab cannot take focus back.
+    if handed_back < 3 and DeskTab.close_took_focus(before, now, now_script_id) then
+      handed_back = handed_back + 1
+      console_print(string.format("DeskCloseTerminalTab: focus moved to %s window %s; handing it back",
+        tostring(now.app), tostring(now.window_id)))
+      hand_focus_back(before)
+    end
+    return hs.timer.secondsSinceEpoch() - started > CLOSE_WATCH_SECS
+  end)
+  return true
+end
+
 -- Dual-function Caps Lock (remapped to F18 at the HID level by
 -- macos/keyboard-remap.sh):
 --   Tap                  → Escape

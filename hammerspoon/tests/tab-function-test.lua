@@ -5,7 +5,8 @@
 -- plain Lua: DeskTab.pick_target (slot geometry) and the UUID validation
 -- gate on DeskOpenTab, plus DeskTab.focus_tty_script and DeskFocusTab's
 -- early-exit paths, and the background open: DeskTab.pick_target's
--- avoid rule, DeskTab.match_script_window and DeskTab.focus_was_taken.
+-- avoid rule, DeskTab.match_script_window and DeskTab.focus_was_taken,
+-- and closing a session's tab: DeskTabTerminal and DeskCloseTerminalTab.
 -- Never touches a real screen, window or osascript call — run with the
 -- system `lua`, not Hammerspoon.
 --
@@ -940,6 +941,71 @@ assert_eq("...no window was opened", nil, w.opened_window)
 assert_eq("...no tab was opened", nil, w.tab_target)
 
 for k, v in pairs(saved_hs) do hs[k] = v end
+
+-- ---------------------------------------------------------------------------
+-- Closing a session's tab: DeskTabTerminal names the terminal while the
+-- session still runs in it, DeskCloseTerminalTab closes its tab afterwards.
+-- ---------------------------------------------------------------------------
+local find_script = DeskTab.terminal_on_tty_script("ttys007")
+assert_eq("the terminal is looked up by its tty in /dev/ form", true,
+  find_script:find('every terminal whose tty is "/dev/ttys007"', 1, true) ~= nil)
+assert_eq("...and reports the foreground pid with the terminal's id", true,
+  find_script:find('((pid of term) as text) & " " & (id of term)', 1, true) ~= nil)
+assert_eq("...refusing more than one match", true, find_script:find('return "many"', 1, true) ~= nil)
+local fg, tid = DeskTab.parse_terminal_reply("4242 AB-12 cd")
+assert_eq("a reply parses to the foreground pid", 4242, fg)
+assert_eq("...and the terminal id", "AB-12 cd", tid)
+assert_eq("a malformed reply parses to nothing", nil, DeskTab.parse_terminal_reply("none"))
+
+local close_script = DeskTab.close_terminal_tab_script('T"1')
+assert_eq("the tab is found by the terminal's id, quoted", true,
+  close_script:find('(id of terminals of t) contains "T\\"1"', 1, true) ~= nil)
+assert_eq("a tab with other terminals in it is left alone", true,
+  close_script:find('if (count of terminals of t) > 1 then return "split"', 1, true) ~= nil)
+assert_eq("two tabs claiming the terminal are left alone", true,
+  close_script:find('if (count of found) > 1 then return "ambiguous"', 1, true) ~= nil)
+assert_eq("the refusals come before the close", true,
+  close_script:find('return "split"', 1, true) < close_script:find("close tab t", 1, true))
+
+hs.application.get = function() return nil end
+osascript_calls = 0
+assert_eq("DeskTabTerminal: no pid refuses", false, silently(function() return DeskTabTerminal("ttys007", nil) end))
+assert_eq("DeskTabTerminal: Ghostty not running refuses", false, silently(function() return DeskTabTerminal("ttys007", 42) end))
+assert_eq("DeskCloseTerminalTab: Ghostty not running refuses", false, silently(function() return DeskCloseTerminalTab("T1") end))
+assert_eq("...none of them reach osascript", 0, osascript_calls)
+
+hs.application.get = function() return {} end
+local real_close_as = hs.osascript.applescript
+local terminal_reply
+hs.osascript.applescript = function() return table.unpack(terminal_reply, 1, 3) end
+terminal_reply = { true, "4242 T1", "" }
+assert_eq("the terminal running the session's pid is named", "terminal T1", DeskTabTerminal("ttys007", 4242))
+assert_eq("...a pid given as a string matches too", "terminal T1", DeskTabTerminal("ttys007", "4242"))
+assert_eq("a terminal running another pid in the foreground is not", false,
+  silently(function() return DeskTabTerminal("ttys007", 4243) end))
+terminal_reply = { true, "none", "" }
+assert_eq("no terminal on the tty", false, silently(function() return DeskTabTerminal("ttys007", 4242) end))
+terminal_reply = { true, "many", "" }
+assert_eq("several terminals on the tty", false, silently(function() return DeskTabTerminal("ttys007", 4242) end))
+terminal_reply = { true, "closed", "" }
+assert_eq("a closed tab is success", true, DeskCloseTerminalTab("T1"))
+for _, why in ipairs({ "gone", "ambiguous", "split" }) do
+  terminal_reply = { true, why, "" }
+  assert_eq("not closed when " .. why, false, silently(function() return DeskCloseTerminalTab("T1") end))
+end
+terminal_reply = { false, nil, { OSAScriptErrorMessageKey = "boom" } }
+assert_eq("an AppleScript error is a failure", false, silently(function() return DeskCloseTerminalTab("T1") end))
+hs.osascript.applescript = real_close_as
+hs.application.get = function() return nil end
+
+assert_eq("focus staying in another app is left alone", false,
+  DeskTab.close_took_focus({ app = "Safari" }, { app = "Safari" }, nil))
+assert_eq("focus pulled onto Ghostty from another app is the close's doing", true,
+  DeskTab.close_took_focus({ app = "Safari" }, { app = "Ghostty" }, nil))
+assert_eq("the same Ghostty window keeping focus is left alone", false,
+  DeskTab.close_took_focus({ app = "Ghostty", script_id = "w1" }, { app = "Ghostty" }, "w1"))
+assert_eq("another Ghostty window taking focus is the close's doing", true,
+  DeskTab.close_took_focus({ app = "Ghostty", script_id = "w1" }, { app = "Ghostty" }, "w2"))
 
 print()
 print(string.format("=== summary: %d passed, %d failed ===", pass, fail))

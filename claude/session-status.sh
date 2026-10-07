@@ -45,7 +45,10 @@
 # event recorded when that file exists, else the transcript found by id:
 # Claude Code can record a path that never existed for a session resumed
 # from another directory),
-# has_start_event, pid, tty (the last two null unless live), duplicate_pids
+# has_start_event, pid, tty (the last two null unless live), recorded_tty
+# (the tty the latest start event recorded for its process, null when it
+# recorded none: a start without a pid, or a process with no terminal),
+# duplicate_pids
 # (true when more than one $CLAUDE_CONFIG_DIR/sessions/*.json pid file
 # names this session id — the session open in two processes at once, a
 # resumed session's stale leftover, or genuine corruption; the live one
@@ -203,6 +206,7 @@ EVENTS_REDUCE='
         cwd: ($s.cwd // ""),
         transcript_path: ($s.transcript_path // ""),
         start_time: ($s.time // null),
+        recorded_tty: ($s.tty // null),
         source: ($s.source // null),
         any_desk_run_start: $any_desk_run,
         ended: ($e != null),
@@ -212,7 +216,7 @@ EVENTS_REDUCE='
         close_failed_at: ($cf.time // null)
       }
 '
-EMPTY_EVENTS='{"has_start_event":false,"cwd":"","transcript_path":"","source":null,"any_desk_run_start":false,"ended":false,"end_reason":null,"end_deliberate":null,"start_time":null,"close_failed":false,"close_failed_at":null}'
+EMPTY_EVENTS='{"has_start_event":false,"cwd":"","transcript_path":"","source":null,"any_desk_run_start":false,"ended":false,"end_reason":null,"end_deliberate":null,"start_time":null,"recorded_tty":null,"close_failed":false,"close_failed_at":null}'
 
 events_by_id_fallback() {
     local f sid out result='{}'
@@ -703,7 +707,7 @@ entries_ndjson=$(jq -n -c \
     ( ($events | keys) + ($pidfiles | keys) + ($transcripts | keys) | unique ) as $ids
     | $ids[]
     | . as $id
-    | ($events[$id] // {has_start_event:false, cwd:"", transcript_path:"", source:null, any_desk_run_start:false, ended:false, end_reason:null, end_deliberate:null, start_time:null}) as $ev
+    | ($events[$id] // {has_start_event:false, cwd:"", transcript_path:"", source:null, any_desk_run_start:false, ended:false, end_reason:null, end_deliberate:null, start_time:null, recorded_tty:null}) as $ev
     | ($pidfiles[$id] // null) as $pf
     | ($live[$id] // false) as $is_live
     | ($titles[$id] // {custom_titles: [], ai_title: ""}) as $ti
@@ -772,6 +776,7 @@ entries_ndjson=$(jq -n -c \
         has_start_event: $ev.has_start_event,
         pid: (if $is_live then ($pids[$id] // null) else null end),
         tty: (if $is_live then ($ttys[$id] // null) else null end),
+        recorded_tty: ($ev.recorded_tty // null),
         duplicate_pids: ($dup_pids[$id] // false),
         _name_source: $name_source
       }

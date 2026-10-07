@@ -89,6 +89,7 @@ BASH_SUITES=(
 	nvim/tests/desk-watch-test.sh
 	nvim/tests/desk-write-pinned-test.sh
 	nvim/tests/desk-write-step-kind-test.sh
+	claude/tests/close-session-test.sh
 	claude/tests/input-bell-test.sh
 	claude/tests/reopen-sessions-test.sh
 	claude/tests/session-recorder-test.sh
