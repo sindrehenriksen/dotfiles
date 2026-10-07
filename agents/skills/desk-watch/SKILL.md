@@ -6,7 +6,7 @@ allowed-tools: Bash, Read
 
 # Watching tickets from a session
 
-A **watch** ties tickets to one Claude Code session, the one that holds the plan for them. A background desk pass, the watcher, reads the ticket tracker and GitHub read-only every 15 minutes while the Mac is awake. When anything moved on those tickets, it sends this session one message with every change since the last message: status, assignee and description changes, new comments, children, linked tickets, tickets that mention the keys, and PRs whose title or branch carries a key. The session takes each update in. It involves the user only when the update meets the bar in the message's own preamble: it starts that reply with `[needs-you]`, which rings the bell on its tab. Otherwise it replies with one quiet line.
+A **watch** ties tickets to one Claude Code session, the one that holds the plan for them. A background desk pass, the watcher, reads the ticket tracker and GitHub read-only every 15 minutes while the Mac is awake. When anything moved on those tickets, it sends this session one message with every change since the last message: status, assignee and description changes, new comments, children, linked tickets, tickets that mention the keys, and PRs whose title or branch carries a key. The session takes each update in. It involves the user only when the update meets the bar in the message's own preamble: it starts that reply with `[needs-you]`, which rings the bell on its tab. Otherwise it replies with one quiet line that doesn't end on a question, since a question rings the bell too.
 
 The mechanism is in `~/dotfiles/docs/desk.md`, under "The watch pass". This skill covers what the user asks for in a session. No command or phrase is expected of them: act on what they mean.
 
