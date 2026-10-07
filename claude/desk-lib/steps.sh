@@ -1187,7 +1187,107 @@ desk_step_close() {
 	echo "ok"
 }
 
-# desk_open_follow_up_tab <pass> <scheduled_date> <follow_up_step>
+# desk_follow_up_summary <pass> <scheduled_date> <session_json> [<repo>]
+# Adds one plain-language turn to the end of a follow-up session before its
+# tab opens, so the user is greeted by an explanation rather than the judge's
+# machine-format reply. The session (a reader entry: id, cwd) is resumed
+# headless from its own cwd under the same id, with no tools at all, no MCP
+# servers and --restricted, so the turn can only write its reply. The prompt
+# is `follow_up_summary_prompt` from the config (relative to it), else this
+# repo's generic one beside this file; it is handed this pass's items as the
+# runner staged them (open items whose id carries `<pass>-<scheduled_date>-`)
+# and a count of the older ones still waiting, read from <repo>'s proposal.
+# Prints "ok", or "failed" when the call failed or its reply is empty or
+# still JSON.
+desk_follow_up_summary() {
+	local pass="$1" scheduled_date="$2" sess="$3" repo="${4:-}"
+	local id cwd
+	id="$(jq -r '.id // empty' <<< "$sess")"
+	cwd="$(jq -r '.cwd // empty' <<< "$sess")"
+	if [ -z "$id" ] || [ ! -d "$cwd" ]; then
+		echo "failed"
+		return
+	fi
+
+	local prompt_rel prompt_path
+	prompt_rel="$(jq -r '.follow_up_summary_prompt // empty' "$DESK_CONFIG" 2> /dev/null)"
+	if [ -n "$prompt_rel" ]; then
+		prompt_path="$(desk_prompt_path "$prompt_rel")"
+	else
+		prompt_path="$DESK_LIB_DIR/follow-up-summary.md"
+	fi
+	if [ ! -f "$prompt_path" ]; then
+		desk_log "$pass" "follow-up summary: prompt not found ($prompt_path)"
+		echo "failed"
+		return
+	fi
+
+	local open='{"items":[]}'
+	if [ -n "$repo" ]; then
+		open="$(desk_nvim_cli proposal-open "$repo" 2> /dev/null)"
+		jq -e '.items | type == "array"' > /dev/null 2>&1 <<< "$open" || open='{"items":[]}'
+	fi
+	local placeholders
+	placeholders="$(jq -c --arg prefix "$pass-$scheduled_date-" --arg today "$(date +%F)" '
+		[.items[] | select(.id | startswith($prefix))] as $mine
+		| ((.items | length) - ($mine | length)) as $older
+		| {
+			today: $today,
+			item_count: ($mine | length | tostring),
+			items: ($mine | map({file, kind, headline, tier, source, before, after}
+				| with_entries(select(.value != null and .value != ""))) | tojson),
+			open_note: (if $older > 0
+				then "\($older) earlier suggestion(s) from previous passes also still wait for review; say so in one line."
+				else "" end)
+		}' <<< "$open")"
+
+	local work="${PASS_SCRATCH:-$DESK_SCRATCH_ROOT}"
+	local prompt_file="$work/follow-up-summary-prompt.txt" out="$work/follow-up-summary-stream.jsonl"
+	local mcp_config="$work/follow-up-summary-mcp.json"
+	desk_render_prompt "$prompt_path" "$placeholders" > "$prompt_file"
+	printf '%s\n' '{"mcpServers":{}}' > "$mcp_config"
+
+	local budget timeout rc
+	budget="$(jq -r '.default_max_budget_usd // empty' "$DESK_CONFIG" 2> /dev/null)"
+	[ -n "$budget" ] || budget="$DESK_DEFAULT_MAX_BUDGET_USD"
+	timeout="${DESK_FOLLOW_UP_SUMMARY_TIMEOUT_SECS:-300}"
+	desk_call_model \
+		--scratch "$cwd" \
+		--prompt-file "$prompt_file" \
+		--allowed-tools "" \
+		--tools "" \
+		--restricted true \
+		--mcp-config "$mcp_config" \
+		--strict-mcp-config true \
+		--max-budget-usd "$budget" \
+		--resume "$id" \
+		--timeout "$timeout" \
+		--config-dir "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" \
+		--out "$out"
+	rc=$?
+
+	local cost
+	cost="$(desk_extract_total_cost_usd "$out")"
+	[ -n "$cost" ] && [ -n "${PASS_SCRATCH:-}" ] && printf '%s\n' "$cost" >> "$PASS_SCRATCH/.costs.log"
+
+	local text
+	text="$(desk_extract_final_text "$out")"
+	if [ "$rc" -ne 0 ]; then
+		desk_log "$pass" "follow-up summary: call failed (exit $rc)"
+		echo "failed"
+	elif [ -z "$(tr -d '[:space:]' <<< "$text")" ]; then
+		desk_log "$pass" "follow-up summary: empty reply"
+		echo "failed"
+	elif jq -e 'type == "object" or type == "array"' > /dev/null 2>&1 <<< "$text"; then
+		desk_log "$pass" "follow-up summary: the reply was JSON again"
+		echo "failed"
+	else
+		desk_log "$pass" "follow-up summary: added (${cost:-?} USD)"
+		echo "ok"
+	fi
+}
+
+# desk_open_follow_up_tab <pass> <scheduled_date> <follow_up_step> [<repo>]
 # After this pass
 # FINISHES (desk-run calls this once, after the step loop, whatever the
 # pass's own result: a failed pass still opens the tab on what exists),
@@ -1226,8 +1326,15 @@ desk_step_close() {
 # desk_step_open_tab's own `restricted: false` path uses for the
 # Wednesday tab. Every tab opened here is a background one: it never takes
 # focus from wherever the user is typing.
+#
+# Before that tab opens, desk_follow_up_summary adds a plain-language turn
+# to the session, so its last message explains the pass instead of being the
+# step's machine-format reply. When that call fails the tab opens anyway: the
+# conversation and its follow-up are still the user's, and a raw reply is
+# readable where a tab that never opened is lost; the log says what failed.
+# A live session never gets one, since that would be a second process on it.
 desk_open_follow_up_tab() {
-	local pass="$1" scheduled_date="$2" follow_up_step="$3"
+	local pass="$1" scheduled_date="$2" follow_up_step="$3" repo="${4:-}"
 	if [ -z "$follow_up_step" ]; then
 		echo "ok"
 		return
@@ -1299,6 +1406,10 @@ desk_open_follow_up_tab() {
 		desk_write_atomic "$guard_marker" ""
 		echo "ok"
 		return
+	fi
+
+	if [ "$(desk_follow_up_summary "$pass" "$scheduled_date" "$best" "$repo")" != "ok" ]; then
+		desk_log "$pass" "follow-up tab: no plain-language summary added — opening on the step's own reply"
 	fi
 
 	local command

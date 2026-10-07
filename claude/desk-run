@@ -638,7 +638,7 @@ desk_status_set_result "$pass" "$overall_result" "$stopped_at" "$failed_sources_
 # Visible run sessions: opens once the pass is done, whatever its own
 # result — a failed pass still opens the tab on whatever visible calls did
 # get made.
-desk_open_follow_up_tab "$pass" "$scheduled_date" "$follow_up_step" > /dev/null
+desk_open_follow_up_tab "$pass" "$scheduled_date" "$follow_up_step" "$repo" > /dev/null
 
 # -----------------------------------------------------------------------
 # The rest of status.json: proposal state/overflow/counts, the ticket cache's own age, and

@@ -158,6 +158,12 @@ desk_write_deny_hook_settings() {
 #   [--mcp-config PATH] [--strict-mcp-config true|false] [--settings PATH]
 #   [--max-budget-usd N] [--name NAME] --timeout SECS --config-dir DIR --out PATH
 #
+# `--resume ID` instead continues an existing persisted session under its own
+# id: no new id, no -n, nothing cleaned up afterwards, and the transcript the
+# call appends to is that session's own (confirmed live: a headless resume
+# keeps the session id and writes to the same file, without --fork-session).
+# An empty --allowed-tools is accepted, for a call meant to have no tools.
+#
 # Runs the call under run_with_timeout, from --scratch as cwd, with
 # CLAUDE_CONFIG_DIR=--config-dir; writes raw stream-json to --out. Returns
 # run_with_timeout's exit code (0 ok, 124 killed on timeout, anything else
@@ -191,13 +197,13 @@ desk_write_deny_hook_settings() {
 # criteria matches. Gating this on --name (as the code used to) left every
 # ephemeral connector call unmarked.
 desk_call_model() {
-	local tools_given="false" scratch="" prompt_file="" allowed_tools="" tools="" connector="false" restricted="false"
-	local mcp_config="" strict_mcp="false" settings="" max_budget_usd="" timeout_secs="" config_dir="" out="" name="" session_id_file=""
+	local tools_given="false" allowed_given="false" scratch="" prompt_file="" allowed_tools="" tools="" connector="false" restricted="false"
+	local mcp_config="" strict_mcp="false" settings="" max_budget_usd="" timeout_secs="" config_dir="" out="" name="" session_id_file="" resume=""
 	while [ $# -gt 0 ]; do
 		case "$1" in
 			--scratch) scratch="$2"; shift 2 ;;
 			--prompt-file) prompt_file="$2"; shift 2 ;;
-			--allowed-tools) allowed_tools="$2"; shift 2 ;;
+			--allowed-tools) allowed_tools="$2"; allowed_given="true"; shift 2 ;;
 			--tools) tools="$2"; tools_given="true"; shift 2 ;;
 			--connector) connector="$2"; shift 2 ;;
 			--restricted) restricted="$2"; shift 2 ;;
@@ -207,13 +213,18 @@ desk_call_model() {
 			--max-budget-usd) max_budget_usd="$2"; shift 2 ;;
 			--name) name="$2"; shift 2 ;;
 			--session-id-file) session_id_file="$2"; shift 2 ;;
+			--resume) resume="$2"; shift 2 ;;
 			--timeout) timeout_secs="$2"; shift 2 ;;
 			--config-dir) config_dir="$2"; shift 2 ;;
 			--out) out="$2"; shift 2 ;;
 			*) desk_log - "desk_call_model: unknown option $1"; return 2 ;;
 		esac
 	done
-	for req in scratch prompt_file allowed_tools timeout_secs config_dir out; do
+	if [ "$allowed_given" != "true" ]; then
+		desk_log - "desk_call_model: missing --allowed-tools"
+		return 2
+	fi
+	for req in scratch prompt_file timeout_secs config_dir out; do
 		if [ -z "${!req}" ]; then
 			desk_log - "desk_call_model: missing --$req"
 			return 2
@@ -227,7 +238,10 @@ desk_call_model() {
 		--allowedTools "$allowed_tools"
 	)
 	local session_id=""
-	if [ -n "$name" ]; then
+	if [ -n "$resume" ]; then
+		session_id="$resume"
+		argv+=(--resume "$session_id")
+	elif [ -n "$name" ]; then
 		session_id="$(desk_new_session_id)"
 		argv+=(--session-id "$session_id" -n "$name")
 		[ -z "$session_id_file" ] || printf '%s\n' "$session_id" > "$session_id_file"
@@ -246,7 +260,11 @@ desk_call_model() {
 	local prompt_text
 	prompt_text="$(cat "$prompt_file")"
 
-	if [ -n "$name" ] && [ "$restricted" = "true" ]; then
+	# Whether this call's session outlives it: a visible call or a resume.
+	local persisted="false"
+	{ [ -n "$name" ] || [ -n "$resume" ]; } && persisted="true"
+
+	if [ "$persisted" = "true" ] && [ "$restricted" = "true" ]; then
 		local transcript_path
 		transcript_path="$config_dir/projects/$(desk_project_folder_name "$scratch")/$session_id.jsonl"
 		jq -cn --arg sid "$session_id" --arg cwd "$scratch" --arg tp "$transcript_path" --arg src "desk-run" \
@@ -263,7 +281,7 @@ desk_call_model() {
 	)
 	rc=$?
 
-	if [ -n "$name" ] && [ "$restricted" = "true" ]; then
+	if [ "$persisted" = "true" ] && [ "$restricted" = "true" ]; then
 		jq -cn --arg sid "$session_id" --arg reason "other" '{session_id:$sid, reason:$reason}' \
 			| "$DESK_SESSION_RECORDER_BIN" end 2> /dev/null
 	fi
@@ -281,7 +299,7 @@ desk_call_model() {
 	# standing for a later `claude --resume` — see this function's own
 	# header comment and desk_prune_old_runs, the only thing that ever
 	# removes it.
-	[ -n "$name" ] || desk_cleanup_project_folder "$config_dir" "$scratch"
+	[ "$persisted" = "true" ] || desk_cleanup_project_folder "$config_dir" "$scratch"
 	return "$rc"
 }
 

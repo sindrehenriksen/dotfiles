@@ -199,8 +199,10 @@ assert_true "F got a real start event, source desk-run" \
 	"$([ -f "$f_store" ] && jq -rs 'map(select(.event=="start")) | last | .source' "$f_store" 2> /dev/null | grep -qx desk-run && echo true || echo false)"
 assert_true "F's start event's own cwd is its scratch dir" \
 	"$([ -f "$f_store" ] && jq -rs 'map(select(.event=="start")) | last | .cwd' "$f_store" 2> /dev/null | grep -qxF "$f_scratch" && echo true || echo false)"
-assert_true "F also got a real end event" \
-	"$([ -f "$f_store" ] && [ "$(jq -rs 'map(select(.event=="end")) | length' "$f_store" 2> /dev/null)" = "1" ] && echo true || echo false)"
+# F is the follow-up step, so the summary turn before its tab resumes it once
+# more: two runs, each recorded with its own start and end, both desk-run.
+assert_true "F also got a real end event for each start" \
+	"$([ -f "$f_store" ] && jq -es 'map(select(.event=="start")) as $s | map(select(.event=="end")) as $e | ($e | length) >= 1 and ($e | length) == ($s | length) and ($s | all(.source == "desk-run"))' "$f_store" > /dev/null 2>&1 && echo true || echo false)"
 
 echo
 echo "=== G: a non-restricted (connector) visible call ==="

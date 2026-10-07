@@ -79,6 +79,7 @@ Once the recorder hooks are live, any headless `claude -p` session started outsi
 | `keep_open` | `[]` | Session names never closed. |
 | `max_closes` | `3` | Real closes per pass. |
 | `away_days` | `5` | A pass more than this many days after the pass's last ok run closes nothing. |
+| `follow_up_summary_prompt` | `claude/desk-lib/follow-up-summary.md` | The prompt for a follow-up tab's plain-language turn (`follow_up_step`), relative to the config's directory. |
 | `retention_warn_days` | `14` | How many days before Claude Code deletes a transcript the `retention` step warns about it. |
 | `caps.<name>` | none | `{act, worth_knowing, wildcard}`: how many tiered items a judge may keep. Which entry a pass uses is its `caps` key; absent, `weekly` for a pass named `weekly` and `daily` for every other. |
 | `default_max_budget_usd` | `$DESK_DEFAULT_MAX_BUDGET_USD`, `2` | Spend cap for a model call whose step has no `max_budget_usd`. |
@@ -98,7 +99,7 @@ The five required tool and step-id fields have no defaults on purpose: this repo
 | `trigger.start_calendar_interval` | `[{hour, minute, weekday?}]`, `weekday` 1 = Monday … 7 = Sunday. The runner never reads a plist, so this mirrors the plist's schedule and decides which slot a run belongs to: the once-a-day guard is keyed on that slot's date, so an evening slot that only fires at next morning's wake still counts as yesterday's, and a later slot for a date that already finished ok is a no-op. Without it, the run's own date is used. |
 | `weekdays_only` | Boolean. `true`: when the slot's scheduled date (not the day the runner happens to start) is a Saturday or Sunday, every step but `commit_push` is skipped (notes are still committed, with no model calls). Absent: `true` for a pass named `morning`, `false` for any other name. |
 | `caps` | Name of the top-level `caps` entry this pass's judge uses. Absent: `weekly` for a pass named `weekly`, else `daily`. |
-| `follow_up_step` | A step id. After the pass, whatever its result, the most recent `visible` call of that step (found by the session id the runner generated for it, never by display name) opens in a background tab with `claude --resume` (a session already live is left in its tab, never focused), at most once per scheduled date. |
+| `follow_up_step` | A step id. After the pass, whatever its result, the most recent `visible` call of that step (found by the session id the runner generated for it, never by display name) opens in a background tab with `claude --resume` (a session already live is left in its tab, never focused), at most once per scheduled date. Before it opens, that session is resumed headless once more, under the same id, with no tools, no MCP servers and `--restricted`, for one turn written to the user in plain language: what the pass proposed and why, each item related to their notes, and any questions. The conversation then ends on that rather than on the step's JSON reply. When that call fails or replies in JSON again, the tab still opens, on the step's own reply, and the log says so: the conversation is still there to follow up in, where a tab held back would be lost. A live session gets no such turn. |
 
 The pass names `morning` and `weekly` only supply the defaults of `weekdays_only` and `caps` above; nothing else about a pass depends on its name.
 
@@ -159,9 +160,10 @@ A prompt is plain text with `{{name}}` placeholders, filled in one pass; a place
 | `caps` | judge | e.g. `ACT ≤3, worth knowing ≤3, wildcard ≤1` |
 | `thread_ids` | write | the pinned ids, one per line |
 | `session_name`, `session_id` | close, retention | the session being closed or warned about |
+| `items`, `item_count`, `open_note` | the follow-up summary | the pass's own staged items as a JSON array (`file`, `kind`, `headline`, `tier`, `source`, `before`, `after`), how many, and a line about older items still waiting, or empty |
 | `deletion_date`, `days_left` | retention | `YYYY-MM-DD` the transcript can be deleted from (today when already due), and the whole days until then |
 
-A close prompt gets only `scratch`, `today`, `session_name` and `session_id`; a retention prompt gets those plus `deletion_date` and `days_left`.
+A close prompt gets only `scratch`, `today`, `session_name` and `session_id`; a retention prompt gets those plus `deletion_date` and `days_left`; a follow-up summary prompt gets `today`, `items`, `item_count` and `open_note`, and runs as a turn of the session it summarises, so it has that conversation and no input files.
 
 **Fetch steps.** What counts is the raw tool results, never the reply's prose: every URL that appears verbatim in any fetch step's tool *results* is what a judge may cite, and a URL that only appears in a call's arguments (the address passed to WebFetch) does not count unless a result repeats it. Any fetch step's reply becomes `<its id, lowercased>.json` (id `F-web` gives `f-web.json`), and the `mail_fetch_step_id` step's also becomes `f-private.json`, each only if it is valid JSON; a judge reads them by listing those names in `input_files`. The ticket step must call `ticket_search_tool` with `{{jql}}`; its results are read in either Jira search shape, `{"issues": [...]}` or `{"issues": {"nodes": [...]}}`, and its reply is ignored. The mail step must search with `{{digest_query}}` exactly, and the write step reads `threads[].id` from that result.
 
@@ -259,7 +261,7 @@ The list holds one Perl regex per line (`#` comments), matched case-insensitivel
 
 ## Dry-running a new instance
 
-The defaults are the safe side of every outward-facing switch: `dry_run` (no write call), `log_only` (no session signalled) and `push_enabled` off. Fetch and judge calls are real model calls even then, and `follow_up_step` and `open_tab` open real tabs.
+The defaults are the safe side of every outward-facing switch: `dry_run` (no write call), `log_only` (no session signalled) and `push_enabled` off. Fetch and judge calls are real model calls even then, `follow_up_step` makes one more for its summary turn, and it and `open_tab` open real tabs.
 
 - **Offline**, to check the config and prompts: point `DESK_CLAUDE_BIN` at a stub that prints a stream-json result, `DESK_OPEN_TAB_BIN` and `DESK_FOCUS_TAB_BIN` at stubs, and `DESK_STATE_DIR` and `CLAUDE_SESSION_STORE` at a temp directory, then `DESK_CONFIG=… desk-run <pass>`. `nvim/tests/desk-example-instance-test.sh` is a worked version, and checks that every placeholder a prompt uses is one the runner fills.
 - **Live, without side effects**, against a copy: clone the notes repo to a temp path, point `notes_repo` at the clone in a copy of the config, and run each pass by hand with `DESK_STATE_DIR` set to a temp directory so the real status file, ledger and caches stay untouched. Read the log and `status.json`, then `<leader>gR` in the clone.
