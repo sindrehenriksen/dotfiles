@@ -137,6 +137,12 @@ assert_eq "start event carries the pid of the process that fired the hook" "$p1"
 echo "=== two live processes on one session ==="
 p2=$(spawn_claude twin prompt_input_exit)
 fire_start "$p2"
+assert_eq "the first start warned of nothing" "" "$(cat "$(tag_of "$p1").start.out")"
+p1_tty=$(ps -o tty= -p "$p1" | tr -d ' ')
+case "$p1_tty" in ''|'?'|'??') p1_tty="no tty" ;; esac
+assert_eq "the second start tells the user where the session is already open" \
+    "This session is already open in another Claude Code process ($p1_tty, pid $p1). Both write the same transcript; close one of them." \
+    "$(jq -r '.systemMessage' "$(tag_of "$p2").start.out")"
 assert_eq "both live: live" "true" "$(read_field twin .live)"
 assert_eq "both live: duplicate_pids (two live pid files)" "true" "$(read_field twin .duplicate_pids)"
 

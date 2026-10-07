@@ -100,6 +100,27 @@ append_end() {
         >> "$file" 2>>"$LOG_FILE"
 }
 
+# Prints a SessionStart `systemMessage` (shown to the user) when another
+# live Claude Code process already holds session $1; $2 is this hook's own
+# process. Claude Code names each pid file after its pid and a new process
+# overwrites a reused pid's file, so a live `claude` behind a pid file that
+# names this session is that session's process; no start-time check needed.
+warn_if_open_elsewhere() { # sid own_pid
+    local sid=$1 own=$2 dir="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/sessions" other tty comm where=""
+    local files=()
+    [ -d "$dir" ] && files=("$dir"/*.json)
+    [ -e "${files[0]:-}" ] || return 0
+    while IFS= read -r other; do
+        [ -n "$other" ] && [ "$other" != "$own" ] || continue
+        read -r tty comm < <(ps -o tty=,comm= -p "$other" 2>/dev/null) || continue
+        case "$comm" in claude|*/claude) ;; *) continue ;; esac
+        case "$tty" in ''|'?'|'??') tty="no tty" ;; esac
+        where="${where:+$where, }$tty, pid $other"
+    done < <(jq -r --arg sid "$sid" 'select(.sessionId == $sid) | .pid' "${files[@]}" 2>/dev/null)
+    [ -n "$where" ] || return 0
+    jq -cn --arg where "$where" '{systemMessage: ("This session is already open in another Claude Code process (\($where)). Both write the same transcript; close one of them.")}'
+}
+
 start_event() {
     local input sid file
     input=$(cat)
@@ -135,6 +156,7 @@ start_event() {
          cwd:(.cwd // ""), transcript_path:(.transcript_path // ""), boot:$boot}
         + (if $pid != "" then {pid: ($pid | tonumber)} else {} end)
     ' >> "$file" 2>>"$LOG_FILE"
+    [ -z "$pid" ] || warn_if_open_elsewhere "$sid" "$pid" 2>>"$LOG_FILE"
 }
 
 end_event() {
