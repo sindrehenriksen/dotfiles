@@ -46,23 +46,26 @@ assert_eq(
 	"closed idle · resumable",
 	annotate.session_text({ live = false, end_reason = "closed-by-pass" }, now)
 )
-for _, reason in ipairs({ "prompt_input_exit", "clear", "logout" }) do
+for _, reason in ipairs({ "prompt_input_exit", "clear", "resume", "logout" }) do
 	assert_eq(
 		"the user ended it themselves (" .. reason .. "): done, with the date",
 		"done · last active " .. os.date("%Y-%m-%d", now - 2 * DAY),
-		annotate.session_text({ live = false, end_reason = reason, last_activity = now - 2 * DAY }, now)
+		annotate.session_text(
+			{ live = false, end_reason = reason, end_deliberate = true, last_activity = now - 2 * DAY },
+			now
+		)
 	)
 end
 
 assert_eq(
 	"ended any other way: not running, with the date",
 	"not running · last active " .. os.date("%Y-%m-%d", now - 2 * DAY),
-	annotate.session_text({ live = false, end_reason = "other", last_activity = now - 2 * DAY }, now)
+	annotate.session_text({ live = false, end_reason = "other", end_deliberate = false, last_activity = now - 2 * DAY }, now)
 )
 assert_eq(
 	"ended with no recorded activity at all: 'unknown' rather than erroring",
 	"not running · last active unknown",
-	annotate.session_text({ live = false, end_reason = "other" }, now)
+	annotate.session_text({ live = false, end_reason = "other", end_deliberate = false }, now)
 )
 
 print()

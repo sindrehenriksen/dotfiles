@@ -103,12 +103,10 @@ end
 ---:
 ---   "live"                                 — live, active recently
 ---   "live · idle Nd"                       — live, but quiet N days
----   "done · last active <date>"            — the user ended it themselves (an end
----                                            event with a user-exit reason)
+---   "done · last active <date>"            — the user ended it themselves (the
+---                                            reader's end_deliberate)
 ---   "closed idle · resumable"              — the pass closed it for being idle
 ---   "not running · last active <date>"     — ended any other way
-local USER_EXIT_REASONS = { prompt_input_exit = true, clear = true, logout = true }
-
 function M.session_text(entry, now)
 	now = now or os.time()
 	if entry.live then
@@ -123,7 +121,7 @@ function M.session_text(entry, now)
 		return "closed idle · resumable"
 	end
 	local date = entry.last_activity and os.date("%Y-%m-%d", entry.last_activity) or "unknown"
-	if USER_EXIT_REASONS[entry.end_reason] then
+	if entry.end_deliberate == true then
 		return "done · last active " .. date
 	end
 	return "not running · last active " .. date
