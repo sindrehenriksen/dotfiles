@@ -93,7 +93,7 @@ is written.
 - When a tool/approach fails, consider alternatives or ask the owner for the missing context directly
 - **Usage and spend limits are the owner's to manage.** When one cuts work off, resume from where it stopped once it clears. Don't halt, trim scope, suggest cheaper models, or raise limits and credits with him.
 - Don't make assumptions — ask for input when uncertain rather than guessing
-- When asking a question, write it as plain text in your reply. Don't use the `AskUserQuestion` tool — the owner prefers freeform replies, not multiple-choice prompts.
+- When asking a question, write it as plain text in your reply. Don't use the `AskUserQuestion` tool — the owner prefers freeform replies, not multiple-choice prompts. When a reply leaves you blocked on a decision or input from him, start it with `[needs-you]`, and only then: the terminal bell rings on that marker, so a reply that simply finishes stays quiet.
 - Think critically about suggestions before offering them — challenge your own ideas
 - Never install, clone, or add third-party packages/tools/MCPs without first confirming the exact source (repo URL, package name) with the owner
 
