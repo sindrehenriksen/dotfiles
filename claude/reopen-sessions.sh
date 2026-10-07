@@ -21,14 +21,13 @@
 # (claude/hooks/session-recorder.sh), and a process cannot outlive its boot,
 # so boots are what separate "open when the machine went down" from an old
 # orphan. A session counts when its latest run is in the previous boot (the
-# latest boot id in the store older than this one) or in this boot, it is not
-# live, and that run was still open when it stopped: no end event, or an end
-# that was not deliberate (open_when_stopped below is the one place that
-# rule lives). A run left open by an older boot is an old orphan, counted but
-# not listed unless --all-boots asks for it. A session that was open at the
-# shutdown and has since been resumed reports as running if it is live, and
-# is left alone if it was then ended deliberately. Sessions whose latest
-# start came from a scheduled pass (source desk-run) are never reopened.
+# latest boot id in the store older than this one) or in this boot, and the
+# reader reports it `left_open`: not live, not a scheduled desk-run call, and
+# stopped without a deliberate end (the reader's header and docs/desk.md say
+# which ends are deliberate; open_when_stopped below is the only place this
+# file asks). A session left open by an older boot is an old orphan, counted
+# but not listed unless --all-boots asks for it. A live session that had a
+# run in the previous boot reports as running.
 #
 # Idle. A session is idle when its user's last human message is at least
 # `close_after_working_days` working days old, the same measure and the same
@@ -172,56 +171,25 @@ boot_now="$(current_boot)"
 [[ "$boot_now" =~ ^[0-9]+$ ]] || die_inputs "could not read the current boot time"
 [ -d "$STORE_DIR" ] || die_inputs "no session store at $STORE_DIR (is the recorder hook wired?)"
 
-# --------------------------------------------------------------------------
-# The one rule for whether a session was still open when it stopped, given a
-# record shaped like the reader's (ended, end_reason). A session with no end
-# was open. So was one whose end was not the user's doing: of the SessionEnd
-# reasons Claude Code reports (clear, resume, logout, prompt_input_exit,
-# other) only `other` is not something the user did, and it is what an end
-# forced by the machine or the terminal going away can report. The recorder's
-# own `closed-by-pass` (a close step) is deliberate.
-#
-# A reader that classifies ends itself wins over the reason list: when the
-# record carries `end_deliberate` (a boolean), that decides. This is the
-# seam for that classification; nothing else here judges an end.
-# --------------------------------------------------------------------------
-INCIDENTAL_END_REASONS='["other"]'
-OPEN_RULE_JQ='
-	def open_when_stopped($incidental):
-		if (.ended // false) | not then true
-		elif (.end_deliberate | type) == "boolean" then (.end_deliberate | not)
-		else ((.end_reason // "") as $r | $incidental | index($r) != null)
-		end;
-'
-open_when_stopped() { # record-json -> prints true/false
-	jq -r --argjson inc "$INCIDENTAL_END_REASONS" "$OPEN_RULE_JQ"' open_when_stopped($inc)' <<< "$1"
+# Whether a session was left open when it stopped, from its reader record.
+# The reader is the one implementation of that judgement (`left_open`); a
+# record without the field comes from a reader too old to make it, and is
+# refused below rather than read as "not open".
+open_when_stopped() { # reader-record-json -> prints true/false
+	jq -r '.left_open == true' <<< "$1"
 }
 
 # --------------------------------------------------------------------------
-# 1. From the raw event records: per session, its runs (one per start
-#    event), each with its boot and how it ended.
+# 1. From the raw event records: per session, the boot of each run (one per
+#    start event).
 # --------------------------------------------------------------------------
 shopt -s nullglob
 store_files=("$STORE_DIR"/*.jsonl)
 shopt -u nullglob
 
 # A file that does not parse (a record from before the recorder's format) is
-# skipped, like the reader does. An end here closes the latest run, which is
-# simpler than the reader's matching of ends to processes by pid; it only
-# feeds the boot of the latest run (start events alone) and the counts, and
-# whenever a session could be opened, its end is judged on the reader's
-# record instead.
-RUNS_JQ='
-	(reduce .[] as $e ({runs: [], cur: null};
-		if $e.event == "start" then
-			(if .cur != null then .runs += [.cur] else . end)
-			| .cur = {boot: (($e.boot // "") | tostring), source: ($e.source // null), ended: false, end_reason: null}
-		elif $e.event == "end" and .cur != null and (.cur.ended | not) then
-			.cur.ended = true | .cur.end_reason = ($e.reason // null)
-		else . end)
-	| if .cur != null then .runs + [.cur] else .runs end) as $runs
-	| {runs: $runs}
-'
+# skipped, like the reader does.
+RUNS_JQ='{runs: map(select(.event == "start") | {boot: ((.boot // "") | tostring)})}'
 records=()
 # The latest event of any kind before this boot: the machine went down
 # somewhere between it and the boot itself.
@@ -246,12 +214,8 @@ prev_boot="$(jq -r --argjson now "$boot_now" --argjson tol "$BOOT_TOLERANCE_SECS
 ' <<< "$all_records")" || die_inputs "could not work out the previous boot"
 
 # Per session: which boot its latest run belongs to (current, previous,
-# older, unknown), whether its last run in the previous boot was open when
-# the machine went down, and whether its latest run looks open from the
-# events alone (for counting old orphans, which the reader is not asked
-# about).
-classified="$(jq -c --argjson now "$boot_now" --arg prev "$prev_boot" --argjson tol "$BOOT_TOLERANCE_SECS" \
-	--argjson inc "$INCIDENTAL_END_REASONS" "$OPEN_RULE_JQ"'
+# older, unknown), and whether it had a run in the previous boot.
+classified="$(jq -c --argjson now "$boot_now" --arg prev "$prev_boot" --argjson tol "$BOOT_TOLERANCE_SECS" '
 	def num: if type == "string" and test("^[0-9]+$") then tonumber else null end;
 	def boot_class:
 		(.boot | num) as $b
@@ -259,16 +223,10 @@ classified="$(jq -c --argjson now "$boot_now" --arg prev "$prev_boot" --argjson 
 		  elif ($b - $now | fabs) <= $tol then "current"
 		  elif $prev != "" and ($b - ($prev | tonumber) | fabs) <= $tol then "previous"
 		  else "older" end;
-	map(select(.runs | length > 0)) | map(
-		(.runs | map(select(boot_class == "previous")) | last) as $prun
-		| (.runs | last) as $last
-		| . + {
-			latest_boot: ($last | boot_class),
-			last_source: $last.source,
-			open_at_shutdown: ($prun != null and ($prun | open_when_stopped($inc))),
-			latest_open: ($last | open_when_stopped($inc))
-		}
-	)
+	map(select(.runs | length > 0)) | map(. + {
+		latest_boot: (.runs | last | boot_class),
+		ran_in_previous: (.runs | any(boot_class == "previous"))
+	})
 ' <<< "$all_records")" || die_inputs "could not classify the event records"
 
 # --------------------------------------------------------------------------
@@ -281,14 +239,16 @@ read_sessions() {
 }
 reader_json="$(read_sessions)" || die_inputs "the session reader ($READER) failed"
 [ -n "$reader_json" ] || die_inputs "the session reader ($READER) returned nothing parseable"
+[ "$(jq 'any(.[]; .has_start_event == true and (has("left_open") | not))' <<< "$reader_json")" = "false" ] \
+	|| die_inputs "the session reader ($READER) does not report left_open; it is older than this command"
 
 # Since the last shutdown means a latest run in the previous boot or this
 # one; anything older is an old orphan, only counted unless --all-boots.
 candidates="$(jq -c --argjson all "$all_boots" '
 	map(select(.latest_boot == "previous" or .latest_boot == "current" or $all))
 ' <<< "$classified")" || die_inputs "could not select candidates"
-older_count="$(jq '[.[] | select((.latest_boot == "older" or .latest_boot == "unknown")
-	and .latest_open and .last_source != "desk-run")] | length' <<< "$classified")" \
+older_count="$(jq --argjson r "$reader_json" '[.[] | select((.latest_boot == "older" or .latest_boot == "unknown")
+	and ($r[.id].left_open == true))] | length' <<< "$classified")" \
 	|| die_inputs "could not count older orphans"
 
 # Selection, when --session narrows it: each selector must resolve to exactly
@@ -328,8 +288,7 @@ narrowed=false
 # --------------------------------------------------------------------------
 # 3. Classify each candidate against the reader, most recent message first.
 # --------------------------------------------------------------------------
-closed_since=0
-scheduled=0
+ended_deliberately=0
 to_open=()
 
 mapfile -t cand_lines < <(jq -c --argjson r "$reader_json" '
@@ -341,43 +300,35 @@ mapfile -t cand_lines < <(jq -c --argjson r "$reader_json" '
 for line in "${cand_lines[@]+"${cand_lines[@]}"}"; do
 	id="$(jq -r '.c.id' <<< "$line")"
 	entry="$(jq -c '.e' <<< "$line")"
-	last_source="$(jq -r '.c.last_source // ""' <<< "$line")"
-	at_shutdown="$(jq -r '.c.open_at_shutdown' <<< "$line")"
+	ran_in_previous="$(jq -r '.c.ran_in_previous' <<< "$line")"
 	name="$(jq -r '.name // ""' <<< "$entry" 2> /dev/null)"
 	cwd="$(jq -r '.cwd // ""' <<< "$entry" 2> /dev/null)"
 	lh="$(jq -r '(.last_human_message // .last_activity) // empty' <<< "$entry" 2> /dev/null)"
 	wd=""
 	[[ "$lh" =~ ^[0-9]+$ ]] && wd="$(desk_working_days_since "$lh" "$NOW")"
 
-	# When the shutdown run is also the latest one, the reader's record
-	# describes it, and its judgement of the end is the one to use.
-	if [ "$entry" != "null" ] && [ "$(jq -r '.c.latest_boot' <<< "$line")" = "previous" ]; then
-		at_shutdown="$(open_when_stopped "$entry")"
-	fi
 	if [ "$entry" = "null" ]; then
-		if [ "$(jq -r '.c.latest_open' <<< "$line")" = "true" ] && [ "$last_source" != "desk-run" ]; then
-			add_result failed "$id" "" "" "" "" "the reader has no entry for this session"
-		fi
+		add_result failed "$id" "" "" "" "" "the reader has no entry for this session"
 		continue
 	fi
-	# Live: worth a line only when it was open at the shutdown and is back.
+	# Live: worth a line only when it was running before the restart too.
 	if [ "$(jq -r '.live' <<< "$entry")" = "true" ]; then
-		if [ "$at_shutdown" = "true" ]; then
+		if [ "$ran_in_previous" = "true" ] || [ "$narrowed" = true ]; then
 			add_result running "$id" "$name" "$cwd" "$lh" "$wd" "already live (pid $(jq -r '.pid // "?"' <<< "$entry"))"
 		fi
 		continue
 	fi
 	if [ "$(open_when_stopped "$entry")" != "true" ]; then
-		[ "$at_shutdown" = "true" ] && closed_since=$((closed_since + 1))
-		continue
-	fi
-	if [ "$last_source" = "desk-run" ]; then
-		scheduled=$((scheduled + 1))
+		if [ "$(jq -r '.end_deliberate == true' <<< "$entry")" = "true" ]; then
+			ended_deliberately=$((ended_deliberately + 1))
+			[ "$narrowed" = true ] && add_result failed "$id" "$name" "$cwd" "$lh" "$wd" \
+				"ended deliberately ($(jq -r '.end_reason // "?"' <<< "$entry")); not reopened"
+		fi
 		continue
 	fi
 	how="no end recorded"
 	[ "$(jq -r '.ended' <<< "$entry")" = "true" ] \
-		&& how="ended with reason $(jq -r '.end_reason // "none"' <<< "$entry"), not a deliberate end"
+		&& how="ended without the user (reason $(jq -r '.end_reason // "none"' <<< "$entry"))"
 	if ! is_uuid "$id"; then
 		add_result failed "$id" "$name" "$cwd" "$lh" "$wd" "not a session id (refusing: an empty or malformed id opens the resume picker)"
 		continue
@@ -509,7 +460,7 @@ results_json="$(printf '%s\n' "${results[@]+"${results[@]}"}" | jq -cs '
 summary_json="$(jq -c \
 	--argjson dry "$dry_run" --arg prev "$prev_boot" --arg now_boot "$boot_now" --arg down "$last_before_boot" \
 	--argjson thr "$idle_threshold" --arg thr_src "$idle_source" \
-	--argjson older "$older_count" --argjson closed "$closed_since" --argjson sched "$scheduled" \
+	--argjson older "$older_count" --argjson deliberate "$ended_deliberately" \
 	--argjson all "$all_boots" '
 	def n($s): map(select(.status == $s)) | length;
 	{dry_run: $dry,
@@ -519,7 +470,7 @@ summary_json="$(jq -c \
 	 opened: n("opened"), would_open: n("would-open"), running: n("running"),
 	 idle: n("idle"), failed: n("failed"),
 	 older_orphans: $older, older_included: $all,
-	 closed_since_restart: $closed, scheduled_skipped: $sched}
+	 ended_deliberately: $deliberate}
 ' <<< "$results_json")"
 
 if [ "$json" = true ]; then
@@ -535,7 +486,7 @@ else
 	down_fmt="$(fmt_time "$last_before_boot" | tr ' ' T)"
 	boot_fmt="$(fmt_time "$boot_now" | tr ' ' T)"
 	jq -r --arg down "$down_fmt" --arg boot "$boot_fmt" '
-		"summary\tdry_run=\(.dry_run) opened=\(.opened) would_open=\(.would_open) running=\(.running) idle=\(.idle) failed=\(.failed) older_orphans=\(.older_orphans) closed_since_restart=\(.closed_since_restart) scheduled_skipped=\(.scheduled_skipped) idle_after_working_days=\(.idle_after_working_days)(\(.idle_threshold_from)) went_down_after=\($down) booted=\($boot)"
+		"summary\tdry_run=\(.dry_run) opened=\(.opened) would_open=\(.would_open) running=\(.running) idle=\(.idle) failed=\(.failed) older_orphans=\(.older_orphans) ended_deliberately=\(.ended_deliberately) idle_after_working_days=\(.idle_after_working_days)(\(.idle_threshold_from)) went_down_after=\($down) booted=\($boot)"
 	' <<< "$summary_json"
 fi
 
