@@ -20,6 +20,12 @@
 # matters) — never trusting the model to only ask for the ids it was told
 # about.
 #
+# `--ignore-keys <k1,k2>`: with `--pinned`, these keys are dropped from
+# tool_input before the comparison, for a field the tool takes that has no
+# effect outside the call (the watch pass's send pins `to` and `message`
+# and ignores SendMessage's transcript-only `summary`). Any other extra
+# key still fails the comparison.
+#
 # `--scratch <dir>` (a judge/close call's own second layer under its
 # scoped `Read(<dir>/**)` --allowedTools entry, steps.sh's
 # desk_step_allowed_tools): when given, a Read call is additionally
@@ -41,11 +47,17 @@ trap 'exit 2' ERR
 
 pinned_file=""
 scratch_dir=""
+ignore_keys=""
 while :; do
 	case "${1:-}" in
 		--pinned)
 			[ $# -ge 2 ] || { echo "desk deny-hook: --pinned needs a file — denying" >&2; exit 2; }
 			pinned_file="$2"
+			shift 2
+			;;
+		--ignore-keys)
+			[ $# -ge 2 ] || { echo "desk deny-hook: --ignore-keys needs a list — denying" >&2; exit 2; }
+			ignore_keys="$2"
 			shift 2
 			;;
 		--scratch)
@@ -93,7 +105,8 @@ if [ -n "$pinned_file" ]; then
 		echo "desk deny-hook: --pinned file is missing ($pinned_file) — denying" >&2
 		exit 2
 	fi
-	tool_input="$(printf '%s' "$input" | jq -c '.tool_input // {}' 2>/dev/null)"
+	tool_input="$(printf '%s' "$input" | jq -c --arg ign "$ignore_keys" \
+		'(.tool_input // {}) | if $ign == "" then . else delpaths([$ign | split(",")[] | [.]]) end' 2>/dev/null)"
 	if ! jq -e --argjson want "$tool_input" 'any(.[]?; . == $want)' "$pinned_file" > /dev/null 2>&1; then
 		echo "desk deny-hook: '$tool_name' tool_input isn't one of the pinned set ($pinned_file)" >&2
 		exit 2

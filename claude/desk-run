@@ -42,7 +42,7 @@ source "$DESK_RUN_DIR/desk-lib/retention.sh"
 
 pass="${1:-}"
 if [ -z "$pass" ]; then
-	echo "usage: desk-run <pass>" >&2
+	echo "usage: desk-run <pass> [watch options]" >&2
 	exit 2
 fi
 
@@ -75,6 +75,16 @@ pass_config="$(jq -c --arg p "$pass" '.passes[$p] // empty' <<< "$config")"
 if [ -z "$pass_config" ]; then
 	desk_log "$pass" "unknown pass (no .passes.$pass in \$DESK_CONFIG)"
 	exit 2
+fi
+
+# A pass of kind "watch" (docs/desk.md, "The watch pass") runs on its own
+# path: no once-a-day guard, no shared lock, no notes repo or status file.
+if [ "$(jq -r '.kind // empty' <<< "$pass_config")" = "watch" ]; then
+	source "$DESK_RUN_DIR/desk-lib/watch.sh"
+	export DESK_CONFIG
+	export CLAUDE_CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+	desk_watch_main "$pass" "$pass_config" "${@:2}"
+	exit $?
 fi
 
 # Generic ids: dotfiles is public and names no instantiation-specific fact

@@ -86,6 +86,7 @@ BASH_SUITES=(
 	nvim/tests/desk-validate-test.sh
 	nvim/tests/desk-visible-run-test.sh
 	nvim/tests/desk-w-count-check-test.sh
+	nvim/tests/desk-watch-test.sh
 	nvim/tests/desk-write-pinned-test.sh
 	nvim/tests/desk-write-step-kind-test.sh
 	claude/tests/input-bell-test.sh

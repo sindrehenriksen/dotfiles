@@ -156,7 +156,7 @@ desk_write_deny_hook_settings() {
 # desk_call_model --scratch DIR --prompt-file PATH --allowed-tools CSV
 #   [--tools VALUE] [--connector true|false] [--restricted true|false]
 #   [--mcp-config PATH] [--strict-mcp-config true|false] [--settings PATH]
-#   [--max-budget-usd N] [--name NAME] --timeout SECS --config-dir DIR --out PATH
+#   [--max-budget-usd N] [--name NAME] [--model MODEL] --timeout SECS --config-dir DIR --out PATH
 #
 # `--resume ID` instead continues an existing persisted session under its own
 # id: no new id, no -n, nothing cleaned up afterwards, and the transcript the
@@ -198,7 +198,7 @@ desk_write_deny_hook_settings() {
 # ephemeral connector call unmarked.
 desk_call_model() {
 	local tools_given="false" allowed_given="false" scratch="" prompt_file="" allowed_tools="" tools="" connector="false" restricted="false"
-	local mcp_config="" strict_mcp="false" settings="" max_budget_usd="" timeout_secs="" config_dir="" out="" name="" session_id_file="" resume=""
+	local mcp_config="" strict_mcp="false" settings="" max_budget_usd="" timeout_secs="" config_dir="" out="" name="" session_id_file="" resume="" model=""
 	while [ $# -gt 0 ]; do
 		case "$1" in
 			--scratch) scratch="$2"; shift 2 ;;
@@ -212,6 +212,7 @@ desk_call_model() {
 			--settings) settings="$2"; shift 2 ;;
 			--max-budget-usd) max_budget_usd="$2"; shift 2 ;;
 			--name) name="$2"; shift 2 ;;
+			--model) model="$2"; shift 2 ;;
 			--session-id-file) session_id_file="$2"; shift 2 ;;
 			--resume) resume="$2"; shift 2 ;;
 			--timeout) timeout_secs="$2"; shift 2 ;;
@@ -254,6 +255,7 @@ desk_call_model() {
 	[ "$strict_mcp" = "true" ] && argv+=(--strict-mcp-config)
 	[ -n "$settings" ] && argv+=(--settings "$settings")
 	[ -n "$max_budget_usd" ] && argv+=(--max-budget-usd "$max_budget_usd")
+	[ -n "$model" ] && argv+=(--model "$model")
 
 	# The rendered prompt is passed as claude's own positional argument
 	#.

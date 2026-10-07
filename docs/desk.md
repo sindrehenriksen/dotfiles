@@ -100,6 +100,7 @@ The five required tool and step-id fields have no defaults on purpose: this repo
 | `trigger.start_calendar_interval` | `[{hour, minute, weekday?}]`, `weekday` 1 = Monday … 7 = Sunday. The runner never reads a plist, so this mirrors the plist's schedule and decides which slot a run belongs to: the once-a-day guard is keyed on that slot's date, so an evening slot that only fires at next morning's wake still counts as yesterday's, and a later slot for a date that already finished ok is a no-op. Without it, the run's own date is used. |
 | `weekdays_only` | Boolean. `true`: when the slot's scheduled date (not the day the runner happens to start) is a Saturday or Sunday, every step but `commit_push` is skipped (notes are still committed, with no model calls). Absent: `true` for a pass named `morning`, `false` for any other name. |
 | `caps` | Name of the top-level `caps` entry this pass's judge uses. Absent: `weekly` for a pass named `weekly`, else `daily`. |
+| `kind` | `"watch"` makes the pass the watch pass, which takes none of the keys here: its own are in [The watch pass](#the-watch-pass). Absent for every other pass. |
 | `follow_up_step` | A step id. After the pass, whatever its result, the most recent `visible` call of that step (found by the session id the runner generated for it, never by display name) opens in a background tab with `claude --resume` (a session already live is left in its tab, never focused), at most once per scheduled date. Before it opens, that session is resumed headless once more, under the same id, with no tools, no MCP servers and `--restricted`, for one turn written to the user in plain language: what the pass proposed and why, each item related to their notes, and any questions. The conversation then ends on that rather than on the step's JSON reply. The turn is told how the run went (which steps it has, any failed sources, where it stopped), so a quiet run says in a line that nothing needs the user and what was checked, and a partial or failed one says what failed and what still ran. When that call fails or replies in JSON again, the tab still opens, on the step's own reply, and the log says so: the conversation is still there to follow up in, where a tab held back would be lost. A live session gets no such turn. When no call of the step ran (a weekend slot, a failure before it) or its session cannot be found, the tab opens a fresh interactive `claude` instead, named `desk-<pass>-<date>-status`, whose first turn reports the run from the same status. Whichever it is, the tab is an interactive Claude Code session, never a plain command. |
 
 The pass names `morning` and `weekly` only supply the defaults of `weekdays_only` and `caps` above; nothing else about a pass depends on its name.
@@ -213,6 +214,50 @@ The step reads `cleanupPeriodDays` from `$CLAUDE_CONFIG_DIR/settings.json` (defa
 
 A retention item that moves the user's entry is kept only when its `before` is lines that sit together in the committed captures file and its `after` carries every one of them, in order and unchanged apart from indent and the appended date; otherwise it lands as `new` on top with just its first line and the added bullets, and the entry stays where it was. The runner appends the deletion date to the first line when the text lacks it.
 
+## The watch pass
+
+A pass of kind `watch` forwards movement on tickets to the Claude Code session that tracks them. The session is a **watch session**: one the user keeps open on an epic or a task, holding the plan for it. The pass sends that session every change as a cross-session message, and the session decides whether the user needs to look. The pass doesn't filter: every movement is forwarded, so the session stays current, and only the session's reply decides whether to involve the user.
+
+**The watch list** is machine-local, since session ids exist only on this machine and a tracked file would leave a workspace repo dirty. It is `$DESK_WATCH_FILE` (default `~/.local/state/desk/watch.json`), `{"entries": {<session id>: {label, keys, related, added_at}}}`, and only `desk-watch` edits it:
+
+```sh
+desk-watch add [--session <id|name>] [--label <text>] [--related <KEY>...] <KEY>...
+desk-watch remove [--session <id|name>] [<KEY>...]   # no keys: the whole watch
+desk-watch list [--json]
+desk-watch run [--dry-run] [--lookback-minutes N]    # one run now
+```
+
+`--session` defaults to `$CLAUDE_CODE_SESSION_ID`, which Claude Code sets in its Bash tool, so a session can register itself. The `desk-watch` skill (`agents/skills/desk-watch/`) tells a session what each ask means. `list --json` is the seam for a later pass: each entry's liveness, queue, last send, and `all_closed_since` once every tracked and related ticket's status is in the done category.
+
+**What a run reads**, read-only:
+
+- **Tickets**, in one restricted model call whose only tool is the configured search tool, running two queries the runner builds. The scope query, every `scope_refresh_minutes` or when the keys change, fetches the tracked keys, the related keys, and the children of the tracked keys. A session's scope is then those, plus every ticket linked to a tracked key or to a child (one hop, any project). The changes query fetches every ticket in a scope, every child, and every ticket whose text mentions a tracked or related key, updated within the window. Results count only from calls whose `jql` is exactly the one the runner built.
+- **Pull requests**, through `gh pr list` and `gh pr view` only (any other `gh` subcommand is refused), in each of `github_repos`, updated within the window, whose title or branch carries a key in some session's scope. Comments and reviews are fetched only for a PR that moved since its snapshot.
+
+**What counts as a change.** Each ticket and PR is snapshotted in `$DESK_WATCH_STATE_FILE` (default `~/.local/state/desk/watch-state.json`), so a change is a difference from the snapshot. For a ticket that is status, summary, assignee, resolution, parent, labels, links, a description edit, and new or edited comments. For a PR it is state, draft, review decision, title, new commits, labels, a description edit, a change in the failing checks or a check run finishing, and new comments and reviews. A ticket seen for the first time counts only when it moved inside the window. The window runs from the last fetch of that source that came back, with five minutes of overlap; comment and review ids keep the overlap from repeating anything. A source's first run records snapshots and sends nothing. A failed fetch keeps that source's window where it was.
+
+**Delivery.** Changes queue per session. For each session with a non-empty queue, the reader resolves the session id to its current name, since the name is the address and the user renames sessions. The message is sent only when the session is live and resolving that name gives back the same id. A session that isn't running, or one whose name another live session shares, keeps its queue, and gets everything in one message the next time it is reachable. The send is one restricted model call whose only tool is SendMessage. The deny hook pins its `to` and `message` to exactly the resolved name and the runner-built text (`--pinned` with `--ignore-keys summary`), so it can reach no other peer. The queue empties, and the session's last-sent time moves, only when that exact call ran and its result wasn't an error or a held or refused delivery.
+
+**The message** starts with `[desk-watch] Watcher update for <label>: …. Not from the user.`, the marker a hook can tell a watcher turn by. Next comes the instance's standing preamble (`preamble`), so a session handles the message correctly even after compaction. Then the changes since the last send, oldest first, one line each: time, ticket or PR, title, how it relates to the session's keys, and what moved. Past `message_max_chars`, later lines are named by ticket only. The preamble is where the instance states the bar for involving the user, and the reply contract: a reply that starts with `[needs-you]` and says in plain language what needs the user, or one quiet line otherwise. `claude/hooks/input-bell.sh` decides what rings.
+
+**Permission class.** Every call runs with `--permission-mode dontAsk`, which Claude Code counts with the prompting modes (default, auto, acceptEdits). A sender and receiver in different classes (bypass against prompting) have their messages held for the receiver's approval, then dropped after five minutes. So the watch pass must never run in bypass mode, and a watch session must not run in bypass mode either.
+
+**Its own path.** `desk-run <pass>` hands a watch pass to `claude/desk-lib/watch.sh` before anything else: no once-a-day guard, no shared runner lock (it takes its own, `watch`, and waits at most a minute for another watch run), no notes repo, no status file. `--scheduled` (what the plist passes) skips a run that comes less than `interval_minutes` after the last one. A manual run always runs. `--dry-run` fetches as usual, prints each message it would send, and sends nothing and writes no state. `--lookback-minutes N` sets the window to the last N minutes for that run and doesn't move the stored windows; with `--dry-run`, that previews real traffic on a machine with no state yet.
+
+| Key (under the pass) | Default | Meaning |
+|---|---|---|
+| `kind` | required | `"watch"` |
+| `interval_minutes` | `15` | The schedule's spacing. Values under 15 are clamped to 15, with a log line. Keep the plist's `StartInterval` at this many seconds. |
+| `scope_refresh_minutes` | `60` | How often the scope query reruns. |
+| `jira.tool`, `jira.prompt` | required | The search tool and the prompt that runs the two queries. The prompt gets `{{scope_jql}}` and `{{changes_jql}}` (each `none` when it doesn't run), `{{scope_fields}}`, `{{changes_fields}}` and `{{today}}`. |
+| `jira.mcp_config`, `jira.model`, `jira.timeout`, `jira.max_budget_usd` | none, the account's default, `300`, `1` | As for a step. |
+| `github_repos` | `[]` | `owner/name` repos whose PRs are matched. |
+| `send.prompt` | required to send | Gets `{{to}}` and `{{message}}`. It must tell the call to send exactly that, once. |
+| `send.model`, `send.timeout`, `send.max_budget_usd` | the account's default, `180`, `1` | |
+| `preamble` | `prompts/watch-preamble.md` | The standing preamble, relative to the config's directory. |
+| `message_max_chars` | `12000` | |
+| `queue_max` | `200` | Per session; older changes past it are counted, not kept. |
+
 ## Review keys
 
 In a notes buffer:
@@ -242,6 +287,8 @@ A take is remembered when you make it and recorded on the next save of either bu
 One LaunchAgent plist per pass, each running `desk-run <pass>` with `DESK_CONFIG` and a `PATH` that reaches bash 4+, `jq`, `nvim`, `perl`, `rg`, `claude` and `~/.local/bin`. `claude/desk-example/com.local.desk.morning.plist` is the pattern: launchd expands neither `~` nor `$HOME`, so it runs through `/bin/sh -c`, and it appends the pass's log to `~/.local/state/desk/logs/`. Set `CLAUDE_CONFIG_DIR` there too if your sessions live in a config directory other than `~/.claude`: the capture and close steps read sessions from it. Keep `StartCalendarInterval` equal to the pass's `trigger.start_calendar_interval` (launchd's `Weekday` uses the same 1–7 numbers). Several slots per pass are the retry mechanism: once a scheduled date finishes ok, later slots for it do nothing.
 
 **Missed slots.** launchd runs a `StartCalendarInterval` slot missed while the Mac slept once it wakes (several missed ones coalesce into one run), but not one missed while it was off: after a restart or shutdown the job waits for its next slot. `RunAtLoad`, as in the example plist, closes that gap: the job also runs whenever launchd loads it, which is at every login, and the once-a-day guard makes the day's later slots no-ops. A login before the day's first slot belongs to the previous day's last slot (`trigger.start_calendar_interval` above), so it runs only if that day never finished. `RunAtLoad` fires at `launchctl bootstrap` too, so enabling such a job runs its pass straight away.
+
+A watch pass's plist uses `StartInterval` (seconds, `interval_minutes` × 60) instead of `StartCalendarInterval`, and runs `desk-run <pass> --scheduled`. launchd doesn't run a missed interval while the Mac sleeps; the first one after wake covers the whole gap, since the window runs from the last fetch that came back.
 
 **Loading.** A job loaded with `launchctl bootstrap` stays loaded until a `bootout` or the next logout; at login, launchd loads only what is in `~/Library/LaunchAgents`. So a job that should survive restarts is linked there from the instance repo, and enabled by bootstrapping the link:
 
