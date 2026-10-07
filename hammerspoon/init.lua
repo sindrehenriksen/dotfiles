@@ -406,13 +406,41 @@ function DeskTab.match_script_window(target_id, hs_windows, script_windows)
   return same[rank].id
 end
 
--- True when focus has moved off `before` onto a Ghostty window: the theft a
--- background open undoes. A move to any other app is the user's own doing
--- and is left alone. before/now: { app, window_id } (window_id may be nil).
-function DeskTab.focus_was_taken(before, now)
-  if now == nil or now.app ~= "Ghostty" then return false end
-  if before == nil then return true end
-  return before.app ~= now.app or before.window_id ~= now.window_id
+-- True when focus sits on a Ghostty window the open itself created: the
+-- theft a background open undoes. Ghostty's activation always lands on the
+-- new tab or window, and each tab is its own window with its own id, so
+-- that id is one `known` (every Ghostty window id from before the open)
+-- does not hold. Focus the user moves anywhere else, including to another
+-- existing Ghostty window, is left alone.
+--   before/now: { app, window_id } (window_id may be nil mid-transition)
+function DeskTab.focus_was_taken(before, now, known)
+  if now == nil or now.app ~= "Ghostty" or now.window_id == nil then return false end
+  if before and before.app == now.app and before.window_id == now.window_id then return false end
+  return not (known or {})[now.window_id]
+end
+
+-- The one window a new-window open created, as Hammerspoon's id, or nil
+-- whenever that is not certain; only that window is ever given a frame.
+-- Certain means: Ghostty counts exactly one more window than before, and
+-- exactly one Hammerspoon id is new while every id from before is still
+-- there. An existing window's id changes when its selected tab does, so a
+-- vanished id means the new id could be an existing window, never to be
+-- moved.
+--   before_ids: set of Ghostty window ids before the open
+--   after: list of { id } now
+--   groups_before, groups_after: Ghostty's own window counts
+function DeskTab.created_window(before_ids, after, groups_before, groups_after)
+  if groups_before == nil or groups_after ~= groups_before + 1 then return nil end
+  local seen, created = {}, {}
+  for _, w in ipairs(after) do
+    seen[w.id] = true
+    if not before_ids[w.id] then created[#created + 1] = w.id end
+  end
+  for id in pairs(before_ids) do
+    if not seen[id] then return nil end
+  end
+  if #created ~= 1 then return nil end
+  return created[1]
 end
 
 local function as_string_literal(s)
@@ -489,7 +517,7 @@ local function ghostty_app_windows()
   local out = {}
   for _, w in ipairs(hs.window.orderedWindows()) do
     local app = w:application()
-    if app and app:name() == "Ghostty" then
+    if app and app:name() == "Ghostty" and (w:id() or 0) ~= 0 then
       out[#out + 1] = { id = w:id(), title = w:title(), screen_id = w:screen():id(), frame = w:frame() }
     end
   end
@@ -523,31 +551,90 @@ local function focus_snapshot()
   }
 end
 
--- Ghostty activates itself and makes the new tab key on the run-loop tick
--- after the AppleEvent returns, with no option to skip it. So a background
--- open watches for that and hands focus straight back. For a couple of
--- seconds after, a key typed in the gap can land in the new tab; Ghostty
--- offers no way to close that gap.
-local FOCUS_WATCH_SECS, FOCUS_POLL_SECS, FOCUS_SETTLE_SECS = 2, 0.03, 0.5
-local function restore_focus_when_taken(before)
-  local started = hs.timer.secondsSinceEpoch()
-  local restored_at
+-- A timer nothing references can be collected before it fires, so every
+-- desk timer is held here until it stops.
+local desk_timers = {}
+local function every_until_done(interval, fn)
   local timer
-  timer = hs.timer.doEvery(FOCUS_POLL_SECS, function()
-    local now = hs.timer.secondsSinceEpoch()
-    if now - started > FOCUS_WATCH_SECS
-        or (restored_at and now - restored_at > FOCUS_SETTLE_SECS) then
+  timer = hs.timer.doEvery(interval, function()
+    if fn() then
       timer:stop()
-      return
+      desk_timers[timer] = nil
     end
-    if DeskTab.focus_was_taken(before, focus_snapshot()) then
-      if before.win_obj then
-        before.win_obj:focus()
-      elseif before.app_obj then
-        before.app_obj:activate()
+  end)
+  desk_timers[timer] = true
+  return timer
+end
+
+-- Hands focus back to where it was. A Ghostty window is reactivated by
+-- Ghostty itself (`activate window`), since a Hammerspoon focus on another
+-- window of the app that has just made a new window key does not reliably
+-- take; any other app's window gets Hammerspoon's focus.
+local function hand_focus_back(before)
+  if before.app == "Ghostty" and before.script_id then
+    local ok, _, descriptor = hs.osascript.applescript(string.format(
+      'tell application "Ghostty" to activate window (window id %s)', as_string_literal(before.script_id)))
+    if ok then return end
+    print("DeskOpenTab: could not reactivate the Ghostty window: " .. DeskTab.osascript_error(descriptor))
+  end
+  if before.win_obj then
+    before.win_obj:focus()
+  elseif before.app_obj then
+    before.app_obj:activate()
+  end
+end
+
+-- Ghostty activates itself and makes the new tab or window key once the
+-- AppleEvent has returned, with no option to skip it, and may do so more
+-- than once while the window settles. So a background open watches for
+-- the whole FOCUS_WATCH_SECS and hands focus back every time it lands on
+-- what the open created. In the gap, a key typed can still land in the new
+-- tab; Ghostty offers no way to close it.
+local FOCUS_WATCH_SECS, FOCUS_POLL_SECS = 4, 0.05
+local function restore_focus_when_taken(before, known)
+  local started = hs.timer.secondsSinceEpoch()
+  local handed_back = 0
+  every_until_done(FOCUS_POLL_SECS, function()
+    local now = focus_snapshot()
+    local taken = DeskTab.focus_was_taken(before, now, known)
+    if hs.timer.secondsSinceEpoch() - started > FOCUS_WATCH_SECS then
+      if taken then
+        print("DeskOpenTab: focus is still on the new window " .. tostring(now.window_id) .. "; could not hand it back")
       end
-      restored_at = restored_at or now
+      return true
     end
+    if taken then
+      handed_back = handed_back + 1
+      if handed_back == 1 then
+        print(string.format("DeskOpenTab: focus moved to the new window %s; handing it back to %s",
+          tostring(now.window_id), tostring(before.window_id)))
+      end
+      hand_focus_back(before)
+    end
+    return false
+  end)
+end
+
+-- Gives the window a new-window open created the upper_C frame on `scr`,
+-- once DeskTab.created_window can name it for certain; otherwise it stays
+-- where Ghostty put it, and no other window is ever touched.
+local PLACE_WATCH_SECS, PLACE_POLL_SECS = 2, 0.1
+local function place_created_window(known, groups_before, scr)
+  local started = hs.timer.secondsSinceEpoch()
+  every_until_done(PLACE_POLL_SECS, function()
+    local script_windows = ghostty_script_windows()
+    local id = DeskTab.created_window(known, ghostty_app_windows(), groups_before,
+      script_windows and #script_windows)
+    if id then
+      local win = hs.window.get(id)
+      if win then win:setFrame(slot_frame(scr, "upper_C")) end
+      return true
+    end
+    if hs.timer.secondsSinceEpoch() - started > PLACE_WATCH_SECS then
+      print("DeskOpenTab: opened a new window but could not tell it apart for certain; left it where Ghostty put it")
+      return true
+    end
+    return false
   end)
 end
 
@@ -578,8 +665,21 @@ function DeskOpenTab(cmd, session_id, cwd, opts)
     id = front:id(),
     app = front:application() and front:application():name() or "",
   }
+  local script_windows = ghostty_script_windows()
+  if script_windows and #script_windows > 0 and #windows == 0 then
+    -- What a locked screen looks like: Ghostty has windows that Hammerspoon
+    -- cannot see, so neither the layout nor the window being typed in is
+    -- known, and any choice could land on top of it.
+    print("DeskOpenTab: Ghostty's windows are not visible (screen locked?); not opening")
+    return false
+  end
+  local known = {}
+  for _, w in ipairs(windows) do known[w.id] = true end
   local before = opts.background and focus_snapshot() or nil
   local avoid = before and before.app == "Ghostty" and before.window_id or nil
+  if avoid and script_windows then
+    before.script_id = DeskTab.match_script_window(avoid, windows, script_windows)
+  end
 
   local function slot_frame_of(screen_id)
     return slot_frame(screens_by_id[screen_id], "upper_C")
@@ -592,7 +692,6 @@ function DeskOpenTab(cmd, session_id, cwd, opts)
 
   local script
   if decision.mode == "existing_window" or decision.mode == "front_window" then
-    local script_windows = ghostty_script_windows()
     local script_id = script_windows
       and DeskTab.match_script_window(decision.window_id, windows, script_windows)
     if script_id then
@@ -624,7 +723,7 @@ function DeskOpenTab(cmd, session_id, cwd, opts)
   local ok, result, descriptor = hs.osascript.applescript(script)
   -- Ghostty may already have taken focus even when the call reports an
   -- error, so the guard runs either way.
-  if before then restore_focus_when_taken(before) end
+  if before then restore_focus_when_taken(before, known) end
   if not ok then
     print("DeskOpenTab: osascript failed: " .. DeskTab.osascript_error(descriptor))
     return false
@@ -635,21 +734,7 @@ function DeskOpenTab(cmd, session_id, cwd, opts)
 
   local scr = decision.mode == "new_window" and decision.screen_id and screens_by_id[decision.screen_id]
   if scr then
-    -- Ghostty's result names the window by its own id, which Hammerspoon
-    -- cannot look up, and the window only appears on a later run-loop
-    -- tick: so it is found as the Ghostty window that was not there before.
-    local known = {}
-    for _, w in ipairs(windows) do known[w.id] = true end
-    hs.timer.doAfter(0.3, function()
-      for _, w in ipairs(ghostty_app_windows()) do
-        if not known[w.id] then
-          local win = hs.window.get(w.id)
-          if win then win:setFrame(slot_frame(scr, "upper_C")) end
-          return
-        end
-      end
-      print("DeskOpenTab: opened a new window but could not find it to place it")
-    end)
+    place_created_window(known, script_windows and #script_windows, scr)
   end
 
   return true

@@ -291,14 +291,33 @@ assert_eq("an unknown window has no match", nil, DeskTab.match_script_window(99,
 assert_eq("a shared title counted differently on the two sides is not guessed", nil,
   DeskTab.match_script_window(10, hs_wins, { sc_wins[1], sc_wins[2] }))
 
-assert_eq("focus moved onto a new Ghostty tab: taken", true,
-  DeskTab.focus_was_taken({ app = "Safari", window_id = 1 }, { app = "Ghostty", window_id = 2 }))
-assert_eq("focus moved between Ghostty windows: taken", true,
-  DeskTab.focus_was_taken({ app = "Ghostty", window_id = 1 }, { app = "Ghostty", window_id = 2 }))
+local known_12 = { [1] = true, [2] = true }
+assert_eq("focus moved from another app onto a new Ghostty window: taken", true,
+  DeskTab.focus_was_taken({ app = "Safari", window_id = 7 }, { app = "Ghostty", window_id = 3 }, known_12))
+assert_eq("focus moved from a Ghostty window onto a new one: taken", true,
+  DeskTab.focus_was_taken({ app = "Ghostty", window_id = 1 }, { app = "Ghostty", window_id = 3 }, known_12))
+assert_eq("the user moved to another existing Ghostty window: left alone", false,
+  DeskTab.focus_was_taken({ app = "Ghostty", window_id = 1 }, { app = "Ghostty", window_id = 2 }, known_12))
 assert_eq("focus unchanged: not taken", false,
-  DeskTab.focus_was_taken({ app = "Ghostty", window_id = 1 }, { app = "Ghostty", window_id = 1 }))
+  DeskTab.focus_was_taken({ app = "Ghostty", window_id = 1 }, { app = "Ghostty", window_id = 1 }, known_12))
 assert_eq("the user moved to another app: left alone", false,
-  DeskTab.focus_was_taken({ app = "Ghostty", window_id = 1 }, { app = "Mail", window_id = 9 }))
+  DeskTab.focus_was_taken({ app = "Ghostty", window_id = 1 }, { app = "Mail", window_id = 9 }, known_12))
+assert_eq("no focused window yet (mid-transition): wait", false,
+  DeskTab.focus_was_taken({ app = "Ghostty", window_id = 1 }, { app = "Ghostty", window_id = nil }, known_12))
+
+local before_12 = { [1] = true, [2] = true }
+assert_eq("one new window and one more Ghostty window: that one", 3,
+  DeskTab.created_window(before_12, { { id = 1 }, { id = 2 }, { id = 3 } }, 2, 3))
+assert_eq("Ghostty's count unchanged (a tab, not a window): nothing to place", nil,
+  DeskTab.created_window(before_12, { { id = 1 }, { id = 2 }, { id = 3 } }, 2, 2))
+assert_eq("an existing id vanished (its selected tab changed): nothing to place", nil,
+  DeskTab.created_window(before_12, { { id = 2 }, { id = 3 } }, 2, 3))
+assert_eq("two new ids: not certain, nothing to place", nil,
+  DeskTab.created_window(before_12, { { id = 1 }, { id = 2 }, { id = 3 }, { id = 4 } }, 2, 3))
+assert_eq("the new window not visible yet: nothing to place (yet)", nil,
+  DeskTab.created_window(before_12, { { id = 1 }, { id = 2 } }, 2, 3))
+assert_eq("no count from before: nothing to place", nil,
+  DeskTab.created_window(before_12, { { id = 1 }, { id = 2 }, { id = 3 } }, nil, 3))
 
 -- DeskOpenTab end to end against the stub: laptop only, the user typing in
 -- Ghostty window 5, a second Ghostty window 6 behind it.
@@ -450,6 +469,268 @@ focus_reply = { false, nil, { OSAScriptErrorMessageKey = "boom" } }
 assert_eq("an AppleScript error is a failure", false, DeskFocusTab("ttys003"))
 hs.osascript.applescript = real_as
 hs.application.get = function() return nil end
+
+-- ---------------------------------------------------------------------------
+-- A background open end to end against a simulated Ghostty: windows with
+-- frames and focus, Ghostty's own activation after the open (and a second
+-- steal a second later), a controllable clock and the opener's timers.
+-- Every pre-existing window's frame must come out unchanged, only a window
+-- the open created may get a frame, and focus must end where it started.
+-- ---------------------------------------------------------------------------
+local saved_hs = {
+  window = hs.window, screen = hs.screen, application = hs.application,
+  osascript = hs.osascript, timer = hs.timer,
+}
+local UPPER_C = { x = 2663, y = -498, w = 1136, h = 700 }
+local LOWER_C = { x = 2663, y = 212, w = 1136, h = 690 }
+local UPPER_R = { x = 3810, y = -498, w = 1131, h = 700 }
+local CASCADE = { x = 1600, y = -400, w = 900, h = 600 }
+local wide = { id = function() return "wide" end,
+  frame = function() return { x = 1512, y = -498, w = 3440, h = 1410 } end }
+
+local function new_world(recs, focused, front_app)
+  local world = { recs = recs, focused = focused, front_app = front_app, clock = 0,
+    timers = {}, events = {}, set_frames = {}, next_id = 2001 }
+  local function rec_by_id(id)
+    for _, r in ipairs(world.recs) do if r.id == id then return r end end
+  end
+  local function focus_rec(r)
+    world.focused, world.front_app = r.id, r.app
+    for i, x in ipairs(world.recs) do
+      if x == r then table.remove(world.recs, i) break end
+    end
+    table.insert(world.recs, 1, r)
+  end
+  local function win_obj(r)
+    if not r then return nil end
+    return {
+      id = function() return r.id end,
+      title = function() return r.title end,
+      application = function() return { name = function() return r.app end } end,
+      screen = function() return wide end,
+      frame = function() return r.frame end,
+      setFrame = function(_, f)
+        world.set_frames[#world.set_frames + 1] = { id = r.id, frame = f }
+        r.frame = f
+      end,
+      focus = function() focus_rec(r) end,
+    }
+  end
+  local function at(dt, fn) world.events[#world.events + 1] = { at = world.clock + dt, fn = fn } end
+  -- Ghostty makes what it created key, then does it once more a second later.
+  local function ghostty_takes_focus(r)
+    at(0.1, function() focus_rec(r) end)
+    at(1.0, function() focus_rec(r) end)
+  end
+
+  hs.screen = { allScreens = function() return { wide } end }
+  hs.window = {
+    animationDuration = 0,
+    orderedWindows = function()
+      local out = {}
+      for _, r in ipairs(world.recs) do out[#out + 1] = win_obj(r) end
+      return out
+    end,
+    focusedWindow = function() return win_obj(rec_by_id(world.focused)) end,
+    frontmostWindow = function() return win_obj(rec_by_id(world.focused)) end,
+    get = function(id) return win_obj(rec_by_id(id)) end,
+  }
+  hs.application = {
+    get = function() return {} end,
+    frontmostApplication = function()
+      return { name = function() return world.front_app end, activate = function() end }
+    end,
+  }
+  hs.timer = {
+    secondsSinceEpoch = function() return world.clock end,
+    doEvery = function(_, fn)
+      local t = { fn = fn }
+      function t:stop() self.stopped = true end
+      world.timers[#world.timers + 1] = t
+      return t
+    end,
+    doAfter = function(_, fn)
+      local t = { fn = fn, once = true }
+      function t:stop() self.stopped = true end
+      world.timers[#world.timers + 1] = t
+      return t
+    end,
+  }
+  hs.osascript = {
+    applescript = function(script)
+      if script:find("get {id, name} of every window", 1, true) then
+        local ids, names = {}, {}
+        for _, r in ipairs(world.recs) do
+          if r.app == "Ghostty" then ids[#ids + 1] = r.script_id; names[#names + 1] = r.title end
+        end
+        return true, { ids, names }, ""
+      end
+      local target = script:match('set w to window id "([^"]+)"')
+      if target and script:find("new tab in w", 1, true) then
+        world.tab_target = target
+        for _, r in ipairs(world.recs) do
+          if r.script_id == target then
+            -- The new tab is its own window: the group now shows under a new id.
+            local new_id = world.next_id
+            world.next_id = new_id + 1
+            at(0.05, function() r.id, r.title = new_id, "👻" end)
+            ghostty_takes_focus(r)
+          end
+        end
+        return true, "opened", ""
+      end
+      if script:find("new window with configuration", 1, true) then
+        world.opened_window = true
+        local r = { id = world.next_id, script_id = "tab-group-new", title = "👻",
+          frame = CASCADE, app = "Ghostty" }
+        world.next_id = world.next_id + 1
+        world.created_id = r.id
+        at(0.15, function() table.insert(world.recs, 1, r) end)
+        ghostty_takes_focus(r)
+        if world.also_swap then
+          at(0.05, function() rec_by_id(world.also_swap).id = 3999 end)
+        end
+        return true, "opened", ""
+      end
+      local activate = script:match('activate window %(window id "([^"]+)"%)')
+      if activate then
+        for _, r in ipairs(world.recs) do
+          if r.script_id == activate then focus_rec(r) end
+        end
+        return true, nil, ""
+      end
+      return false, nil, { OSAScriptErrorMessageKey = "unexpected script" }
+    end,
+  }
+
+  function world.run(seconds)
+    local stop_at = world.clock + seconds
+    while world.clock < stop_at do
+      world.clock = world.clock + 0.01
+      for _, e in ipairs(world.events) do
+        if not e.done and e.at <= world.clock then e.done = true; e.fn() end
+      end
+      for _, t in ipairs(world.timers) do
+        if not t.stopped then
+          t.fn()
+          if t.once then t.stopped = true end
+        end
+      end
+    end
+  end
+  function world.frames()
+    local out = {}
+    for _, r in ipairs(world.recs) do out[r.script_id or r.id] = r.frame end
+    return out
+  end
+  return world
+end
+
+local function frames_unchanged(desc, before_frames, world, except_key)
+  local after = world.frames()
+  local same = true
+  for key, f in pairs(before_frames) do
+    local g = after[key]
+    if key ~= except_key and (g == nil or g.x ~= f.x or g.y ~= f.y or g.w ~= f.w or g.h ~= f.h) then
+      same = false
+    end
+  end
+  assert_eq(desc, true, same)
+end
+
+local function silently(fn)
+  local real = print
+  print = function() end
+  local r = fn()
+  print = real
+  return r
+end
+
+-- Typing in the upper_C window: the tab goes into another window, which
+-- shows under a new id afterwards; nothing moves and focus comes back.
+local w = new_world({
+  { id = 1138, script_id = "tab-group-a", title = "deploy", frame = UPPER_C, app = "Ghostty" },
+  { id = 175, script_id = "tab-group-b", title = "~/dev", frame = LOWER_C, app = "Ghostty" },
+  { id = 510, script_id = "tab-group-c", title = "notes", frame = UPPER_R, app = "Ghostty" },
+}, 1138, "Ghostty")
+local frames0 = w.frames()
+silently(function() return DeskOpenTab("echo hi", nil, nil, { background = true }) end)
+w.run(6)
+assert_eq("typing in upper_C: the tab went to another window", true, w.tab_target ~= "tab-group-a")
+assert_eq("...focus is back on the window being typed in, after both steals", 1138, w.focused)
+assert_eq("...no window was given a frame", 0, #w.set_frames)
+frames_unchanged("...every existing window's frame is unchanged", frames0, w)
+
+-- The live failure: typing in a Ghostty window with nothing in upper_C, so
+-- a new window opens. Only that window is placed; focus comes back.
+w = new_world({
+  { id = 1138, script_id = "tab-group-a", title = "deploy", frame = LOWER_C, app = "Ghostty" },
+  { id = 510, script_id = "tab-group-c", title = "notes", frame = UPPER_R, app = "Ghostty" },
+}, 1138, "Ghostty")
+frames0 = w.frames()
+silently(function() return DeskOpenTab("echo hi", nil, nil, { background = true }) end)
+w.run(6)
+assert_eq("new window: one was opened", true, w.opened_window)
+assert_eq("...focus is back on the window being typed in, after both steals", 1138, w.focused)
+assert_eq("...exactly one frame was set", 1, #w.set_frames)
+assert_eq("...and only on the window the open created", w.created_id, w.set_frames[1] and w.set_frames[1].id)
+frames_unchanged("...every existing window's frame is unchanged", frames0, w, "tab-group-new")
+
+-- Another app frontmost: the tab goes into upper_C, and focus returns to
+-- that app's window.
+w = new_world({
+  { id = 9, title = "page", frame = CASCADE, app = "Safari" },
+  { id = 1138, script_id = "tab-group-a", title = "deploy", frame = UPPER_C, app = "Ghostty" },
+}, 9, "Safari")
+frames0 = w.frames()
+silently(function() return DeskOpenTab("echo hi", nil, nil, { background = true }) end)
+w.run(6)
+assert_eq("another app frontmost: the tab went into upper_C", "tab-group-a", w.tab_target)
+assert_eq("...focus is back in that app", "Safari", w.front_app)
+assert_eq("...on its window", 9, w.focused)
+assert_eq("...no window was given a frame", 0, #w.set_frames)
+frames_unchanged("...every existing window's frame is unchanged", frames0, w)
+
+-- A new window while an existing window's id changes (the user switched
+-- tabs in it): the new id is not certainly the created window, so nothing
+-- is placed at all.
+w = new_world({
+  { id = 1138, script_id = "tab-group-a", title = "deploy", frame = LOWER_C, app = "Ghostty" },
+  { id = 510, script_id = "tab-group-c", title = "notes", frame = UPPER_R, app = "Ghostty" },
+}, 1138, "Ghostty")
+w.also_swap = 510
+frames0 = w.frames()
+silently(function() return DeskOpenTab("echo hi", nil, nil, { background = true }) end)
+w.run(6)
+assert_eq("an id swap during the open: no window is given a frame", 0, #w.set_frames)
+frames_unchanged("...every existing window's frame is unchanged", frames0, w, "tab-group-new")
+
+-- The user moves to another existing Ghostty window right after the open:
+-- left there, not pulled back.
+w = new_world({
+  { id = 9, title = "page", frame = CASCADE, app = "Safari" },
+  { id = 1138, script_id = "tab-group-a", title = "deploy", frame = UPPER_C, app = "Ghostty" },
+  { id = 510, script_id = "tab-group-c", title = "notes", frame = UPPER_R, app = "Ghostty" },
+}, 9, "Safari")
+silently(function() return DeskOpenTab("echo hi", nil, nil, { background = true }) end)
+w.run(0.5)
+hs.window.get(510):focus()
+w.run(0.3)
+assert_eq("the user's own move to an existing window is left alone", 510, w.focused)
+
+-- A locked screen: Ghostty has windows, Hammerspoon sees none. Nothing is
+-- opened (no new window landing on top of the layout) and it says so.
+w = new_world({
+  { id = 1138, script_id = "tab-group-a", title = "deploy", frame = UPPER_C, app = "Ghostty" },
+}, 0, "loginwindow")
+hs.window.orderedWindows = function() return {} end
+local locked_result = silently(function() return DeskOpenTab("echo hi", nil, nil, { background = true }) end)
+w.run(1)
+assert_eq("screen locked: the open is refused", false, locked_result)
+assert_eq("...no window was opened", nil, w.opened_window)
+assert_eq("...no tab was opened", nil, w.tab_target)
+
+for k, v in pairs(saved_hs) do hs[k] = v end
 
 print()
 print(string.format("=== summary: %d passed, %d failed ===", pass, fail))
