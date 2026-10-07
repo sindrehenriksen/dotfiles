@@ -657,19 +657,15 @@ end
 
 -- ---------------------------------------------------------------------------
 -- Desk: focus an existing Ghostty tab by the tty of the process running in
--- it — the notes hotkey's live-session case, so it never opens a second tab against a session
--- that's already live. Unverified against real Ghostty: that its AppleScript dictionary actually
--- exposes a per-tab `tty`, and that selecting a tab and activating its
--- window raises the right one on screen. Pure selection logic is on
--- DeskTab.pick_tab_by_tty so it's testable without osascript at all — see
--- hammerspoon/tests/tab-function-test.lua; the AppleScript query and the
--- actual focus are exercised only against real Ghostty, never in a test.
+-- it — the notes hotkey's live-session case, so it never opens a second tab
+-- against a session that's already live. In Ghostty's dictionary the tty
+-- belongs to a terminal (a tab's split), not to the tab, and `focus` on a
+-- terminal selects its tab and brings its window and Ghostty forward.
 -- ---------------------------------------------------------------------------
 
 --- Strips a leading "/dev/" so "ttys003" and "/dev/ttys003" compare equal
---- — session-status.sh's own pid-file-derived tty and Ghostty's own `tty
---- of t` AppleScript property aren't guaranteed to agree on which form
---- they report.
+--- — session-status.sh's own pid-file-derived tty and Ghostty's own `tty`
+--- property aren't guaranteed to agree on which form they report.
 function DeskTab.normalize_tty(tty)
   if type(tty) ~= "string" then
     return tty
@@ -677,64 +673,26 @@ function DeskTab.normalize_tty(tty)
   return (tty:gsub("^/dev/", ""))
 end
 
---- Given a flat list of `{ window_id, tab_index, tty }` (every open Ghostty
---- tab) and a target `tty`, returns the matching entry or nil. Matched
---- after normalizing both sides (DeskTab.normalize_tty) so "ttys003" and
---- "/dev/ttys003" are the same tty regardless of which form either side
---- happens to report.
-function DeskTab.pick_tab_by_tty(tabs, tty)
-  local want = DeskTab.normalize_tty(tty)
-  for _, t in ipairs(tabs) do
-    if DeskTab.normalize_tty(t.tty) == want then
-      return t
-    end
-  end
-  return nil
+-- The AppleScript that focuses the terminal on `tty` (either form), in one
+-- call: "focused", or "none" when no open terminal is on it. Ghostty
+-- reports the /dev/ form.
+function DeskTab.focus_tty_script(tty)
+  return table.concat({
+    'tell application "Ghostty"',
+    "set matches to every terminal whose tty is " .. as_string_literal("/dev/" .. DeskTab.normalize_tty(tty)),
+    'if (count of matches) = 0 then return "none"',
+    "focus (item 1 of matches)",
+    'return "focused"',
+    "end tell",
+  }, "\n")
 end
 
--- Asks Ghostty (via AppleScript, in one call) for every window/tab's tty:
--- a list of "windowId,tabIndex,tty" lines, one per tab. `false` as the
--- second return means the query itself failed (Ghostty not scriptable
--- this way, or not running); an empty-but-successful list is a real "no
--- tabs" answer, not a failure.
-local function ghostty_tabs_with_tty()
-  local script = [[
-    tell application "Ghostty"
-      set out to ""
-      repeat with w in windows
-        set wid to id of w
-        set tabIdx to 0
-        repeat with t in tabs of w
-          set tabIdx to tabIdx + 1
-          try
-            set out to out & wid & "," & tabIdx & "," & (tty of t) & "\n"
-          end try
-        end repeat
-      end repeat
-      return out
-    end tell
-  ]]
-  local ok, result = hs.osascript.applescript(script)
-  if not ok or type(result) ~= "string" then
-    return {}, false
-  end
-  local tabs = {}
-  for line in result:gmatch("[^\n]+") do
-    local wid, idx, tty = line:match("^(%d+),(%d+),(.+)$")
-    if wid then
-      tabs[#tabs + 1] = { window_id = tonumber(wid), tab_index = tonumber(idx), tty = tty }
-    end
-  end
-  return tabs, true
-end
-
--- Focuses the Ghostty tab running `tty`: activates Ghostty and selects
--- that tab in its window. Returns true on success; false (printed, so
--- `hs -c` surfaces it) if Ghostty isn't running, the AppleScript query
--- failed, or no open tab matches — callers (the notes hotkey) must treat
--- false as "don't resume either": falling back to resuming a session this
--- returned false for would risk a second process against a live
--- transcript.
+-- Focuses the Ghostty tab running `tty`. Returns true on success; false
+-- (printed, so `hs -c` surfaces it) if Ghostty isn't running, the
+-- AppleScript failed, or no open terminal is on that tty — callers (the
+-- notes hotkey) must treat false as "don't resume either": falling back to
+-- resuming a session this returned false for would risk a second process
+-- against a live transcript.
 function DeskFocusTab(tty)
   if type(tty) ~= "string" or tty == "" then
     print("DeskFocusTab: no tty given")
@@ -744,26 +702,13 @@ function DeskFocusTab(tty)
     print("DeskFocusTab: Ghostty is not running")
     return false
   end
-  local tabs, query_ok = ghostty_tabs_with_tty()
-  if not query_ok then
-    print("DeskFocusTab: could not read Ghostty's tabs")
-    return false
-  end
-  local target = DeskTab.pick_tab_by_tty(tabs, tty)
-  if not target then
-    print("DeskFocusTab: no Ghostty tab is running " .. tty)
-    return false
-  end
-  local script = string.format(
-    'tell application "Ghostty"\n' ..
-    '  activate\n' ..
-    '  tell window id %d to set selected tab index to %d\n' ..
-    'end tell',
-    target.window_id, target.tab_index
-  )
-  local ok, _, descriptor = hs.osascript.applescript(script)
+  local ok, result, descriptor = hs.osascript.applescript(DeskTab.focus_tty_script(tty))
   if not ok then
     print("DeskFocusTab: osascript failed: " .. DeskTab.osascript_error(descriptor))
+    return false
+  end
+  if result ~= "focused" then
+    print("DeskFocusTab: no Ghostty tab is running " .. tty)
     return false
   end
   return true

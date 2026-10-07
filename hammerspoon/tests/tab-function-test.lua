@@ -3,7 +3,7 @@
 -- top-level calls — hs.hotkey.modal.new, the eventtaps, the watchers, the
 -- closing hs.alert.show — don't error), then exercises the pure parts with
 -- plain Lua: DeskTab.pick_target (slot geometry) and the UUID validation
--- gate on DeskOpenTab, plus DeskTab.pick_tab_by_tty and DeskFocusTab's
+-- gate on DeskOpenTab, plus DeskTab.focus_tty_script and DeskFocusTab's
 -- early-exit paths, and the background open: DeskTab.pick_target's
 -- avoid rule, DeskTab.match_script_window and DeskTab.focus_was_taken.
 -- Never touches a real screen, window or osascript call — run with the
@@ -398,41 +398,22 @@ hs.window.orderedWindows = function() return {} end
 hs.application.frontmostApplication = function() return nil end
 
 -- ---------------------------------------------------------------------------
--- DeskTab.pick_tab_by_tty
+-- DeskTab.focus_tty_script: the tty is a terminal's, looked up in /dev/ form
 -- ---------------------------------------------------------------------------
-if type(DeskTab.pick_tab_by_tty) ~= "function" then
-  bad("DeskTab.pick_tab_by_tty not defined after loading init.lua")
-  os.exit(1)
-end
 if type(DeskFocusTab) ~= "function" then
   bad("DeskFocusTab global not defined after loading init.lua")
   os.exit(1)
 end
 
-local tabs = {
-  { window_id = 1, tab_index = 1, tty = "ttys001" },
-  { window_id = 1, tab_index = 2, tty = "ttys003" },
-  { window_id = 2, tab_index = 1, tty = "ttys007" },
-}
-local found = DeskTab.pick_tab_by_tty(tabs, "ttys003")
-assert_eq("a matching tty is found", 1, found and found.window_id)
-assert_eq("...at its own tab index", 2, found and found.tab_index)
-
-found = DeskTab.pick_tab_by_tty(tabs, "ttys999")
-assert_eq("no matching tty returns nil", nil, found)
-
-found = DeskTab.pick_tab_by_tty({}, "ttys001")
-assert_eq("an empty tab list returns nil", nil, found)
-
--- normalize_tty matches both "ttysNNN" and "/dev/ttysNNN"
--- regardless of which form either side happens to report.
-local tabs_with_dev_prefix = {
-  { window_id = 9, tab_index = 1, tty = "/dev/ttys003" },
-}
-found = DeskTab.pick_tab_by_tty(tabs_with_dev_prefix, "ttys003")
-assert_eq("a bare-form target still matches a /dev/-prefixed tab", 9, found and found.window_id)
-found = DeskTab.pick_tab_by_tty(tabs, "/dev/ttys003")
-assert_eq("a /dev/-prefixed target still matches a bare-form tab", 1, found and found.window_id)
+local focus_script = DeskTab.focus_tty_script("ttys003")
+assert_eq("a bare tty is looked up in Ghostty's /dev/ form", true,
+  focus_script:find('every terminal whose tty is "/dev/ttys003"', 1, true) ~= nil)
+assert_eq("a /dev/ tty is not doubled", true,
+  DeskTab.focus_tty_script("/dev/ttys003"):find('"/dev/ttys003"', 1, true) ~= nil)
+assert_eq("the match is focused, never a tab index set", true,
+  focus_script:find("focus (item 1 of matches)", 1, true) ~= nil)
+assert_eq("a quote in the tty cannot break out of the string", true,
+  DeskTab.focus_tty_script('x"; quit'):find('"/dev/x\\"; quit"', 1, true) ~= nil)
 assert_eq("normalize_tty strips a leading /dev/", "ttys003", DeskTab.normalize_tty("/dev/ttys003"))
 assert_eq("normalize_tty leaves a bare form untouched", "ttys003", DeskTab.normalize_tty("ttys003"))
 
@@ -455,6 +436,20 @@ osascript_calls = 0
 result = DeskFocusTab("ttys003")
 assert_eq("Ghostty not running (this stub): refuses", false, result)
 assert_eq("and never calls osascript either", 0, osascript_calls)
+
+-- DeskFocusTab with Ghostty running: only a "focused" reply is success.
+hs.application.get = function() return {} end
+local real_as = hs.osascript.applescript
+local focus_reply
+hs.osascript.applescript = function() return table.unpack(focus_reply, 1, 3) end
+focus_reply = { true, "focused", "" }
+assert_eq("a focused terminal is success", true, DeskFocusTab("ttys003"))
+focus_reply = { true, "none", "" }
+assert_eq("no terminal on that tty is a failure", false, DeskFocusTab("ttys003"))
+focus_reply = { false, nil, { OSAScriptErrorMessageKey = "boom" } }
+assert_eq("an AppleScript error is a failure", false, DeskFocusTab("ttys003"))
+hs.osascript.applescript = real_as
+hs.application.get = function() return nil end
 
 print()
 print(string.format("=== summary: %d passed, %d failed ===", pass, fail))
