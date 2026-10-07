@@ -77,18 +77,20 @@ export DESK_OPEN_TAB_BIN="$TMP/opener"
 # --- fixtures ---------------------------------------------------------------
 
 ev_start() { jq -cn --arg b "$1" --argjson t "$2" --arg s "${3:-resume}" '{event:"start", time:$t, source:$s, cwd:"", transcript_path:"", boot:$b}'; }
-ev_end() { jq -cn --argjson t "$1" '{event:"end", time:$t, reason:"other"}'; }
+ev_end() { jq -cn --argjson t "$1" --arg r "${2:-other}" '{event:"end", time:$t, reason:$r}'; }
 epoch() { date -u -j -f "%Y-%m-%dT%H:%M:%SZ" "$1" +%s 2> /dev/null || date -u -d "$1" +%s; }
 
-# reader_line <id> <last human ISO> [live] [ended] [cwd]
+# reader_line <id> <last human ISO> [live] [ended] [cwd] [end reason] [end_deliberate]
 reader_line() {
 	local id="$1" lh cwd="${5:-$WORK}" tp="$PROJ/$1.jsonl"
 	lh=$(epoch "$2")
 	: > "$tp"
 	jq -cn --arg id "$id" --argjson lh "$lh" --argjson live "${3:-false}" --argjson ended "${4:-false}" \
-		--arg cwd "$cwd" --arg tp "$tp" '
+		--arg cwd "$cwd" --arg tp "$tp" --arg reason "${6:-}" --arg deliberate "${7:-}" '
 		{id: $id, name: ("name-" + $id[0:4]), cwd: $cwd, live: $live, ended: $ended,
+		 end_reason: (if $ended then ($reason | if . == "" then "other" else . end) else null end),
 		 last_human_message: $lh, last_activity: $lh, transcript_path: $tp, pid: (if $live then 4242 else null end)}
+		+ (if $deliberate == "" then {} else {end_deliberate: ($deliberate == "true")} end)
 	' >> "$TMP/reader.jsonl"
 }
 
@@ -110,6 +112,10 @@ SCHEDULED=99999999-0000-4000-8000-000000000001
 THIS_BOOT=88888888-0000-4000-8000-000000000001
 EDGE_IDLE=77777777-0000-4000-8000-000000000001
 EDGE_ACTIVE=77777777-0000-4000-8000-000000000002
+SHUTDOWN_OTHER=66666666-0000-4000-8000-000000000001
+TODAY_LIVE=55555555-0000-4000-8000-000000000001
+SEAM_DELIBERATE=44444444-0000-4000-8000-000000000001
+SEAM_INCIDENTAL=44444444-0000-4000-8000-000000000002
 
 standard_fixtures() {
 	reset_fixtures
@@ -123,20 +129,32 @@ standard_fixtures() {
 	# Open at shutdown, already resumed and live again.
 	{ ev_start "$PREV_BOOT" 1790100000; ev_start "$REOPEN_BOOT_TIME" 1791301000; } > "$S/$LIVE.jsonl"
 	reader_line "$LIVE" 2026-10-06T09:00:00Z true
-	# Ended cleanly before the shutdown.
-	{ ev_start "$PREV_BOOT" 1790100000; ev_end 1790200000; } > "$S/$ENDED.jsonl"
-	reader_line "$ENDED" 2026-10-06T09:00:00Z false true
+	# Ended by the user before the shutdown.
+	{ ev_start "$PREV_BOOT" 1790100000; ev_end 1790200000 prompt_input_exit; } > "$S/$ENDED.jsonl"
+	reader_line "$ENDED" 2026-10-06T09:00:00Z false true "" prompt_input_exit
+	# Ended at the shutdown, but not by the user (reason other): still open.
+	{ ev_start "$PREV_BOOT" 1790100000; ev_end 1790200000 other; } > "$S/$SHUTDOWN_OTHER.jsonl"
+	reader_line "$SHUTDOWN_OTHER" 2026-10-06T07:00:00Z false true "" other
+	# Started and still live this boot: nothing to do with the shutdown.
+	ev_start "$REOPEN_BOOT_TIME" 1791301000 > "$S/$TODAY_LIVE.jsonl"
+	reader_line "$TODAY_LIVE" 2026-10-07T08:00:00Z true
+	# The reader's own classification of an end wins over the reason.
+	{ ev_start "$PREV_BOOT" 1790100000; ev_end 1790200000 other; } > "$S/$SEAM_DELIBERATE.jsonl"
+	reader_line "$SEAM_DELIBERATE" 2026-10-06T07:00:00Z false true "" other true
+	{ ev_start "$PREV_BOOT" 1790100000; ev_end 1790200000 prompt_input_exit; } > "$S/$SEAM_INCIDENTAL.jsonl"
+	reader_line "$SEAM_INCIDENTAL" 2026-10-06T07:00:00Z false true "" prompt_input_exit false
 	# Left open by a boot before the previous one: an old orphan.
 	ev_start "$OLDER_BOOT" 1780100000 > "$S/$OLD.jsonl"
 	reader_line "$OLD" 2026-10-06T08:00:00Z
 	# Open at shutdown, resumed after the restart and closed again.
-	{ ev_start "$PREV_BOOT" 1790100000; ev_start "$REOPEN_BOOT_TIME" 1791301000; ev_end 1791302000; } > "$S/$CLOSED_SINCE.jsonl"
-	reader_line "$CLOSED_SINCE" 2026-10-06T09:00:00Z false true
+	{ ev_start "$PREV_BOOT" 1790100000; ev_start "$REOPEN_BOOT_TIME" 1791301000; ev_end 1791302000 prompt_input_exit; } > "$S/$CLOSED_SINCE.jsonl"
+	reader_line "$CLOSED_SINCE" 2026-10-06T09:00:00Z false true "" prompt_input_exit
 	# A scheduled pass's own call, open at shutdown.
 	ev_start "$PREV_BOOT" 1790100000 desk-run > "$S/$SCHEDULED.jsonl"
 	reader_line "$SCHEDULED" 2026-10-06T09:00:00Z
-	# Died during this boot (not a shutdown); its boot id is a little off the
-	# current one, as kern.boottime can be after a clock step.
+	# Stopped during this boot with no end (a crash, the terminal quitting):
+	# counts too. Its boot id is a little off the current one, as
+	# kern.boottime can be after a clock step.
 	ev_start "$((REOPEN_BOOT_TIME - 40))" 1791301000 > "$S/$THIS_BOOT.jsonl"
 	reader_line "$THIS_BOOT" 2026-10-07T08:00:00Z
 	# The idle boundary, as the close step counts it: Friday's message is 3
@@ -164,11 +182,16 @@ assert_eq "dry run exits 0" 0 "$rc"
 assert_eq "open at shutdown, recent message: would open" would-open "$(status_of "$out" "$ACTIVE")"
 assert_eq "open at shutdown, old message: idle" idle "$(status_of "$out" "$IDLE")"
 assert_eq "already live: running" running "$(status_of "$out" "$LIVE")"
-assert_eq "ended before shutdown: not listed" "" "$(status_of "$out" "$ENDED")"
+assert_eq "ended by the user before shutdown: not listed" "" "$(status_of "$out" "$ENDED")"
+assert_eq "ended with reason other at shutdown: would open" would-open "$(status_of "$out" "$SHUTDOWN_OTHER")"
+assert_eq "and says why it counts" true "$(detail_of "$out" "$SHUTDOWN_OTHER" | grep -q 'reason other, not a deliberate end' && echo true || echo false)"
+assert_eq "live session started this boot: not listed" "" "$(status_of "$out" "$TODAY_LIVE")"
+assert_eq "reader classifies the end as deliberate: not listed" "" "$(status_of "$out" "$SEAM_DELIBERATE")"
+assert_eq "reader classifies the end as not deliberate: would open" would-open "$(status_of "$out" "$SEAM_INCIDENTAL")"
 assert_eq "old orphan from an earlier boot: not listed" "" "$(status_of "$out" "$OLD")"
 assert_eq "closed again after the restart: not listed" "" "$(status_of "$out" "$CLOSED_SINCE")"
 assert_eq "scheduled pass's call: not listed" "" "$(status_of "$out" "$SCHEDULED")"
-assert_eq "died during this boot: not listed" "" "$(status_of "$out" "$THIS_BOOT")"
+assert_eq "stopped this boot without an end: would open" would-open "$(status_of "$out" "$THIS_BOOT")"
 assert_eq "Friday's message is idle on Wednesday" idle "$(status_of "$out" "$EDGE_IDLE")"
 assert_eq "Monday's message is not" would-open "$(status_of "$out" "$EDGE_ACTIVE")"
 assert_eq "idle line carries the last-message date" "2026-09-25 09:00" \
@@ -191,7 +214,7 @@ assert_eq "old orphan listed with --all-boots" would-open "$(status_of "$out" "$
 echo
 echo "=== --json ==="
 json=$("$CLI" --dry-run --json)
-assert_eq "json summary would_open" 2 "$(jq '.summary.would_open' <<< "$json")"
+assert_eq "json summary would_open" 5 "$(jq '.summary.would_open' <<< "$json")"
 assert_eq "json summary idle" 2 "$(jq '.summary.idle' <<< "$json")"
 assert_eq "json summary running" 1 "$(jq '.summary.running' <<< "$json")"
 assert_eq "json session carries idle_working_days" 1 \
@@ -212,7 +235,7 @@ rc=$?
 assert_eq "exit 0" 0 "$rc"
 assert_eq "active session opened" opened "$(status_of "$out" "$ACTIVE")"
 assert_eq "idle session still only listed" idle "$(status_of "$out" "$IDLE")"
-assert_eq "one opener call per active session" 2 "$(opener_calls)"
+assert_eq "one opener call per active session" 5 "$(opener_calls)"
 call=$(grep -F "$ACTIVE" "$TMP/opener-calls")
 assert_eq "asks for a background open" background "$(cut -f4 <<< "$call")"
 assert_eq "resumes that session id" "CLAUDE_CONFIG_DIR='$CLAUDE_CONFIG_DIR' claude --resume '$ACTIVE'" "$(cut -f1 <<< "$call")"
