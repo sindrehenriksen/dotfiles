@@ -903,6 +903,47 @@ do
 	assert_true("and it says why", said ~= nil and said:match("notes changed") ~= nil)
 end
 
+print("\n=== colours like git: per-window diff groups while the review is open, cleared after ===")
+do
+	vim.o.termguicolors = true
+	vim.api.nvim_set_hl(0, "Normal", { bg = 0x1d2021, fg = 0xebdbb2 })
+	vim.api.nvim_set_hl(0, "DiffAdd", { bg = 0x5a633a })
+	vim.api.nvim_set_hl(0, "DiffDelete", { bg = 0x792329 })
+	vim.cmd("doautocmd ColorScheme")
+	local r = new_repo(BASE)
+	build(r, "2026-10-01", { item("n1") })
+	local nb = open_notes(r)
+	review.attach(nb)
+	assert_true("review opens", review.open_review(nb))
+	local rb = review_buf_of(nb)
+	local rw, nw = vim.fn.bufwinid(rb), vim.fn.bufwinid(nb)
+	assert_eq("the review window maps the diff groups to green", review.REVIEW_WINHL, vim.wo[rw].winhighlight)
+	assert_eq("the notes window maps them to red", review.NOTES_WINHL, vim.wo[nw].winhighlight)
+	local function bg(g)
+		return vim.api.nvim_get_hl(0, { name = g, link = false }).bg
+	end
+	assert_eq("green comes from the scheme's DiffAdd", 0x5a633a, bg("DeskDiffAdd"))
+	assert_eq("red from its DiffDelete", 0x792329, bg("DeskDiffRemove"))
+	assert_true("the filler is neither", bg("DeskDiffFiller") ~= bg("DiffDelete") and bg("DeskDiffFiller") ~= nil)
+	assert_true("the review side's DiffAdd is green, the notes side's red", review.REVIEW_WINHL:match("DiffAdd:DeskDiffAdd,") and review.NOTES_WINHL:match("DiffAdd:DeskDiffRemove,"))
+	vim.api.nvim_set_hl(0, "DiffAdd", { bg = 0x225522 })
+	vim.cmd("doautocmd ColorScheme")
+	assert_eq("a scheme change redefines them", 0x225522, bg("DeskDiffAdd"))
+	vim.api.nvim_set_current_win(rw)
+	vim.cmd("quit")
+	assert_true("after :q in the review window the notes window left diff mode", not vim.wo[nw].diff)
+	assert_eq("and its winhighlight is cleared", "", vim.wo[nw].winhighlight)
+
+	-- another buffer shown in the review window: that window is cleared too
+	assert_true("review reopens", review.open_review(nb))
+	rb = review_buf_of(nb)
+	rw = vim.fn.bufwinid(rb)
+	vim.api.nvim_win_set_buf(rw, vim.api.nvim_create_buf(true, false))
+	assert_true("the review buffer is gone", not vim.api.nvim_buf_is_valid(rb))
+	assert_eq("the window that showed it has its winhighlight cleared", "", vim.wo[rw].winhighlight)
+	assert_eq("as does the notes window", "", vim.wo[vim.fn.bufwinid(nb)].winhighlight)
+end
+
 print(string.format("\n=== summary: %d passed, %d failed ===", pass, fail))
 if fail > 0 then
 	os.exit(1)

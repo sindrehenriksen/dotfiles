@@ -404,6 +404,116 @@ local function open_file_buf(repo, file)
 	return b
 end
 
+-- ---------------------------------------------------------------------------
+-- Colours like git's: diff mode colours each side symmetrically ("this side
+-- has it"), so in the notes window a line a suggestion adds shows as a red
+-- filler and a line it removes shows green — backwards from a git diff. While
+-- a review is open each window maps the diff groups to its own: red always
+-- means "goes away if you take it", green "comes in", and the filler rows
+-- are a quiet grey. Derived from the active scheme, so a scheme change
+-- redefines them.
+-- ---------------------------------------------------------------------------
+
+M.REVIEW_WINHL = "DiffAdd:DeskDiffAdd,DiffChange:DeskDiffAddLine,DiffText:DeskDiffAddText,DiffDelete:DeskDiffFiller"
+M.NOTES_WINHL = "DiffAdd:DeskDiffRemove,DiffChange:DeskDiffRemoveLine,DiffText:DeskDiffRemoveText,DiffDelete:DeskDiffFiller"
+
+-- A group's background as it shows (a reversed group shows its fg there).
+local function shown_bg(name)
+	local h = vim.api.nvim_get_hl(0, { name = name, link = false })
+	if h.reverse then
+		return h.fg
+	end
+	return h.bg
+end
+
+local function channels(c)
+	return { math.floor(c / 65536) % 256, math.floor(c / 256) % 256, c % 256 }
+end
+
+local function pack(ch)
+	local function clamp(v)
+		return math.max(0, math.min(255, math.floor(v + 0.5)))
+	end
+	return clamp(ch[1]) * 65536 + clamp(ch[2]) * 256 + clamp(ch[3])
+end
+
+-- `c` moved away from `from` by `t` of their difference (toward it when
+-- negative), per channel: toward the background is dimmer on either one.
+local function away(c, from, t)
+	local a, o = channels(c), channels(from)
+	return pack({ a[1] + (a[1] - o[1]) * t, a[2] + (a[2] - o[2]) * t, a[3] + (a[3] - o[3]) * t })
+end
+
+-- `c` with its distance from its own grey scaled by `1 + k`: more vivid at
+-- about the same lightness.
+local function saturate(c, k)
+	local a = channels(c)
+	local grey = (a[1] + a[2] + a[3]) / 3
+	return pack({ a[1] + (a[1] - grey) * k, a[2] + (a[2] - grey) * k, a[3] + (a[3] - grey) * k })
+end
+
+function M.define_highlights()
+	local set = vim.api.nvim_set_hl
+	if not vim.o.termguicolors then
+		for _, g in ipairs({ "DeskDiffAdd", "DeskDiffAddLine", "DeskDiffAddText" }) do
+			set(0, g, { link = "DiffAdd" })
+		end
+		for _, g in ipairs({ "DeskDiffRemove", "DeskDiffRemoveLine", "DeskDiffRemoveText" }) do
+			set(0, g, { link = "DiffDelete" })
+		end
+		set(0, "DeskDiffFiller", { link = "NonText" })
+		return
+	end
+	local dark = vim.o.background ~= "light"
+	local normal = vim.api.nvim_get_hl(0, { name = "Normal", link = false })
+	local bg = normal.bg or (dark and 0x1c1c1c or 0xffffff)
+	local fg = normal.fg or (dark and 0xd0d0d0 or 0x303030)
+	local green = shown_bg("DiffAdd") or (dark and 0x2b4a2b or 0xd0f0d0)
+	local red = shown_bg("DiffDelete") or (dark and 0x4a2b2b or 0xf0d0d0)
+	-- The changed words: on a dark background more vivid rather than lighter,
+	-- which would wash out light text; on a light one deeper.
+	local function strong(c)
+		return dark and saturate(c, 1) or away(c, bg, 0.5)
+	end
+	set(0, "DeskDiffAdd", { bg = green })
+	set(0, "DeskDiffAddLine", { bg = away(green, bg, -0.45) })
+	set(0, "DeskDiffAddText", { bg = strong(green) })
+	set(0, "DeskDiffRemove", { bg = red })
+	set(0, "DeskDiffRemoveLine", { bg = away(red, bg, -0.45) })
+	set(0, "DeskDiffRemoveText", { bg = strong(red) })
+	set(0, "DeskDiffFiller", { bg = away(bg, fg, -0.06), fg = away(bg, fg, -0.3) })
+end
+
+local colours_installed = false
+
+local function install_colours()
+	if colours_installed then
+		return
+	end
+	colours_installed = true
+	M.define_highlights()
+	vim.api.nvim_create_autocmd("ColorScheme", {
+		group = vim.api.nvim_create_augroup("desk_review_colours", { clear = true }),
+		callback = M.define_highlights,
+	})
+end
+
+local function set_winhl(win, value)
+	vim.api.nvim_set_option_value("winhighlight", value, { scope = "local", win = win })
+end
+
+-- Clears what the review set on `win`, leaving a winhighlight of the
+-- user's own alone.
+local function clear_winhl(win)
+	if not vim.api.nvim_win_is_valid(win) then
+		return
+	end
+	local v = vim.wo[win].winhighlight
+	if v == M.REVIEW_WINHL or v == M.NOTES_WINHL then
+		set_winhl(win, "")
+	end
+end
+
 --- Asks a question with choices; the number picked, 0 when cancelled or
 --- when nothing can answer. Replaceable, so a headless run can answer.
 function M.confirm(msg, choices)
@@ -519,6 +629,10 @@ function M.open_review(notes_buf)
 	vim.api.nvim_win_call(notes_win, function()
 		vim.cmd("diffthis")
 	end)
+	install_colours()
+	set_winhl(review_win, M.REVIEW_WINHL)
+	set_winhl(notes_win, M.NOTES_WINHL)
+	s.review_win = review_win
 
 	vim.api.nvim_create_autocmd("BufWritePost", {
 		group = vim.api.nvim_create_augroup("desk_taken_" .. notes_buf, { clear = true }),
@@ -550,11 +664,13 @@ function M.open_review(notes_buf)
 			if sessions[notes_buf] == s then
 				sessions[notes_buf] = nil
 			end
-			local win = vim.fn.bufwinid(notes_buf)
-			if win ~= -1 then
-				vim.api.nvim_win_call(win, function()
-					vim.cmd("diffoff")
-				end)
+			if vim.api.nvim_buf_is_valid(notes_buf) then
+				for _, win in ipairs(vim.fn.win_findbuf(notes_buf)) do
+					vim.api.nvim_win_call(win, function()
+						vim.cmd("diffoff")
+					end)
+					clear_winhl(win)
+				end
 			end
 		end,
 	})
