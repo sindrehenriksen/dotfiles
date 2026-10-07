@@ -41,6 +41,8 @@ local timers_started = 0
 -- and for `id of front window`.
 local script_windows_reply = { {}, {} }
 local front_window_reply = nil
+-- What `defaults read … NSWindowLastPosition` prints, or nil for nothing.
+local saved_position_reply = nil
 
 hs = {
   window = {
@@ -77,8 +79,13 @@ hs = {
       return setmetatable({}, inert)
     end,
     secondsSinceEpoch = function() return 0 end,
+    usleep = function() end,
   },
-  screen = { allScreens = function() return {} end },
+  screen = {
+    allScreens = function() return {} end,
+    primaryScreen = function() return { fullFrame = function() return { h = 1000 } end } end,
+  },
+  execute = function() return saved_position_reply, saved_position_reply ~= nil end,
   application = {
     get = function() return nil end,
     frontmostApplication = function() return nil end,
@@ -92,6 +99,7 @@ hs = {
         return true, front_window_reply, ""
       end
       osascript_calls = osascript_calls + 1
+      if script:find("activate window", 1, true) then return true, nil, "" end
       last_osascript_script = script
       return false, nil, { OSAScriptErrorMessageKey = "stub: never actually run in tests" }
     end,
@@ -139,45 +147,61 @@ assert_eq("a window on the wrong part of the screen is outside the slot", false,
   DeskTab.point_in_frame(DeskTab.frame_center(elsewhere), slot))
 
 -- ---------------------------------------------------------------------------
--- DeskTab.pick_target
+-- DeskTab.slot_windows, DeskTab.plan_open
 -- ---------------------------------------------------------------------------
-local function slot_frame_of(_) return slot end
+local lower_slot = { x = 1000, y = 400, w = 600, h = 400 }
+local function slot_frame_of(_, name) return name == "lower_C" and lower_slot or slot end
 
--- Existing window whose centre sits in the upper_C slot on the wide screen.
 local screens = { { id = "wide", wide = true }, { id = "laptop", wide = false } }
-local windows = { { id = 42, screen_id = "wide", frame = nudged } }
-local d = DeskTab.pick_target(screens, windows, slot_frame_of, nil)
-assert_eq("a matching window on the ultrawide is picked", "existing_window", d.mode)
-assert_eq("its id is reported", 42, d.window_id)
+local windows = {
+  { id = 42, screen_id = "wide", frame = nudged },
+  { id = 43, screen_id = "wide", frame = { x = 1010, y = 420, w = 580, h = 360 } },
+}
+local up, low = DeskTab.slot_windows(screens, windows, slot_frame_of, nil)
+assert_eq("the upper_C window is found", 42, up)
+assert_eq("the lower_C window is found", 43, low)
 
--- No matching window on the ultrawide: falls to a new, placed window.
-d = DeskTab.pick_target(screens, {}, slot_frame_of, nil)
-assert_eq("no match on the ultrawide opens a new window there", "new_window", d.mode)
-assert_eq("targets the wide screen", "wide", d.screen_id)
+up, low = DeskTab.slot_windows(screens, { { id = 7, screen_id = "wide", frame = elsewhere } }, slot_frame_of, nil)
+assert_eq("a window outside both slots is neither", nil, up)
+assert_eq("...in either slot", nil, low)
 
--- A Ghostty window elsewhere on the ultrawide (outside the slot) still
--- falls to new_window, not to that window.
-windows = { { id = 7, screen_id = "wide", frame = elsewhere } }
-d = DeskTab.pick_target(screens, windows, slot_frame_of, nil)
-assert_eq("a Ghostty window outside the slot doesn't count as a match", "new_window", d.mode)
+up = DeskTab.slot_windows(screens, { { id = 9, screen_id = "laptop", frame = slot } }, slot_frame_of, nil)
+assert_eq("a same-shaped window on the wrong screen doesn't match", nil, up)
 
--- A window on a *different* screen, even inside an equivalent rect, must
--- not match — screen_id has to agree too.
-windows = { { id = 9, screen_id = "laptop", frame = slot } }
-d = DeskTab.pick_target(screens, windows, slot_frame_of, nil)
-assert_eq("a same-shaped window on the wrong screen doesn't match", "new_window", d.mode)
-
--- No ultrawide at all (laptop only): front window decides.
 local laptop_only = { { id = "laptop", wide = false } }
-d = DeskTab.pick_target(laptop_only, {}, slot_frame_of, { id = 3, app = "Ghostty" })
-assert_eq("laptop-only, front window is Ghostty: uses it", "front_window", d.mode)
-assert_eq("front window id reported", 3, d.window_id)
+assert_eq("laptop-only: a frontmost Ghostty window stands in for upper_C", 3,
+  DeskTab.slot_windows(laptop_only, {}, slot_frame_of, { id = 3, app = "Ghostty" }))
+assert_eq("laptop-only: another app in front means no upper_C", nil,
+  DeskTab.slot_windows(laptop_only, {}, slot_frame_of, { id = 3, app = "Safari" }))
 
-d = DeskTab.pick_target(laptop_only, {}, slot_frame_of, { id = 3, app = "Safari" })
-assert_eq("laptop-only, front window isn't Ghostty: no target", "none", d.mode)
+local plan = DeskTab.plan_open(42, 43, 99, true)
+assert_eq("typing elsewhere: the tab goes to upper_C", 42, plan.window_id)
+plan = DeskTab.plan_open(42, 43, 42, true)
+assert_eq("typing in upper_C: a background tab falls back to lower_C", 43, plan.window_id)
+plan = DeskTab.plan_open(42, nil, 42, true)
+assert_eq("typing in upper_C with no lower_C: a new window", "new_window", plan.mode)
+plan = DeskTab.plan_open(nil, 43, 99, true)
+assert_eq("no upper_C: a new window (lower_C is only the fallback)", "new_window", plan.mode)
+plan = DeskTab.plan_open(42, 43, nil, false)
+assert_eq("the hotkey: upper_C", 42, plan.window_id)
+plan = DeskTab.plan_open(42, 43, 42, false)
+assert_eq("the hotkey, typing in upper_C: still upper_C (it wants the focus)", 42, plan.window_id)
 
-d = DeskTab.pick_target(laptop_only, {}, slot_frame_of, nil)
-assert_eq("laptop-only, no front window at all: no target", "none", d.mode)
+-- ---------------------------------------------------------------------------
+-- Ghostty's saved last window position
+-- ---------------------------------------------------------------------------
+local saved = DeskTab.parse_saved_position("(\n    2663,\n    780,\n    1136,\n    700\n)\n")
+assert_eq("the defaults output parses", "2663,780,1136,700",
+  saved and string.format("%d,%d,%d,%d", saved.x, saved.y, saved.w, saved.h))
+assert_eq("fractional values parse too", 780.5, DeskTab.parse_saved_position("(1, 780.5, 3, 4)").y)
+assert_eq("too few values is nil", nil, DeskTab.parse_saved_position("(1, 2)"))
+assert_eq("no output is nil", nil, DeskTab.parse_saved_position(nil))
+-- The live case: the upper-mid window, primary screen 982 high.
+local upper_mid = { x = 2663, y = -498, w = 1136, h = 700 }
+local lower_mid = { x = 2663, y = 212, w = 1136, h = 690 }
+assert_eq("the saved position is the upper-mid window's", true, DeskTab.saved_position_is(saved, upper_mid, 982))
+assert_eq("...not the lower-mid window's", false, DeskTab.saved_position_is(saved, lower_mid, 982))
+assert_eq("no saved position is never a match", false, DeskTab.saved_position_is(nil, upper_mid, 982))
 
 -- ---------------------------------------------------------------------------
 -- DeskTab.looks_like_uuid
@@ -207,9 +231,11 @@ assert_eq("a non-UUID session id refuses outright", false, result)
 assert_eq("and never calls osascript", 0, osascript_calls)
 
 osascript_calls = 0
+last_osascript_script = nil
 result = DeskOpenTab("echo hi", nil, nil)
-assert_eq("no ultrawide, no frontmost Ghostty window (this stub): no target", false, result)
-assert_eq("and never calls osascript either", 0, osascript_calls)
+assert_eq("no ultrawide, no frontmost Ghostty window (this stub): a new window is asked for", true,
+  last_osascript_script ~= nil and last_osascript_script:find("new window with configuration", 1, true) ~= nil)
+assert_eq("...which this stub's osascript fails, so false", false, result)
 
 -- ---------------------------------------------------------------------------
 -- Every tab command runs through the user's login+interactive
@@ -246,36 +272,6 @@ assert_eq("its own content survives the re-quoting intact", true,
 
 hs.window.frontmostWindow = real_frontmost
 
--- ---------------------------------------------------------------------------
--- Background opens (the scheduled passes): never into the window being
--- typed in, and Ghostty's own window id is what the script targets.
--- ---------------------------------------------------------------------------
-local wide_windows = {
-  { id = 42, screen_id = "wide", frame = nudged },     -- the upper_C window
-  { id = 43, screen_id = "laptop", frame = elsewhere },
-  { id = 44, screen_id = "wide", frame = elsewhere },
-}
-d = DeskTab.pick_target(screens, wide_windows, slot_frame_of, nil, 42)
-assert_eq("typing in the upper_C window: another window gets the tab", "existing_window", d.mode)
-assert_eq("...the frontmost other one on the ultrawide", 44, d.window_id)
-assert_eq("...and the diversion is flagged", true, d.diverted)
-
-d = DeskTab.pick_target(screens, wide_windows, slot_frame_of, nil, 43)
-assert_eq("typing in some other window: upper_C is still the target", 42, d.window_id)
-assert_eq("...not flagged as diverted", nil, d.diverted)
-
-d = DeskTab.pick_target(screens, { wide_windows[1], wide_windows[2] }, slot_frame_of, nil, 42)
-assert_eq("no other window on the ultrawide: any other Ghostty window", 43, d.window_id)
-
-d = DeskTab.pick_target(screens, { wide_windows[1] }, slot_frame_of, nil, 42)
-assert_eq("the only Ghostty window is the one being typed in: a new window", "new_window", d.mode)
-assert_eq("...placed on the ultrawide", "wide", d.screen_id)
-
-d = DeskTab.pick_target(laptop_only, { { id = 3, screen_id = "laptop", frame = slot } },
-  slot_frame_of, { id = 3, app = "Ghostty" }, 3)
-assert_eq("laptop-only, typing in the front Ghostty window: a new window", "new_window", d.mode)
-assert_eq("...left unplaced (no ultrawide slot)", nil, d.screen_id)
-
 local hs_wins = {
   { id = 10, title = "~/dev" },
   { id = 11, title = "notes" },
@@ -310,18 +306,6 @@ assert_eq("the user moved to another app: left alone", false,
 assert_eq("no focused window yet (mid-transition): wait", false,
   DeskTab.focus_was_taken({ app = "Ghostty", window_id = 1 }, { app = "Ghostty", window_id = nil }, known_12))
 
-local slot_hit = { mode = "existing_window", window_id = 42 }
-assert_eq("user in another app, upper_C is Ghostty's front window: a tab there", "front_tab",
-  DeskTab.background_target(slot_hit, 42, false))
-assert_eq("user in another app, upper_C is not Ghostty's front window: a new window", "new_window",
-  DeskTab.background_target(slot_hit, 7, false))
-assert_eq("user in Ghostty: always a new window", "new_window",
-  DeskTab.background_target(slot_hit, 42, true))
-assert_eq("a diverted target never gets the tab", "new_window",
-  DeskTab.background_target({ mode = "existing_window", window_id = 42, diverted = true }, 42, false))
-assert_eq("no upper_C window: a new window", "new_window",
-  DeskTab.background_target({ mode = "new_window" }, 42, false))
-
 -- DeskOpenTab end to end against the stub: laptop only, the user typing in
 -- Ghostty window 5, a second Ghostty window 6 behind it.
 local function fake_win(id, title)
@@ -349,16 +333,54 @@ assert_eq("background, typing in Ghostty: a new window, never a tab in an existi
   last_osascript_script ~= nil
     and last_osascript_script:find("new window with configuration", 1, true) ~= nil
     and last_osascript_script:find("new tab", 1, true) == nil)
-assert_eq("background: the focus guard is started", 1, timers_started)
-assert_eq("background: no placement timer either", 1, timers_started)
+assert_eq("background: the focus guard is started, and no other timer", 1, timers_started)
 
+-- The window's frame (`slot`, primary screen 1000 high) as Ghostty saves it.
+local SAVED_WIN5 = "(\n    1000,\n    600,\n    600,\n    400\n)"
+saved_position_reply = SAVED_WIN5
 osascript_calls, timers_started, last_osascript_script = 0, 0, nil
 DeskOpenTab("echo hi", nil, nil)
-assert_eq("hotkey (no background): the front window gets the tab, as asked", true,
+assert_eq("hotkey (no background), saved position already its own: the tab goes in", true,
   last_osascript_script ~= nil
     and last_osascript_script:find('set w to window id "tab-group-5"', 1, true) ~= nil
     and last_osascript_script:find("new tab in w with configuration", 1, true) ~= nil)
 assert_eq("hotkey: no focus guard", 0, timers_started)
+assert_eq("...and no activation was needed", 1, osascript_calls)
+
+-- The saved position is another window's: Ghostty is asked to focus the
+-- target first, and the tab goes in only once the saved position is the
+-- target's own; if it never becomes so, a new window instead.
+local scripts_seen = {}
+local real_as_for_saved = hs.osascript.applescript
+hs.osascript.applescript = function(script)
+  scripts_seen[#scripts_seen + 1] = script
+  if script:find("activate window", 1, true) then saved_position_reply = SAVED_WIN5 end
+  return real_as_for_saved(script)
+end
+saved_position_reply = "(1, 2, 3, 4)"
+last_osascript_script = nil
+DeskOpenTab("echo hi", nil, nil)
+local activated_first = false
+for _, sc in ipairs(scripts_seen) do
+  if sc:find('activate window (window id "tab-group-5")', 1, true) then activated_first = true end
+  if sc:find("new tab in w", 1, true) then break end
+end
+assert_eq("another window's saved position: the target is focused first", true, activated_first)
+assert_eq("...then the tab goes in", true,
+  last_osascript_script ~= nil and last_osascript_script:find("new tab in w with configuration", 1, true) ~= nil)
+
+scripts_seen = {}
+hs.osascript.applescript = function(script)
+  scripts_seen[#scripts_seen + 1] = script
+  return real_as_for_saved(script)
+end
+saved_position_reply = "(1, 2, 3, 4)"
+last_osascript_script = nil
+DeskOpenTab("echo hi", nil, nil)
+assert_eq("the saved position never becomes the target's: a new window, so nothing moves", true,
+  last_osascript_script ~= nil and last_osascript_script:find("new window with configuration", 1, true) ~= nil)
+hs.osascript.applescript = real_as_for_saved
+saved_position_reply = SAVED_WIN5
 
 script_windows_reply = { { "tab-group-5", "tab-group-6" }, { "typing here", "renamed" } }
 osascript_calls, timers_started, last_osascript_script = 0, 0, nil
@@ -511,14 +533,21 @@ local CASCADE = { x = 1600, y = -400, w = 900, h = 600 }
 local wide = { id = function() return "wide" end,
   frame = function() return { x = 1512, y = -498, w = 3440, h = 1410 } end }
 
+local PRIMARY_H = 982
 local function new_world(recs, focused, front_app)
   local world = { recs = recs, focused = focused, front_app = front_app, clock = 0,
-    timers = {}, events = {}, set_frames = {}, next_id = 2001 }
+    timers = {}, events = {}, set_frames = {}, next_id = 2001, moved = {} }
+  -- Ghostty's saved last position: the frame of the Ghostty window it last
+  -- focused. It starts as the frontmost Ghostty window's.
+  for _, r in ipairs(recs) do
+    if r.app == "Ghostty" then world.saved = r.frame break end
+  end
   local function rec_by_id(id)
     for _, r in ipairs(world.recs) do if r.id == id then return r end end
   end
   local function focus_rec(r)
     world.focused, world.front_app = r.id, r.app
+    if r.app == "Ghostty" and not world.freeze_saved then world.saved = r.frame end
     for i, x in ipairs(world.recs) do
       if x == r then table.remove(world.recs, i) break end
     end
@@ -545,8 +574,27 @@ local function new_world(recs, focused, front_app)
     at(0.1, function() focus_rec(r) end)
     at(1.0, function() focus_rec(r) end)
   end
+  -- Showing a new tab moves its whole window to the saved position, as
+  -- Ghostty does: this is how a tab moved a window on screen.
+  local function ghostty_shows_tab(r)
+    at(0.08, function()
+      local f, sv = r.frame, world.saved
+      if sv and (sv.x ~= f.x or sv.y ~= f.y) then
+        world.moved[#world.moved + 1] = r.script_id
+        r.frame = { x = sv.x, y = sv.y, w = f.w, h = f.h }
+      end
+    end)
+  end
 
-  hs.screen = { allScreens = function() return { wide } end }
+  hs.screen = {
+    allScreens = function() return { wide } end,
+    primaryScreen = function() return { fullFrame = function() return { h = PRIMARY_H } end } end,
+  }
+  hs.execute = function()
+    local sv = world.saved
+    if not sv then return "", false end
+    return string.format("(\n    %d,\n    %d,\n    %d,\n    %d\n)\n", sv.x, PRIMARY_H - (sv.y + sv.h), sv.w, sv.h), true
+  end
   hs.window = {
     animationDuration = 0,
     orderedWindows = function()
@@ -566,6 +614,7 @@ local function new_world(recs, focused, front_app)
   }
   hs.timer = {
     secondsSinceEpoch = function() return world.clock end,
+    usleep = function() end,
     doEvery = function(_, fn)
       local t = { fn = fn }
       function t:stop() self.stopped = true end
@@ -603,6 +652,7 @@ local function new_world(recs, focused, front_app)
             local new_id = world.next_id
             world.next_id = new_id + 1
             at(0.05, function() r.id, r.title = new_id, "👻" end)
+            ghostty_shows_tab(r)
             ghostty_takes_focus(r)
           end
         end
@@ -672,8 +722,10 @@ local function silently(fn)
   return r
 end
 
--- Typing in the upper_C window: a new window, nothing moves, focus comes
--- back after both of Ghostty's steals.
+-- Typing in upper_C: the tab falls back to lower_C. Ghostty's saved
+-- position is upper_C's, so lower_C is focused first (saving its own
+-- frame), then the tab goes in; nothing moves, and focus comes back to
+-- upper_C after both of Ghostty's steals.
 local w = new_world({
   { id = 1138, script_id = "tab-group-a", title = "deploy", frame = UPPER_C, app = "Ghostty" },
   { id = 175, script_id = "tab-group-b", title = "~/dev", frame = LOWER_C, app = "Ghostty" },
@@ -682,13 +734,13 @@ local w = new_world({
 local frames0 = w.frames()
 silently(function() return DeskOpenTab("echo hi", nil, nil, { background = true }) end)
 w.run(6)
-assert_eq("typing in upper_C: a new window, no tab in any existing one", true, w.opened_window and w.tab_target == nil)
-assert_eq("...focus is back on the window being typed in, after both steals", 1138, w.focused)
-assert_eq("...no window was given a frame", 0, #w.set_frames)
-frames_unchanged("...every existing window's frame is unchanged", frames0, w, "tab-group-new")
+assert_eq("typing in upper_C: the tab went into lower_C", "tab-group-b", w.tab_target)
+assert_eq("...no window moved on screen", 0, #w.moved)
+assert_eq("...focus is back on upper_C, after both steals", 1138, w.focused)
+assert_eq("...no window was given a frame by the opener", 0, #w.set_frames)
+frames_unchanged("...every window's frame is unchanged", frames0, w)
 
--- Typing in the lower-mid window with another window in upper_C (the
--- second live run): still a new window, never a tab in the upper_C one.
+-- Typing in lower_C: the tab goes to upper_C the same way.
 w = new_world({
   { id = 1524, script_id = "tab-group-b", title = "watcher", frame = LOWER_C, app = "Ghostty" },
   { id = 175, script_id = "tab-group-a", title = "deploy", frame = UPPER_C, app = "Ghostty" },
@@ -697,13 +749,13 @@ w = new_world({
 frames0 = w.frames()
 silently(function() return DeskOpenTab("echo hi", nil, nil, { background = true }) end)
 w.run(6)
-assert_eq("typing in lower-mid: a new window, no tab in upper_C", true, w.opened_window and w.tab_target == nil)
-assert_eq("...focus is back on lower-mid", 1524, w.focused)
-assert_eq("...no window was given a frame", 0, #w.set_frames)
-frames_unchanged("...every existing window's frame is unchanged", frames0, w, "tab-group-new")
+assert_eq("typing in lower_C: the tab went into upper_C", "tab-group-a", w.tab_target)
+assert_eq("...no window moved on screen", 0, #w.moved)
+assert_eq("...focus is back on lower_C", 1524, w.focused)
+frames_unchanged("...every window's frame is unchanged", frames0, w)
 
--- Another app frontmost and upper_C is Ghostty's front window: the tab
--- goes there, and focus returns to that app's window.
+-- Another app frontmost and Ghostty's saved position already upper_C's:
+-- the tab goes straight in, and focus returns to that app.
 w = new_world({
   { id = 9, title = "page", frame = CASCADE, app = "Safari" },
   { id = 1138, script_id = "tab-group-a", title = "deploy", frame = UPPER_C, app = "Ghostty" },
@@ -712,14 +764,13 @@ w = new_world({
 frames0 = w.frames()
 silently(function() return DeskOpenTab("echo hi", nil, nil, { background = true }) end)
 w.run(6)
-assert_eq("another app frontmost: the tab went into upper_C, Ghostty's front window", "tab-group-a", w.tab_target)
-assert_eq("...focus is back in that app", "Safari", w.front_app)
-assert_eq("...on its window", 9, w.focused)
-assert_eq("...no window was given a frame", 0, #w.set_frames)
-frames_unchanged("...every existing window's frame is unchanged", frames0, w)
+assert_eq("another app, saved position upper_C's: the tab went into upper_C", "tab-group-a", w.tab_target)
+assert_eq("...no window moved on screen", 0, #w.moved)
+assert_eq("...focus is back in that app, on its window", 9, w.front_app == "Safari" and w.focused)
+frames_unchanged("...every window's frame is unchanged", frames0, w)
 
--- Another app frontmost but Ghostty's front window is lower-mid: a tab in
--- upper_C would move it, so a new window instead.
+-- Another app frontmost but the saved position is lower_C's (it was
+-- Ghostty's last focused window): upper_C is focused first, so nothing moves.
 w = new_world({
   { id = 9, title = "page", frame = CASCADE, app = "Safari" },
   { id = 175, script_id = "tab-group-b", title = "~/dev", frame = LOWER_C, app = "Ghostty" },
@@ -728,9 +779,52 @@ w = new_world({
 frames0 = w.frames()
 silently(function() return DeskOpenTab("echo hi", nil, nil, { background = true }) end)
 w.run(6)
-assert_eq("upper_C not Ghostty's front window: a new window, no tab", true, w.opened_window and w.tab_target == nil)
+assert_eq("another app, saved position lower_C's: the tab still went into upper_C", "tab-group-a", w.tab_target)
+assert_eq("...no window moved on screen", 0, #w.moved)
 assert_eq("...focus is back in that app", "Safari", w.front_app)
-frames_unchanged("...every existing window's frame is unchanged", frames0, w, "tab-group-new")
+frames_unchanged("...every window's frame is unchanged", frames0, w)
+
+-- Ghostty never saves the target's frame (focusing it did not take): a
+-- new window instead of a tab that would move the target.
+w = new_world({
+  { id = 1138, script_id = "tab-group-a", title = "deploy", frame = UPPER_C, app = "Ghostty" },
+  { id = 175, script_id = "tab-group-b", title = "~/dev", frame = LOWER_C, app = "Ghostty" },
+}, 1138, "Ghostty")
+w.freeze_saved = true
+frames0 = w.frames()
+silently(function() return DeskOpenTab("echo hi", nil, nil, { background = true }) end)
+w.run(6)
+assert_eq("the saved position never becomes the target's: a new window, no tab", true,
+  w.opened_window and w.tab_target == nil)
+assert_eq("...no window moved on screen", 0, #w.moved)
+assert_eq("...focus is back on upper_C", 1138, w.focused)
+frames_unchanged("...every window's frame is unchanged", frames0, w, "tab-group-new")
+
+-- Typing in upper_C with no lower_C window: a new window.
+w = new_world({
+  { id = 1138, script_id = "tab-group-a", title = "deploy", frame = UPPER_C, app = "Ghostty" },
+  { id = 510, script_id = "tab-group-c", title = "notes", frame = UPPER_R, app = "Ghostty" },
+}, 1138, "Ghostty")
+frames0 = w.frames()
+silently(function() return DeskOpenTab("echo hi", nil, nil, { background = true }) end)
+w.run(6)
+assert_eq("typing in upper_C, no lower_C: a new window", true, w.opened_window and w.tab_target == nil)
+assert_eq("...focus is back on upper_C", 1138, w.focused)
+frames_unchanged("...every window's frame is unchanged", frames0, w, "tab-group-new")
+
+-- The notes hotkey from a window that isn't upper_C: upper_C is focused
+-- first, so it does not move, and focus stays on the new tab, as asked.
+w = new_world({
+  { id = 1524, script_id = "tab-group-b", title = "nvim", frame = LOWER_C, app = "Ghostty" },
+  { id = 175, script_id = "tab-group-a", title = "deploy", frame = UPPER_C, app = "Ghostty" },
+}, 1524, "Ghostty")
+frames0 = w.frames()
+silently(function() return DeskOpenTab("echo hi", nil, nil) end)
+w.run(3)
+assert_eq("hotkey: the tab went into upper_C", "tab-group-a", w.tab_target)
+assert_eq("...no window moved on screen", 0, #w.moved)
+assert_eq("...focus is on the new tab", 2001, w.focused)
+frames_unchanged("...every window's frame is unchanged", frames0, w)
 
 -- The user moves to another existing Ghostty window right after the open:
 -- left there, not pulled back.
