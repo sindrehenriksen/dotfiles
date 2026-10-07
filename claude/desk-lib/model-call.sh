@@ -156,7 +156,8 @@ desk_write_deny_hook_settings() {
 # desk_call_model --scratch DIR --prompt-file PATH --allowed-tools CSV
 #   [--tools VALUE] [--connector true|false] [--restricted true|false]
 #   [--mcp-config PATH] [--strict-mcp-config true|false] [--settings PATH]
-#   [--max-budget-usd N] [--name NAME] [--model MODEL] --timeout SECS --config-dir DIR --out PATH
+#   [--max-budget-usd N] [--name NAME] [--model MODEL] [--spill-dir DIR]
+#   --timeout SECS --config-dir DIR --out PATH
 #
 # `--resume ID` instead continues an existing persisted session under its own
 # id: no new id, no -n, nothing cleaned up afterwards, and the transcript the
@@ -198,7 +199,7 @@ desk_write_deny_hook_settings() {
 # ephemeral connector call unmarked.
 desk_call_model() {
 	local tools_given="false" allowed_given="false" scratch="" prompt_file="" allowed_tools="" tools="" connector="false" restricted="false"
-	local mcp_config="" strict_mcp="false" settings="" max_budget_usd="" timeout_secs="" config_dir="" out="" name="" session_id_file="" resume="" model=""
+	local mcp_config="" strict_mcp="false" settings="" max_budget_usd="" timeout_secs="" config_dir="" out="" name="" session_id_file="" resume="" model="" spill_dir=""
 	while [ $# -gt 0 ]; do
 		case "$1" in
 			--scratch) scratch="$2"; shift 2 ;;
@@ -213,6 +214,7 @@ desk_call_model() {
 			--max-budget-usd) max_budget_usd="$2"; shift 2 ;;
 			--name) name="$2"; shift 2 ;;
 			--model) model="$2"; shift 2 ;;
+			--spill-dir) spill_dir="$2"; shift 2 ;;
 			--session-id-file) session_id_file="$2"; shift 2 ;;
 			--resume) resume="$2"; shift 2 ;;
 			--timeout) timeout_secs="$2"; shift 2 ;;
@@ -296,6 +298,15 @@ desk_call_model() {
 		desk_log - "model call stderr ($out): $(cat "$out.stderr")"
 	fi
 	rm -f "$out.stderr"
+
+	# `--spill-dir`: a tool result past Claude Code's output limit reaches
+	# the stream only as a pointer to a file it saved under the project
+	# folder; those files are copied out before the folder goes.
+	if [ -n "$spill_dir" ]; then
+		mkdir -p "$spill_dir"
+		find "$config_dir/projects/$(desk_project_folder_name "$scratch")" -path '*/tool-results/*' -type f \
+			-exec cp {} "$spill_dir"/ \; 2> /dev/null
+	fi
 
 	# A visible call's own project folder (transcript included) is left
 	# standing for a later `claude --resume` — see this function's own

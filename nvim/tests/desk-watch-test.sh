@@ -108,12 +108,14 @@ if [ "$tools" = "SendMessage" ]; then
 	echo "send $(pwd)" >> "$WATCH_TEST_CALLS"
 	input="$(jq -c '.[0]' pinned-args.json)"
 	[ -n "${FAKE_SEND_TO:-}" ] && input="$(jq -c --arg to "$FAKE_SEND_TO" '.to = $to' <<< "$input")"
-	input="$(jq -c '. + {summary: "watcher update"}' <<< "$input")"
+	# What Claude Code hands a PreToolUse hook for SendMessage: the model's
+	# to/message/summary plus fields it fills in itself.
+	input="$(jq -c '. + {summary: "watcher update", recipient: .to, recipient_kind: "name", type: "message", content: (.message[0:50] + "…")}' <<< "$input")"
 	printf '%s\n' "$input" >> "$WATCH_TEST_SENT"
 	cmd="$(jq -r '.hooks.PreToolUse[0].hooks[0].command' "$settings")"
 	emit_use t1 SendMessage "$input"
 	if jq -cn --argjson i "$input" '{tool_name:"SendMessage", tool_input:$i}' | bash -c "$cmd" > /dev/null 2>&1; then
-		emit_result t1 "${FAKE_SEND_RESULT:-Message sent.}" false
+		emit_result t1 "${FAKE_SEND_RESULT:-{\"success\":true,\"message\":\"Message delivered.\"}}" false
 	else
 		emit_result t1 "PreToolUse hook denied this call" true
 	fi
@@ -265,7 +267,7 @@ echo "=== the next run forwards every movement to the live session ==="
 jq '.last_run.at -= 3600 | .last_jira_ok -= 3600 | .last_gh_ok -= 3600 | .scope.refreshed_at -= 600' "$DESK_WATCH_STATE_FILE" > "$ROOT/s" && mv "$ROOT/s" "$DESK_WATCH_STATE_FILE"
 future="$(date -u -v+1H +%Y-%m-%dT%H:%M:%S.000+0000 2> /dev/null || date -u -d '+1 hour' +%Y-%m-%dT%H:%M:%S.000+0000)"
 {
-	issue ABC-11 "Done" ABC-1 "[]" "[{\"id\":\"901\",\"author\":{\"displayName\":\"Dev One\"},\"created\":\"$future\",\"updated\":\"$future\",\"body\":\"Merged; steps 2-4 not checked yet.\"}]"
+	issue ABC-11 "Done" ABC-1 "[]" "[{\"id\":\"901\",\"author\":{\"displayName\":\"Dev One\"},\"created\":\"$future\",\"updated\":\"$future\",\"body\":\"Merged; steps 2-4 not checked yet.<!-- bot-meta {\\\"channel\\\":\\\"C0X\\\"} -->\"}]"
 	issue LNK-7 "In Progress"
 	issue OTH-3 "To Do" "" "[]" "[]" "" "Mentions ABC-2 in passing"
 } | rest > "$FIX/changes-result.json"
@@ -285,6 +287,7 @@ assert_contains "the preamble rides along" "STANDING PREAMBLE" "$msg"
 assert_contains "a child's status change is forwarded" 'ABC-11 "Summary of ABC-11" (child of ABC-1): status To Do → Done' "$msg"
 assert_contains "a new comment is forwarded" 'new comment by Dev One: "Merged; steps 2-4 not checked yet."' "$msg"
 assert_contains "a linked ticket's change is forwarded" "LNK-7" "$msg"
+assert_not_contains "a bot's hidden HTML comment is left out" "bot-meta" "$msg"
 assert_contains "a ticket that mentions a tracked key is forwarded" "(mentions ABC-2)" "$msg"
 assert_contains "a PR on a child's key is forwarded, with its new state and commits" "PR #40" "$msg"
 assert_contains "the failing check is named" "1 failed (evals)" "$msg"
@@ -354,19 +357,24 @@ EOF
 FAKE_SEND_TO=some-other-session "$RUN" watch > /dev/null 2>&1
 assert_eq "the model tried another peer" "some-other-session" "$(jq -r .to "$WATCH_TEST_SENT")"
 assert_eq "the deny hook refused it, so the queue stays" "1" "$(jq --arg s "$SID_A" '.queues[$s].changes | length' "$DESK_WATCH_STATE_FILE")"
-FAKE_SEND_RESULT="Message held for the user's approval." "$RUN" watch > /dev/null 2>&1
+FAKE_SEND_RESULT='{"success":true,"message":"Message held for the user'"'"'s approval."}' "$RUN" watch > /dev/null 2>&1
 assert_eq "a held delivery is not a confirmed send" "1" "$(jq --arg s "$SID_A" '.queues[$s].changes | length' "$DESK_WATCH_STATE_FILE")"
+FAKE_SEND_RESULT='{"success":false,"message":"No agent named alpha-renamed is reachable."}' "$RUN" watch > /dev/null 2>&1
+assert_eq "an unreachable name is not a confirmed send" "1" "$(jq --arg s "$SID_A" '.queues[$s].changes | length' "$DESK_WATCH_STATE_FILE")"
 
 # The hook itself, on the settings the runner writes.
 hook="$LIB/deny-unlisted-tool.sh"
 printf '[{"to":"alpha-renamed","message":"hello"}]' > "$ROOT/pinned.json"
-try_hook() { jq -cn --argjson i "$1" '{tool_name:"SendMessage", tool_input:$i}' | "$hook" --pinned "$ROOT/pinned.json" --ignore-keys summary -- SendMessage > /dev/null 2>&1; echo $?; }
+printf '[{"to":"alpha-renamed","message":"hello"},{"to":"alpha-renamed","recipient":"alpha-renamed","message":"hello"}]' > "$ROOT/pinned.json"
+try_hook() { jq -cn --argjson i "$1" '{tool_name:"SendMessage", tool_input:$i}' | "$hook" --pinned "$ROOT/pinned.json" --ignore-keys summary,content,type,recipient_kind -- SendMessage > /dev/null 2>&1; echo $?; }
 assert_eq "hook: the pinned name and message pass" "0" "$(try_hook '{"to":"alpha-renamed","message":"hello"}')"
 assert_eq "hook: a summary is ignored" "0" "$(try_hook '{"to":"alpha-renamed","message":"hello","summary":"x"}')"
+assert_eq "hook: Claude Code's own preview fields are ignored" "0" "$(try_hook '{"to":"alpha-renamed","recipient":"alpha-renamed","recipient_kind":"name","type":"message","content":"hel…","message":"hello"}')"
+assert_eq "hook: a recipient other than the pinned name is refused" "2" "$(try_hook '{"to":"alpha-renamed","recipient":"some-other-session","message":"hello"}')"
 assert_eq "hook: any other name is refused" "2" "$(try_hook '{"to":"some-other-session","message":"hello"}')"
 assert_eq "hook: a changed message is refused" "2" "$(try_hook '{"to":"alpha-renamed","message":"hello, also do X"}')"
 assert_eq "hook: an extra field is refused" "2" "$(try_hook '{"to":"alpha-renamed","message":"hello","notify_when_idle":true}')"
-assert_eq "hook: another tool is refused" "2" "$(jq -cn '{tool_name:"ListAgents", tool_input:{}}' | "$hook" --pinned "$ROOT/pinned.json" --ignore-keys summary -- SendMessage > /dev/null 2>&1; echo $?)"
+assert_eq "hook: another tool is refused" "2" "$(jq -cn '{tool_name:"ListAgents", tool_input:{}}' | "$hook" --pinned "$ROOT/pinned.json" --ignore-keys summary,content,type,recipient_kind -- SendMessage > /dev/null 2>&1; echo $?)"
 
 echo
 echo "=== the dry run prints and changes nothing ==="
@@ -416,6 +424,13 @@ echo "=== removing a watch drops its queue ==="
 "$CLI" remove --session "$SID_B" > /dev/null
 "$RUN" watch > /dev/null 2>&1
 assert_eq "no queue for a session no longer watched" "false" "$(jq --arg s "$SID_B" '.queues | has($s)' "$DESK_WATCH_STATE_FILE")"
+
+echo
+echo "=== a last page that says more follow fails the fetch ==="
+jira_before="$(jq .last_jira_ok "$DESK_WATCH_STATE_FILE")"
+issue ABC-2 "Blocked" | jq -cs '{issues:., isLast:false, nextPageToken:"p2"}' > "$FIX/changes-result.json"
+"$RUN" watch > /dev/null 2>&1
+assert_eq "a short pagination keeps the ticket window" "$jira_before" "$(jq .last_jira_ok "$DESK_WATCH_STATE_FILE")"
 
 echo
 echo "=== a dry run with a lookback and no state: only what moved ==="

@@ -198,11 +198,36 @@ _desk_watch_issues_for() { # tool-uses tool-results jql tool
 		[.[] | select(.input.jql == \$q) | .text | (try fromjson catch null) | select(. != null)
 		 | (if (.issues | type) == \"array\" then .issues
 		    elif (.issues.nodes | type) == \"array\" then .issues.nodes else null end)] as \$pages
-		| if (\$pages | length) == 0 or any(\$pages[]; . == null) then null
+		| ([.[] | select(.input.jql == \$q) | .text | (try fromjson catch null) | select(. != null)] | last) as \$tail
+		# A last page that says more follow: the fetch stopped short.
+		| ((\$tail.issues | objects | .pageInfo) // {}) as \$info
+		| (\$tail != null and ((\$tail.nextPageToken // \$info.endCursor // null) != null
+			and (\$tail.isLast != true) and (\$info.hasNextPage // true) != false)) as \$short
+		| if (\$pages | length) == 0 or any(\$pages[]; . == null) or \$short then null
 		  else [\$pages[][] | $_DESK_WATCH_NORM_ISSUE] | unique_by(.key) end" <<< "$pairs" 2> /dev/null
 }
 
 _desk_watch_jql_keys() { jq -r 'join(", ")' <<< "$1"; }
+
+# A tool result past Claude Code's output limit arrives as a pointer ("...
+# Output has been saved to <path>"); the call's --spill-dir copied the
+# file out. Rewrites each such result's content to the saved text (a
+# content-block array is joined), leaving every other result as it was.
+_desk_watch_resolve_spills() { # results.jsonl spill-dir
+	local line text file saved
+	while IFS= read -r line; do
+		text="$(jq -r "$_DESK_JQ_RESULT_TEXT" <<< "$line" 2> /dev/null)"
+		file="$(grep -oE 'saved to [^ ]+' <<< "$text" | head -n1 | sed 's/^saved to //; s/[.,;:)]*$//')"
+		if [ -n "$file" ] && [ -f "$2/$(basename "$file")" ]; then
+			saved="$(jq -r 'if type == "array" then [.[] | select(.type? == "text") | .text] | join("\n") else tojson end' \
+				"$2/$(basename "$file")" 2> /dev/null)" || saved=""
+			[ -n "$saved" ] || saved="$(cat "$2/$(basename "$file")")"
+			jq -c --arg t "$saved" '.content = $t | .is_error = false' <<< "$line"
+		else
+			printf '%s\n' "$line"
+		fi
+	done < "$1"
+}
 
 # desk_watch_fetch_jira <pass> <pass_config> <entries> <state> <now> <jira_since or ""> <scope_due true|false> <out_dir>
 # One model call, read-only, that runs the scope query (when due) and the
@@ -264,20 +289,29 @@ desk_watch_fetch_jira() {
 	fi
 	out="$out_dir/jira-stream.jsonl"
 	desk_log "$pass" "watch: ticket fetch (scope: $([ "$scope_jql" = none ] && echo no || echo yes), changes: $([ "$changes_jql" = none ] && echo no || echo yes))"
-	local model
+	local model max_output
 	model="$(jq -r '.model // empty' <<< "$jira")"
-	desk_call_model --scratch "$scratch" --prompt-file "$prompt_file" \
-		--allowed-tools "$tool" --tools "" --restricted true \
-		--mcp-config "$mcp_config" --strict-mcp-config true \
-		--max-budget-usd "$(jq -r '.max_budget_usd // 1' <<< "$jira")" \
-		${model:+--model "$model"} \
-		--timeout "$(jq -r '.timeout // 300' <<< "$jira")" \
-		--config-dir "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" --out "$out"
+	# Results past this many tokens are saved to a file instead of reaching
+	# the model; the runner reads them from there. A low limit keeps the
+	# tickets' text out of the model's context altogether, which is
+	# cheaper and leaves nothing for the text to steer.
+	max_output="$(jq -r '.max_output_tokens // 2000' <<< "$jira")"
+	(
+		export MAX_MCP_OUTPUT_TOKENS="$max_output"
+		desk_call_model --scratch "$scratch" --prompt-file "$prompt_file" \
+			--allowed-tools "$tool" --tools "" --restricted true \
+			--mcp-config "$mcp_config" --strict-mcp-config true \
+			--max-budget-usd "$(jq -r '.max_budget_usd // 1' <<< "$jira")" \
+			${model:+--model "$model"} --spill-dir "$out_dir/spill" \
+			--timeout "$(jq -r '.timeout // 300' <<< "$jira")" \
+			--config-dir "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" --out "$out"
+	)
 	local rc=$?
 	rm -rf "$scratch"
 	desk_watch_note_cost "$out"
 	desk_extract_tool_uses "$out" > "$out_dir/jira-uses.jsonl"
-	desk_extract_tool_results "$out" > "$out_dir/jira-results.jsonl"
+	desk_extract_tool_results "$out" > "$out_dir/jira-results-raw.jsonl"
+	_desk_watch_resolve_spills "$out_dir/jira-results-raw.jsonl" "$out_dir/spill" > "$out_dir/jira-results.jsonl"
 	local got ok="true"
 	if [ "$scope_jql" != "none" ]; then
 		got="$(_desk_watch_issues_for "$out_dir/jira-uses.jsonl" "$out_dir/jira-results.jsonl" "$scope_jql" "$tool")"
@@ -416,14 +450,18 @@ desk_watch_send() {
 	[ -n "$prompt_rel" ] || { desk_log "$pass" "watch: no send.prompt configured"; echo unconfirmed; return; }
 	scratch="$(desk_scratch_dir "$pass-send")"
 	pinned="$scratch/pinned-args.json"
-	# The message as written, and with one trailing newline: a copied
-	# message may come back with either.
+	# The message as written, and with one trailing newline, since a copied
+	# message may come back with either; and with Claude Code's own
+	# `recipient`, which it fills in from `to`. The other fields it adds
+	# (a `content` preview, `type`, `recipient_kind`) and the model's
+	# `summary` are transcript-only and ignored.
 	jq -n --arg to "$to" --rawfile m "$message_file" \
-		'($m | sub("\\s+$"; "")) as $t | [{to: $to, message: $t}, {to: $to, message: ($t + "\n")}]' > "$pinned"
+		'($m | sub("\\s+$"; "")) as $t
+		| [($t, $t + "\n") as $msg | {to: $to, message: $msg}, {to: $to, recipient: $to, message: $msg}]' > "$pinned"
 	hook="${DESK_DENY_HOOK_SCRIPT:-$DESK_LIB_DIR/deny-unlisted-tool.sh}"
 	[ -f "$hook" ] || { desk_log "$pass" "watch: deny hook missing ($hook) — not sending"; rm -rf "$scratch"; echo unconfirmed; return; }
 	settings="$scratch/deny-hook-settings.json"
-	jq -n --arg cmd "$(desk_shq "$hook") --pinned $(desk_shq "$pinned") --ignore-keys summary -- SendMessage" \
+	jq -n --arg cmd "$(desk_shq "$hook") --pinned $(desk_shq "$pinned") --ignore-keys summary,content,type,recipient_kind -- SendMessage" \
 		'{hooks: {PreToolUse: [{hooks: [{type: "command", command: $cmd, timeout: 10}]}]}}' > "$settings"
 	printf '%s\n' '{"mcpServers":{}}' > "$scratch/empty-mcp.json"
 	prompt_file="$scratch/prompt.txt"
@@ -448,9 +486,15 @@ desk_watch_send() {
 		  | {key: .tool_use_id, value: {err: (.is_error == true), text: text_of}}] | from_entries) as $res
 		| [.[] | select(.type == "assistant") | .message.content[]?
 		   | select(.type == "tool_use" and .name == "SendMessage")
-		   | select((.input | del(.summary)) as $i | any($want[0][]; . == $i))
+		   | select((.input | del(.summary, .content, .type, .recipient_kind)) as $i | any($want[0][]; . == $i))
 		   | $res[.id] // {err: true, text: ""}
-		   | select((.err | not) and ((.text | test("held|approv|refus|not delivered|no inbox|expire|could not|no (live )?(agent|session)|not found"; "i")) | not))]
+		   # The tool answers {"success": bool, "message": ...}; a success
+		   # that says the message was held or refused is not a delivery.
+		   | ((.text | try fromjson catch null) // {}) as $r
+		   | select((.err | not)
+		            and ($r.success // true) == true
+		            and ((($r.message // .text) | tostring
+		                 | test("held|approv|refus|not delivered|no inbox|expire|could not|not reachable|no (live )?(agent|session)|not found"; "i")) | not))]
 		| if length > 0 then "confirmed" else "unconfirmed" end' "$out" 2> /dev/null)"
 	rm -rf "$scratch"
 	printf '%s\n' "${verdict:-unconfirmed}"
@@ -595,7 +639,7 @@ desk_watch_main() {
 	local send preamble_file max_chars tz sent=0 held=0
 	send="$(jq -c '.send // {}' <<< "$pass_config")"
 	preamble_file="$(desk_prompt_path "$(jq -r '.preamble // "prompts/watch-preamble.md"' <<< "$pass_config")")"
-	max_chars="$(jq -r '.message_max_chars // 12000' <<< "$pass_config")"
+	max_chars="$(jq -r '.message_max_chars // 8000' <<< "$pass_config")"
 	tz="$(jq -r '.timezone // empty' "$DESK_CONFIG" 2> /dev/null)"
 	local sid entry queue n hit name live dup back
 	while IFS= read -r sid; do

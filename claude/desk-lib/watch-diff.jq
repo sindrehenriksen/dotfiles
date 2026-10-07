@@ -26,7 +26,9 @@
 | .baseline_jira as $baseline_jira | .baseline_gh as $baseline_gh | .queue_max as $queue_max
 |
 
-def collapse: gsub("\\s+"; " ") | sub("^ "; "") | sub(" $"; "");
+# HTML comments (bots' hidden metadata) are dropped: they carry nothing a
+# session reads, and opaque ids are what a copied message gets wrong.
+def collapse: gsub("<!--[\\s\\S]*?-->"; "") | gsub("\\s+"; " ") | sub("^ "; "") | sub(" $"; "");
 def excerpt($n): collapse | if length > $n then .[0:$n] + "…" else . end;
 
 # Jira and GitHub timestamps (2026-10-07T09:57:40.138+0300, ...Z) to epoch.
@@ -128,12 +130,12 @@ def comment_changes($prev):
 	      | . as $c
 	      | if $seen != null then
 	          if ($seen | index($c.id)) == null then
-	            {at: ($c.created | ts), what: "new comment by \($c.author): \"\($c.body | excerpt(700))\""}
+	            {at: ($c.created | ts), what: "new comment by \($c.author): \"\($c.body | excerpt(500))\""}
 	          elif (($c.updated | ts) // 0) > $jira_since and $c.updated != $c.created then
 	            {at: ($c.updated | ts), what: "comment by \($c.author) edited: \"\($c.body | excerpt(400))\""}
 	          else empty end
 	        elif (($c.created | ts) // 0) > $jira_since then
-	          {at: ($c.created | ts), what: "new comment by \($c.author): \"\($c.body | excerpt(700))\""}
+	          {at: ($c.created | ts), what: "new comment by \($c.author): \"\($c.body | excerpt(500))\""}
 	        else empty end ]
 	  end;
 
@@ -202,7 +204,7 @@ def pr_field_changes($prev):
 			(($prev.labels - $p.labels) | if length > 0 then "labels removed: \(join(", "))" else empty end)
 		 else empty end),
 		(if ($prev | has("body_sig")) and $prev.body_sig != ($p.body | desc_sig)
-		 then "description edited: \"\($p.body | excerpt(900))\"" else empty end),
+		 then "description edited: \"\($p.body | excerpt(600))\"" else empty end),
 		# Checks are reported when the failing set changes, or when a run
 		# finishes; a check that is merely still running is not movement.
 		(if (($prev.failing // []) != $p.checks.fail) or ((($prev.checks_done // true) | not) and $p.checks.pending == 0)
@@ -219,8 +221,8 @@ def pr_comment_changes($prev):
 	           else empty end
 	         | {at: ($c.at | ts),
 	            what: (if $c.kind == "review"
-	                   then "review by \($c.author): \($c.state | ascii_downcase)\(if ($c.body // "") != "" then ", \"" + ($c.body | excerpt(700)) + "\"" else "" end)"
-	                   else "comment by \($c.author): \"\($c.body | excerpt(700))\"" end)} ]
+	                   then "review by \($c.author): \($c.state | ascii_downcase)\(if ($c.body // "") != "" then ", \"" + ($c.body | excerpt(500)) + "\"" else "" end)"
+	                   else "comment by \($c.author): \"\($c.body | excerpt(500))\"" end)} ]
 	  end;
 
 def pr_events:
