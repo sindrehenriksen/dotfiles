@@ -944,6 +944,106 @@ do
 	assert_eq("as does the notes window", "", vim.wo[vim.fn.bufwinid(nb)].winhighlight)
 end
 
+print("\n=== :q from either window ends the review and leaves the user in their notes ===")
+do
+	local function tick()
+		vim.wait(20, function()
+			return false
+		end)
+	end
+	local function setup()
+		local r = new_repo(BASE)
+		build(r, "2026-10-01", { item("n1"), item("a1", { kind = "add", target = { under = "Section A" }, after = "  added", source = "", headline = "add A" }) })
+		local nb = open_notes(r)
+		review.attach(nb)
+		assert_true("review opens", review.open_review(nb))
+		local rb = review_buf_of(nb)
+		return r, nb, rb, vim.fn.bufwinid(rb), vim.fn.bufwinid(nb)
+	end
+	local function left_in_notes(desc, nb)
+		local wins = vim.api.nvim_tabpage_list_wins(0)
+		assert_eq(desc .. ": one window left", 1, #wins)
+		assert_eq(desc .. ": showing the notes", nb, vim.api.nvim_win_get_buf(wins[1]))
+		assert_true(desc .. ": diff off", not vim.wo[wins[1]].diff)
+		assert_eq(desc .. ": no review colours", "", vim.wo[wins[1]].winhighlight)
+		assert_true(desc .. ": the status line, not the keys", vim.wo[wins[1]].winbar ~= review.KEY_HINT)
+		assert_true(desc .. ": no review buffer remains", review_buf_of(nb) == nil)
+	end
+	local orig = review.confirm
+	local asked
+	local function answer(n)
+		asked = 0
+		review.confirm = function()
+			asked = asked + 1
+			return n
+		end
+	end
+
+	-- nothing unsaved: :q in the notes window just ends it
+	answer(3)
+	local _, nb, _, _, nw = setup()
+	vim.api.nvim_set_current_win(nw)
+	vim.cmd("quit")
+	tick()
+	left_in_notes(":q in the notes window", nb)
+	assert_eq("nothing to ask about", 0, asked)
+
+	-- unsaved declines, cancel: the review stays and the notes come back below it
+	local r2, nb2, rb2, rw2, nw2 = setup()
+	go_to(rw2, rb2, "  added")
+	assert_true("decline", review.decline(rb2))
+	answer(3)
+	vim.api.nvim_set_current_win(nw2)
+	vim.cmd("quit")
+	tick()
+	assert_eq("it asked", 1, asked)
+	assert_true("cancel keeps the review and its unsaved decline", vim.api.nvim_buf_is_valid(rb2) and vim.bo[rb2].modified)
+	local nw2b = vim.fn.bufwinid(nb2)
+	assert_true("the notes are shown again", nw2b ~= -1)
+	assert_true("below the review", vim.fn.win_screenpos(rw2)[1] < vim.fn.win_screenpos(nw2b)[1])
+	assert_true("in diff mode with the review colours", vim.wo[nw2b].diff and vim.wo[nw2b].winhighlight == review.NOTES_WINHL)
+	-- then save: the decline is recorded and the review ends
+	answer(1)
+	vim.api.nvim_set_current_win(nw2b)
+	vim.cmd("quit")
+	tick()
+	assert_eq("asked again", 1, asked)
+	assert_eq("save records the decline", 1, #declined_ids(r2))
+	left_in_notes(":q in the notes window, then save", nb2)
+
+	-- discard: nothing recorded
+	local r3, nb3, rb3, rw3, nw3 = setup()
+	go_to(rw3, rb3, "  added")
+	assert_true("decline", review.decline(rb3))
+	answer(2)
+	vim.api.nvim_set_current_win(nw3)
+	vim.cmd("quit")
+	tick()
+	assert_eq("discard records nothing", {}, declined_ids(r3))
+	left_in_notes(":q in the notes window, then discard", nb3)
+
+	-- another buffer in the notes window ends it too
+	answer(3)
+	local _, nb4, rb4, _, nw4 = setup()
+	vim.api.nvim_set_current_win(nw4)
+	vim.cmd("enew")
+	tick()
+	assert_true("the review buffer is gone", not vim.api.nvim_buf_is_valid(rb4))
+	local w4 = vim.fn.bufwinid(nb4)
+	assert_true("the notes are shown where the review was, out of diff mode", w4 ~= -1 and not vim.wo[w4].diff and vim.wo[w4].winhighlight == "")
+
+	-- :wq in the review window: saves the declines and leaves the notes
+	local r5, nb5, rb5, rw5 = setup()
+	go_to(rw5, rb5, "  added")
+	assert_true("decline", review.decline(rb5))
+	vim.api.nvim_set_current_win(rw5)
+	vim.cmd("wq")
+	tick()
+	assert_eq(":wq records the decline", 1, #declined_ids(r5))
+	left_in_notes(":wq in the review window", nb5)
+	review.confirm = orig
+end
+
 print(string.format("\n=== summary: %d passed, %d failed ===", pass, fail))
 if fail > 0 then
 	os.exit(1)

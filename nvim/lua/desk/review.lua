@@ -514,6 +514,97 @@ local function clear_winhl(win)
 	end
 end
 
+-- Turns diff mode and the review's colours off in every window showing the
+-- notes, and puts the status line back over them.
+local function tidy_notes_windows(notes_buf)
+	if not vim.api.nvim_buf_is_valid(notes_buf) then
+		return
+	end
+	for _, win in ipairs(vim.fn.win_findbuf(notes_buf)) do
+		if vim.wo[win].diff then
+			vim.api.nvim_win_call(win, function()
+				vim.cmd("diffoff")
+			end)
+		end
+		clear_winhl(win)
+	end
+	M.refresh_status_line(notes_buf)
+end
+
+-- ---------------------------------------------------------------------------
+-- Quitting the notes window ends the review too, as `:q` in the split does:
+-- the user is left in their notes, shown in the split's window when no other
+-- window has them. Unsaved declines ask first; cancelling keeps the review
+-- and puts the notes back below it.
+-- ---------------------------------------------------------------------------
+
+local watch_notes_window
+
+local function end_from_notes(s)
+	if sessions[s.notes_buf] ~= s or not vim.api.nvim_buf_is_valid(s.review_buf) then
+		return
+	end
+	local notes_ok = vim.api.nvim_buf_is_valid(s.notes_buf)
+	if notes_ok and vim.api.nvim_win_is_valid(s.notes_win) and vim.api.nvim_win_get_buf(s.notes_win) == s.notes_buf then
+		return -- the notes are back where they were: nothing ended
+	end
+	local review_win = vim.fn.bufwinid(s.review_buf)
+	if notes_ok and vim.bo[s.review_buf].modified then
+		local choice = M.confirm("The review split has unsaved declines.", "&Save them\n&Discard them\n&Cancel")
+		if choice == 1 then
+			local saved, why = M.save_review(s)
+			if not saved then
+				vim.notify("desk: " .. tostring(why), vim.log.levels.WARN)
+				choice = 3
+			end
+		end
+		if choice ~= 1 and choice ~= 2 then
+			local win = vim.fn.win_findbuf(s.notes_buf)[1]
+			if not win and review_win ~= -1 then
+				vim.api.nvim_win_call(review_win, function()
+					vim.cmd("belowright split")
+					win = vim.api.nvim_get_current_win()
+				end)
+				vim.api.nvim_win_set_buf(win, s.notes_buf)
+			end
+			if win then
+				vim.api.nvim_win_call(win, function()
+					vim.cmd("diffthis")
+				end)
+				set_winhl(win, M.NOTES_WINHL)
+				s.notes_win = win
+				watch_notes_window(s, win)
+				M.refresh_status_line(s.notes_buf)
+			end
+			return
+		end
+	end
+	vim.bo[s.review_buf].modified = false
+	if notes_ok and #vim.fn.win_findbuf(s.notes_buf) == 0 and review_win ~= -1 then
+		vim.api.nvim_win_set_buf(review_win, s.notes_buf)
+	end
+	close_session(s)
+	tidy_notes_windows(s.notes_buf)
+end
+
+-- The events run inside a window being closed, where the layout can't
+-- change, so the ending waits for the next tick (once for both events).
+watch_notes_window = function(s, win)
+	local group = vim.api.nvim_create_augroup("desk_review_notes_" .. s.notes_buf, { clear = true })
+	local function soon()
+		if s.ending then
+			return
+		end
+		s.ending = true
+		vim.schedule(function()
+			s.ending = false
+			end_from_notes(s)
+		end)
+	end
+	vim.api.nvim_create_autocmd("WinClosed", { group = group, pattern = tostring(win), callback = soon })
+	vim.api.nvim_create_autocmd("BufWinLeave", { group = group, buffer = s.notes_buf, callback = soon })
+end
+
 --- Asks a question with choices; the number picked, 0 when cancelled or
 --- when nothing can answer. Replaceable, so a headless run can answer.
 function M.confirm(msg, choices)
@@ -632,7 +723,8 @@ function M.open_review(notes_buf)
 	install_colours()
 	set_winhl(review_win, M.REVIEW_WINHL)
 	set_winhl(notes_win, M.NOTES_WINHL)
-	s.review_win = review_win
+	s.notes_win = notes_win
+	watch_notes_window(s, notes_win)
 
 	vim.api.nvim_create_autocmd("BufWritePost", {
 		group = vim.api.nvim_create_augroup("desk_taken_" .. notes_buf, { clear = true }),
@@ -664,14 +756,10 @@ function M.open_review(notes_buf)
 			if sessions[notes_buf] == s then
 				sessions[notes_buf] = nil
 			end
-			if vim.api.nvim_buf_is_valid(notes_buf) then
-				for _, win in ipairs(vim.fn.win_findbuf(notes_buf)) do
-					vim.api.nvim_win_call(win, function()
-						vim.cmd("diffoff")
-					end)
-					clear_winhl(win)
-				end
+			if sessions[notes_buf] == nil then
+				pcall(vim.api.nvim_del_augroup_by_name, "desk_review_notes_" .. notes_buf)
 			end
+			tidy_notes_windows(notes_buf)
 		end,
 	})
 	-- Plain `do` on the last line does nothing when a suggestion is appended

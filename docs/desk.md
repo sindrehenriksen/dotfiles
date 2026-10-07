@@ -301,7 +301,8 @@ In the review split:
 | `<leader>gD` | Decline the suggestion under the cursor. |
 | `u` | Undo the latest take or decline made here. A take is undone in your notes buffer, unless you have edited your notes since, when it says so and leaves them alone; anything else is plain undo. |
 | `<leader>go` | The overview. |
-| `:w` | The commit point: records as declined every suggestion whose lines are gone from both the split and your notes, restores any declined this session whose lines are back, and records pending takes. Closing the split without saving records nothing. |
+| `:w` | The commit point: records as declined every suggestion whose lines are gone from both the split and your notes, restores any declined this session whose lines are back, and records pending takes. |
+| `:q`, `:wq` | `:q` from either window ends the review and leaves you in your notes; `:wq` in the review split also saves declines. Quitting the split without saving records nothing; quitting your notes window over unsaved declines asks to save, discard or cancel, and cancelling puts your notes back below the split. |
 
 A take is remembered when you make it and recorded on the next save of either buffer, so a suggestion you edit right after taking stays taken. The notes window's winbar shows the status line: each pass's last result, untaken suggestions, closes and lockouts. The review split's own winbar lists its keys in one line.
 
