@@ -651,7 +651,7 @@ end
 -- the table in the desk guide doesn't have to be open beside it. Kept to
 -- about 120 columns with the count, which is why plain diff motion (]c/[c)
 -- is left out. Each bar names only the window key that leaves it.
-M.KEY_HINT = "dp take · ␣gA one · ␣gD decline · u undo · zo/zc fold · zR/zM all · C-n down · ␣go list · :wq done"
+M.KEY_HINT = "]c/[c next · dp take · ␣gA one · ␣gD decline · u undo · zo/zc/zR/zM fold · C-n down · ␣go list"
 -- The notes window's keys while a review is open, right-aligned after its
 -- status line. `u` there is plain undo, which is right in that buffer.
 M.NOTES_KEY_HINT = "do take · u undo · C-t up"

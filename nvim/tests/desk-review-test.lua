@@ -852,7 +852,7 @@ do
 	counts("at open: this review's own, live and recorded", 3, 3)
 	assert_true("the top bar fits in 120 columns with two-digit counts", vim.fn.strchars("99 left (99 saved) · " .. review.KEY_HINT) <= 120)
 	assert_true("the top bar names the window below, not above", review.KEY_HINT:match("C%-n down") and not review.KEY_HINT:match("C%-t"))
-	assert_true("and the folds", review.KEY_HINT:match("zo/zc fold · zR/zM all"))
+	assert_true("and the folds", review.KEY_HINT:match("zo/zc/zR/zM fold"))
 	assert_true("the notes bar names the window above, not below", review.NOTES_KEY_HINT:match("C%-t up") and not review.NOTES_KEY_HINT:match("C%-n"))
 
 	go_to(rw, rb, "  added A")
