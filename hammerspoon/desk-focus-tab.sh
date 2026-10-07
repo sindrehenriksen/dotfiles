@@ -4,13 +4,11 @@
 # notes hotkey's live-session case, alongside desk-open-tab.sh for
 # resuming a non-live one.
 #
-# Unlike desk-open-tab.sh (fire-and-forget: opening a tab has nothing
-# useful to fall back to), this script's exit code is load-bearing: the
-# hotkey must never resume a session its own focus attempt just failed on,
-# so it reads DeskFocusTab's true/false return off `hs -c`'s own output
-# rather than just trusting `hs -c`'s process exit code, which reflects
-# whether the IPC connection worked, not whether the Lua call it ran
-# returned true.
+# Its exit code is load-bearing: the hotkey must never resume a session its
+# own focus attempt just failed on, so it reads DeskFocusTab's true/false
+# return off `hs -c`'s own output rather than just trusting `hs -c`'s
+# process exit code, which reflects whether the IPC connection worked, not
+# whether the Lua call it ran returned true. desk-open-tab.sh does the same.
 #
 # A hang or timeout is a failure like any other (exit 124), so the hotkey
 # reports it and still never resumes.

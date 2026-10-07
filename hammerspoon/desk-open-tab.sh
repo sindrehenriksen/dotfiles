@@ -69,4 +69,17 @@ run_hs() {
 
 expr="DeskOpenTab($(lua_string "$cmd"), $(lua_arg "$session_id"), $(lua_arg "$cwd"), $opts)"
 
-run_hs "$expr"
+# DeskOpenTab's own true/false is the last line hs prints; hs's exit status
+# only says whether the IPC call went through. The runner stamps a tab as
+# opened on exit 0, so a false must not exit 0.
+out=$(run_hs "$expr")
+hs_status=$?
+if [ "$hs_status" -ne 0 ]; then
+    printf '%s\n' "$out" >&2
+    exit "$hs_status"
+fi
+if [ "$(printf '%s\n' "$out" | tail -n1)" = "true" ]; then
+    exit 0
+fi
+printf '%s\n' "$out" >&2
+exit 1

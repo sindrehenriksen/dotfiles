@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# hammerspoon/desk-open-tab.sh and desk-focus-tab.sh never hang on `hs`:
+# hammerspoon/desk-open-tab.sh and desk-focus-tab.sh never hang on `hs`,
+# and report the Lua call's own true/false as their exit status:
 #   - hs gets /dev/null on stdin, so a caller whose own stdin never closes
 #     (an agent's shell) cannot leave it waiting for more commands;
 #   - an hs that never returns is killed after DESK_HS_TIMEOUT_SECS and
@@ -82,6 +83,12 @@ echo "=== an hs that answers in time is unaffected ==="
 stub_hs 'echo "DeskFocusTab: no Ghostty tab is running ttys001"; echo false'
 read -r status _ < <(timed "$FOCUS_TAB_SH" ttys001 < /dev/null)
 assert_eq "a false from DeskFocusTab is still exit 1" "1" "$status"
+stub_hs 'echo "DeskOpenTab: not opening"; echo false'
+read -r status _ < <(timed "$OPEN_TAB_SH" "echo hi" < /dev/null)
+assert_eq "a false from DeskOpenTab is exit 1, so the runner never stamps it opened" "1" "$status"
+stub_hs 'echo true'
+read -r status _ < <(timed "$OPEN_TAB_SH" "echo hi" < /dev/null)
+assert_eq "a true from DeskOpenTab is exit 0" "0" "$status"
 stub_hs 'printf "%s\n" "$@" > "'"$ROOT"'/argv"; echo true'
 read -r status _ < <(timed "$FOCUS_TAB_SH" ttys001 < /dev/null)
 assert_eq "a true from DeskFocusTab is exit 0" "0" "$status"

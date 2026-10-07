@@ -72,6 +72,7 @@ for a in "\$@"; do
 	prev="\$a"
 done
 cat "$ROOT/state/status.json" > "$HS_STATUS_LOG" 2> /dev/null
+echo true
 exit 0
 FAKE
 chmod +x "$FAKEBIN"/*
