@@ -1,9 +1,9 @@
 -- The ledger: one append-only JSON-lines blob on `refs/desk/ledger` in the
--- notes repo. It holds what he DECIDED — never a copy of what was proposed
+-- notes repo. It holds what the user DECIDED — never a copy of what was proposed
 -- (that is the proposal commit, desk.proposal): `decline` / `restore` /
 -- `restore_applied` records for the decline ledger, keyed by item id and by
 -- source URL, and `taken` records, the provenance of suggestions whose text
--- first reached his HEAD, by content hash (the weekly's agent-text
+-- first reached the user's HEAD, by content hash (the weekly's agent-text
 -- exclusion). This module reads it and appends to it through the
 -- compare-and-swap-with-retry helper.
 local git = require("desk.git")
@@ -101,9 +101,9 @@ function M.namespace_ids(repo_dir, pass, scheduled_date, items, extra_used_ids)
 end
 
 -- ---------------------------------------------------------------------------
--- Decisions (stateless diff review): the ledger now holds only what he
+-- Decisions (stateless diff review): the ledger now holds only what the user
 -- decided, never a copy of what was proposed. `decline` records carry the
--- whole item so a restore can put it back; `restore` records (his undo from
+-- whole item so a restore can put it back; `restore` records (the user's undo from
 -- the declined-recently list) hand an item back to the next pass, which
 -- notes it with `restore_applied` once it has re-proposed it; `taken`
 -- records are provenance for the weekly's agent-text exclusion (the item's
@@ -229,7 +229,7 @@ function M.declined(records)
 	return { ids = ids, sources = sources, keys = keys, list = list }
 end
 
---- Items he restored that no pass has re-proposed yet.
+--- Items the user restored that no pass has re-proposed yet.
 function M.restored(records)
 	local out = {}
 	local latest = M.decisions(records)
@@ -252,7 +252,7 @@ function M.taken_by_id(records)
 	return out
 end
 
---- The URL sources of everything ever taken: a story he has already taken
+--- The URL sources of everything ever taken: a story the user has already taken
 --- is not offered again under a new id.
 function M.taken_sources(records)
 	local out = {}

@@ -20,7 +20,7 @@
 # live pid file's own user-set name — vs "ai_or_none": an ai-title fallback
 # or no name at all), older_names, cwd, live, status, last_activity,
 # last_human_message (epoch seconds: the latest transcript record that is text
-# he typed — not a tool_result, meta or compaction record, task
+# the user typed — not a tool_result, meta or compaction record, task
 # notification or command/bash/system wrapper — falling back to the
 # session's start; this, not last_activity, is the idle measure, since
 # last_activity also moves on status updates, resumes and tool results),
@@ -29,9 +29,9 @@
 # any_desk_run_start (true if ANY start event this session ever recorded
 # had source "desk-run" — the capture step keys its own
 # exclusion off THIS, never off `source` alone: a scheduled call's session
-# he later resumes himself gets a real second start event, e.g. "resume",
+# the user later resumes themselves gets a real second start event, e.g. "resume",
 # which would overwrite `source` and — checked against the last start
-# alone — silently drop the exclusion right as he starts actually using
+# alone — silently drop the exclusion right as the user starts actually using
 # it), ended, end_reason, close_failed, close_failed_at, transcript_path,
 # has_start_event, pid, tty (the last two null unless live), duplicate_pids
 # (true when more than one $CLAUDE_CONFIG_DIR/sessions/*.json pid file
@@ -49,7 +49,7 @@
 #   session-status.sh resolve <token>
 #       Exact match against a session's *user-set* name (a custom
 #       title, or a live session whose pid file says nameSource "user") —
-#       never an ai-title fallback, which isn't a name he chose. When no
+#       never an ai-title fallback, which isn't a name the user chose. When no
 #       name matches, the token may instead be a session id or a unique
 #       prefix of one (8+ characters): the short id an unnamed capture
 #       carries. An id match is never ranked; several are reported as
@@ -511,7 +511,7 @@ fi
 [ -n "$new_entries_json" ] || new_entries_json='{}'
 
 # The latest human message per changed transcript: a type-user record whose
-# content is text typed by him, not a tool_result, a meta/compaction record,
+# content is text typed by the user, not a tool_result, a meta/compaction record,
 # a task notification or a slash-command/bash/system wrapper. Scanned from
 # the cached human_offset like the titles, but on its own offset since only
 # whole lines are ever consumed. The rg prefilter drops tool_result records
@@ -605,7 +605,7 @@ fi
 #    into a variable rather than streamed straight to stdout, since `resolve`
 #    mode below needs to filter and rank this same set rather than re-derive
 #    it. `_name_source` is dropped before anything is actually printed (both
-#    modes) — it exists only so resolve can tell a name he chose from an
+#    modes) — it exists only so resolve can tell a name the user chose from an
 #    ai-title fallback without a second join.
 # --------------------------------------------------------------------------
 printf '%s' "$titles_by_id" > "$WORK_DIR/titles.json"
@@ -695,7 +695,7 @@ case "${1:-}" in
             map(select(._name_source == "user" and .name == $token) | del(._name_source))
         ')
         if [ "$(printf '%s' "$matches" | jq 'length')" = "0" ] && [ -n "$token" ]; then
-            # Not a name he set: an unnamed capture is labelled by its short
+            # Not a name the user set: an unnamed capture is labelled by its short
             # session id, so a full id or a unique 8+-character id prefix
             # resolves too. Never a guess: several matches are reported as
             # candidates, not ranked.
@@ -737,7 +737,7 @@ case "${1:-}" in
         exit 1
         ;;
     "")
-        # name_source ("user" vs "ai_or_none") tells apart a session he
+        # name_source ("user" vs "ai_or_none") tells apart a session the user
         # actually named from one only ever known by its auto title — the
         # 16:30 capture's own "unnamed" needs exactly this,
         # not just an empty .name (an ai-title fallback is never empty when

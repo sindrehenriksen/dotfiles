@@ -2,7 +2,7 @@
 # Tests for desk-denylist-check.sh's two invocation forms, and for
 # git-hooks/pre-push's own routing in front of the hook form.
 #
-# His `core.hooksPath` points every repo on the machine at THIS repo's
+# The user's `core.hooksPath` points every repo on the machine at THIS repo's
 # git-hooks dir, so pre-push must fire the denylist check only when the
 # repo actually being pushed is this repo — every other repo passes
 # straight through regardless of its own (unset, or leftover) `desk.denylist`.
@@ -12,7 +12,7 @@
 #     the repo being pushed IS the repo the hooks belong to, same as the
 #     real dotfiles-desk arrangement. The denylist check must fire here.
 #   - "other" repo: an unrelated throwaway repo whose core.hooksPath
-#     points at THIS repo's real git-hooks dir — modelling his global
+#     points at THIS repo's real git-hooks dir — modelling the user's global
 #     hooksPath pointing every other repo at these same hooks. The
 #     denylist check must never fire here, regardless of what
 #     `desk.denylist` says (including a leftover config naming a pattern

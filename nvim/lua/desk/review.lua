@@ -1,18 +1,18 @@
 -- The stateless diff review. A pass leaves ONE proposal commit
--- (desk.proposal): his HEAD at pass time as its parent, the files with every
--- suggestion applied as its tree. Nothing in it ever enters his notes unless
--- he takes it, and nothing here tracks a suggestion by position.
+-- (desk.proposal): the user's HEAD at pass time as its parent, the files with every
+-- suggestion applied as its tree. Nothing in it ever enters the user's notes unless
+-- the user takes it, and nothing here tracks a suggestion by position.
 --
--- Review key: merges his CURRENT buffer text (ours) with the proposal
--- (theirs) against the pass-time version (base) with `git merge-file`, his
+-- Review key: merges the user's CURRENT buffer text (ours) with the proposal
+-- (theirs) against the pass-time version (base) with `git merge-file`, the user's
 -- text winning any conflict, and opens the result in a stacked split as an
--- `acwrite` scratch buffer, both windows in diff mode. He takes a hunk with
+-- `acwrite` scratch buffer, both windows in diff mode. The user takes a hunk with
 -- `do` in the notes window (editing first is fine) and leaves one alone to
 -- mean "not now" (the next pass carries it). The decline key makes the hunk
--- under the cursor in the review split equal his text — an ordinary edit, so
--- plain `u` undoes it. Nothing is recorded until he SAVES the review split:
+-- under the cursor in the review split equal the user's text — an ordinary edit, so
+-- plain `u` undoes it. Nothing is recorded until the user SAVES the review split:
 -- that is the commit point, recording every suggestion whose lines are gone
--- from the review buffer and not in his notes as declined. A discarded
+-- from the review buffer and not in the user's notes as declined. A discarded
 -- review buffer records nothing. Adjacent suggestions are one diff hunk, so
 -- the decline key (and `<leader>gA`, which takes one) act on a single
 -- suggestion's own lines rather than the whole hunk.
@@ -60,9 +60,9 @@ end
 -- The merged view
 -- ---------------------------------------------------------------------------
 
---- The merged view of his current text with the proposal (see
+--- The merged view of the user's current text with the proposal (see
 --- desk.proposal.merged_lines): the union merge, which keeps a suggestion
---- his own nearby edit conflicts with instead of dropping it.
+--- the user's own nearby edit conflicts with instead of dropping it.
 function M.merged_lines(repo, p, file, ours_lines)
 	local clean, union = proposal.merged_lines(repo, p, file, ours_lines)
 	if not clean then
@@ -86,9 +86,9 @@ local function session_for_review_buf(buf)
 end
 
 -- ---------------------------------------------------------------------------
--- Taken by decision: when he takes a suggestion (`do` in his notes, or the
+-- Taken by decision: when the user takes a suggestion (`do` in the user's notes, or the
 -- take key in the review split) its id is remembered, and the next save of
--- either buffer records it as taken by that id — so a suggestion he edits
+-- either buffer records it as taken by that id — so a suggestion the user edits
 -- after taking it is still taken, not re-proposed, and not declined by the
 -- review split's save.
 -- ---------------------------------------------------------------------------
@@ -133,7 +133,7 @@ local function remember_taken(s, item, pre)
 	pend.ids[item.id] = { item = item, base = s.base, seq = undo_seq(s.notes_buf), pre = pre }
 end
 
---- Remembers every shown suggestion whose text reached his notes buffer
+--- Remembers every shown suggestion whose text reached the user's notes buffer
 --- since `pre` (the buffer's lines before the take), plus `known` (the
 --- item the take key acted on, whatever its edited text).
 local function note_takes(s, pre, known)
@@ -154,8 +154,8 @@ local function note_takes(s, pre, known)
 	end
 end
 
---- Records, as taken, the suggestions he took since the last flush. One
---- whose take he has undone (the text is not there, and the buffer is back
+--- Records, as taken, the suggestions the user took since the last flush. One
+--- whose take the user has undone (the text is not there, and the buffer is back
 --- before the take) is dropped. Returns how many were recorded.
 function M.flush_taken(notes_buf)
 	local pend = pending_taken[notes_buf]
@@ -201,7 +201,7 @@ local function close_session(s)
 end
 
 --- Records as declined every shown suggestion whose lines are gone from the
---- review buffer and not present in his notes — the review split's save.
+--- review buffer and not present in the user's notes — the review split's save.
 function M.save_review(s)
 	if not vim.api.nvim_buf_is_valid(s.review_buf) then
 		return false, "review buffer is gone"
@@ -226,7 +226,7 @@ function M.save_review(s)
 		return a.id < b.id
 	end)
 	-- Undo after a save: a suggestion this session declined whose lines are
-	-- back in the review buffer or his notes is no longer declined.
+	-- back in the review buffer or the user's notes is no longer declined.
 	s.declined_here = s.declined_here or {}
 	for id in pairs(s.declined_here) do
 		local item = s.shown[id]
@@ -591,7 +591,7 @@ function M.place_marks(s, ours)
 end
 
 -- The first row of the occurrence of `item.before` the proposal anchored,
--- in `lines`: the base text's anchored occurrence carried across his edits,
+-- in `lines`: the base text's anchored occurrence carried across the user's edits,
 -- else the anchor's own first occurrence. nil if it is not there.
 local function anchored_start(s, item, lines)
 	local before = snippet.split_lines(item.before)
@@ -702,7 +702,7 @@ local function decline_item(s, item)
 	return changed
 end
 
--- Takes `item` into his notes buffer: its lines go in at the place the
+-- Takes `item` into the user's notes buffer: its lines go in at the place the
 -- review shows them, its deleted lines go out of their anchored occurrence.
 local function take_item(s, item)
 	local nbuf = s.notes_buf
@@ -738,7 +738,7 @@ end
 
 --- The review-buffer line range of the suggestion whose lines contain
 --- `line`, or nil (a removal has no lines of its own there, and plain text
---- of his own is no suggestion). Adjacent suggestions form ONE diff hunk, so
+--- of the user's own is no suggestion). Adjacent suggestions form ONE diff hunk, so
 --- acting on a single suggestion means acting on this range, not the hunk.
 function M.item_range(s, line)
 	for _, item in pairs(s.shown) do
@@ -758,7 +758,7 @@ function M.item_range(s, line)
 	end
 end
 
--- Runs `diffget` (obtain from his notes) or `diffput` (hand to his notes)
+-- Runs `diffget` (obtain from the user's notes) or `diffput` (hand to the user's notes)
 -- for the suggestion under the cursor in the review split, or for the whole
 -- hunk there when the cursor isn't on a suggestion's own lines. Returns
 -- whether either buffer changed.
@@ -813,7 +813,7 @@ local function act_on_item(s, verb)
 end
 
 --- The decline key: makes the suggestion under the cursor in the review
---- split equal his text (it obtains his side), so its diff disappears. An
+--- split equal the user's text (it obtains the user's side), so its diff disappears. An
 --- ordinary edit — `u` undoes it; nothing is recorded until the review split
 --- is saved.
 function M.decline(review_buf)
@@ -831,9 +831,9 @@ function M.decline(review_buf)
 	return ok, why
 end
 
---- Takes the suggestion under the cursor into his notes buffer (just that
---- one — `do` in his window takes the whole hunk, which can be several
---- adjacent suggestions). His buffer stays unsaved until he commits.
+--- Takes the suggestion under the cursor into the user's notes buffer (just that
+--- one — `do` in the user's window takes the whole hunk, which can be several
+--- adjacent suggestions). The user's buffer stays unsaved until the user commits.
 function M.take(review_buf)
 	local s = session_for_review_buf(review_buf)
 	if not s then
@@ -858,8 +858,8 @@ M.DECLINED_TITLE = "Desk declined recently"
 M.DECLINED_WINDOW_DAYS = 14
 
 --- The suggestions still left as hunks right now: shown at open, still
---- proposed in the review buffer, not yet in his notes. Each with the review
---- buffer line (`lnum`) and the line of HIS notes window the hunk aligns
+--- proposed in the review buffer, not yet in the user's notes. Each with the review
+--- buffer line (`lnum`) and the line of THE USER'S notes window the hunk aligns
 --- with (`notes_lnum`, where `do` takes it in diff mode), sorted by position.
 function M.remaining(s)
 	local review_lines = buf_lines(s.review_buf)
@@ -982,9 +982,9 @@ end
 
 --- The quickfix `<CR>` handler for every quickfix buffer (installed once,
 --- globally): anything that isn't desk's own overview falls through to the
---- ordinary jump. An overview entry jumps in HIS NOTES window, to the line
+--- ordinary jump. An overview entry jumps in THE USER'S NOTES window, to the line
 --- aligned with the hunk (so `do` there takes it) — through the jumplist
---- (`m'` first), so Ctrl-O returns to where he was in his notes.
+--- (`m'` first), so Ctrl-O returns to where the user was in the user's notes.
 function M.qf_jump()
 	if is_loclist_win(vim.api.nvim_get_current_win()) then
 		vim.cmd(vim.fn.line(".") .. "ll")
@@ -1112,10 +1112,10 @@ function M.qf_restore()
 end
 
 -- ---------------------------------------------------------------------------
--- His commit key
+-- The user's commit key
 -- ---------------------------------------------------------------------------
 
---- Saves his notes buffer and commits the file as it is, then records any
+--- Saves the user's notes buffer and commits the file as it is, then records any
 --- suggestion now in HEAD as taken. A no-op commit when nothing changed.
 function M.commit(bufnr)
 	local repo, file = M.repo_context(bufnr)

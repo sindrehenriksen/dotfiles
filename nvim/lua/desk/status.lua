@@ -10,7 +10,7 @@
 -- (claude/desk-lib/status.sh, read-only here): `proposal` is `{state:
 -- "pending"|"partial"|"none", partial, overflow: {act, worth_knowing,
 -- wildcard}, counts, untaken}` — `untaken` is how many suggestions still
--- wait on him (not taken, not declined), and `state` alone doesn't mean
+-- wait on the user (not taken, not declined), and `state` alone doesn't mean
 -- "something's unresolved", so the segment only shows when `untaken` is
 -- nonzero. `closes` / `refused_closes` / `failed_closes` / `lockouts` are
 -- each a plain count. If the runner ends up writing something else, this is
@@ -60,7 +60,7 @@ end
 
 --- The proposal segment: "proposal pending", "proposal partial", and any
 --- "+N more ACT → brief" / worth_knowing / wildcard overflow counts. Only
---- shown while at least one suggestion still waits on him (`untaken`).
+--- shown while at least one suggestion still waits on the user (`untaken`).
 local function proposal_segments(status, opts)
 	local out = {}
 	local p = status.proposal or {}
@@ -111,7 +111,7 @@ end
 --- A single-line summary, segments joined with " · ", or "" if the status
 --- file is missing/empty (so a statusline component can just show nothing
 --- rather than a placeholder).
---- `opts.untaken` is the live count of suggestions still waiting on him
+--- `opts.untaken` is the live count of suggestions still waiting on the user
 --- (what a review would show); without it the runner's own `untaken`
 --- applies, which only moves when a pass runs.
 function M.summary(status, opts)

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # T's own two jobs:
-# building the `key in (...)` query from every ticket-like token in his
+# building the `key in (...)` query from every ticket-like token in the user's
 # notes, and turning T's raw search results — either Jira shape — into
 # the ticket cache the editor reads. Never the model's reply: T's own
 # prompt (prompts/ticket-status.md) tells it to reply "done" and nothing
@@ -22,7 +22,7 @@ DESK_TICKET_CACHE="${DESK_TICKET_CACHE:-${DESK_STATE_DIR:-$HOME/.local/state/des
 # `tokens` entry whose handler is "url" (annotate.lua's own url-handler
 # tokens — a "session" handler entry never names a ticket), case-folded
 # per that entry's own `case_insensitive`, and always upper-cased in the
-# output (Jira keys are canonically upper-case; his notes mix casing, per
+# output (Jira keys are canonically upper-case; the user's notes mix casing, per
 # annotate.lua's own comment, but a JQL `key in (...)` needs one spelling
 # per key or it just matches the same issue twice).
 desk_ticket_keys_from_text() {
@@ -101,7 +101,7 @@ desk_parse_jira_issues() {
 # {"status": "...", "summary": "..."}}}. Prints "ok" and writes the file,
 # or "failed" and writes nothing (on failure the old cache
 # stays, its age visible) when not one page parsed as valid JSON — an
-# empty issue list from valid JSON (his notes name zero tickets, or all
+# empty issue list from valid JSON (the user's notes name zero tickets, or all
 # are gone) is still an "ok", refreshing checked_at with an empty map.
 # `<tool-name>` is the instantiation's own ticket-search tool (desk-run's
 # own required $DESK_CONFIG field "ticket_search_tool") — never a literal

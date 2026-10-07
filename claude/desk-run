@@ -79,7 +79,7 @@ fi
 # Generic ids: dotfiles is public and names no instantiation-specific fact
 # of any kind, which extends to the exact MCP tool names an
 # instantiation's own connectors happen to expose, the step ids it
-# special-cases for ticket status and mail, and his own timezone — none of
+# special-cases for ticket status and mail, and the user's own timezone — none of
 # those are guessable defaults this repo can ship, so every one is a
 # required $DESK_CONFIG field, failing loudly (never a silent fallback to
 # a work-specific literal) when absent.
@@ -96,7 +96,7 @@ for required_field in timezone ticket_search_tool mail_search_tool ticket_status
 done
 
 # Weekdays only for morning/16:30's own MODEL steps — but commit-and-push runs every day, weekends included:
-# a weekend still deserves whatever his own text picked up committed (and
+# a weekend still deserves whatever the user's own text picked up committed (and
 # pushed, once push_enabled) even though nothing is calling a model.
 # Checked against the step loop below rather than a whole-pass early exit,
 # so a weekend invocation still takes the lock, runs the once-a-day guard,
@@ -645,7 +645,7 @@ desk_open_follow_up_tab "$pass" "$scheduled_date" "$follow_up_step" > /dev/null
 # -----------------------------------------------------------------------
 
 # proposal: state ("partial" if this pass leaves any source failed,
-# "pending" while any suggestion still waits on him — untaken, undeclined,
+# "pending" while any suggestion still waits on the user — untaken, undeclined,
 # applied — and "none" otherwise, from the CURRENT standing proposal, not
 # just what this pass itself staged, since a pass with no judge step still
 # has to report on whatever's already sitting there); overflow (this

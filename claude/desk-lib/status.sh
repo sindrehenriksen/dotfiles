@@ -12,7 +12,7 @@
 # guard's own key, set on the most recent "ok" — desk-lib/lock.sh's
 # desk_scheduled_date_for, not necessarily last_run's own calendar date).
 # Top-level: proposal ({state, partial, overflow, counts, untaken} —
-# untaken is how many suggestions still wait on him), closes/refused_closes/
+# untaken is how many suggestions still wait on the user), closes/refused_closes/
 # failed_closes/lockouts (plain counts; closed_names holds the last few
 # closed sessions' names), push (a plain status string),
 # ticket_cache_age. The runner writes the per-pass fields and the push/lockouts/

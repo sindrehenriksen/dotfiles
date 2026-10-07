@@ -74,7 +74,7 @@ if verb == "blocks" then
 	os.exit(0)
 elseif verb == "proposal-build" then
 	-- Usage: proposal-build <repo> <pass> <scheduled-date> <items-json-file> <file>...
-	-- The pass's one proposal commit (desk.proposal.build): his newest HEAD
+	-- The pass's one proposal commit (desk.proposal.build): the user's newest HEAD
 	-- plus the previous proposal's untaken, undeclined items plus the new
 	-- items in <items-json-file> ({"items": [...]}), all applied, written as
 	-- the tip of refs/desk/proposal. Prints {sha, stats} or {error}.
@@ -108,7 +108,7 @@ elseif verb == "proposal-read" then
 	os.exit(0)
 elseif verb == "proposal-open" then
 	-- Usage: proposal-open <repo>
-	-- The tip proposal's items still waiting on him: not taken, not
+	-- The tip proposal's items still waiting on the user: not taken, not
 	-- declined, and applied (a deferred item has no hunk to take).
 	local repo = args[2]
 	if not repo then
@@ -119,7 +119,7 @@ elseif verb == "proposal-open" then
 elseif verb == "declined-recent" then
 	-- Usage: declined-recent <repo> [limit]
 	-- The most recent currently-declined items (newest first, default 50), so
-	-- a judge is told what he already turned down.
+	-- a judge is told what the user already turned down.
 	local repo, limit = args[2], tonumber(args[3] or "") or 50
 	if not repo then
 		fail("usage: nvim -l nvim/lua/desk/cli.lua declined-recent <repo> [limit]")
@@ -135,7 +135,7 @@ elseif verb == "declined-recent" then
 	os.exit(0)
 elseif verb == "taken-sync" then
 	-- Usage: taken-sync <repo>
-	-- Records, as taken, every tip-proposal item whose `after` is now in his
+	-- Records, as taken, every tip-proposal item whose `after` is now in the user's
 	-- HEAD (desk.proposal.sync_taken). The runner calls it after its own
 	-- daily commit. Prints {recorded: [ids]}.
 	local repo = args[2]
@@ -151,7 +151,7 @@ elseif verb == "taken-sync" then
 elseif verb == "taken-lines" then
 	-- Usage: taken-lines <repo> <file>
 	-- The agent-originated lines of `file`: every taken item's `after`
-	-- lines, for the runner's marked copy of his notes. Prints {lines}.
+	-- lines, for the runner's marked copy of the user's notes. Prints {lines}.
 	local repo, file = args[2], args[3]
 	if not repo or not file then
 		fail("usage: nvim -l nvim/lua/desk/cli.lua taken-lines <repo> <file>")
@@ -193,15 +193,15 @@ elseif verb == "ledger-state" then
 elseif verb == "notes-diff" then
 	-- Usage: notes-diff <repo> <file> <since>
 	-- The weekly tab's own notes-diff input:
-	-- his own additions/removals in `file` between `since` (any commit-
+	-- the user's own additions/removals in `file` between `since` (any commit-
 	-- ish) and HEAD, with every line the taken-provenance records call
 	-- agent-originated excluded on its own side. Records any item newly in
-	-- his HEAD as taken first, so a commit made outside the review key or
+	-- the user's HEAD as taken first, so a commit made outside the review key or
 	-- the runner is still attributed.
 	--
 	-- Additions: every taken item's own `after` lines. Removals: every
 	-- taken item's own `before` lines — a plain content lookup, so a line
-	-- he took into HEAD and later moved or replaced is still excluded.
+	-- the user took into HEAD and later moved or replaced is still excluded.
 	local repo, file, since = args[2], args[3], args[4]
 	if not repo or not file or not since then
 		fail("usage: nvim -l nvim/lua/desk/cli.lua notes-diff <repo> <file> <since>")

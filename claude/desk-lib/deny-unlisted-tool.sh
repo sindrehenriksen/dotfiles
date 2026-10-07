@@ -9,7 +9,7 @@
 # `--allowedTools` plus `--permission-mode dontAsk` already refuse an
 # unlisted tool on their own; this hook is the second, independent layer a
 # connector call needs specifically because loading user settings (required
-# to load the claude.ai connectors at all) also loads his 220 allow rules,
+# to load the claude.ai connectors at all) also loads the user's 220 allow rules,
 # which this hook denies regardless of.
 #
 # `--pinned <file>`: <file> holds a JSON array of exact tool_input shapes

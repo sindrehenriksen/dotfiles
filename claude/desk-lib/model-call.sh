@@ -177,16 +177,16 @@ desk_write_deny_hook_settings() {
 # A --restricted call loads no hooks at all, so nothing
 # else would ever record its lifecycle: this function calls
 # session-recorder.sh's own start/end verbs itself, source "desk-run". A
-# non-restricted (`--connector`) call DOES load his real settings (merged
+# non-restricted (`--connector`) call DOES load the user's real settings (merged
 # in alongside its own --settings deny-hook file), so its own SessionStart/
 # SessionEnd fire on their own — recording it here too would double up, so
 # this only sets DESK_HEADLESS=1 in its environment instead (the hook's own
 # DESK_HEADLESS handling tags that event source "desk-run" itself). This is
 # every non-restricted call, named or not: an EPHEMERAL connector call
-# (F-private, W — no --name, --no-session-persistence) still loads his
+# (F-private, W — no --name, --no-session-persistence) still loads the user's
 # real settings and hooks exactly like a visible one does, so without
 # DESK_HEADLESS its own genuine SessionStart/SessionEnd would land
-# source "startup", reason "other" — indistinguishable from a session he
+# source "startup", reason "other" — indistinguishable from a session the user
 # actually opened, and exactly what the 16:30 capture's own "dropped"
 # criteria matches. Gating this on --name (as the code used to) left every
 # ephemeral connector call unmarked.

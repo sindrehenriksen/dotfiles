@@ -1,7 +1,7 @@
 -- The block rule and anchor resolution.
 -- One shared reader for where a block starts and ends, used to place a
 -- proposal item at an anchor and to re-resolve a pending item's position
--- fresh each run (so drift from his own edits elsewhere in the file doesn't
+-- fresh each run (so drift from the user's own edits elsewhere in the file doesn't
 -- go stale).
 --
 -- What this module deliberately does NOT implement: recognizing a block as
@@ -23,7 +23,7 @@ local function is_col0(line)
 	return line ~= "" and line:match("^%S") ~= nil
 end
 
--- No letters or digits anywhere on the line: a separator like his "———".
+-- No letters or digits anywhere on the line: a separator like the user's "———".
 local function is_separator(line)
 	return line:match("[%a%d]") == nil
 end
@@ -161,7 +161,7 @@ end
 --- falling back to the top of the file (position 0, "fell_back" true) when
 --- the anchor is present but can't be resolved at all (its quote is gone).
 --- Never for a before-shaped leave/removal anchor: its absence is a
---- genuine content conflict (his edits sit where the suggestion expected
+--- genuine content conflict (the user's edits sit where the suggestion expected
 --- to find its own `before`), which a caller keeps deferred instead —
 --- that distinction is the caller's own to make, not this function's.
 ---

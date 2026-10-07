@@ -59,7 +59,7 @@ desk_strip_disallowed_urls() {
 # annotation on a line whose HEAD content is an accepted suggestion —
 # desk_write_marked_head_copy's own comment) from $1. J or a 1630 call may
 # echo a marked line back verbatim as part of an anchor/before/after; this
-# is what keeps that mark from ever reaching his real files, and from
+# is what keeps that mark from ever reaching the user's real files, and from
 # breaking an exact-line anchor match against real (unmarked) HEAD content.
 desk_strip_agent_marks() {
 	local text="$1"
@@ -68,9 +68,9 @@ desk_strip_agent_marks() {
 
 # One item's text run through the stripping passes and the URL check, in one
 # place so nothing downstream can apply only one of them. $2 = allowed URLs,
-# newline-separated (desk_allowed_urls's output). `before` is his text as the
-# agent quoted it and must keep matching his file, so it is never altered
-# (beyond the scratch-copy agent mark). The URLs on his own line are his:
+# newline-separated (desk_allowed_urls's output). `before` is the user's text as the
+# agent quoted it and must keep matching the user's file, so it is never altered
+# (beyond the scratch-copy agent mark). The URLs on the user's own line are the user's:
 # `after` may keep any URL `before` already carries, and only URLs the agent
 # adds (in `after` or the headline) are checked against the allowed set.
 desk_sanitize_item_text() {
@@ -175,7 +175,7 @@ desk_validate_items() {
 # transcript tail it was actually given is dropped (a fabricated citation
 # is worse than none); every citation marker is stripped from before/after
 # before an item is kept, valid or not — the marker itself never belongs
-# in his notes.
+# in the user's notes.
 # ---------------------------------------------------------------------------
 _DESK_TURN_MARK_GREP='\[turn [A-Za-z0-9]+\]'
 _DESK_TURN_MARK_SED='s/\[turn [A-Za-z0-9]+\]//g'

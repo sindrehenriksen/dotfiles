@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The notes-repo git operations: the daily commit-and-push of his on-disk
+# The notes-repo git operations: the daily commit-and-push of the user's on-disk
 # files exactly as they are, and the one proposal commit per pass. Every
 # ledger/proposal write goes through nvim/lua/desk/cli.lua — this file only
 # orchestrates: which files to commit, what the refused-commit conditions
@@ -23,8 +23,8 @@ desk_repo_committable() {
 	return 0
 }
 
-# Commits his on-disk files exactly as they are (only the configured
-# files, only if something changed), records any suggestion now in his HEAD
+# Commits the user's on-disk files exactly as they are (only the configured
+# files, only if something changed), records any suggestion now in the user's HEAD
 # as taken, then pushes main + refs/desk/ledger. Prints one status word to
 # stdout: "ok" (ran, whether or not there was anything new to commit),
 # "skipped" (HEAD isn't main / mid-rebase — reported, never attempted), or
@@ -54,7 +54,7 @@ desk_step_commit_push() {
 	local err_file
 	err_file="$(mktemp)"
 	# `git commit -- <paths>` commits those paths' on-disk content and
-	# leaves anything else he has staged alone.
+	# leaves anything else the user has staged alone.
 	local existing=() f
 	for f in "${files[@]}"; do
 		[ -e "$repo/$f" ] && existing+=("$f")
@@ -125,10 +125,10 @@ desk_push_notes() {
 # ---------------------------------------------------------------------------
 
 # Builds the proposal commit for this pass and moves refs/desk/proposal to
-# it: his newest HEAD, plus the previous proposal's items he has neither
+# it: the user's newest HEAD, plus the previous proposal's items the user has neither
 # taken nor declined (an untaken one returning is "not now"), plus this
 # pass's new items — all applied to the configured files. Id namespacing,
-# dropping what he declined (by id or source URL), and superseding a carried
+# dropping what the user declined (by id or source URL), and superseding a carried
 # item a new one replaces all happen inside the builder. Prints the new
 # proposal commit sha, or nothing (and a non-zero exit) on failure.
 #

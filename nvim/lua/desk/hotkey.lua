@@ -177,7 +177,7 @@ function M.run(bufnr, win, config, deps)
 	end
 
 	-- session: a plain in-notes reference to a section defined elsewhere in
-	-- this same buffer is followed internally — the ' mark is set first, so Ctrl-O returns to where he was.
+	-- this same buffer is followed internally — the ' mark is set first, so Ctrl-O returns to where the user was.
 	-- "Elsewhere" means the cursor isn't already inside the block that
 	-- section head starts (block.block_containing): jumping there from
 	-- within it would just be a no-op self-jump, and — when two sections

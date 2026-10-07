@@ -1,5 +1,5 @@
 -- The apply function: turns a validated proposal into
--- file text (desk.proposal applies it onto his HEAD). Each item's `target` is the pinned wire-format anchor
+-- file text (desk.proposal applies it onto the user's HEAD). Each item's `target` is the pinned wire-format anchor
 -- (`"top"` | `{under=...}` | `{after=...}` | `{at=...}`, or — for
 -- `merge`/`move` — a two-element list of these), parsed via
 -- desk.block.parse_target. For `edit`, `remove`, and a move/merge's
@@ -9,8 +9,8 @@
 -- An item whose `before` doesn't actually sit where its anchor resolved
 -- (occurrence-aware, never a bare substring) is deferred: left out of the
 -- applied text and counted: the proposal carries it flagged deferred, with
--- no hunk to take. That's a genuine content conflict (his edits sit at that
--- spot), retried against his text at the next pass.
+-- no hunk to take. That's a genuine content conflict (the user's edits sit at that
+-- spot), retried against the user's text at the next pass.
 --
 -- An anchor that doesn't resolve AT ALL — its quote is simply gone — is a
 -- different failure: there's no longer anywhere specific to identify a
@@ -32,7 +32,7 @@ local INSERT_KINDS = { new = true, add = true, link = true }
 --- Resolves a before-shaped (leave/removal) anchor against `lines`,
 --- distinguishing "the anchor's own quote is gone entirely" (`"bad_anchor"`
 --- — nothing left to identify a specific edit location against) from "the
---- quote's there, but what follows it doesn't match `before`" (his edits
+--- quote's there, but what follows it doesn't match `before`" (the user's edits
 --- sit at that spot: `"content_mismatch"`, a genuine conflict). A missing
 --- anchor (nil — malformed data) is always the latter: inventing a landing
 --- spot for something with no anchor at all isn't this function's call.

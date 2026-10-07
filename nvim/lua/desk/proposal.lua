@@ -1,11 +1,11 @@
 -- The proposal (stateless diff review): `refs/desk/proposal` is ONE commit
--- per pass whose parent is his HEAD at pass time and whose tree holds the
+-- per pass whose parent is the user's HEAD at pass time and whose tree holds the
 -- configured files (notes.md, reading.md) with every suggestion applied,
--- plus `proposal.json` listing the items. Nothing in it ever enters his
--- notes unless he takes a hunk, and nothing about it is tracked by position:
--- an item is *taken* when its `after` text is present in his HEAD, and
+-- plus `proposal.json` listing the items. Nothing in it ever enters the user's
+-- notes unless the user takes a hunk, and nothing about it is tracked by position:
+-- an item is *taken* when its `after` text is present in the user's HEAD, and
 -- *declined* when the decline ledger (desk.ledger) says so, by id or by
--- source URL. The next pass builds from his newest HEAD plus the previous
+-- source URL. The next pass builds from the user's newest HEAD plus the previous
 -- proposal's untaken, undeclined items plus the new ones — an untaken item
 -- coming back is "not now".
 local apply = require("desk.apply")
@@ -78,9 +78,9 @@ local function contains_within(lines, block_lines, first, last)
 	return false
 end
 
--- Whether the removal `item` is done in `lines`. With `base` (his text when
+-- Whether the removal `item` is done in `lines`. With `base` (the user's text when
 -- the proposal was built) the anchored occurrence is the one whose base
--- lines his edits since then deleted — so removing the other copy of a
+-- lines the user's edits since then deleted — so removing the other copy of a
 -- repeated line doesn't count, and removing this one does even though a
 -- copy remains. Without it, the occurrence the anchor resolves to must no
 -- longer hold `before`.
@@ -124,7 +124,7 @@ end
 --- Whether `item`'s proposed change is present in `lines`, judged at the
 --- place it applies to rather than anywhere in the file: an insertion's `after` within the block of its landing
 --- anchor (a move or merge at its landing side, not where its `before`
---- sits), a removal's anchored occurrence of `before` gone (`base`, his text
+--- sits), a removal's anchored occurrence of `before` gone (`base`, the user's text
 --- at the proposal's pass time, pins which occurrence), an edit's `after`
 --- present.
 function M.proposed_in(item, lines, base)
@@ -172,7 +172,7 @@ function M.read_items(repo)
 	return p and p.items or {}
 end
 
---- The text of `file` the proposal `p` was built on (his HEAD at pass time).
+--- The text of `file` the proposal `p` was built on (the user's HEAD at pass time).
 function M.base_lines(repo, p, file)
 	return p.parent and M.lines_at(repo, p.parent, file) or nil
 end
@@ -183,16 +183,16 @@ local function head_sha(repo)
 end
 
 --- Records as taken every item of the tip proposal whose change is now in
---- his HEAD and not yet recorded. Returns the items newly recorded.
+--- the user's HEAD and not yet recorded. Returns the items newly recorded.
 function M.sync_taken(repo)
 	local p = M.read(repo)
 	if not p then
 		return {}
 	end
 	local have = ledger.taken_by_id(ledger.read(repo))
-	-- Taken is a decision made at some point: the change was in his text at
+	-- Taken is a decision made at some point: the change was in the user's text at
 	-- the anchored place in HEAD or in any commit since the proposal's
-	-- parent (he may have moved the line afterwards).
+	-- parent (the user may have moved the line afterwards).
 	local revs = { "HEAD" }
 	if p.parent then
 		local ok, out = git.run(repo, { "rev-list", p.parent .. "..HEAD" })
@@ -224,9 +224,9 @@ function M.sync_taken(repo)
 	return new
 end
 
---- `git merge-file` of `ours` (his current text) with the proposal: base is
+--- `git merge-file` of `ours` (the user's current text) with the proposal: base is
 --- the proposal's parent version, theirs the proposal's version. Returns
---- the `--ours` merge (his text winning any conflict), the `--union` merge
+--- the `--ours` merge (the user's text winning any conflict), the `--union` merge
 --- (both sides kept where they conflict), or nil, err.
 function M.merged_lines(repo, p, file, ours_lines)
 	local base = p.parent and M.lines_at(repo, p.parent, file) or {}
@@ -255,9 +255,9 @@ function M.merged_lines(repo, p, file, ours_lines)
 end
 
 --- The suggestions of `file` a review can actually show against `ours`
---- (his text): not deferred, not taken or declined, in the merged view but
---- not yet in his text. A suggestion his own edit conflicts with is still
---- shown, in the union view, and listed in `conflicts` with the line of his
+--- (the user's text): not deferred, not taken or declined, in the merged view but
+--- not yet in the user's text. A suggestion the user's own edit conflicts with is still
+--- shown, in the union view, and listed in `conflicts` with the line of the user's
 --- text it sits next to. Returns { shown = id -> item, conflicts = id ->
 --- line, merged = lines }, or nil, err.
 function M.reviewable(repo, p, file, ours)
@@ -310,8 +310,8 @@ function M.positions(lines, block_lines)
 	return out
 end
 
---- The tip proposal's items still waiting on him: exactly the ones a review
---- of his HEAD would show.
+--- The tip proposal's items still waiting on the user: exactly the ones a review
+--- of the user's HEAD would show.
 function M.open_items(repo)
 	local p = M.read(repo)
 	if not p then
@@ -400,7 +400,7 @@ function M.build(repo, pass, scheduled_date, new_items, files)
 		end
 
 		-- Carried: last proposal's items that are neither taken nor declined,
-		-- then items he restored that no pass has re-proposed yet.
+		-- then items the user restored that no pass has re-proposed yet.
 		local carried, carried_ids = {}, {}
 		local function carry(item, base)
 			if carried_ids[item.id] or taken[item.id] or declined.ids[item.id] or declined.keys[ledger.content_key(item)] then
@@ -428,8 +428,8 @@ function M.build(repo, pass, scheduled_date, new_items, files)
 			carry(item)
 		end
 
-		-- New: namespaced, minus anything he declined (by source) or that is
-		-- already in his text, and replacing any carried item it supersedes.
+		-- New: namespaced, minus anything the user declined (by source) or that is
+		-- already in the user's text, and replacing any carried item it supersedes.
 		local used = {}
 		for id in pairs(carried_ids) do
 			used[#used + 1] = id

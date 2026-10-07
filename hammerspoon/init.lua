@@ -303,7 +303,7 @@ function DeskTab.frame_center(frame)
 end
 
 -- Loose match: the window's centre sits inside the slot's rectangle, not an
--- exact frame match — he may have nudged or resized it, and re-placing it
+-- exact frame match — the user may have nudged or resized it, and re-placing it
 -- isn't this function's job.
 function DeskTab.point_in_frame(pt, frame)
   return pt.x >= frame.x and pt.x <= frame.x + frame.w
@@ -430,10 +430,10 @@ local function shell_single_quote(s)
 end
 
 -- Every tab command (the follow-up tab, the hotkey's resume, the
--- Wednesday tab) runs through his own login+interactive shell rather than
+-- Wednesday tab) runs through the user's own login+interactive shell rather than
 -- however Ghostty's own `command:` field would otherwise invoke it —
 -- the desk launch envelope assumes CLAUDE_CONFIG_DIR and PATH
--- (~/.local/bin, mise shims, ...) come from his shell rc files, which a
+-- (~/.local/bin, mise shims, ...) come from the user's shell rc files, which a
 -- bare exec of the command never sources.
 local function wrap_in_login_shell(cmd)
   return "/bin/zsh -lic " .. shell_single_quote(cmd)

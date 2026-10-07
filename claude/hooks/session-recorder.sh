@@ -98,7 +98,7 @@ start_event() {
     maybe_prune "$(boot_id)"
     file="$STORE_DIR/$sid.jsonl"
     # A desk-run call that isn't
-    # --restricted still loads this hook via his real settings (merged in
+    # --restricted still loads this hook via the user's real settings (merged in
     # alongside the call's own deny-hook settings file), so it would record
     # a real SessionStart on its own — the runner never also calls this
     # script itself for that same call (that would double-record). Instead

@@ -8,7 +8,7 @@
 -- The ticket cache's path and shape are this module's to define; the
 -- runner's ticket-cache step writes this shape. Read-only here: `{"checked_at": <unix seconds>, "tickets": {"<TOKEN>": {"status":
 -- "..."}, ...}}`, keyed by the token text itself (case-insensitive lookup —
--- his notes mix casing on a ticket key) rather than by anything Jira-specific,
+-- the user's notes mix casing on a ticket key) rather than by anything Jira-specific,
 -- so this stays generic across whatever url-handler tokens an instantiation
 -- configures. If the runner ends up writing something else, this is the
 -- one place to change.
@@ -103,7 +103,7 @@ end
 ---:
 ---   "live"                                 — live, active recently
 ---   "live · idle Nd"                       — live, but quiet N days
----   "done · last active <date>"            — he ended it himself (an end
+---   "done · last active <date>"            — the user ended it themselves (an end
 ---                                            event with a user-exit reason)
 ---   "closed idle · resumable"              — the pass closed it for being idle
 ---   "not running · last active <date>"     — ended any other way

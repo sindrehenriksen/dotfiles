@@ -141,7 +141,7 @@ end
 --- canonical short id from a decorated token (a prefix/suffix around it),
 --- so callers that resolve a session (the hotkey, the annotations' by-name
 --- lookup) match against the id the reader actually indexes by, not
---- whatever extra text surrounds it in his notes. Most session patterns
+--- whatever extra text surrounds it in the user's notes. Most session patterns
 --- (the plain catch-all `^.+$`, with no capture at all) leave `id` equal
 --- to `token`, so this is a no-op for them.
 function M.classify(token, tokens_config)
