@@ -95,6 +95,7 @@ BASH_SUITES=(
 	claude/tests/session-end-kind-test.sh
 	git-hooks/test-commit-msg.sh
 	hammerspoon/tests/hs-timeout-test.sh
+	hammerspoon/tests/tabs-live-check-selftest.sh
 	git-hooks/test-desk-denylist.sh
 )
 

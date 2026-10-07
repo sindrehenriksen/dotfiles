@@ -6,15 +6,22 @@
 #   - typing in the upper_C Ghostty window (the tab must go elsewhere);
 #   - another app frontmost (the tab goes into upper_C).
 # Put focus where the case needs it during the countdown and leave it there.
+# It also runs unattended (an agent's shell: no tty, stdin from /dev/null),
+# checking whatever focus the user has at the time.
 #
-# It records the focused window and every Ghostty window's frame, opens a
-# tab whose command prints a marker and exits after a few seconds (so the
-# tab closes itself), then asserts that focus is where it was and that no
-# pre-existing Ghostty window moved, resized or vanished. A created tab still
-# open at the end is closed only after its working directory proves it is
-# the one this check opened; anything else is reported, never touched.
+# It records the focused window and the frame of every visible window, opens
+# a close-on-exit tab that says what it is and ends after 10s, then asserts:
+# focus is where it was; no window anywhere moved, resized or vanished
+# (compared by position across all apps, and by Ghostty's own window id
+# where Ghostty can name it); and the tab it opened is gone by the end, by
+# that tab's own id. A tab that lingers is a failure, and that one tab,
+# and nothing else, is then closed.
+# A first snapshot it cannot read aborts the check before anything opens.
+# Any failure exits 1; an abort exits 2.
 #
 # Usage: DESK_TABS_LIVE=1 hammerspoon/tests/tabs-live-check.sh [countdown-secs]
+# hammerspoon/tests/tabs-live-check-selftest.sh runs this against stubs via
+# DESK_TABS_LIVE_HS, DESK_TABS_LIVE_OPENER and the *_SECS waits below.
 set -u
 
 if [ "${DESK_TABS_LIVE:-}" != "1" ]; then
@@ -23,7 +30,13 @@ if [ "${DESK_TABS_LIVE:-}" != "1" ]; then
 fi
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-OPEN_TAB_SH="$HERE/../desk-open-tab.sh"
+HS_BIN="${DESK_TABS_LIVE_HS:-hs}"
+OPENER="${DESK_TABS_LIVE_OPENER:-$HERE/../desk-open-tab.sh}"
+# Longer than the opener's focus watch (4s) and placement watch (2s).
+SETTLE_SECS="${DESK_TABS_LIVE_SETTLE_SECS:-6}"
+# The opened tab's command exits after 10s; this is from the first snapshot
+# after the open, so together they cover it.
+CLOSE_SECS="${DESK_TABS_LIVE_CLOSE_SECS:-6}"
 countdown=${1:-8}
 
 pass=0
@@ -33,37 +46,51 @@ bad() { fail=$((fail + 1)); printf 'FAIL - %s\n' "$1"; }
 assert_eq() {
 	if [ "$2" = "$3" ]; then ok "$1"; else bad "$1 (expected [$2], got [$3])"; fi
 }
+finish() {
+	echo
+	echo "=== summary: $pass passed, $fail failed ==="
+	[ "$fail" -eq 0 ] && exit 0
+	exit 1
+}
 
 # stdin from /dev/null: hs otherwise reads a piped stdin as more commands.
-hs_lua() { hs -t 10 -c "$1" < /dev/null; }
+hs_lua() { "$HS_BIN" -q -t 10 -c "$1" < /dev/null; }
 
-# One JSON line: the focused window and app, every Ghostty window with
-# Ghostty's own id (matched the way the opener matches it) and frame, the
-# upper_C window's Ghostty id, and every tab id.
+# The snapshot is returned on one line behind this marker, because hs also
+# prints other lines to stdout, such as "-- Loading extension: json" the
+# first time an extension is used after a reload.
+MARKER="DESK_SNAPSHOT "
+
+# The focused window and app; every visible window as "app|frame"; Ghostty's
+# window ids, front window and tab ids; and Ghostty windows' frames by
+# Ghostty id where the title match can name them.
 SNAPSHOT_LUA='
 local front = hs.application.frontmostApplication()
 local fw = hs.window.focusedWindow()
-local hs_list = {}
+local hs_list, visible = {}, {}
 for _, w in ipairs(hs.window.orderedWindows()) do
   local app = w:application()
-  if app and app:name() == "Ghostty" then
-    hs_list[#hs_list + 1] = { id = w:id(), title = w:title(), frame = w:frame() }
+  local name = app and app:name() or "?"
+  local f = w:frame()
+  visible[#visible + 1] = string.format("%s|%d,%d,%d,%d", name, f.x, f.y, f.w, f.h)
+  if name == "Ghostty" then
+    hs_list[#hs_list + 1] = { id = w:id(), title = w:title(), frame = f }
   end
 end
 local ok, r = hs.osascript.applescript([[tell application "Ghostty" to get {id, name} of every window]])
-local sw = {}
+local sw, ids = {}, {}
 if ok and type(r) == "table" then
-  for i, id in ipairs(r[1]) do sw[#sw + 1] = { id = id, name = r[2][i] } end
+  for i, id in ipairs(r[1]) do sw[#sw + 1] = { id = id, name = r[2][i] }; ids[#ids + 1] = id end
 end
-local windows = {}
+local by_ghostty = {}
 for _, w in ipairs(hs_list) do
-  local f = w.frame
-  windows[#windows + 1] = {
-    hs_id = w.id,
-    ghostty_id = DeskTab.match_script_window(w.id, hs_list, sw) or "",
-    frame = string.format("%d,%d,%d,%d", f.x, f.y, f.w, f.h),
-  }
+  local gid = DeskTab.match_script_window(w.id, hs_list, sw)
+  if gid then
+    local f = w.frame
+    by_ghostty[#by_ghostty + 1] = gid .. "|" .. string.format("%d,%d,%d,%d", f.x, f.y, f.w, f.h)
+  end
 end
+local okf, front_gid = hs.osascript.applescript([[tell application "Ghostty" to get id of front window]])
 local ok2, tabs = hs.osascript.applescript([[tell application "Ghostty"
 set out to {}
 repeat with w in windows
@@ -73,63 +100,135 @@ end repeat
 end repeat
 return out
 end tell]])
-return hs.json.encode({
+return "DESK_SNAPSHOT " .. hs.json.encode({
   app = front and front:name() or "",
   focused = fw and fw:id() or 0,
-  windows = windows,
-  tabs = ok2 and tabs or {},
+  ghostty_front = okf and front_gid or "",
+  ghostty_ids = ids,
+  ghostty_seen = #hs_list,
+  visible = visible,
+  by_ghostty = by_ghostty,
+  tabs = (ok2 and type(tabs) == "table") and tabs or {},
 })
 '
+
+# Prints the snapshot as normalised JSON (every list always an array), or
+# fails with the reason on stderr.
+snapshot() {
+	local out line
+	if ! out=$(hs_lua "$SNAPSHOT_LUA" 2>&1); then
+		printf 'hs failed: %s\n' "$out" >&2
+		return 1
+	fi
+	line=$(printf '%s\n' "$out" | grep "^$MARKER" | tail -n1)
+	line=${line#"$MARKER"}
+	if [ -z "$line" ]; then
+		printf 'no snapshot in the hs output: %s\n' "$out" >&2
+		return 1
+	fi
+	jq -ce '
+		def arr: if type == "array" then . else [] end;
+		if (.app | type) != "string" or .app == "" then error("no frontmost app") else . end
+		| .visible |= arr | .by_ghostty |= arr | .ghostty_ids |= arr | .tabs |= arr
+	' <<< "$line" 2> /dev/null || {
+		printf 'unreadable snapshot: %s\n' "$line" >&2
+		return 1
+	}
+}
+
+lines() { jq -r ".$1[]" <<< "$2" | sort; }
 
 echo "Put focus where this case needs it; recording in ${countdown}s..."
 sleep "$countdown"
 
-before=$(hs_lua "$SNAPSHOT_LUA") || { echo "could not read the window state"; exit 1; }
+if ! before=$(snapshot); then
+	echo "ABORT: could not read the window state before opening anything; nothing was opened"
+	exit 2
+fi
 before_app=$(jq -r '.app' <<< "$before")
 before_focused=$(jq -r '.focused' <<< "$before")
-echo "focused: $before_app window $before_focused; $(jq '.windows | length' <<< "$before") Ghostty windows"
+if [ "$before_app" = "loginwindow" ]; then
+	echo "ABORT: the screen is locked, so the windows cannot be seen; nothing was opened"
+	exit 2
+fi
+if [ "$(jq '.ghostty_ids | length' <<< "$before")" -gt 0 ] && [ "$(jq '.ghostty_seen' <<< "$before")" -eq 0 ]; then
+	echo "ABORT: Ghostty has windows that Hammerspoon cannot see; nothing was opened"
+	exit 2
+fi
+if [ "$(jq '.visible | length' <<< "$before")" -eq 0 ]; then
+	echo "ABORT: no visible windows to compare; nothing was opened"
+	exit 2
+fi
+echo "focused: $before_app window $before_focused; $(jq '.visible | length' <<< "$before") visible windows, $(jq '.ghostty_ids | length' <<< "$before") of them Ghostty's"
 
-marker_dir=$(mktemp -d "/tmp/desk-live-check.XXXXXX")
-"$OPEN_TAB_SH" "echo desk-live-check; sleep 10" "" "$marker_dir" background > /dev/null
+started=$(date '+%Y-%m-%d %H:%M:%S')
+"$OPENER" "printf 'desk tab check: this tab closes itself in 10s\\n'; sleep 10" "" "${TMPDIR:-/tmp}" background,close > /dev/null
 assert_eq "the opener reports success" "0" "$?"
 
-# Longer than the opener's focus watch (4s) and placement watch (2s).
-sleep 6
-after=$(hs_lua "$SNAPSHOT_LUA") || { echo "could not read the window state"; exit 1; }
+sleep "$SETTLE_SECS"
+if ! after=$(snapshot); then
+	bad "could not read the window state after the open"
+	finish
+fi
 assert_eq "focus is still in the same app" "$before_app" "$(jq -r '.app' <<< "$after")"
 assert_eq "focus is still on the same window" "$before_focused" "$(jq -r '.focused' <<< "$after")"
 
-# Every pre-existing Ghostty window, by Ghostty's own id (stable across the
-# opener adding a tab to it), must keep its exact frame.
-while IFS=$'\t' read -r gid frame hs_id; do
-	if [ -z "$gid" ]; then
-		bad "window $hs_id could not be identified to Ghostty, so its frame could not be compared"
-		continue
-	fi
-	now=$(jq -r --arg g "$gid" '.windows[] | select(.ghostty_id == $g) | .frame' <<< "$after")
-	assert_eq "Ghostty window $gid (was $hs_id) kept its frame" "$frame" "$now"
-done < <(jq -r '.windows[] | [.ghostty_id, .frame, (.hs_id | tostring)] | @tsv' <<< "$before")
+new_windows=$(comm -13 <(lines ghostty_ids "$before") <(lines ghostty_ids "$after") | grep -c . || true)
+created_tabs=$(comm -13 <(lines tabs "$before") <(lines tabs "$after"))
+echo "the open created $new_windows new Ghostty window(s) and these tabs: $(printf '%s' "$created_tabs" | tr '\n' ';')"
 
-# The tab's command exits after 10s and the tab closes itself; give it time.
-sleep 6
-final=$(hs_lua "$SNAPSHOT_LUA") || { echo "could not read the window state"; exit 1; }
-leftover=$(jq -r --argjson b "$(jq '.tabs' <<< "$before")" '.tabs - $b | .[]' <<< "$final")
-if [ -z "$leftover" ]; then
-	ok "the tab this check opened has closed itself"
+# No frame anywhere may change: every window from before must still be at
+# exactly the same place and size. Only a newly created Ghostty window may
+# add a frame.
+moved=$(comm -23 <(lines visible "$before") <(lines visible "$after"))
+if [ -z "$moved" ]; then
+	ok "no visible window moved, resized or vanished"
 else
-	while read -r wid tid; do
-		[ -n "$tid" ] || continue
-		dir=$(hs_lua "local ok, r = hs.osascript.applescript([[tell application \"Ghostty\" to get working directory of focused terminal of tab id \"$tid\" of window id \"$wid\"]]) return tostring(r)")
-		if [ "$dir" = "$marker_dir" ] || [ "$dir" = "/private$marker_dir" ]; then
-			hs_lua "hs.osascript.applescript([[tell application \"Ghostty\" to close tab (tab id \"$tid\" of window id \"$wid\")]])" > /dev/null
-			echo "closed the tab this check opened ($tid)"
-		else
-			bad "a tab appeared that this check cannot prove it opened ($tid in $wid, cwd $dir); left alone"
-		fi
-	done <<< "$leftover"
+	bad "windows moved, resized or vanished: $(printf '%s' "$moved" | tr '\n' ';')"
 fi
-rmdir "$marker_dir" 2> /dev/null
+extra=$(comm -13 <(lines visible "$before") <(lines visible "$after"))
+extra_other=$(printf '%s\n' "$extra" | grep -v '^Ghostty|' | grep -c . || true)
+extra_ghostty=$(printf '%s\n' "$extra" | grep -c '^Ghostty|' || true)
+assert_eq "no other app gained a window" "0" "$extra_other"
+assert_eq "Ghostty gained a frame only for a window it newly created" "$new_windows" "$extra_ghostty"
+changed=$(comm -23 <(lines by_ghostty "$before") <(lines by_ghostty "$after") | while IFS='|' read -r gid frame; do
+	jq -e --arg g "$gid" '.by_ghostty[] | select(startswith($g + "|"))' <<< "$after" > /dev/null && echo "$gid"
+done)
+if [ -z "$changed" ]; then
+	ok "every Ghostty window Ghostty could name kept its frame"
+else
+	bad "Ghostty windows changed frame: $(printf '%s' "$changed" | tr '\n' ' ')"
+fi
+
+sleep "$CLOSE_SECS"
+if ! final=$(snapshot); then
+	bad "could not read the window state at the end; check by hand for a tab saying 'desk tab check'"
+	finish
+fi
+lingering=$(comm -12 <(printf '%s\n' "$created_tabs" | grep . | sort) <(lines tabs "$final"))
+if [ -z "$created_tabs" ]; then
+	bad "no new tab was seen after the open, so its closing could not be checked"
+elif [ -z "$lingering" ]; then
+	ok "the tab this check opened is gone"
+else
+	bad "the tab this check opened is still open: $(printf '%s' "$lingering" | tr '\n' ';')"
+	if [ "$(printf '%s\n' "$created_tabs" | grep -c .)" -eq 1 ]; then
+		read -r wid tid <<< "$lingering"
+		hs_lua "hs.osascript.applescript([[tell application \"Ghostty\" to close tab (tab id \"$tid\" of window id \"$wid\")]])" > /dev/null
+		echo "closed that tab ($tid), and nothing else"
+	else
+		echo "more than one new tab appeared, so none was closed; close the 'desk tab check' tab by hand"
+	fi
+fi
+moved_end=$(comm -23 <(lines visible "$before") <(lines visible "$final"))
+if [ -z "$moved_end" ]; then
+	ok "after the tab closed, still no window moved"
+else
+	bad "after the tab closed, windows moved: $(printf '%s' "$moved_end" | tr '\n' ';')"
+fi
 
 echo
-echo "=== summary: $pass passed, $fail failed ==="
-[ "$fail" -eq 0 ]
+echo "opener log (Hammerspoon console since $started):"
+hs_lua 'return hs.console.getConsole()' 2> /dev/null | grep 'DeskOpenTab' | awk -v s="$started" 'substr($0, 1, 19) >= s'
+
+finish
