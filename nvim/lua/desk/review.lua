@@ -5,10 +5,11 @@
 --
 -- Review key: merges the user's CURRENT buffer text (ours) with the proposal
 -- (theirs) against the pass-time version (base) with `git merge-file`, the user's
--- text winning any conflict, and opens the result in a stacked split as an
--- `acwrite` scratch buffer, both windows in diff mode. The user takes a hunk with
--- `do` in the notes window (editing first is fine) and leaves one alone to
--- mean "not now" (the next pass carries it). The decline key makes the hunk
+-- text winning any conflict, and opens the result in a split above the notes
+-- as an `acwrite` scratch buffer, both windows in diff mode, the cursor in the
+-- split. The user takes a hunk with `dp` there or `do` in the notes window
+-- (editing first is fine) and leaves one alone to mean "not now" (the next
+-- pass carries it). The decline key makes the hunk
 -- under the cursor in the review split equal the user's text — an ordinary edit, so
 -- plain `u` undoes it. Nothing is recorded until the user SAVES the review split:
 -- that is the commit point, recording every suggestion whose lines are gone
@@ -378,10 +379,11 @@ end
 
 -- The review split's winbar: the keys in one line, so the table in the
 -- desk guide doesn't have to be open beside it.
-M.KEY_HINT = "]c/[c next/prev · do take (notes) · ␣gA take one · ␣gD decline · u undo · ␣go list · :w save"
+M.KEY_HINT = "]c/[c next/prev · dp take · ␣gA take one · ␣gD decline (u undoes) · C-t/C-n up/down · ␣go list · :wq done"
 
---- The review key: opens the merged view in a stacked split (or focuses
---- the one already open for this proposal). Returns true, or false, why.
+--- The review key: opens the merged view in a split above the notes window,
+--- and focuses it (or focuses the one already open for this proposal).
+--- Returns true, or false, why.
 function M.open_review(notes_buf)
 	local repo, file = M.repo_context(notes_buf)
 	if not repo then
@@ -445,7 +447,7 @@ function M.open_review(notes_buf)
 		vim.api.nvim_win_set_buf(notes_win, notes_buf)
 	end
 	vim.api.nvim_set_current_win(notes_win)
-	vim.cmd("belowright split")
+	vim.cmd("aboveleft split")
 	local review_win = vim.api.nvim_get_current_win()
 	local review_buf = vim.api.nvim_create_buf(false, true)
 	vim.bo[review_buf].buftype = "acwrite"
@@ -454,7 +456,11 @@ function M.open_review(notes_buf)
 	vim.bo[review_buf].modeline = false
 	vim.api.nvim_buf_set_name(review_buf, "desk-review://" .. file)
 	vim.bo[review_buf].filetype = vim.bo[notes_buf].filetype
+	-- Loaded outside the undo history, so `u` in the split never blanks it.
+	local undolevels = vim.bo[review_buf].undolevels
+	vim.bo[review_buf].undolevels = -1
 	vim.api.nvim_buf_set_lines(review_buf, 0, -1, false, merged)
+	vim.bo[review_buf].undolevels = undolevels
 	vim.bo[review_buf].modified = false
 	vim.api.nvim_win_set_buf(review_win, review_buf)
 	vim.wo[review_win].winbar = M.KEY_HINT
@@ -548,8 +554,8 @@ function M.open_review(notes_buf)
 		M.overview(notes_buf)
 	end, { buffer = review_buf, desc = "Overview: remaining suggestions" })
 
-	vim.api.nvim_set_current_win(notes_win)
-	first_hunk(notes_win)
+	vim.api.nvim_set_current_win(review_win)
+	first_hunk(review_win)
 	say_elsewhere(repo, file, p)
 	return true
 end
@@ -1012,7 +1018,7 @@ function M.qf_jump()
 			vim.notify("desk: your notes are not showing in any window", vim.log.levels.WARN)
 			return
 		end
-		-- The other file: open it above, with its own review split below.
+		-- The other file: open it above, with its own review split above it.
 		local b = open_file_buf(repo, file)
 		M.open_review(b)
 		win = vim.fn.bufwinid(b)

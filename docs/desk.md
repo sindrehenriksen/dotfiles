@@ -14,7 +14,7 @@ macOS only: tabs open in Ghostty through Hammerspoon, and passes run from launch
 
 **The proposal.** A pass that suggests anything writes one commit to `refs/desk/proposal` in the notes repo: its parent is your `HEAD` at pass time, its tree is the configured files with every suggestion applied, plus `proposal.json` listing the items. The next pass rebuilds it from your newest `HEAD`, plus the previous items you neither took nor declined, plus its own new ones. Leaving a suggestion alone therefore means "not now". A pass's own items sit above those carried from earlier passes, and among themselves keep the order of the steps that staged them, so the order of `steps` decides what reads first; that is also the order in which items landing at the same spot go in. What you decided lives on `refs/desk/ledger`: declines (by item id, by source URL, and by content — file, kind, target and normalised before/after — so a declined link or a regenerated copy is never proposed again) and takes (so a taken suggestion's text is recognised as agent-written later, even after you edit or move it).
 
-**The review.** In a notes buffer, `<leader>gR` merges your current buffer with the proposal and opens the result in a stacked split, both windows in diff mode. Taking is an ordinary diff take; declining makes the suggestion equal your text; nothing is recorded until you save the review split. The keys are in [Review keys](#review-keys).
+**The review.** In a notes buffer, `<leader>gR` merges your current buffer with the proposal and opens the result in a split above your notes, both windows in diff mode, with the cursor in the split: the proposal is where you work, and your notes below it show the result. Taking is an ordinary diff take; declining makes the suggestion equal your text; nothing is recorded until you save the review split. The keys are in [Review keys](#review-keys).
 
 **Edits from sessions.** The notes are also edited from Claude Code sessions, as work goes. A session changes a notes file directly only when the user asks for that edit in the conversation. A change that is the session's own idea it proposes instead, by asking or as a suggestion for review, never by writing it in. Agent text in the notes writes a long link as `[short label](url)` (next paragraph) and a session name exactly as the session is named, so marks and the hotkey find it. The notes repo's own `CLAUDE.md`, which every session working in it reads, is where an instance says this, along with what the user's own markup means, and that the working files may hold unreviewed suggestions while the reviewed text is `HEAD`'s.
 
@@ -285,7 +285,7 @@ In a notes buffer:
 
 | Key | Action |
 |---|---|
-| `<leader>gR` | Open the review split, or focus it. Reopening over a split with unsaved declines asks to save, discard or cancel. |
+| `<leader>gR` | Open the review split above your notes and focus it, or focus the one already open. Reopening over a split with unsaved declines asks to save, discard or cancel. |
 | `do` | (notes window, while a review is open) Take the diff hunk under the cursor: every adjacent suggestion in it. |
 | `<leader>gc` | Save the buffer, commit the file, and record suggestions now in `HEAD` as taken. |
 | `<leader>go` | Overview: a quickfix list with one headline per remaining diff hunk; `<CR>` jumps to it in your notes window. |
@@ -301,7 +301,7 @@ In the review split:
 | `<leader>go` | The overview. |
 | `:w` | The commit point: records as declined every suggestion whose lines are gone from both the split and your notes, restores any declined this session whose lines are back, and records pending takes. Closing the split without saving records nothing. |
 
-A take is remembered when you make it and recorded on the next save of either buffer, so a suggestion you edit right after taking stays taken. The winbar shows the status line: each pass's last result, untaken suggestions, closes and lockouts. The review split's own winbar lists its keys in one line.
+A take is remembered when you make it and recorded on the next save of either buffer, so a suggestion you edit right after taking stays taken. The notes window's winbar shows the status line: each pass's last result, untaken suggestions, closes and lockouts. The review split's own winbar lists its keys in one line.
 
 ## Scheduling
 
