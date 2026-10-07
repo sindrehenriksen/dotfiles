@@ -461,31 +461,26 @@ function M.build(repo, pass, scheduled_date, new_items, files)
 			end
 		end
 
-		local items = {}
-		for _, n in ipairs(fresh) do
-			items[#items + 1] = n
-		end
+		-- Order, which is also the order items sharing an anchor land in: this
+		-- run's items above everything carried from earlier runs, and within
+		-- this run in the order its steps staged them. A pass stages once per
+		-- step that suggests anything, so an earlier step's items (the judge's
+		-- news) are already carried when a later step (retention, close)
+		-- builds; the step order in the config decides which reads first.
+		local run_prefix = "^" .. vim.pesc(pass .. "-" .. scheduled_date .. "-")
+		local this_run, older = {}, {}
 		for _, e in ipairs(kept) do
-			items[#items + 1] = e
-		end
-
-		-- Order on top: the morning news sits above the 16:30 captures,
-		-- whichever pass landed last (items keep their order within a pass).
-		-- A pass is the first dash-separated part of an item's id.
-		local function pass_rank(item)
-			return tostring(item.id):match("^morning%-") and 0 or 1
-		end
-		for i, item in ipairs(items) do
-			item._order = i
-		end
-		table.sort(items, function(a, b)
-			if pass_rank(a) ~= pass_rank(b) then
-				return pass_rank(a) < pass_rank(b)
+			if tostring(e.id):match(run_prefix) then
+				this_run[#this_run + 1] = e
+			else
+				older[#older + 1] = e
 			end
-			return a._order < b._order
-		end)
-		for _, item in ipairs(items) do
-			item._order = nil
+		end
+		local items = {}
+		for _, list in ipairs({ this_run, fresh, older }) do
+			for _, item in ipairs(list) do
+				items[#items + 1] = item
+			end
 		end
 
 		-- Apply per file onto HEAD.

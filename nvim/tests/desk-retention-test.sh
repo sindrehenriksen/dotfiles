@@ -197,12 +197,12 @@ reply 77777777-0009 '{"id":"r1","file":"notes.md","kind":"new","target":"top","b
 
 
 PASS_SCRATCH="$(mktemp -d "$ROOT/pass.XXXX")"
-step_json='{"id":"1630-retention","kind":"retention","prompt":"prompt.md","tools":["Read"],"cap":50,"timeout":30}'
+step_json='{"id":"retention","kind":"retention","prompt":"prompt.md","tools":["Read"],"cap":50,"timeout":30}'
 printf 'session {{session_name}} {{session_id}} deleted {{deletion_date}} in {{days_left}}d, today {{today}}\n' > "$ROOT/prompt.md"
-result="$(desk_step_retention "1630" "$step_json" '{}' "$repo" "2027-01-15" '{"act": 3}' "${files[@]}")"
+result="$(desk_step_retention "morning" "$step_json" '{}' "$repo" "2027-01-15" '{"act": 3}' "${files[@]}")"
 assert_eq "the step reports ok" "ok" "$result"
 assert_eq "three calls under an act cap of 3, soonest first" "77777777-0009 0000aaaa-0008 aaaaaaaa-0001" "$(tr '\n' ' ' < "$CALLS" | sed 's/ $//')"
-assert_eq "the overflow is counted for status" '{"act":1,"worth_knowing":0,"wildcard":0}' "$(cat "$PASS_SCRATCH/1630-retention-overflow.json")"
+assert_eq "the overflow is counted for status" '{"act":1,"worth_knowing":0,"wildcard":0}' "$(cat "$PASS_SCRATCH/retention-overflow.json")"
 assert_true "the overflow is in the dated brief" \
 	"$(grep -q 'edge-work: transcript deleted' "$DESK_BRIEF_DIR"/*.md 2> /dev/null && echo true || echo false)"
 assert_true "the prompt got every placeholder" \
@@ -240,7 +240,7 @@ LUA
 jq -c '[.items[] | select(.session_id == "aaaaaaaa-0001")]' <<< "$proposal" > "$ROOT/decline.json"
 nvim --headless -u NONE -l "$ROOT/decline.lua" > /dev/null 2>&1
 : > "$CALLS"
-result="$(desk_step_retention "1630" "$step_json" '{}' "$repo" "2027-01-16" '{"act": 3}' "${files[@]}")"
+result="$(desk_step_retention "morning" "$step_json" '{}' "$repo" "2027-01-16" '{"act": 3}' "${files[@]}")"
 assert_eq "the repeat step reports ok" "ok" "$result"
 assert_eq "only the overflowed session is called now" "eeeeeeee-0003" "$(tr '\n' ' ' < "$CALLS" | sed 's/ $//')"
 assert_eq "the declined session's warning is not proposed again" "0" \

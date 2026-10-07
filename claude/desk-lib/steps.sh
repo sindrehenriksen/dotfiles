@@ -461,7 +461,7 @@ desk_step_model_call() {
 
 	desk_log "$pass" "model call: $id${label:+ ($label)}"
 	# call_scratch is this call's own actual cwd — the one thing a
-	# `--restricted` call's Read is really confined to (a live 16:30 close
+	# `--restricted` call's Read is really confined to (a live close
 	# call's own failure: --allowedTools naming Read(<seed dir>/**) and the
 	# prompt's own {{scratch}} placeholder pointing at that same seed dir
 	# meant nothing once the process itself ran from a DIFFERENT cwd, so
@@ -766,8 +766,7 @@ desk_close_session() {
 }
 
 # ---------------------------------------------------------------------------
-# capture: the 16:30 pass's own "running"/"dropped" session captures
-#.
+# capture: "running"/"dropped" session captures.
 # ---------------------------------------------------------------------------
 
 # The short id every capture of an unnamed session labels itself with
@@ -932,7 +931,7 @@ desk_step_capture_sessions() {
 }
 
 # The capped tail of a session's own transcript (only its end), as JSON lines, each keeping its own
-# `uuid` — the 16:30-close prompt's own per-bullet turn citations are
+# `uuid` — a close or retention prompt's per-bullet turn citations are
 # checked against exactly this file, never the full transcript. $3 = cap
 # in lines (the step's own `cap` field; a step with none gets 200).
 desk_write_transcript_tail() {
@@ -1194,7 +1193,7 @@ desk_step_close() {
 # pass's own result: a failed pass still opens the tab on what exists),
 # open one Ghostty tab resuming the pass's own `follow_up_step` call — the
 # morning pass's J (which holds the user's notes plus the fetched material), or
-# 16:30's most recently-run close call, the config's own per-pass
+# a pass's most recently-run close call, the config's own per-pass
 # `follow_up_step` naming which step id.
 #
 # `follow_up_step` matches a run directory under
@@ -1553,7 +1552,7 @@ desk_step_open_tab() {
 	# any session the user opens by hand, so without this its own genuine
 	# SessionStart would land untagged (source "startup") — indistinguishable
 	# from a session the user actually opened themselves, and never excluded from a
-	# later 16:30 capture. A plain env-var prefix on the assembled command
+	# later capture step. A plain env-var prefix on the assembled command
 	# line (never user-controlled content, so never quoted) is the only
 	# lever available here: this call never goes through desk_call_model
 	# (it opens a brand-new terminal tab, not a background call this

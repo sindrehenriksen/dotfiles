@@ -113,7 +113,7 @@ source "$LIB/lock.sh"
 # shellcheck source=../../claude/desk-lib/steps.sh
 source "$LIB/steps.sh"
 
-step_json='{"id":"1630-close","kind":"close","tools":["Read"],"connector":false,"cap":50,"timeout":30}'
+step_json='{"id":"close","kind":"close","tools":["Read"],"connector":false,"cap":50,"timeout":30}'
 config_json_base='{"close_after_working_days": 3, "keep_open": [], "max_closes": 3, "away_days": 5}'
 
 write_items_reply() {

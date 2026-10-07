@@ -69,17 +69,7 @@
           "input_files": ["notes.md", "reading.md", "sources.json", "f-web.json", "open-items.json", "declined.json"],
           "timeout": 600,
           "max_budget_usd": 2
-        }
-      ]
-    },
-
-    "1630": {
-      "weekdays_only": true,
-      "caps": "daily",
-      "trigger": { "start_calendar_interval": [{ "hour": 16, "minute": 30 }] },
-      "steps": [
-        { "id": "commit-push", "kind": "commit_push" },
-        { "id": "capture", "kind": "capture" },
+        },
         {
           "id": "retention",
           "kind": "retention",

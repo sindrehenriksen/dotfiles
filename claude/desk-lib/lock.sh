@@ -45,11 +45,11 @@ desk_day_before() {
 # scheduled date, not the date desk-run actually happened to be invoked on.
 # $1 is a JSON array of {hour, minute} (daily) or {hour, minute, weekday}
 # (weekly, 1=Mon..7=Sun per `date +%u`) slot objects — a pass's own
-# `.trigger.start_calendar_interval`. This is what makes a 16:30 pass that
+# `.trigger.start_calendar_interval`. This is what makes an evening slot that
 # only actually runs on the next morning's wake still read as *yesterday's*
-# evening slot (its most recent past slot is still last night's, since
-# today's own 16:30 hasn't happened yet) rather than a fresh one for today —
-# and, symmetrically, why today's real 16:30 firing later that same day
+# (its most recent past slot is still last night's, since today's own
+# evening slot hasn't happened yet) rather than a fresh one for today —
+# and, symmetrically, why today's real evening firing later that same day
 # lands on a different scheduled date and is never treated as a repeat.
 # An empty/missing slot list falls back to $2's own calendar date, so a step
 # or test with no trigger configured keeps the simple "today" behavior this
@@ -143,9 +143,9 @@ desk_guard_already_ok_today() {
 	[ "$last_scheduled_date" = "$scheduled_date" ]
 }
 
-# One lock, shared across every pass ("morning and 16:30 must never run at
-# once" — they share the same notes repo, ledger and status.json, so two
-# passes racing each other is exactly as unsafe as the same pass running
+# One lock, shared across every pass (no two passes may run at once — they
+# share the same notes repo, ledger and status.json, so two passes racing
+# each other is exactly as unsafe as the same pass running
 # twice). $1 (the pass name) is recorded in the lock's own meta.json purely
 # for a waiting caller's diagnostics — it never changes which lock is taken.
 DESK_LOCK_NAME="runner"

@@ -68,7 +68,7 @@ echo '{"type":"result","subtype":"success","total_cost_usd":0}'
 FAKE
 chmod +x "$FAKEBIN/claude"
 
-# One session, unrecorded (so capture skips it) and named in the notes with a
+# One session, unrecorded and named in the notes with a
 # transcript 25 days old, inside the retention margin under the default
 # 30-day cleanup: the retention step makes its one call. The follow-up tab
 # resolves nothing, an ordinary "ok".

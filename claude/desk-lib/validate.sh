@@ -3,7 +3,7 @@
 # shaped call returns is untrusted until checked against that call's own
 # raw tool_results, never its prose. This is the one place that runs: the
 # source-URL check (desk-lib/tool-results.sh supplies the allowed set),
-# control/ANSI-character and modeline stripping, 16:30's turn-citation
+# control/ANSI-character and modeline stripping, the close call's turn-citation
 # check, and the daily/weekly tier caps with dated-brief overflow.
 set -u
 
@@ -57,7 +57,7 @@ desk_strip_disallowed_urls() {
 
 # Strips desk-lib/steps.sh's own DESK_AGENT_MARK suffix (a scratch-copy-only
 # annotation on a line whose HEAD content is an accepted suggestion —
-# desk_write_marked_head_copy's own comment) from $1. J or a 1630 call may
+# desk_write_marked_head_copy's own comment) from $1. J or a close call may
 # echo a marked line back verbatim as part of an anchor/before/after; this
 # is what keeps that mark from ever reaching the user's real files, and from
 # breaking an exact-line anchor match against real (unmarked) HEAD content.
@@ -143,8 +143,8 @@ desk_validate_also_sources() {
 # The full validation pass for a set of proposal-shaped items: drops an item whose URL source isn't verifiably from this call's
 # own raw results, then sanitizes every remaining item's text. $2 = the
 # allowed-URL set (desk_allowed_urls's output, newline-separated).
-# Caps are a separate step (desk_apply_caps below) since 16:30's items are
-# never capped, only J's news items are.
+# Caps are a separate step (desk_apply_caps below) since a close call's items
+# are never capped, only tiered items are.
 # ---------------------------------------------------------------------------
 desk_validate_items() {
 	local items_json="$1" allowed_urls="$2"

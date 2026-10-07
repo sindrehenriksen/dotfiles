@@ -3,7 +3,7 @@
 # window is floored on a dedicated `last_fetch_ok` (claude/desk-lib/
 # status.sh), advanced only when a fetch step of THIS pass actually ran
 # and none failed — never on `last_ok_run`, which a weekend commit-only
-# invocation of morning/1630 (the weekday_only_pass guard skips every
+# invocation of a weekdays_only pass (the weekday_only_pass guard skips every
 # model-calling step, fetch included, but commit_push still runs and can
 # still finish the pass "ok") would otherwise advance too, silently
 # narrowing the next weekday's own lookback past mail the weekend itself
@@ -80,8 +80,7 @@ git -C "$repo" push -q origin main
 prompt="$ROOT/prompt.md"
 echo "a generic test prompt" > "$prompt"
 
-# One config, two independently-guarded pass names (morning/1630 — the
-# only two names desk-run's own weekday_only_pass check recognizes), pinned
+# One config, two independently-guarded weekdays_only passes, pinned
 # to a Wednesday and a Saturday slot, since the weekend skip follows the
 # slot's scheduled date, not the date this suite happens to run on, so
 # each case below runs its own pass exactly once, never tripping the
@@ -101,7 +100,7 @@ jq -n --arg repo "$repo" --arg prompt "$prompt" '{
 			{ id: "commit-push", kind: "commit_push" },
 			{ id: "F-test", kind: "fetch", prompt: $prompt, tools: ["Read"], connector: false, timeout: 30 }
 		] },
-		"1630": { trigger: { start_calendar_interval: [{ hour: 0, minute: 0, weekday: 6 }] }, steps: [
+		evening: { weekdays_only: true, trigger: { start_calendar_interval: [{ hour: 0, minute: 0, weekday: 6 }] }, steps: [
 			{ id: "commit-push", kind: "commit_push" },
 			{ id: "F-test", kind: "fetch", prompt: $prompt, tools: ["Read"], connector: false, timeout: 30 }
 		] },
@@ -131,14 +130,14 @@ assert_true "last_fetch_ok falls within this run's own window (start of run thro
 
 echo
 echo "=== a weekend run of a DIFFERENT weekday_only_pass: fetch never ran, last_fetch_ok is never touched ==="
-DESK_CONFIG="$cfg" "$DESK_RUN" 1630 > "$ROOT/weekend.out" 2>&1
+DESK_CONFIG="$cfg" "$DESK_RUN" evening > "$ROOT/weekend.out" 2>&1
 rc=$?
 assert_eq "the run still succeeds (commit_push alone)" "0" "$rc"
 assert_true "the fetch step itself was skipped (weekend, model steps only run weekdays)" \
 	"$(grep -q 'F-test.*skipped (weekend' "$ROOT/weekend.out" && echo true || echo false)"
-fetch_ok_1630="$(jq -r 'has("passes") and (.passes | has("1630")) and (.passes["1630"] | has("last_fetch_ok"))' "$DESK_STATUS_FILE")"
-assert_eq "1630's own last_fetch_ok field was never even created" "false" "$fetch_ok_1630"
-assert_eq "morning's own last_fetch_ok (a different pass) is untouched by 1630's run" \
+fetch_ok_evening="$(jq -r 'has("passes") and (.passes | has("evening")) and (.passes.evening | has("last_fetch_ok"))' "$DESK_STATUS_FILE")"
+assert_eq "evening's own last_fetch_ok field was never even created" "false" "$fetch_ok_evening"
+assert_eq "morning's own last_fetch_ok (a different pass) is untouched by evening's run" \
 	"$last_fetch_ok" "$(jq -r '.passes.morning.last_fetch_ok' "$DESK_STATUS_FILE")"
 
 echo

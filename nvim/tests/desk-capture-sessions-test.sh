@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# claude/desk-lib/steps.sh's desk_step_capture_sessions: the 16:30 pass's own "running" (live now) and "dropped" (has
+# claude/desk-lib/steps.sh's desk_step_capture_sessions: the "running" (live now) and "dropped" (has
 # a start event, isn't live, never got a deliberate end) session captures,
 # a bare name on top of notes.md — no model call, no transcript read.
 # session-status.sh is faked (a fixture file, never a real Claude Code
@@ -123,7 +123,7 @@ PASS_SCRATCH="$(mktemp -d)"
 export PASS_SCRATCH
 
 echo "=== a first capture pass ==="
-result="$(desk_step_capture_sessions "1630" "$repo" "2026-09-28" "${files[@]}")"
+result="$(desk_step_capture_sessions "morning" "$repo" "2026-09-28" "${files[@]}")"
 assert_eq "the step reports ok" "ok" "$result"
 
 proposal="$(desk_nvim_cli proposal-read "$repo")"
@@ -181,7 +181,7 @@ count_before="$(printf '%s' "$proposal" | jq '.items | length')"
 rm -rf "$PASS_SCRATCH"
 PASS_SCRATCH="$(mktemp -d)"
 export PASS_SCRATCH
-result="$(desk_step_capture_sessions "1630" "$repo" "2026-09-28" "${files[@]}")"
+result="$(desk_step_capture_sessions "morning" "$repo" "2026-09-28" "${files[@]}")"
 assert_eq "the second pass still reports ok" "ok" "$result"
 proposal2="$(desk_nvim_cli proposal-read "$repo")"
 count_after="$(printf '%s' "$proposal2" | jq '.items | length')"

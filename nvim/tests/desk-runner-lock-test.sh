@@ -2,7 +2,7 @@
 # a single lock shared across every pass
 # (claude/desk-lib/lock.sh's own DESK_LOCK_NAME), taken before the once-
 # a-day guard check and before any status.json write. Before this fix the
-# lock was keyed per pass name, so "morning" and "1630" — invoked
+# lock was keyed per pass name, so "morning" and "evening" — invoked
 # concurrently, as their own launchd slots genuinely can be — never
 # contended for the same lock at all and could run at once against the
 # same notes repo/ledger/status.json. This drives desk-run itself, twice,
@@ -94,28 +94,28 @@ jq -n --arg repo "$repo" --arg prompt "$prompt" '{
 	files: ["notes.md", "reading.md"],
 	passes: {
 		morning: { steps: [ { id: "F", kind: "fetch", prompt: $prompt, tools: ["Read"], connector: false, timeout: 30 } ] },
-		"1630": { steps: [ { id: "F", kind: "fetch", prompt: $prompt, tools: ["Read"], connector: false, timeout: 30 } ] }
+		evening: { steps: [ { id: "F", kind: "fetch", prompt: $prompt, tools: ["Read"], connector: false, timeout: 30 } ] }
 	}
 }' > "$cfg"
 
 DESK_CONFIG="$cfg" "$DESK_RUN" morning > "$ROOT/morning.out" 2>&1 &
 morning_bg=$!
 # Give "morning" a head start so it's the one holding the lock when
-# "1630" tries to acquire it — not a race between the two.
+# "evening" tries to acquire it — not a race between the two.
 sleep 1
-DESK_CONFIG="$cfg" "$DESK_RUN" 1630 > "$ROOT/1630.out" 2>&1
-rc_1630=$?
+DESK_CONFIG="$cfg" "$DESK_RUN" evening > "$ROOT/evening.out" 2>&1
+rc_evening=$?
 wait "$morning_bg"
 rc_morning=$?
 
 assert_eq "morning succeeds" "0" "$rc_morning"
-assert_eq "1630 succeeds (waited, never raced)" "0" "$rc_1630"
+assert_eq "evening succeeds (waited, never raced)" "0" "$rc_evening"
 
 morning_end="$(grep -m1 '^morning-F-.* end ' "$LOG" | awk '{print $3}')"
-sixteen_start="$(grep -m1 '^1630-F-.* start ' "$LOG" | awk '{print $3}')"
+sixteen_start="$(grep -m1 '^evening-F-.* start ' "$LOG" | awk '{print $3}')"
 assert_true "morning's own call recorded an end time" "$([ -n "$morning_end" ] && echo true || echo false)"
-assert_true "1630's own call recorded a start time" "$([ -n "$sixteen_start" ] && echo true || echo false)"
-assert_true "1630's call never started before morning's finished (serialized, not concurrent)" \
+assert_true "evening's own call recorded a start time" "$([ -n "$sixteen_start" ] && echo true || echo false)"
+assert_true "evening's call never started before morning's finished (serialized, not concurrent)" \
 	"$([ "$sixteen_start" -ge "$morning_end" ] && echo true || echo false)"
 
 echo

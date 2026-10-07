@@ -187,7 +187,7 @@ desk_write_deny_hook_settings() {
 # real settings and hooks exactly like a visible one does, so without
 # DESK_HEADLESS its own genuine SessionStart/SessionEnd would land
 # source "startup", reason "other" — indistinguishable from a session the user
-# actually opened, and exactly what the 16:30 capture's own "dropped"
+# actually opened, and exactly what the capture step's own "dropped"
 # criteria matches. Gating this on --name (as the code used to) left every
 # ephemeral connector call unmarked.
 desk_call_model() {
@@ -311,7 +311,7 @@ desk_extract_tool_uses() {
 }
 
 # A judge-shaped call's own final reply text (every text content block of
-# the LAST assistant message, joined) — J and 16:30 hold no output tool,
+# the LAST assistant message, joined) — J and a close call hold no output tool,
 # so their pinned {"items": [...]} shape is their last
 # assistant turn's own text, never a tool_result. Prints "" if the stream
 # has no assistant text at all (a hung/killed call, or one that only ever

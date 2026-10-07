@@ -96,29 +96,29 @@ for required_field in timezone ticket_search_tool mail_search_tool ticket_status
 	fi
 done
 
-# Weekdays only for morning/16:30's own MODEL steps — but commit-and-push runs every day, weekends included:
+# Weekdays only for a weekdays_only pass's MODEL steps — but commit-and-push runs every day, weekends included:
 # a weekend still deserves whatever the user's own text picked up committed (and
 # pushed, once push_enabled) even though nothing is calling a model.
 # Checked against the step loop below rather than a whole-pass early exit,
 # so a weekend invocation still takes the lock, runs the once-a-day guard,
 # and does the commit_push step; only the model-calling step kinds are
 # skipped.
-# The pass's own `weekdays_only` says so; absent, the names `morning` and
-# `1630` keep their historical default of true, every other name false.
+# The pass's own `weekdays_only` says so; absent, a pass named `morning`
+# keeps its historical default of true, every other name false.
 case "$pass" in
-	morning | 1630) weekday_default="true" ;;
+	morning) weekday_default="true" ;;
 	*) weekday_default="false" ;;
 esac
 weekday_only_pass="$(jq -r --arg d "$weekday_default" 'if .weekdays_only == null then $d else (.weekdays_only | tostring) end' <<< "$pass_config")"
 # Whether this is a weekend slot is decided below, from the slot's scheduled
-# date: a Friday 16:30 slot that only fires on Saturday's wake is still a
+# date: a Friday evening slot that only fires on Saturday's wake is still a
 # Friday slot and runs.
 is_weekend="false"
 
-# One lock, shared across every pass (lock.sh's own DESK_LOCK_NAME): morning
-# and 16:30 both touch the same notes repo, ledger and status.json, so they
-# must never run at once regardless of which pass name invoked this — a
-# per-pass lock would let exactly that race happen. Taken before anything
+# One lock, shared across every pass (lock.sh's own DESK_LOCK_NAME): every
+# pass touches the same notes repo, ledger and status.json, so no two may
+# run at once regardless of which pass name invoked this — a per-pass lock
+# would let exactly that race happen. Taken before anything
 # else touches status.json, the once-a-day guard check included, so a
 # concurrent invocation waits (or gives up) rather than racing the guard's
 # own read against another invocation's write, or racing
@@ -331,10 +331,10 @@ failed_sources=()
 # Whether any fetch step of THIS pass actually ran (as opposed to being
 # skipped by the weekday_only_pass/weekend guard above) — desk_status_
 # set_fetch_ok only ever advances the window when this is true, so a
-# weekend commit-only run of morning/1630 never moves it.
+# weekend commit-only run of a weekdays_only pass never moves it.
 any_fetch_step_ran="false"
 # The judge branch below fills this in from its own {kept, overflow}
-# result; a pass with no judge step this run (a close-only 16:30, a
+# result; a pass with no judge step this run (a close-only pass, a
 # commit_push-only pass) reports no overflow, matching status.lua's own
 # "only shown when actually nonzero" gate.
 proposal_overflow_json='{"act": 0, "worth_knowing": 0, "wildcard": 0}'
