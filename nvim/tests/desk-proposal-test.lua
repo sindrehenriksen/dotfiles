@@ -399,6 +399,58 @@ do
 	assert_eq("recorded as taken from the intermediate commit", 1, #proposal.sync_taken(r))
 end
 
+print("\n=== fifty items, edits listed before the insertions sharing their spot: nothing is lost ===")
+do
+	local SECTIONS = 10
+	local notes = {}
+	for i = 1, SECTIONS do
+		vim.list_extend(notes, { "Section " .. i, "- s" .. i .. " one", "- s" .. i .. " two", "- s" .. i .. " three", "- s" .. i .. " four", "" })
+	end
+	local function section_items(i)
+		local one = "- s" .. i .. " one"
+		local two, three, four = "- s" .. i .. " two", "- s" .. i .. " three", "- s" .. i .. " four"
+		-- Everything acts at the spot between "one" and "two", or removes a
+		-- line right beside it; the in-place kinds come first.
+		return {
+			item("e" .. i, { kind = "edit", target = { at = two }, before = two, after = two .. " edited", source = "" }),
+			item("r" .. i, { kind = "remove", target = { at = four }, before = four, after = "", source = "" }),
+			item("m" .. i, { kind = "move", target = { { at = three }, { after = one } }, before = three, after = three, source = "" }),
+			item("a" .. i, { kind = "add", target = { after = one }, after = "- ADD " .. i, source = "" }),
+			item("l" .. i, { kind = "link", target = { after = one }, after = "- LINK " .. i, source = "" }),
+		}
+	end
+	local function expected(insert_order)
+		local out = {}
+		for i = 1, SECTIONS do
+			out[#out + 1] = "Section " .. i
+			out[#out + 1] = "- s" .. i .. " one"
+			for _, k in ipairs(insert_order) do
+				out[#out + 1] = ({ m = "- s" .. i .. " three", a = "- ADD " .. i, l = "- LINK " .. i })[k]
+			end
+			out[#out + 1] = "- s" .. i .. " two edited"
+			out[#out + 1] = ""
+		end
+		return out
+	end
+	for _, case in ipairs({ { "edits first", false, { "m", "a", "l" } }, { "insertions first", true, { "l", "a", "m" } } }) do
+		local r = new_repo(notes)
+		local items = {}
+		for i = 1, SECTIONS do
+			vim.list_extend(items, section_items(i))
+		end
+		if case[2] then
+			local rev = {}
+			for k = #items, 1, -1 do
+				rev[#rev + 1] = items[k]
+			end
+			items = rev
+		end
+		local _, st = proposal.build(r, "morning", "2026-10-01", items, FILES)
+		assert_eq(case[1] .. ": all fifty applied", { 50, 0 }, { st.applied, st.deferred })
+		assert_eq(case[1] .. ": every insertion, move and edit is in the tree, nothing else went", expected(case[3]), tip_lines(r, "notes.md"))
+	end
+end
+
 print(string.format("\n=== summary: %d passed, %d failed ===", pass, fail))
 if fail > 0 then
 	os.exit(1)

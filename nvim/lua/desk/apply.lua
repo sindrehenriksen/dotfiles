@@ -57,31 +57,50 @@ end
 --- targeting "top") — a caller uses that set purely for its own reporting,
 --- never to change how the edit itself applied.
 ---
---- Edits are collected as (position, remove-count, insert-lines) against
---- the *original* `lines`, tagged with the item's own index in `items` (its
---- tie-break — "ties at one anchor are laid in input order"). They're
---- applied bottom-of-file-up (by descending original position, ties broken
---- by *descending* input index — so of two items sharing an anchor, the
---- later one is inserted first and the earlier one, inserted afterward at
---- the same spot, pushes it down, landing above it — input order top to
---- bottom), so an earlier (lower) edit's line-count change never shifts a
---- later (higher) one out from under it.
+--- Every item resolves against the committed `lines` only, and the result
+--- is composed in one walk over them, never spliced into a buffer that
+--- earlier items already changed. So a removal (an edit's, a remove's, a
+--- move's leaving side) drops exactly its own committed lines, by index,
+--- and can never take a line some insertion put at the same spot. What
+--- goes in sits in the gap before a committed line: insertions first, in
+--- input order ("ties at one anchor are laid in input order"), then an
+--- edit's replacement, which stays where its own lines were. Two items
+--- claiming the same committed line can't both act: the first in input
+--- order does, and the other is deferred, a conflict like any other.
 function M.apply_file(lines, items)
-	local edits = {}
+	local pieces = {} -- gap (0..#lines) -> list of { insert, seq, in_place }
+	local claimed = {} -- committed line index -> true once an item removes it
 	local results = {}
 	local landed_on_top = {}
 
+	local function free(first, count)
+		for i = first, first + count - 1 do
+			if claimed[i] then
+				return false
+			end
+		end
+		return true
+	end
+	local function claim(first, count)
+		for i = first, first + count - 1 do
+			claimed[i] = true
+		end
+	end
+
 	for item_index, item in ipairs(items) do
 		local leave_anchor, land_anchor = block.parse_target(item.target)
-		local function push(pos, remove, insert)
-			edits[#edits + 1] = { pos = pos, remove = remove, insert = insert, seq = item_index }
+		local function put(gap, insert, in_place)
+			if #insert > 0 then
+				pieces[gap] = pieces[gap] or {}
+				table.insert(pieces[gap], { insert = insert, seq = item_index, in_place = in_place })
+			end
 		end
 		if INSERT_KINDS[item.kind] then
 			local pos, fell_back = block.find_after_anchor(lines, land_anchor)
 			if pos == nil then
 				results[item.id] = "deferred" -- no anchor at all: malformed, nothing to do
 			else
-				push(pos, 0, snippet.split_lines(item.after))
+				put(pos, snippet.split_lines(item.after), false)
 				results[item.id] = "applied"
 				if fell_back then
 					landed_on_top[item.id] = true
@@ -92,35 +111,39 @@ function M.apply_file(lines, items)
 			local pos, status = resolve_leave(lines, leave_anchor, before_lines)
 			if status == "bad_anchor" then
 				-- Nowhere left to edit in place: land like a plain
-				-- insertion at the top instead (empty insert for remove,
+				-- insertion at the top instead (nothing for remove,
 				-- whose `after` is always empty anyway).
-				push(0, 0, item.kind == "edit" and snippet.split_lines(item.after) or {})
+				put(0, item.kind == "edit" and snippet.split_lines(item.after) or {}, false)
 				results[item.id] = "applied"
 				landed_on_top[item.id] = true
-			elseif status == "content_mismatch" then
+			elseif status == "content_mismatch" or not free(pos + 1, #before_lines) then
 				results[item.id] = "deferred"
 			else
-				push(pos, #before_lines, item.kind == "edit" and snippet.split_lines(item.after) or {})
+				claim(pos + 1, #before_lines)
+				put(pos, item.kind == "edit" and snippet.split_lines(item.after) or {}, true)
 				results[item.id] = "applied"
 			end
 		elseif item.kind == "merge" or item.kind == "move" then
 			local before_lines = snippet.split_lines(item.before)
 			local leave_pos, leave_status = resolve_leave(lines, leave_anchor, before_lines)
-			if leave_status == "content_mismatch" then
+			local land_pos, land_fell_back
+			if leave_status ~= "content_mismatch" then
+				land_pos, land_fell_back = block.find_after_anchor(lines, land_anchor)
+			end
+			if
+				leave_status == "content_mismatch"
+				or land_pos == nil
+				or (leave_status == "resolved" and not free(leave_pos + 1, #before_lines))
+			then
 				results[item.id] = "deferred"
 			else
-				local land_pos, land_fell_back = block.find_after_anchor(lines, land_anchor)
-				if land_pos == nil then
-					results[item.id] = "deferred"
-				else
-					if leave_status == "resolved" then
-						push(leave_pos, #before_lines, {})
-					end
-					push(land_pos, 0, snippet.split_lines(item.after))
-					results[item.id] = "applied"
-					if leave_status == "bad_anchor" or land_fell_back then
-						landed_on_top[item.id] = true
-					end
+				if leave_status == "resolved" then
+					claim(leave_pos + 1, #before_lines)
+				end
+				put(land_pos, snippet.split_lines(item.after), false)
+				results[item.id] = "applied"
+				if leave_status == "bad_anchor" or land_fell_back then
+					landed_on_top[item.id] = true
 				end
 			end
 		else
@@ -128,20 +151,22 @@ function M.apply_file(lines, items)
 		end
 	end
 
-	table.sort(edits, function(a, b)
-		if a.pos ~= b.pos then
-			return a.pos > b.pos
+	local new_lines = {}
+	for gap = 0, #lines do
+		local here = pieces[gap]
+		if here then
+			table.sort(here, function(a, b)
+				if a.in_place ~= b.in_place then
+					return not a.in_place
+				end
+				return a.seq < b.seq
+			end)
+			for _, piece in ipairs(here) do
+				vim.list_extend(new_lines, piece.insert)
+			end
 		end
-		return a.seq > b.seq
-	end)
-
-	local new_lines = vim.deepcopy(lines)
-	for _, e in ipairs(edits) do
-		for _ = 1, e.remove do
-			table.remove(new_lines, e.pos + 1)
-		end
-		for i = #e.insert, 1, -1 do
-			table.insert(new_lines, e.pos + 1, e.insert[i])
+		if gap < #lines and not claimed[gap + 1] then
+			new_lines[#new_lines + 1] = lines[gap + 1]
 		end
 	end
 
