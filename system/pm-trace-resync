@@ -1,0 +1,13 @@
+#!/bin/sh
+# /usr/lib/systemd/system-sleep/pm-trace-resync
+#
+# Puts the clock right after resume while pm_trace (pm-trace.conf) is on. The
+# kernel measures how long it slept by comparing RTC readings, and pm_trace
+# overwrites the RTC during resume, so no sleep time gets added: the clock wakes
+# up showing the moment the lid closed. timesyncd does not resync on resume and
+# polls only about every half hour, so restart it. The network is not up yet at
+# this point, which is fine: timesyncd retries every 30s until it is.
+#
+# Remove together with pm-trace.conf. README.md, "Display freeze on resume".
+[ "$1" = post ] && systemctl restart --no-block systemd-timesyncd.service
+exit 0

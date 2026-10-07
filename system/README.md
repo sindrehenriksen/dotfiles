@@ -292,6 +292,7 @@ nothing behind:
 ```bash
 sudo cp ~/dotfiles/system/pm-trace.conf /etc/tmpfiles.d/pm-trace.conf
 sudo systemd-tmpfiles --create /etc/tmpfiles.d/pm-trace.conf
+sudo install -m 755 ~/dotfiles/system/pm-trace-resync /usr/lib/systemd/system-sleep/
 cat /sys/power/pm_trace   # 1
 ```
 
@@ -303,16 +304,28 @@ cat /sys/power/pm_trace_dev_match
 ```
 
 Several devices can share a hash, so treat the output as a shortlist rather than
-an answer. Both kernels support this (`CONFIG_PM_TRACE_RTC=y` in the 7.2.0 build
-and in Ubuntu's 7.0.0-31), and the machine has the legacy `rtc_cmos` the tracer
+an answer. Both kernels support this (`CONFIG_PM_TRACE_RTC=y` in the mainline build
+and in Ubuntu's 7.0), and the machine has the legacy `rtc_cmos` the tracer
 needs.
 
-**It costs a wrong clock after every resume, not only after a failure.** The
-kernel writes hashes over the RTC, the system clock follows the RTC on resume and
-at boot, and `systemd-timesyncd` then pulls it back, so expect a jump lasting
-seconds to a minute. That is the trade, and it is deliberately time-boxed:
-**take it out once a failure has been captured**, or by 2026-11-05 if none has,
-with `sudo rm /etc/tmpfiles.d/pm-trace.conf` and a reboot.
+**It stops the clock during every sleep.** The kernel measures how long it slept
+by comparing RTC readings, and pm_trace overwrites the RTC during resume, so no
+sleep time is added: the clock wakes up showing the moment the lid closed, and
+`uptime` excludes every sleep. `systemd-timesyncd` does not resync on resume and
+polls only about every half hour, so without help the clock stays behind by the
+whole sleep for up to that long (19.5 hours, once). `pm-trace-resync` restarts
+it on every resume, which puts the clock right within about a minute of the
+network coming up. Journal timestamps in that first minute, and the apparent
+length of every suspend, are still wrong.
+
+That is the trade, and it is deliberately time-boxed: **take it out once a
+failure has been captured**, or by 2026-11-05 if none has:
+
+```bash
+sudo rm /etc/tmpfiles.d/pm-trace.conf /usr/lib/systemd/system-sleep/pm-trace-resync
+```
+
+then reboot.
 
 **Ruled out:** PSR. The panel reports `eDP-1: PSR support 0`, so panel self
 refresh is already disabled and `amdgpu.dcdebugmask=0x10` would be a no-op.
