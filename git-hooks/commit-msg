@@ -6,81 +6,155 @@
 
 msg_file="$1"
 
-# Reflow body paragraphs at 72 chars
-# Preserves title (line 1), blank separator (line 2),
-# and git comment lines (starting with #).
-# An awk preprocessor inserts a blank line before each bullet (-/*/+ or
-# N.) so fmt sees each bullet as its own paragraph — otherwise fmt joins
-# adjacent same-indent bullets into one paragraph and can splice them as
-# "- foo. - bar" mid-line. cat -s squeezes the synthetic blanks back.
-# The sed filter collapses the double-space that BSD fmt (macOS) inserts
-# after sentence-ending punctuation when joining lines.
+# Reflow body paragraphs at 72 chars (like vim gqip), leaving the title
+# (line 1) and the blank separator (line 2) alone.
 #
-# A trailing trailer block (Co-Authored-By:, etc.) must not go through
-# fmt at all: fmt doesn't know trailers can't be merged, and will happily
-# pull a short trailer line up into its neighbour, wrecking both. Git's
-# own definition of a trailer block is used to find one: the last
-# paragraph of the message, where every line is either "Token: value"
-# (token = letters/digits/hyphens, no spaces) or a folded continuation
-# of the line above it (git-interpret-trailers(1), "is all trailers").
-# That block, if present, is held out of the reflow and emitted verbatim.
-body_file=$(mktemp)
-tail -n +3 "$msg_file" | grep -v '^#' > "$body_file"
+# Comment lines are lines starting with core.commentChar (default #).
+# Git strips them only in its "strip" cleanup mode, the editor default;
+# with -F or -m the default is "whitespace" and they are content. So a
+# comment line is never moved and never reflowed: it is emitted verbatim
+# where it stood, and the text on either side of it is reflowed as a
+# separate run, so fmt cannot join it into a neighbouring paragraph.
+# Two regions are emitted verbatim as a whole: the trailing block of
+# comment and blank lines (git's editor template), and everything from
+# git's scissors line on (commit -v puts the diff below it, and git
+# discards it). core.commentChar=auto is chosen by git from the message
+# before the template is added, which the hook cannot reconstruct; it
+# takes the character of the scissors line, else of the last non-blank
+# line if that is one of auto's candidates, else #.
+#
+# Within a run, an awk preprocessor inserts a blank line before each
+# bullet (-/*/+ or N.) so fmt sees each bullet as its own paragraph —
+# otherwise fmt joins adjacent same-indent bullets into one paragraph and
+# can splice them as "- foo. - bar" mid-line. cat -s squeezes the
+# synthetic blanks back. The sed filter collapses the double-space that
+# BSD fmt (macOS) inserts after sentence-ending punctuation when joining
+# lines.
+#
+# A trailer block (Co-Authored-By:, etc.) at the end of the last run
+# must not go through fmt at all: fmt doesn't know trailers can't be
+# merged, and will happily pull a short trailer line up into its
+# neighbour, wrecking both. Git's own definition of a trailer block is
+# used to find one: the last paragraph, where every line is either
+# "Token: value" (token = letters/digits/hyphens, no spaces) or a folded
+# continuation of the line above it (git-interpret-trailers(1), "is all
+# trailers"). That block, if present, is held out of the reflow and
+# emitted verbatim.
+comment_char=$(git config --get core.commentString 2>/dev/null) \
+    || comment_char=$(git config --get core.commentChar 2>/dev/null) \
+    || comment_char='#'
 
-trailer_range=$(awk '
-    { n++; lines[n] = $0 }
-    END {
-        end = n
-        while (end >= 1 && lines[end] ~ /^[ \t]*$/) end--
-        if (end < 1) { print "NONE"; exit }
-        start = end
-        while (start - 1 >= 1 && lines[start - 1] !~ /^[ \t]*$/) start--
-        for (i = start; i <= end; i++) {
-            line = lines[i]
-            if (line ~ /^[A-Za-z0-9-]+:( |$)/) continue
-            if (i > start && line ~ /^[ \t]/) continue
-            print "NONE"
-            exit
-        }
-        print start, end
+reflow() {
+    awk 'prev != "" && /^[[:space:]]*([-*+]|[0-9]+\.) / { print "" } { print; prev = $0 }' "$1" \
+        | fmt -w 72 \
+        | sed -E 's/([.!?]) {2,}/\1 /g' \
+        | cat -s
+}
+
+# Split the body into numbered segment files, in order: NNNN.t is a run
+# to reflow, NNNN.l the last run (reflowed, trailer block held out),
+# NNNN.v verbatim.
+seg_dir=$(mktemp -d)
+tail -n +3 "$msg_file" | awk -v cc="$comment_char" -v dir="$seg_dir" '
+    function is_comment(s) { return index(s, cc) == 1 }
+    function open_seg(type) {
+        if (out != "") close(out)
+        seg++
+        out = sprintf("%s/%04d.%s", dir, seg, type)
     }
-' "$body_file")
+    { n++; line[n] = $0 }
+    END {
+        cut = " ------------------------ >8 ------------------------"
+        if (cc == "auto") {
+            cands = "#;@!$%^&|:"
+            cc = ""
+            for (i = 1; i <= n && cc == ""; i++)
+                if (substr(line[i], 2) == cut && index(cands, substr(line[i], 1, 1)))
+                    cc = substr(line[i], 1, 1)
+            for (i = n; i >= 1 && cc == ""; i--)
+                if (line[i] !~ /^[ \t]*$/) {
+                    if (index(cands, substr(line[i], 1, 1))) cc = substr(line[i], 1, 1)
+                    break
+                }
+            if (cc == "") cc = "#"
+        }
+        scissors = n + 1
+        for (i = 1; i <= n; i++) if (line[i] == cc cut) { scissors = i; break }
+        last = scissors - 1
+        while (last >= 1 && (line[last] ~ /^[ \t]*$/ || is_comment(line[last]))) last--
+        last_comment = 0
+        for (i = 1; i <= last; i++) if (is_comment(line[i])) last_comment = i
+        type = ""
+        for (i = 1; i <= last; i++) {
+            t = is_comment(line[i]) ? "v" : (i > last_comment ? "l" : "t")
+            if (t != type) { open_seg(t); type = t }
+            print line[i] > out
+        }
+        if (last < n) {
+            open_seg("v")
+            for (i = last + 1; i <= n; i++) print line[i] > out
+        }
+        if (out != "") close(out)
+    }
+'
 
-rest_file="$body_file"
-trailer_file=""
-if [ "$trailer_range" != "NONE" ]; then
-    trailer_start=${trailer_range% *}
-    trailer_end=${trailer_range#* }
-    trailer_file=$(mktemp)
-    sed -n "${trailer_start},${trailer_end}p" "$body_file" > "$trailer_file"
-    rest_file=$(mktemp)
-    if [ "$trailer_start" -gt 1 ]; then
-        # Trim trailing blanks: the paragraph break before the trailer
-        # block is re-inserted explicitly below, so it must not also
-        # survive here or the two would stack into a double blank line.
-        sed -n "1,$((trailer_start - 1))p" "$body_file" \
-            | awk 'NF { p = NR } { a[NR] = $0 } END { for (i = 1; i <= p; i++) print a[i] }' > "$rest_file"
+# Hold a trailer block out of the last run: print "start end" of it, or
+# NONE.
+trailer_range() {
+    awk '
+        { n++; lines[n] = $0 }
+        END {
+            end = n
+            while (end >= 1 && lines[end] ~ /^[ \t]*$/) end--
+            if (end < 1) { print "NONE"; exit }
+            start = end
+            while (start - 1 >= 1 && lines[start - 1] !~ /^[ \t]*$/) start--
+            for (i = start; i <= end; i++) {
+                line = lines[i]
+                if (line ~ /^[A-Za-z0-9-]+:( |$)/) continue
+                if (i > start && line ~ /^[ \t]/) continue
+                print "NONE"
+                exit
+            }
+            print start, end
+        }
+    ' "$1"
+}
+
+emit_last_run() {
+    local run="$1" range start end rest
+    range=$(trailer_range "$run")
+    if [ "$range" = "NONE" ]; then
+        reflow "$run"
+        return
     fi
-fi
+    start=${range% *}
+    end=${range#* }
+    if [ "$start" -gt 1 ]; then
+        # Trim trailing blanks: line start-1 is blank by construction,
+        # and that one paragraph break is re-inserted explicitly so it
+        # does not depend on fmt keeping blank lines at end of input.
+        rest="$seg_dir/rest"
+        sed -n "1,$((start - 1))p" "$run" \
+            | awk 'NF { p = NR } { a[NR] = $0 } END { for (i = 1; i <= p; i++) print a[i] }' > "$rest"
+        [ -s "$rest" ] && reflow "$rest"
+        echo
+    fi
+    sed -n "${start},${end}p" "$run"
+}
 
 {
     head -2 "$msg_file"
-    if [ -s "$rest_file" ]; then
-        awk 'prev != "" && /^[[:space:]]*([-*+]|[0-9]+\.) / { print "" } { print; prev = $0 }' "$rest_file" \
-            | fmt -w 72 \
-            | sed -E 's/([.!?]) {2,}/\1 /g' \
-            | cat -s
-    fi
-    if [ -s "$trailer_file" ]; then
-        [ -s "$rest_file" ] && echo
-        cat "$trailer_file"
-    fi
-    tail -n +3 "$msg_file" | grep '^#' || true
+    for seg in "$seg_dir"/*; do
+        case "$seg" in
+            *.t) reflow "$seg" ;;
+            *.l) emit_last_run "$seg" ;;
+            *.v) cat "$seg" ;;
+        esac
+    done
 } > "${msg_file}.tmp" && mv "${msg_file}.tmp" "$msg_file"
 
-rm -f "$body_file"
-[ -n "$trailer_file" ] && rm -f "$trailer_file"
-[ "$rest_file" != "$body_file" ] && rm -f "$rest_file"
+rm -rf "$seg_dir"
 
 # Validate title length. Strip autosquash prefixes (fixup!/squash!/amend!,
 # which can stack) before measuring — git generates them, they're discarded on

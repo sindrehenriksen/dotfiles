@@ -4,19 +4,22 @@
 # Each case maps to a prior fix — see git log -- git-hooks/commit-msg.
 
 set -u
+# The hook reads core.commentChar, so keep the caller's own git config out.
+export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
 HOOK="$(cd "$(dirname "$0")" && pwd)/commit-msg"
 pass=0
 fail=0
 total=0
 
 # Reflow test: hook should pass AND output should match expected verbatim.
+# env_pfx is optional, as for test_lint.
 test_reflow() {
-    local name="$1" input="$2" expected="$3"
+    local name="$1" input="$2" expected="$3" env_pfx="${4:-}"
     total=$((total + 1))
     local tmp
     tmp=$(mktemp)
     printf '%s\n' "$input" > "$tmp"
-    if ! (cd /tmp && bash "$HOOK" "$tmp") >/dev/null 2>&1; then
+    if ! (cd /tmp && env $env_pfx bash "$HOOK" "$tmp") >/dev/null 2>&1; then
         echo "FAIL [$name]: hook exited non-zero"
         fail=$((fail + 1))
         rm -f "$tmp"
@@ -212,6 +215,120 @@ Claude-Session: https://claude.ai/code/session_01SWWZ7hbheeGQfnc25rACWJ" \
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
 Claude-Session: https://claude.ai/code/session_01SWWZ7hbheeGQfnc25rACWJ"
+
+# --- Comment-char lines stay where they are. Git strips them only in
+# its "strip" cleanup mode (the editor); with -F or -m the default is
+# "whitespace", so a line starting with # is content. Either way the
+# hook must not move it or join it into a neighbouring paragraph. ---
+test_reflow "mid-body # line stays in place, neighbours reflow apart" \
+"Short title
+
+First line
+joined.
+#42 is content when committing with -F.
+Second line
+joined too." \
+"Short title
+
+First line joined.
+#42 is content when committing with -F.
+Second line joined too."
+
+test_reflow "# line directly before trailers stays before them" \
+"Short title
+
+Body text.
+
+#42 tracks the follow-up.
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01SWWZ7hbheeGQfnc25rACWJ" \
+"Short title
+
+Body text.
+
+#42 tracks the follow-up.
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01SWWZ7hbheeGQfnc25rACWJ"
+
+test_reflow "trailing editor template stays at the end, verbatim" \
+"Short title
+
+Body line one
+continues here.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+# Please enter the commit message for your changes. Lines starting
+# with '#' will be ignored, and an empty message aborts the commit.
+#
+# On branch main" \
+"Short title
+
+Body line one continues here.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+# Please enter the commit message for your changes. Lines starting
+# with '#' will be ignored, and an empty message aborts the commit.
+#
+# On branch main"
+
+SCISSORS_TAIL="# ------------------------ >8 ------------------------
+# Do not modify or remove the line above.
+# Everything below it will be ignored.
+diff --git a/f.sh b/f.sh
+index 0000000..1111111 100644
+--- a/f.sh
++++ b/f.sh
+@@ -1,2 +1,2 @@
+ # a shell comment in the diff context
+-echo old
++echo a new line that is deliberately longer than seventy-two columns wide"
+test_reflow "scissors line and the diff after it are verbatim" \
+"Short title
+
+Body line one
+continues here.
+# Please enter the commit message for your changes.
+$SCISSORS_TAIL" \
+"Short title
+
+Body line one continues here.
+# Please enter the commit message for your changes.
+$SCISSORS_TAIL"
+
+test_reflow "custom core.commentChar is respected" \
+"Short title
+
+First line
+joined.
+; mid-body comment
+Second line,
+#42 included.
+
+; Please enter the commit message for your changes." \
+"Short title
+
+First line joined.
+; mid-body comment
+Second line, #42 included.
+
+; Please enter the commit message for your changes." \
+"GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.commentChar GIT_CONFIG_VALUE_0=;"
+
+test_reflow "core.commentChar=auto takes the template's character" \
+"Short title
+
+Fixes
+#42.
+
+; Please enter the commit message for your changes." \
+"Short title
+
+Fixes #42.
+
+; Please enter the commit message for your changes." \
+"GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.commentChar GIT_CONFIG_VALUE_0=auto"
 
 # --- Summary ---
 echo
