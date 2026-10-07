@@ -36,23 +36,24 @@ desk_strip_modelines() {
 
 # Removes any http(s) URL substring from $1 that isn't one of the allowed
 # URLs in $2 (newline-separated), replacing it with "[url removed]".
-# An allowed URL is
-# left exactly as it appears; a text with no URLs at all is unchanged.
+# An allowed URL is left exactly as it appears; a text with no URLs at all is
+# unchanged. A labelled link, `[label](url)`, is kept whole when its URL is
+# allowed, and becomes `label [url removed]` when it is not, so no link
+# syntax is left pointing at nothing.
 desk_strip_disallowed_urls() {
 	local text="$1" allowed_newline="$2"
-	local urls
-	urls="$(grep -oE 'https?://[^[:space:]"'"'"'<>)]+' <<< "$text" 2> /dev/null | sort -u)"
-	[ -n "$urls" ] || { printf '%s' "$text"; return; }
-	local url
-	while IFS= read -r url; do
-		[ -n "$url" ] || continue
-		if ! grep -qxF "$url" <<< "$allowed_newline" 2> /dev/null; then
-			local esc
-			esc="$(printf '%s' "$url" | sed 's/[.[\*^$\/]/\\&/g')"
-			text="$(printf '%s' "$text" | sed "s|$esc|[url removed]|g")"
-		fi
-	done <<< "$urls"
-	printf '%s' "$text"
+	DESK_ALLOWED_URLS="$allowed_newline" perl -0777 -e '
+		my %ok = map { $_ => 1 } grep { length } split /\n/, $ENV{DESK_ALLOWED_URLS};
+		my $t = join "", <STDIN>;
+		my $url = qr{https?://[^\s"\x27<>)]+};
+		my @kept;
+		$t =~ s{\[([^\]\n]*)\]\(($url)\)}{
+			if ($ok{$2}) { push @kept, "[$1]($2)"; "\x00" . $#kept . "\x00" } else { "$1 [url removed]" }
+		}ge;
+		$t =~ s{($url)}{ $ok{$1} ? $1 : "[url removed]" }ge;
+		$t =~ s{\x00(\d+)\x00}{$kept[$1]}g;
+		print $t;
+	' <<< "$text" | perl -pe 'chomp if eof'
 }
 
 # Strips desk-lib/steps.sh's own DESK_AGENT_MARK suffix (a scratch-copy-only

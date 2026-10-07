@@ -22,4 +22,4 @@ Write, in this order:
 
 When there are suggestions, close with one line saying they wait as a diff in the user's notes and nothing changes until they take one.
 
-Plain prose and simple bullets only: no JSON, no tables, no item ids or step ids beyond what the user would recognise. Address the user as "you". Keep it short enough to read in a minute.
+Write any link as `[short label](url)`, never a bare long URL. Plain prose and simple bullets only: no JSON, no tables, no item ids or step ids beyond what the user would recognise. Address the user as "you". Keep it short enough to read in a minute.

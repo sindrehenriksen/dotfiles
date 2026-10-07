@@ -66,6 +66,21 @@ assert_true "the disallowed URL is gone" "$([[ "$out" != *evil.example* ]] && ec
 assert_contains "the disallowed URL is replaced with a marker" "$out" "[url removed]"
 
 echo
+echo "=== URL stripping: labelled links ==="
+out="$(desk_strip_disallowed_urls "- WK: a thread [Slack thread](https://example.com/allowed) worth a look" "$allowed")"
+assert_eq "a labelled link to an allowed source survives whole" \
+	"- WK: a thread [Slack thread](https://example.com/allowed) worth a look" "$out"
+out="$(desk_strip_disallowed_urls "- WK: see [the post](https://evil.example/phish) now" "$allowed")"
+assert_eq "a disallowed one keeps its label and loses its URL and link syntax" \
+	"- WK: see the post [url removed] now" "$out"
+out="$(desk_strip_disallowed_urls $'[ok](https://example.com/allowed) and [bad](https://evil.example/x)\nbare https://evil.example/y' "$allowed")"
+assert_eq "mixed, over several lines" \
+	$'[ok](https://example.com/allowed) and bad [url removed]\nbare [url removed]' "$out"
+validated="$(desk_validate_items '[{"id":"l1","file":"notes.md","kind":"new","target":"top","before":"","after":"- WK: x [Slack thread](https://example.com/allowed)","source":"https://example.com/allowed","headline":"h"}]' "$allowed")"
+assert_eq "an item citing its source as a labelled link is kept intact" \
+	"- WK: x [Slack thread](https://example.com/allowed)" "$(jq -r '.[0].after' <<< "$validated")"
+
+echo
 echo "=== desk_allowed_urls: Gmail literal + Slack rebuilt-from-raw ==="
 results_file="$ROOT/tool-results.jsonl"
 cat > "$results_file" <<'JSONL'

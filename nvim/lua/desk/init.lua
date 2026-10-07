@@ -47,6 +47,16 @@ function M.setup()
 			end
 			review.attach(args.buf)
 
+			-- Links are written `[label](url)`: show the label and reveal the
+			-- URL on the cursor line (concealcursor left at its empty default).
+			-- The conceal comes from the markdown tree-sitter highlights; the
+			-- legacy syntax file does not hide link URLs, so start them here
+			-- when nothing else has.
+			if not vim.treesitter.highlighter.active[args.buf] then
+				pcall(vim.treesitter.start, args.buf, "markdown")
+			end
+			vim.opt_local.conceallevel = 2
+
 			-- The tokens config is instantiation-specific and can be genuinely absent while dotfiles is
 			-- being exercised on its own (e.g. these tests): a missing or
 			-- invalid config just means annotations/hotkey have nothing to
