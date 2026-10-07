@@ -296,7 +296,7 @@ In the review split:
 
 | Key | Action |
 |---|---|
-| `dp` | Take the diff hunk under the cursor into your notes buffer: every adjacent suggestion in it, as `do` from the notes window does. For a suggestion that only removes lines, the cursor goes on the line just below its grey filler, which is where `]c` lands; at the end of the file, on the last line. |
+| `dp` | Take the diff hunk under the cursor into your notes buffer: every adjacent suggestion in it, as `do` from the notes window does. For a suggestion that only removes lines, the cursor goes on the line just above or just below its grey filler; `]c` lands below. |
 | `<leader>gA` | Take just the suggestion under the cursor into your notes buffer. |
 | `<leader>gD` | Decline the suggestion under the cursor. |
 | `u` | Undo the latest take or decline made here. A take is undone in your notes buffer, unless you have edited your notes since, when it says so and leaves them alone; anything else is plain undo. |

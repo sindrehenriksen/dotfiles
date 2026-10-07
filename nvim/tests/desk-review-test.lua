@@ -839,6 +839,15 @@ do
 	assert_eq("the cursor starts on the first hunk: the line below the filler", line_of(rb, "Section B"), vim.api.nvim_win_get_cursor(rw)[1])
 	vim.cmd("normal dp")
 	assert_eq("dp there takes the removal", { "Section A", "  existing", "Section B", "  other" }, lines_of(nb))
+	vim.cmd("normal u")
+	assert_eq("u puts it back", { "Section A", "  existing", "  - stale", "Section B", "  other" }, lines_of(nb))
+	go_to(rw, rb, "  existing")
+	vim.cmd("normal dp")
+	assert_eq("dp on the line above the filler takes it too", { "Section A", "  existing", "Section B", "  other" }, lines_of(nb))
+	vim.cmd("normal u")
+	go_to(rw, rb, "Section A")
+	vim.cmd("normal dp")
+	assert_eq("two lines above it, dp takes nothing", { "Section A", "  existing", "  - stale", "Section B", "  other" }, lines_of(nb))
 end
 
 print("\n=== dp in the review split takes the hunk, recorded like do from the notes side ===")

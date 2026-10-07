@@ -824,9 +824,11 @@ function M.open_review(notes_buf)
 		note_takes(s, pre)
 		M.refresh_status_line(notes_buf)
 	end, { buffer = notes_buf, desc = "Take the hunk under the cursor (also at the end of the file)" })
-	-- The same take from the review side. Plain `dp` on the split's last line
-	-- misses a removal of the notes lines after it, and the range form is
-	-- invalid past the split's end, so that removal is obtained from the
+	-- The same take from the review side. Plain `dp` takes a removal (lines
+	-- only the notes have, grey filler in the split) from the line just below
+	-- the filler, and misses it from the line just above, which is the only
+	-- one there at the end of the file. The range form is invalid past the
+	-- split's end, so from the line above the removal is obtained from the
 	-- notes side instead.
 	vim.keymap.set("n", "dp", function()
 		local tick = vim.api.nvim_buf_get_changedtick(notes_buf)
@@ -836,12 +838,7 @@ function M.open_review(notes_buf)
 		pcall(vim.cmd, "normal! " .. count .. "dp")
 		local line = vim.api.nvim_win_get_cursor(0)[1]
 		local nwin = vim.fn.bufwinid(notes_buf)
-		if
-			vim.api.nvim_buf_get_changedtick(notes_buf) == tick
-			and count == ""
-			and nwin ~= -1
-			and line == vim.api.nvim_buf_line_count(review_buf)
-		then
+		if vim.api.nvim_buf_get_changedtick(notes_buf) == tick and count == "" and nwin ~= -1 then
 			for _, h in ipairs(diff_indices(pre, buf_lines(review_buf))) do
 				if h[4] == 0 and h[3] == line and h[2] > 0 then
 					vim.api.nvim_win_call(nwin, function()
