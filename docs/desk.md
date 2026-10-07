@@ -239,15 +239,19 @@ A take is remembered when you make it and recorded on the next save of either bu
 
 One LaunchAgent plist per pass, each running `desk-run <pass>` with `DESK_CONFIG` and a `PATH` that reaches bash 4+, `jq`, `nvim`, `perl`, `rg`, `claude` and `~/.local/bin`. `claude/desk-example/com.local.desk.morning.plist` is the pattern: launchd expands neither `~` nor `$HOME`, so it runs through `/bin/sh -c`, and it appends the pass's log to `~/.local/state/desk/logs/`. Set `CLAUDE_CONFIG_DIR` there too if your sessions live in a config directory other than `~/.claude`: the capture and close steps read sessions from it. Keep `StartCalendarInterval` equal to the pass's `trigger.start_calendar_interval` (launchd's `Weekday` uses the same 1–7 numbers). Several slots per pass are the retry mechanism: once a scheduled date finishes ok, later slots for it do nothing.
 
-Keep the plists in the instance repo and load them from there:
+**Missed slots.** launchd runs a `StartCalendarInterval` slot missed while the Mac slept once it wakes (several missed ones coalesce into one run), but not one missed while it was off: after a restart or shutdown the job waits for its next slot. `RunAtLoad`, as in the example plist, closes that gap: the job also runs whenever launchd loads it, which is at every login, and the once-a-day guard makes the day's later slots no-ops. A login before the day's first slot belongs to the previous day's last slot (`trigger.start_calendar_interval` above), so it runs only if that day never finished. `RunAtLoad` fires at `launchctl bootstrap` too, so enabling such a job runs its pass straight away.
+
+**Loading.** A job loaded with `launchctl bootstrap` stays loaded until a `bootout` or the next logout; at login, launchd loads only what is in `~/Library/LaunchAgents`. So a job that should survive restarts is linked there from the instance repo, and enabled by bootstrapping the link:
 
 ```sh
-launchctl bootstrap gui/$(id -u) /path/to/instance/com.local.desk.morning.plist
+ln -s /path/to/instance/com.local.desk.morning.plist ~/Library/LaunchAgents/ \
+  && launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.local.desk.morning.plist
 launchctl kickstart gui/$(id -u)/com.local.desk.morning    # run once now
-launchctl bootout gui/$(id -u)/com.local.desk.morning
+launchctl bootout gui/$(id -u)/com.local.desk.morning \
+  && rm ~/Library/LaunchAgents/com.local.desk.morning.plist
 ```
 
-Don't link them into `~/Library/LaunchAgents` until the instance has run cleanly for a while: launchd loads everything there at every login, so a link there turns a half-configured instance into one that runs on its own after the next restart. `bootstrap` from the instance path is reversible with one `bootout`.
+Link a job only once its instance runs cleanly by hand: from then on it runs on its own at every login. Until then, `bootstrap` straight from the instance path tries it for one login session, and one `bootout` undoes it.
 
 ## The denylist
 

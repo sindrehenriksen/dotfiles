@@ -187,6 +187,8 @@ if command -v plutil > /dev/null 2>&1; then
 	from_plist="$(plutil -convert json -o - "$plist" | jq -c '[.StartCalendarInterval[] | {hour: .Hour, minute: .Minute} + (if .Weekday then {weekday: .Weekday} else {} end)]')"
 	from_config="$(jq -c '.passes.morning.trigger.start_calendar_interval' "$EXAMPLE/config.json")"
 	assert_eq "StartCalendarInterval equals trigger.start_calendar_interval" "$from_config" "$from_plist"
+	assert_eq "it runs at load, so a login catches up a morning missed while off" "true" \
+		"$(plutil -convert json -o - "$plist" | jq -r '.RunAtLoad')"
 else
 	echo "skipped: no plutil on this machine"
 fi

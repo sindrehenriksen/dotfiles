@@ -73,7 +73,8 @@ desk_log() {
 	printf '%s [desk-run:%s] %s\n' "$(date -u +%FT%TZ)" "$pass" "$*" >&2
 }
 
-desk_now() { date +%s; }
+# $DESK_NOW (epoch seconds) pins the clock for tests.
+desk_now() { echo "${DESK_NOW:-$(date +%s)}"; }
 
 # The pid this whole desk-run invocation belongs to, so a lock/guard can
 # record and later liveness-check its owner.

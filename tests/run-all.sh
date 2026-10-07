@@ -67,6 +67,7 @@ BASH_SUITES=(
 	nvim/tests/desk-partial-proposal-test.sh
 	nvim/tests/desk-push-test.sh
 	nvim/tests/desk-render-prompt-test.sh
+	nvim/tests/desk-run-at-load-test.sh
 	nvim/tests/desk-run-morning-integration-test.sh
 	nvim/tests/desk-run-test.sh
 	nvim/tests/desk-runner-lock-test.sh

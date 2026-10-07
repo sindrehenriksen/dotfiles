@@ -21,7 +21,8 @@
          the runner never reads this file, so the two are kept equal by hand.
          The later slot only retries; once a scheduled date has finished ok,
          another firing for it is a no-op. A slot missed while asleep fires on
-         wake. -->
+         wake; one missed while the Mac was off does not, which RunAtLoad
+         below covers. -->
     <key>StartCalendarInterval</key>
     <array>
         <dict>
@@ -37,5 +38,11 @@
             <integer>0</integer>
         </dict>
     </array>
+    <!-- Also run at load: at every login, so a morning after a restart or
+         shutdown runs when the Mac is opened rather than at the next slot,
+         and at `launchctl bootstrap`, so enabling the job runs it at once.
+         The once-a-day guard makes a later slot that day a no-op. -->
+    <key>RunAtLoad</key>
+    <true/>
 </dict>
 </plist>
