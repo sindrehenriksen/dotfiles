@@ -36,6 +36,11 @@
 # it), ended (true only when no process for the session is live and its
 # latest run has an end event; see EVENTS_REDUCE for how ends are matched to
 # processes), end_reason (that end's reason, null unless ended),
+# end_deliberate (whether that end was the user's doing, null unless ended;
+# see DELIBERATE_END_REASONS), left_open (true when the session has a start
+# event, is not live, was not started by a scheduled desk-run call, and its
+# latest run stopped without a deliberate end: no end at all, or one that
+# was not deliberate — the session to reopen after a restart),
 # close_failed, close_failed_at, transcript_path (the path the last start
 # event recorded when that file exists, else the transcript found by id:
 # Claude Code can record a path that never existed for a session resumed
@@ -151,6 +156,21 @@ parse_etime_secs() {
 # of a run win: `close` followed by the process's own SessionEnd, or a
 # stray second SessionEnd. The events alone say the session ended when its
 # latest run is closed; the join below still overrules that with liveness.
+#
+# Which ends are deliberate, by the reason the end recorded. Claude Code
+# 2.1.292 reports `prompt_input_exit` for every way of leaving at the
+# prompt (Ctrl+C twice, Ctrl+D, /exit), `clear` and `resume` for the
+# session a /clear or /resume moves away from, and `logout`; the close
+# step's `close` verb records `closed-by-pass`. Anything that ends the
+# process from outside reports `other`: SIGHUP (a closed tab, a quit
+# terminal, a shutdown that quits the terminal), SIGTERM (a shutdown's
+# first signal), and Claude Code's own error exits. SIGKILL records no end
+# at all. So the reason alone separates the two, and a reason not listed
+# here (`other`, or one a later Claude Code adds) counts as not
+# deliberate: reopening a session the user had finished costs a tab,
+# losing one they had not costs the session. A tab closed on purpose
+# reads the same as a shutdown and so counts as not deliberate too.
+DELIBERATE_END_REASONS='["prompt_input_exit", "clear", "resume", "logout", "closed-by-pass"]'
 EVENTS_REDUCE='
     (map(select(.event=="start")) | last) as $s
     | (any(.[]; .event=="start" and .source=="desk-run")) as $any_desk_run
@@ -178,18 +198,19 @@ EVENTS_REDUCE='
         any_desk_run_start: $any_desk_run,
         ended: ($e != null),
         end_reason: ($e.reason // null),
+        end_deliberate: (if $e == null then null else (($e.reason // "") as $r | any($deliberate[]; . == $r)) end),
         close_failed: ($cf != null),
         close_failed_at: ($cf.time // null)
       }
 '
-EMPTY_EVENTS='{"has_start_event":false,"cwd":"","transcript_path":"","source":null,"any_desk_run_start":false,"ended":false,"end_reason":null,"start_time":null,"close_failed":false,"close_failed_at":null}'
+EMPTY_EVENTS='{"has_start_event":false,"cwd":"","transcript_path":"","source":null,"any_desk_run_start":false,"ended":false,"end_reason":null,"end_deliberate":null,"start_time":null,"close_failed":false,"close_failed_at":null}'
 
 events_by_id_fallback() {
     local f sid out result='{}'
     for f in "$STORE_DIR"/*.jsonl; do
         [ -f "$f" ] || continue
         sid=$(basename "$f" .jsonl)
-        out=$(jq -cs "$EVENTS_REDUCE" "$f" 2>/dev/null)
+        out=$(jq -cs --argjson deliberate "$DELIBERATE_END_REASONS" "$EVENTS_REDUCE" "$f" 2>/dev/null)
         [ -n "$out" ] || out="$EMPTY_EVENTS"
         result=$(jq -c --arg id "$sid" --argjson ev "$out" '. + {($id): $ev}' <<< "$result" 2>/dev/null)
         [ -n "$result" ] || result='{}'
@@ -203,7 +224,7 @@ if [ -d "$STORE_DIR" ]; then
     store_files=("$STORE_DIR"/*.jsonl)
     shopt -u nullglob
     if [ "${#store_files[@]}" -gt 0 ]; then
-        events_by_id=$(jq -n "
+        events_by_id=$(jq -n --argjson deliberate "$DELIBERATE_END_REASONS" "
             [inputs | {file: input_filename, ev: .}]
             | group_by(.file)
             | map({
@@ -673,7 +694,7 @@ entries_ndjson=$(jq -n -c \
     ( ($events | keys) + ($pidfiles | keys) + ($transcripts | keys) | unique ) as $ids
     | $ids[]
     | . as $id
-    | ($events[$id] // {has_start_event:false, cwd:"", transcript_path:"", source:null, any_desk_run_start:false, ended:false, end_reason:null, start_time:null}) as $ev
+    | ($events[$id] // {has_start_event:false, cwd:"", transcript_path:"", source:null, any_desk_run_start:false, ended:false, end_reason:null, end_deliberate:null, start_time:null}) as $ev
     | ($pidfiles[$id] // null) as $pf
     | ($live[$id] // false) as $is_live
     | ($titles[$id] // {custom_titles: [], ai_title: ""}) as $ti
@@ -683,6 +704,8 @@ entries_ndjson=$(jq -n -c \
     # A live process outranks any end event: a session is ended only once
     # none of its processes is still running.
     | ($ev.ended and ($is_live | not)) as $ended
+    | ($ev.has_start_event and ($is_live | not) and $ev.source != "desk-run"
+       and (($ended and $ev.end_deliberate == true) | not)) as $left_open
     | ($ti.custom_titles | length) as $name_count
     | (
         if $name_count > 0 then $ti.custom_titles[-1]
@@ -732,6 +755,8 @@ entries_ndjson=$(jq -n -c \
         any_desk_run_start: ($ev.any_desk_run_start // false),
         ended: $ended,
         end_reason: (if $ended then $ev.end_reason else null end),
+        end_deliberate: (if $ended then $ev.end_deliberate else null end),
+        left_open: $left_open,
         close_failed: $ev.close_failed,
         close_failed_at: $ev.close_failed_at,
         transcript_path: $transcript_path,

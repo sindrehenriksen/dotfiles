@@ -145,6 +145,7 @@ assert_eq "the second start tells the user where the session is already open" \
     "$(jq -r '.systemMessage' "$(tag_of "$p2").start.out")"
 assert_eq "both live: live" "true" "$(read_field twin .live)"
 assert_eq "both live: duplicate_pids (two live pid files)" "true" "$(read_field twin .duplicate_pids)"
+assert_eq "both live: not left open" "false" "$(read_field twin .left_open)"
 
 echo "=== the first process exits; the second still runs ==="
 fire_end "$p1"
@@ -153,6 +154,8 @@ assert_eq "end event carries the exiting process's pid" "$p1" \
 assert_eq "still live" "true" "$(read_field twin .live)"
 assert_eq "not ended while the other process runs" "false" "$(read_field twin .ended)"
 assert_eq "no end_reason while not ended" "null" "$(read_field twin .end_reason)"
+assert_eq "no end_deliberate while not ended" "null" "$(read_field twin .end_deliberate)"
+assert_eq "not left open while the other process runs" "false" "$(read_field twin .left_open)"
 assert_eq "pid is the process still running" "$p2" "$(read_field twin .pid)"
 assert_eq "duplicate_pids clears once only one pid file is left" "false" "$(read_field twin .duplicate_pids)"
 
@@ -161,6 +164,8 @@ fire_end "$p2"
 assert_eq "ended once no process is left" "true" "$(read_field twin .ended)"
 assert_eq "end_reason is the last exit's" "prompt_input_exit" "$(read_field twin .end_reason)"
 assert_eq "status ended" "ended" "$(read_field twin .status)"
+assert_eq "the last exit was deliberate" "true" "$(read_field twin .end_deliberate)"
+assert_eq "not left open" "false" "$(read_field twin .left_open)"
 
 echo "=== an end ends only its own process: the other one later crashes ==="
 : > "$PROJ_DIR/split.jsonl"
@@ -173,6 +178,7 @@ crash "$q2"
 assert_eq "not live" "false" "$(read_field split .live)"
 assert_eq "not ended: the crashed process never recorded an end" "false" "$(read_field split .ended)"
 assert_eq "status orphaned" "orphaned" "$(read_field split .status)"
+assert_eq "left open: the crashed process never ended" "true" "$(read_field split .left_open)"
 
 echo "=== records from before events carried a pid: liveness still wins ==="
 # The shape of the session that prompted this: two starts and an end, none
@@ -210,6 +216,8 @@ fire_start "$s1"
 "$RECORDER" close closed
 fire_end "$s1"
 assert_eq "end_reason stays closed-by-pass" "closed-by-pass" "$(read_field closed .end_reason)"
+assert_eq "a close is deliberate" "true" "$(read_field closed .end_deliberate)"
+assert_eq "a closed session is not left open" "false" "$(read_field closed .left_open)"
 
 echo "=== recorder never logged an error ==="
 if [ -s "$TMP/recorder.log" ]; then
