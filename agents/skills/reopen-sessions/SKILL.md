@@ -6,7 +6,9 @@ allowed-tools: Bash, Read
 
 # Reopen sessions
 
-`reopen-sessions.sh` (on `PATH` via `install_symlinks.sh`; the source is `~/dotfiles/claude/reopen-sessions.sh`, macOS only) finds the sessions that were still open when the machine last went down, or that stopped since without the user ending them, and resumes the active ones in background tabs. Its header documents the rules; what follows is how to run it for the user.
+`reopen-sessions.sh` (macOS only, linked onto `PATH` by `install_symlinks.sh`) finds the sessions that were still open when the machine last went down, or that stopped since without the user ending them, and resumes the active ones in background tabs. Its header documents the rules; what follows is how to run it for the user.
+
+Always call it by that bare name, as in the commands below, never by a path: the permission rule that lets it run without a prompt matches the command as typed.
 
 ## Steps
 
