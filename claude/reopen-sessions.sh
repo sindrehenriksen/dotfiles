@@ -55,7 +55,7 @@
 #
 # Overrides (tests): $DESK_READER, $DESK_OPEN_TAB_BIN, $CLAUDE_SESSION_STORE,
 # $CLAUDE_CONFIG_DIR, $REOPEN_NOW and $REOPEN_BOOT_TIME (epochs),
-# $REOPEN_TAB_TIMEOUT_SECS (default 8), $REOPEN_CONFIRM_SECS (how long to
+# $REOPEN_TAB_TIMEOUT_SECS (default 10), $REOPEN_CONFIRM_SECS (how long to
 # wait for an opened session to show as live, default 20; 0 skips the wait).
 set -u
 
@@ -118,7 +118,9 @@ READER="${DESK_READER:-session-status.sh}"
 OPENER="${DESK_OPEN_TAB_BIN:-${DESK_OPEN_TAB:-desk-open-tab.sh}}"
 STORE_DIR="${CLAUDE_SESSION_STORE:-$HOME/.local/state/claude/session-events}"
 CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
-TAB_TIMEOUT="${REOPEN_TAB_TIMEOUT_SECS:-8}"
+# Above desk-open-tab.sh's own limit on hs (6s and a kill), so that one
+# reports first when it fires; this is the backstop for everything else.
+TAB_TIMEOUT="${REOPEN_TAB_TIMEOUT_SECS:-10}"
 CONFIRM_SECS="${REOPEN_CONFIRM_SECS:-20}"
 NOW="${REOPEN_NOW:-$(date +%s)}"
 # Boot ids a few minutes apart are treated as one boot: kern.boottime can be
@@ -204,8 +206,11 @@ store_files=("$STORE_DIR"/*.jsonl)
 shopt -u nullglob
 
 # A file that does not parse (a record from before the recorder's format) is
-# skipped, like the reader does. The first end in a run is the one that
-# counts, as the recorder itself keeps it.
+# skipped, like the reader does. An end here closes the latest run, which is
+# simpler than the reader's matching of ends to processes by pid; it only
+# feeds the boot of the latest run (start events alone) and the counts, and
+# whenever a session could be opened, its end is judged on the reader's
+# record instead.
 RUNS_JQ='
 	(reduce .[] as $e ({runs: [], cur: null};
 		if $e.event == "start" then
