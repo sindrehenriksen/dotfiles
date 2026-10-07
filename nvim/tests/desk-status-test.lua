@@ -93,6 +93,10 @@ assert_eq("a live count shows even with no runner proposal", "proposal pending (
 assert_eq("a live count shows with no status file at all", "proposal pending (2 untaken)", status.summary(nil, { untaken = 2 }))
 assert_eq("a live zero silences the runner's stale count", "", status.summary(pending, { untaken = 0 }))
 assert_eq("the live count wins over the runner's", "proposal partial (5 untaken)", status.summary(partial, { untaken = 5 }))
+assert_eq("an open review's count: live, then recorded, in place of the proposal segment", "3 left (5 saved)", status.summary(partial, { untaken = 9, left = 3, saved = 5 }))
+assert_eq("it shows with no status file at all", "1 left (2 saved)", status.summary(nil, { left = 1, saved = 2 }))
+assert_eq("and at zero, while the review is open", "0 left (0 saved)", status.summary(partial, { left = 0, saved = 0 }))
+assert_eq("the overflow still follows it", "2 left (2 saved) · +3 more ACT → brief", status.summary({ proposal = { state = "partial", overflow = { act = 3 } } }, { left = 2, saved = 2 }))
 assert_eq(
 	"closes name the sessions closed last",
 	"3 closes (b, c, d)",

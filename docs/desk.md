@@ -296,15 +296,16 @@ In the review split:
 
 | Key | Action |
 |---|---|
-| `dp` | Take the diff hunk under the cursor into your notes buffer: every adjacent suggestion in it, as `do` from the notes window does. |
+| `dp` | Take the diff hunk under the cursor into your notes buffer: every adjacent suggestion in it, as `do` from the notes window does. For a suggestion that only removes lines, the cursor goes on the line just below its grey filler, which is where `]c` lands; at the end of the file, on the last line. |
 | `<leader>gA` | Take just the suggestion under the cursor into your notes buffer. |
 | `<leader>gD` | Decline the suggestion under the cursor. |
 | `u` | Undo the latest take or decline made here. A take is undone in your notes buffer, unless you have edited your notes since, when it says so and leaves them alone; anything else is plain undo. |
 | `<leader>go` | The overview. |
+| `zo`/`zc`, `zR`/`zM` | Open or close the fold of unchanged lines under the cursor; open or close them all. |
 | `:w` | The commit point: records as declined every suggestion whose lines are gone from both the split and your notes, restores any declined this session whose lines are back, and records pending takes. |
 | `:q`, `:wq` | `:q` from either window ends the review and leaves you in your notes; `:wq` in the review split also saves declines. Quitting the split without saving records nothing; quitting your notes window over unsaved declines asks to save, discard or cancel, and cancelling puts your notes back below the split. |
 
-A take is remembered when you make it and recorded on the next save of either buffer, so a suggestion you edit right after taking stays taken. The notes window's winbar shows the status line: each pass's last result, untaken suggestions, closes and lockouts. The review split's own winbar lists its keys in one line.
+A take is remembered when you make it and recorded on the next save of either buffer, so a suggestion you edit right after taking stays taken. The notes window's winbar shows the status line: each pass's last result, untaken suggestions, closes and lockouts. While a review is open its count is that review's own, live first and recorded after, as in `30 left (34 saved)`: the first is the suggestions in this file neither taken nor declined, counting unsaved takes and declines as done, so it moves as you work; the second is what the ledger and `HEAD` say, which moves on a save or a commit. With no review open it is the recorded count over both files, `proposal pending (34 untaken)`. The review split's winbar starts with the same count, then lists its keys in one line, folds included, and `C-n` for the window below; the notes window's adds its own keys on the right, with `C-t` for the window above.
 
 ## Scheduling
 

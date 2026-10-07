@@ -178,6 +178,14 @@ function M.flush_taken(notes_buf)
 		return a.id < b.id
 	end)
 	ledger.record_taken(pend.repo, items)
+	-- An open review counts these as done from here on, edited or not.
+	local s = sessions[notes_buf]
+	if s then
+		s.taken_saved = s.taken_saved or {}
+		for _, item in ipairs(items) do
+			s.taken_saved[item.id] = true
+		end
+	end
 	return #items
 end
 
@@ -639,9 +647,14 @@ function M.confirm(msg, choices)
 	return vim.fn.confirm(msg, choices, 3)
 end
 
--- The review split's winbar: the keys in one line, so the table in the
--- desk guide doesn't have to be open beside it.
-M.KEY_HINT = "]c/[c next/prev · dp take · ␣gA take one · ␣gD decline · u undo · C-t/C-n up/down · ␣go list · :wq done"
+-- The review split's winbar: the live count, then the keys in one line, so
+-- the table in the desk guide doesn't have to be open beside it. Kept to
+-- about 120 columns with the count, which is why plain diff motion (]c/[c)
+-- is left out. Each bar names only the window key that leaves it.
+M.KEY_HINT = "dp take · ␣gA one · ␣gD decline · u undo · zo/zc fold · zR/zM all · C-n down · ␣go list · :wq done"
+-- The notes window's keys while a review is open, right-aligned after its
+-- status line. `u` there is plain undo, which is right in that buffer.
+M.NOTES_KEY_HINT = "do take · u undo · C-t up"
 
 --- The review key: opens the merged view in a split above the notes window,
 --- and focuses it (or focuses the one already open for this proposal).
@@ -725,7 +738,6 @@ function M.open_review(notes_buf)
 	vim.bo[review_buf].undolevels = undolevels
 	vim.bo[review_buf].modified = false
 	vim.api.nvim_win_set_buf(review_win, review_buf)
-	vim.wo[review_win].winbar = M.KEY_HINT
 
 	local s = {
 		notes_buf = notes_buf,
@@ -739,6 +751,7 @@ function M.open_review(notes_buf)
 		takes = {},
 	}
 	sessions[notes_buf] = s
+	M.recount_saved(s)
 	M.place_marks(s, ours)
 	M.place_del_marks(s)
 
@@ -762,6 +775,7 @@ function M.open_review(notes_buf)
 		buffer = notes_buf,
 		callback = function()
 			M.flush_taken(notes_buf)
+			M.refresh_status_line(notes_buf, true)
 		end,
 	})
 
@@ -777,7 +791,7 @@ function M.open_review(notes_buf)
 				vim.notify("desk: declined " .. n_or_err .. " suggestion(s)", vim.log.levels.INFO)
 			end
 			M.refresh_overview(s)
-			M.refresh_status_line(notes_buf)
+			M.refresh_status_line(notes_buf, true)
 		end,
 	})
 	vim.api.nvim_create_autocmd("BufWipeout", {
@@ -806,6 +820,7 @@ function M.open_review(notes_buf)
 			pcall(vim.cmd, string.format("%d,%ddiffget", line, line + 1))
 		end
 		note_takes(s, pre)
+		M.refresh_status_line(notes_buf)
 	end, { buffer = notes_buf, desc = "Take the hunk under the cursor (also at the end of the file)" })
 	-- The same take from the review side. Plain `dp` on the split's last line
 	-- misses a removal of the notes lines after it, and the range form is
@@ -835,6 +850,7 @@ function M.open_review(notes_buf)
 		end
 		note_takes(s, pre)
 		end_take(s, t)
+		M.refresh_status_line(notes_buf)
 	end, { buffer = review_buf, desc = "Take the hunk under the cursor into your notes (also at the end of the file)" })
 	vim.keymap.set("n", "u", function()
 		local ok, why = M.undo(review_buf)
@@ -858,6 +874,25 @@ function M.open_review(notes_buf)
 		M.overview(notes_buf)
 	end, { buffer = review_buf, desc = "Overview: remaining suggestions" })
 
+	-- Edits by hand move the count too; the keys refresh it themselves.
+	vim.api.nvim_create_autocmd("TextChanged", {
+		group = group,
+		buffer = review_buf,
+		callback = function()
+			M.refresh_status_line(notes_buf)
+		end,
+	})
+	vim.api.nvim_create_autocmd("TextChanged", {
+		buffer = notes_buf,
+		callback = function()
+			if sessions[notes_buf] ~= s then
+				return true -- this review is over: drop the autocmd
+			end
+			M.refresh_status_line(notes_buf)
+		end,
+	})
+
+	M.refresh_status_line(notes_buf)
 	vim.api.nvim_set_current_win(review_win)
 	first_hunk(review_win)
 	say_elsewhere(repo, file, p)
@@ -1142,6 +1177,7 @@ function M.decline(review_buf)
 	end
 	if ok then
 		M.refresh_overview(s)
+		M.refresh_status_line(s.notes_buf)
 	end
 	return ok, why
 end
@@ -1162,6 +1198,7 @@ function M.take(review_buf)
 	if ok then
 		end_take(s, t)
 		M.refresh_overview(s)
+		M.refresh_status_line(s.notes_buf)
 	end
 	return ok, why
 end
@@ -1177,6 +1214,9 @@ function M.undo(review_buf)
 		vim.api.nvim_buf_call(review_buf, function()
 			vim.cmd("normal! " .. count .. "u")
 		end)
+		if s then
+			M.refresh_status_line(s.notes_buf)
+		end
 		return true
 	end
 	table.remove(s.takes)
@@ -1196,6 +1236,7 @@ function M.undo(review_buf)
 		vim.cmd("diffupdate")
 	end)
 	M.refresh_overview(s)
+	M.refresh_status_line(s.notes_buf)
 	return true
 end
 
@@ -1511,7 +1552,7 @@ function M.commit(bufnr)
 	end
 	M.flush_taken(bufnr)
 	local taken = proposal.sync_taken(repo)
-	M.refresh_status_line(bufnr)
+	M.refresh_status_line(bufnr, true)
 	return true, { taken = #taken }
 end
 
@@ -1519,22 +1560,90 @@ end
 -- Status line: the runner's status.json summary in the notes buffer's winbar.
 -- ---------------------------------------------------------------------------
 
-function M.status_line(bufnr)
+local function live_session(bufnr)
+	local s = bufnr and sessions[bufnr]
+	if s and vim.api.nvim_buf_is_valid(s.review_buf) then
+		return s
+	end
+end
+
+--- How many suggestions still wait in the open review `s`: neither taken
+--- (in the notes, or taken and since edited) nor declined (gone from the
+--- split), saved or not. The live number both of the review's bars show.
+function M.left(s)
+	local pend = pending_ids(s.notes_buf)
+	local saved = s.taken_saved or {}
+	local n = 0
+	for _, r in ipairs(M.remaining(s)) do
+		if not (pend[r.item.id] or saved[r.item.id]) then
+			n = n + 1
+		end
+	end
+	return n
+end
+
+--- The recorded count for the open review `s`'s file: what a review of
+--- HEAD would show, given the ledger. Kept on the session, since it moves
+--- only on a save or a commit and costs git calls to work out.
+function M.recount_saved(s)
+	local n = 0
+	local p = proposal.read(s.repo)
+	local r = p and proposal.reviewable(s.repo, p, s.file, proposal.lines_at(s.repo, "HEAD", s.file))
+	for _ in pairs(r and r.shown or {}) do
+		n = n + 1
+	end
+	s.saved = n
+	return n
+end
+
+--- The notes buffer's status line. While a review of it is open the
+--- proposal's count is that review's, live and recorded (`status.live_count`);
+--- otherwise it is the recorded one over every file, which moves only on a
+--- save or a commit.
+function M.status_line(bufnr, left)
 	local opts
-	local repo = bufnr and M.repo_context(bufnr)
-	if repo then
-		opts = { untaken = #proposal.open_items(repo) }
+	local s = live_session(bufnr)
+	if s then
+		opts = { left = left or M.left(s), saved = s.saved or M.recount_saved(s) }
+	else
+		local repo = bufnr and M.repo_context(bufnr)
+		if repo then
+			opts = { untaken = #proposal.open_items(repo) }
+		end
 	end
 	return status.summary(status.read(), opts)
 end
 
-function M.refresh_status_line(bufnr)
+-- Text for a winbar, which reads `%` as statusline syntax.
+local function bar_text(text)
+	return (text:gsub("%%", "%%%%"))
+end
+
+--- The bars over a notes buffer's windows and, while a review is open, over
+--- its split: the status line plus the notes window's keys below, the count
+--- and the review keys above. `recount` after a save or a commit, which
+--- moves the recorded count.
+function M.refresh_status_line(bufnr, recount)
 	if not vim.api.nvim_buf_is_valid(bufnr) then
 		return
 	end
-	local line = M.status_line(bufnr)
+	local s = live_session(bufnr)
+	if s and recount then
+		M.recount_saved(s)
+	end
+	local left = s and M.left(s)
+	local line = bar_text(M.status_line(bufnr, left))
+	if s then
+		line = line .. "%=" .. M.NOTES_KEY_HINT
+	end
 	for _, win in ipairs(vim.fn.win_findbuf(bufnr)) do
 		vim.wo[win].winbar = line
+	end
+	if s then
+		local rw = vim.fn.bufwinid(s.review_buf)
+		if rw ~= -1 then
+			vim.wo[rw].winbar = bar_text(status.live_count(left, s.saved)) .. " · " .. M.KEY_HINT
+		end
 	end
 end
 
@@ -1637,8 +1746,19 @@ function M.attach(bufnr)
 		callback = function()
 			-- winbar is a window option, not a real per-buffer one: left set,
 			-- it would keep showing this status line over whatever the window
-			-- shows next.
-			vim.wo[0].winbar = ""
+			-- shows next. BufLeave also fires on merely moving to another
+			-- window, so this waits to see whether the window still has the notes.
+			local win = vim.api.nvim_get_current_win()
+			local mine = vim.wo[win].winbar
+			vim.schedule(function()
+				if
+					vim.api.nvim_win_is_valid(win)
+					and vim.api.nvim_win_get_buf(win) ~= bufnr
+					and vim.wo[win].winbar == mine
+				then
+					vim.wo[win].winbar = ""
+				end
+			end)
 		end,
 	})
 

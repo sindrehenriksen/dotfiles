@@ -152,7 +152,7 @@ local review_win = vim.fn.bufwinid(rb)
 assert_true("both windows are in diff mode", vim.wo[review_win].diff and vim.wo[notes_win].diff)
 assert_true("review is above the notes window", vim.fn.win_screenpos(review_win)[1] < vim.fn.win_screenpos(notes_win)[1])
 assert_eq("the cursor is in the review window", review_win, vim.api.nvim_get_current_win())
-assert_eq("the review winbar shows the keys", review.KEY_HINT, vim.wo[review_win].winbar)
+assert_eq("the review winbar shows the count and the keys", "2 left (2 saved) · " .. review.KEY_HINT, vim.wo[review_win].winbar)
 assert_true("the keys include the review-side take", review.KEY_HINT:match("dp take") ~= nil)
 assert_true("the notes winbar is still the status line, not the keys", vim.wo[notes_win].winbar ~= review.KEY_HINT)
 vim.api.nvim_set_current_win(review_win)
@@ -757,26 +757,87 @@ do
 	review.confirm = orig
 end
 
-print("\n=== the status line tracks the live untaken count and refreshes after a review save or the user's commit ===")
+print("\n=== the bars: one live count in both while a review is open, the recorded one otherwise ===")
 do
 	local r = new_repo(BASE)
-	build(r, "2026-10-01", { item("n1"), item("n2") })
+	build(r, "2026-10-01", {
+		item("n1"),
+		item("a1", { kind = "add", target = { under = "Section A" }, after = "  added A", source = "", headline = "add A" }),
+		item("a2", { kind = "add", target = { under = "Section B" }, after = "  added B", source = "", headline = "add B" }),
+		item("rd", { file = "reading.md", kind = "new", after = "READ paper", headline = "read paper" }),
+	})
 	local nb = open_notes(r)
 	review.attach(nb)
 	local win = vim.fn.bufwinid(nb)
-	assert_true("the winbar counts both", vim.wo[win].winbar:match("%(2 untaken%)") ~= nil)
+	local function bars()
+		local rb = review_buf_of(nb)
+		local rw = rb and vim.fn.bufwinid(rb)
+		return vim.wo[win].winbar, rw and rw ~= -1 and vim.wo[rw].winbar or nil
+	end
+	local function counts(desc, n, saved)
+		local text = string.format("%d left (%d saved)", n, saved)
+		local notes_bar, review_bar = bars()
+		assert_eq(desc .. ": the notes bar says " .. text .. ", then its keys", text .. "%=" .. review.NOTES_KEY_HINT, notes_bar)
+		assert_eq(desc .. ": the review bar starts with the same text", text .. " · " .. review.KEY_HINT, review_bar)
+	end
+	assert_true("before a review: the recorded count, both files", vim.wo[win].winbar:match("%(4 untaken%)") ~= nil)
 	assert_true("review opens", review.open_review(nb))
 	local rb = review_buf_of(nb)
-	go_to(vim.fn.bufwinid(rb), rb, "NEWS n1")
+	local rw = vim.fn.bufwinid(rb)
+	counts("at open: this review's own, live and recorded", 3, 3)
+	assert_true("the top bar fits in 120 columns with two-digit counts", vim.fn.strchars("99 left (99 saved) · " .. review.KEY_HINT) <= 120)
+	assert_true("the top bar names the window below, not above", review.KEY_HINT:match("C%-n down") and not review.KEY_HINT:match("C%-t"))
+	assert_true("and the folds", review.KEY_HINT:match("zo/zc fold · zR/zM all"))
+	assert_true("the notes bar names the window above, not below", review.NOTES_KEY_HINT:match("C%-t up") and not review.NOTES_KEY_HINT:match("C%-n"))
+
+	go_to(rw, rb, "  added A")
 	review.decline(rb)
-	vim.cmd("write")
-	assert_true("after a review save it counts one", vim.wo[win].winbar:match("%(1 untaken%)") ~= nil)
-	go_to(win, nb, "Section A")
-	vim.api.nvim_win_set_cursor(win, { 1, 0 })
+	counts("an unsaved decline counts as done", 2, 3)
+	vim.api.nvim_set_current_win(win)
+	vim.api.nvim_set_current_win(rw)
+	vim.wait(20, function()
+		return false
+	end)
+	assert_true("moving between the windows keeps the notes bar", vim.wo[win].winbar:match("^2 left %(3 saved%)") ~= nil)
+	vim.cmd("normal u")
+	counts("u brings it back", 3, 3)
+
+	go_to(rw, rb, "NEWS n1")
+	vim.cmd("normal dp")
+	counts("a dp take counts as done", 2, 3)
+	local k = assert(line_of(nb, "NEWS n1"))
+	vim.api.nvim_buf_set_lines(nb, k - 1, k, false, { "NEWS n1, edited" })
+	go_to(rw, rb, "  added B")
+	review.decline(rb)
+	counts("a take edited afterwards is still done", 1, 3)
+
+	go_to(win, nb, "Section B")
 	vim.cmd("diffupdate")
 	vim.cmd("normal do")
-	review.commit(nb)
-	assert_eq("after the user's commit nothing is untaken: silent", "", vim.wo[win].winbar)
+	counts("a do take from the notes counts too", 0, 3)
+
+	vim.api.nvim_set_current_win(rw)
+	vim.cmd("write")
+	counts("a save of the split records them all", 0, 0)
+	vim.cmd("wq")
+	assert_true("after the review, the recorded count again: the takes were recorded at the save", vim.wo[win].winbar:match("%(1 untaken%)") ~= nil)
+	assert_true("and no keys", vim.wo[win].winbar:match("%%=") == nil)
+end
+
+print("\n=== a removal is taken from the review split: ]c lands below its filler, where dp takes it ===")
+do
+	local r = new_repo({ "Section A", "  existing", "  - stale", "Section B", "  other" })
+	build(r, "2026-10-01", {
+		item("rm", { kind = "remove", target = { at = "  - stale" }, before = "  - stale", after = "", source = "notes", headline = "drop stale" }),
+	})
+	local nb = open_notes(r)
+	review.attach(nb)
+	assert_true("review opens", review.open_review(nb))
+	local rb = review_buf_of(nb)
+	local rw = vim.fn.bufwinid(rb)
+	assert_eq("the cursor starts on the first hunk: the line below the filler", line_of(rb, "Section B"), vim.api.nvim_win_get_cursor(rw)[1])
+	vim.cmd("normal dp")
+	assert_eq("dp there takes the removal", { "Section A", "  existing", "Section B", "  other" }, lines_of(nb))
 end
 
 print("\n=== dp in the review split takes the hunk, recorded like do from the notes side ===")

@@ -58,6 +58,13 @@ local function pass_segments(status)
 	return out
 end
 
+--- An open review's count, the same text in both of its bars: what is
+--- still waiting with unsaved takes and declines counted as done, then
+--- what the ledger and HEAD say.
+function M.live_count(left, saved)
+	return string.format("%d left (%d saved)", left, saved or left)
+end
+
 --- The proposal segment: "proposal pending", "proposal partial", and any
 --- "+N more ACT → brief" / worth_knowing / wildcard overflow counts. Only
 --- shown while at least one suggestion still waits on the user (`untaken`).
@@ -65,16 +72,20 @@ local function proposal_segments(status, opts)
 	local out = {}
 	local p = status.proposal or {}
 	local untaken = opts and opts.untaken
-	if untaken == nil then
+	if opts and opts.left ~= nil then
+		out[#out + 1] = M.live_count(opts.left, opts.saved)
+	elseif untaken == nil then
 		untaken = p.untaken or 0
 		if not p.state or p.state == "none" then
 			return out
 		end
 	end
-	if untaken <= 0 then
-		return out
+	if #out == 0 then
+		if untaken <= 0 then
+			return out
+		end
+		out[#out + 1] = string.format("proposal %s (%d untaken)", (p.state and p.state ~= "none") and p.state or "pending", untaken)
 	end
-	out[#out + 1] = string.format("proposal %s (%d untaken)", (p.state and p.state ~= "none") and p.state or "pending", untaken)
 	local tier_labels = { act = "ACT", worth_knowing = "worth knowing", wildcard = "wildcard" }
 	for _, tier in ipairs({ "act", "worth_knowing", "wildcard" }) do
 		local n = p.overflow and p.overflow[tier]
@@ -111,12 +122,14 @@ end
 --- A single-line summary, segments joined with " · ", or "" if the status
 --- file is missing/empty (so a statusline component can just show nothing
 --- rather than a placeholder).
---- `opts.untaken` is the live count of suggestions still waiting on the user
---- (what a review would show); without it the runner's own `untaken`
---- applies, which only moves when a pass runs.
+--- `opts.untaken` is the recorded count of suggestions still waiting on the
+--- user (what a review would show); without it the runner's own `untaken`
+--- applies, which only moves when a pass runs. `opts.left` and `opts.saved`,
+--- while a review is open, are that review's live and recorded counts, and
+--- replace the proposal segment with `live_count`'s text, shown even at zero.
 function M.summary(status, opts)
 	if not status then
-		if opts and opts.untaken and opts.untaken > 0 then
+		if opts and ((opts.untaken or 0) > 0 or opts.left ~= nil) then
 			status = {}
 		else
 			return ""
