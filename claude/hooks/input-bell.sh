@@ -10,7 +10,7 @@
 # prepends a marker to that tab's title until it is focused; Claude's own
 # title is never touched.
 #
-# Mid-turn: on every `PreToolUse` and `PostToolUse` the hook scans the
+# Mid-turn: on every `PreToolUse` the hook scans the
 # transcript bytes appended since its last call for an assistant text with
 # a line starting `[needs-you]` (outside code fences) and rings at once,
 # so a session that flags a block and carries on does not make him wait
@@ -22,11 +22,11 @@
 # Dedup: the idle check stays quiet when any assistant record of its turn
 # was rung mid-turn, so a final reply repeating the same ask is the same
 # ask and does not ring again; a new turn with a new marker rings.
-# Both events are scanned because the text may reach the transcript only
-# after `PreToolUse`; the uuid record makes the second scan harmless.
+# The assistant text is already in the transcript when `PreToolUse` fires
+# (checked on 2.1.292), so no later event is needed.
 #
 # Wired from settings.json on `Notification` (matcher limited to the
-# needs-you types below) and on `PreToolUse`/`PostToolUse` for every tool
+# needs-you types below) and on `PreToolUse` for every tool
 # (AskUserQuestion and ExitPlanMode ring directly). Hook JSON on stdin.
 # The bell goes out through the hook JSON
 # field `terminalSequence`, which Claude Code writes itself: a hook has no
@@ -49,7 +49,7 @@ fields="$(printf '%s' "$input" | jq -r '
           then "ring"
           elif $t == "idle_prompt" then "idle"
           else "quiet" end
-    elif .hook_event_name == "PreToolUse" or .hook_event_name == "PostToolUse" then
+    elif .hook_event_name == "PreToolUse" then
         if (.tool_name // "" | IN("AskUserQuestion", "ExitPlanMode"))
         then "ring" else "midturn" end
     else "quiet" end),

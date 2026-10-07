@@ -109,13 +109,13 @@ arec() { jq -nc --arg u "$1" --arg t "$2" '{type:"assistant", uuid:$u, message:{
 rm -f "$STATE"; : >"$TMP/m.jsonl"
 expect "mid: first call on an empty transcript is quiet" "" "$(mid PreToolUse)"
 arec u1 "Checking things." >>"$TMP/m.jsonl"
-expect "mid: no marker is quiet" "" "$(mid PostToolUse)"
+expect "mid: no marker is quiet" "" "$(mid PreToolUse)"
 off1="$(head -n 1 "$STATE")"
 arec u2 $'[needs-you] Need the API key, carrying on meanwhile.' >>"$TMP/m.jsonl"
 expect "mid: marker rings" "$BELL" "$(mid PreToolUse)"
 off2="$(head -n 1 "$STATE")"
 [ "$off2" -gt "$off1" ] && [ "$off2" = "$(wc -c <"$TMP/m.jsonl" | tr -d ' ')" ] && ok "mid: offset advanced to the end" || bad "mid: offset ($off1 -> $off2)"
-expect "mid: second call on unchanged input is quiet" "" "$(mid PostToolUse)"
+expect "mid: second call on unchanged input is quiet" "" "$(mid PreToolUse)"
 printf '%s\n' "$(cat "$STATE")" >"$TMP/state.before"
 expect "mid: unchanged input again is quiet" "" "$(mid PreToolUse)"
 cmp -s "$STATE" "$TMP/state.before" && ok "mid: unchanged input leaves state untouched" || bad "mid: state changed"
@@ -133,7 +133,7 @@ expect "mid: new turn with a new marker rings at turn end" "$BELL" "$(idle "$TMP
 # Code blocks and quotes do not count.
 arec u4 $'Example:\n```\n[needs-you] inside code\n```' >>"$TMP/m.jsonl"
 arec u5 $'He wrote:\n> [needs-you] quoted' >>"$TMP/m.jsonl"
-expect "mid: marker in a code block or quote is quiet" "" "$(mid PostToolUse)"
+expect "mid: marker in a code block or quote is quiet" "" "$(mid PreToolUse)"
 # Truncated/rotated transcript: offset past EOF recovers quietly, then works.
 arec r1 "fresh start" >"$TMP/m.jsonl"
 expect "mid: offset past EOF recovers quietly" "" "$(mid PreToolUse)"
@@ -167,11 +167,12 @@ case "$m" in
 	*permission_prompt*idle_prompt*|*idle_prompt*permission_prompt*) ok "Notification matcher is limited ($m)" ;;
 	*) bad "Notification matcher missing or unlimited ([$m])" ;;
 esac
-for ev in PreToolUse PostToolUse; do
+for ev in PreToolUse; do
 	n="$(jq -r --arg ev "$ev" '[.hooks[$ev][] | select(.hooks[].command | test("input-bell"))] | length' "$SETTINGS")"
 	m="$(jq -r --arg ev "$ev" '.hooks[$ev][] | select(.hooks[].command | test("input-bell")) | .matcher // "all"' "$SETTINGS")"
 	[ "$n" = 1 ] && [ "$m" = all ] && ok "$ev wired once for all tools" || bad "$ev wiring (n=$n matcher=[$m])"
 done
+jq -e '.hooks | has("PostToolUse") | not' "$SETTINGS" >/dev/null && ok "no PostToolUse hook wired" || bad "PostToolUse hook wired"
 
 echo "$pass passed, $fail failed"
 [ "$fail" -eq 0 ]

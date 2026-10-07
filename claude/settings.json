@@ -334,17 +334,6 @@
           }
         ]
       }
-    ],
-    "PostToolUse": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "$HOME/dotfiles/claude/hooks/input-bell.sh",
-            "timeout": 5
-          }
-        ]
-      }
     ]
   },
   "statusLine": {
