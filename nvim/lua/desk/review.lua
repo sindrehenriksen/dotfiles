@@ -1178,8 +1178,9 @@ M.DECLINED_WINDOW_DAYS = 14
 
 --- The suggestions still left as hunks right now: shown at open, still
 --- proposed in the review buffer, not yet in the user's notes. Each with the review
---- buffer line (`lnum`) and the line of THE USER'S notes window the hunk aligns
---- with (`notes_lnum`, where `do` takes it in diff mode), sorted by position.
+--- buffer line (`lnum`, where `dp` takes it) and the line of THE USER'S notes
+--- window the hunk aligns with (`notes_lnum`, where `do` takes it), sorted by
+--- position.
 function M.remaining(s)
 	local review_lines = buf_lines(s.review_buf)
 	local notes_lines = buf_lines(s.notes_buf)
@@ -1209,7 +1210,9 @@ function M.remaining(s)
 				for _, pos in ipairs(positions) do
 					for _, h in ipairs(hunks) do
 						if pos >= h[1] and pos <= h[1] + math.max(h[2], 1) - 1 then
-							lnum = math.max(h[3], 1)
+							-- a pure removal sits after review line h[3]; `dp` takes
+							-- it from the line below
+							lnum = math.max(h[4] == 0 and h[3] + 1 or h[3], 1)
 							notes_lnum = pos
 						end
 					end
@@ -1240,7 +1243,7 @@ local function overview_items(s, repo, file)
 			if r.conflict then
 				text = string.format("%s (near your edit at line %d)", text, r.conflict)
 			end
-			qf[#qf + 1] = { bufnr = s.notes_buf, lnum = r.notes_lnum, col = 1, text = text }
+			qf[#qf + 1] = { bufnr = s.notes_buf, lnum = r.notes_lnum, col = 1, text = text, user_data = { id = r.item.id } }
 		end
 	end
 	for _, o in ipairs(M.pending_elsewhere(repo, file)) do
@@ -1250,7 +1253,7 @@ local function overview_items(s, repo, file)
 			if e.conflict then
 				text = string.format("%s (near your edit at line %d)", text, e.conflict)
 			end
-			qf[#qf + 1] = { bufnr = b, lnum = e.lnum, col = 1, text = o.file .. ": " .. text, user_data = { file = o.file } }
+			qf[#qf + 1] = { bufnr = b, lnum = e.lnum, col = 1, text = o.file .. ": " .. text, user_data = { file = o.file, id = e.item.id } }
 		end
 	end
 	return qf
@@ -1301,9 +1304,11 @@ end
 
 --- The quickfix `<CR>` handler for every quickfix buffer (installed once,
 --- globally): anything that isn't desk's own overview falls through to the
---- ordinary jump. An overview entry jumps in THE USER'S NOTES window, to the line
---- aligned with the hunk (so `do` there takes it) — through the jumplist
---- (`m'` first), so Ctrl-O returns to where the user was in the user's notes.
+--- ordinary jump. An overview entry jumps into the review split, where the user
+--- works, to the suggestion's line (so `dp` there takes it); with no review
+--- open, into THE USER'S NOTES window at the line aligned with the hunk. Either
+--- way through the jumplist (`m'` first), so Ctrl-O returns to where the user
+--- was in that window.
 function M.qf_jump()
 	if is_loclist_win(vim.api.nvim_get_current_win()) then
 		vim.cmd(vim.fn.line(".") .. "ll")
@@ -1332,10 +1337,27 @@ function M.qf_jump()
 		win = vim.fn.bufwinid(b)
 		item.bufnr = b
 	end
+	local lnum = item.lnum
+	local s = sessions[item.bufnr]
+	local id = type(item.user_data) == "table" and item.user_data.id
+	local review_win = s and vim.api.nvim_buf_is_valid(s.review_buf) and vim.fn.bufwinid(s.review_buf) or -1
+	if review_win ~= -1 and id then
+		-- looked up now, not when the list was made: takes and edits since
+		-- then move the lines
+		for _, r in ipairs(M.remaining(s)) do
+			if r.item.id == id then
+				win, lnum = review_win, r.lnum
+			end
+		end
+	end
+	if win == -1 then
+		vim.notify("desk: your notes are not showing in any window", vim.log.levels.WARN)
+		return
+	end
 	vim.api.nvim_set_current_win(win)
 	vim.cmd("normal! m'")
 	vim.cmd("diffupdate")
-	vim.api.nvim_win_set_cursor(win, { math.max(item.lnum, 1), 0 })
+	vim.api.nvim_win_set_cursor(win, { math.max(lnum, 1), 0 })
 end
 
 -- ---------------------------------------------------------------------------

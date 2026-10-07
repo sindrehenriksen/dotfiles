@@ -288,7 +288,7 @@ In a notes buffer:
 | `<leader>gR` | Open the review split above your notes and focus it, or focus the one already open. Reopening over a split with unsaved declines asks to save, discard or cancel. |
 | `do` | (notes window, while a review is open) Take the diff hunk under the cursor: every adjacent suggestion in it. |
 | `<leader>gc` | Save the buffer, commit the file, and record suggestions now in `HEAD` as taken. |
-| `<leader>go` | Overview: a quickfix list with one headline per remaining diff hunk; `<CR>` jumps to it in your notes window. |
+| `<leader>go` | Overview: a quickfix list with one headline per remaining diff hunk; `<CR>` jumps to it in the review split, where `dp` takes it, or in your notes window when no review is open. |
 | `<leader>gd` | Declined in the last 14 days (also `:DeskDeclined`); `r` on an entry restores it, so the next pass proposes it again. |
 | `<leader>gx` | The hotkey: act on the token under the cursor. |
 

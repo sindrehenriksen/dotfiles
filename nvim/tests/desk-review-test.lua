@@ -392,17 +392,21 @@ end
 -- from the overview's own split: put the cursor on the last entry, press <CR>
 local qf_win = vim.fn.getqflist({ winid = 0 }).winid
 assert_true("the overview is in its own window", qf_win ~= 0 and qf_win ~= review_win)
-vim.api.nvim_set_current_win(notes_win)
-vim.api.nvim_win_set_cursor(notes_win, { 2, 0 })
+vim.api.nvim_set_current_win(review_win)
+vim.api.nvim_win_set_cursor(review_win, { 2, 0 })
+vim.api.nvim_set_current_win(qf_win)
+vim.api.nvim_win_set_cursor(qf_win, { 2, 0 })
+review.qf_jump()
+assert_eq("with a review open, the jump lands in the review split", review_win, vim.api.nvim_get_current_win())
+assert_eq("on the suggestion's own line there", line_of(rb, "  added under B"), vim.api.nvim_win_get_cursor(review_win)[1])
+vim.cmd([[execute "normal! 1\<C-o>"]])
+assert_eq("Ctrl-O returns to where the user was in the review split", 2, vim.api.nvim_win_get_cursor(review_win)[1])
+vim.cmd([[execute "normal! 1\<C-i>"]])
+assert_eq("Ctrl-I goes forward again", line_of(rb, "  added under B"), vim.api.nvim_win_get_cursor(review_win)[1])
 vim.api.nvim_set_current_win(qf_win)
 vim.api.nvim_win_set_cursor(qf_win, { #qf, 0 })
 review.qf_jump()
-assert_eq("the jump lands in the user's notes window", notes_win, vim.api.nvim_get_current_win())
-assert_eq("on the line aligned with the hunk", qf[#qf].lnum, vim.api.nvim_win_get_cursor(notes_win)[1])
-vim.cmd([[execute "normal! 1\<C-o>"]])
-assert_eq("Ctrl-O returns to where the user was in the user's notes", 2, vim.api.nvim_win_get_cursor(notes_win)[1])
-vim.cmd([[execute "normal! 1\<C-i>"]])
-assert_eq("Ctrl-I goes forward again", qf[#qf].lnum, vim.api.nvim_win_get_cursor(notes_win)[1])
+assert_eq("a removal at the end lands on the split's last line, where dp takes it", vim.api.nvim_buf_line_count(rb), vim.api.nvim_win_get_cursor(review_win)[1])
 
 print("\n=== overview drops a hunk once it is declined or taken ===")
 go_to(review_win, rb, "  added under B")
@@ -447,28 +451,54 @@ print("\n=== format_source: a short, honest label, never the raw field ===")
 assert_eq("nil source: notes", "notes", review.format_source(nil))
 assert_eq("a URL: just its host", "github.com", review.format_source("https://github.com/foo/bar/pull/1"))
 
-print("\n=== from the overview, `do` takes the hunk the jump landed on ===")
+print("\n=== from the overview, dp takes the hunk the jump landed on ===")
 do
 	local r = new_repo({ "Section A", "  existing", "Section B", "  other", "Section C", "  more" })
 	build(r, "2026-10-01", {
 		item("n1"),
 		item("a1", { kind = "add", target = { under = "Section B" }, after = "  added under B", source = "", headline = "add under B" }),
-		item("a2", { kind = "add", target = { under = "Section C" }, after = "  added under C", source = "", headline = "add under C" }),
+		item("r1", { kind = "remove", target = { at = "  existing" }, before = "  existing", after = "", source = "", headline = "drop existing" }),
+		item("r2", { kind = "remove", target = { at = "  more" }, before = "  more", after = "", source = "", headline = "drop more" }),
 	})
 	local nb = open_notes(r)
 	review.attach(nb)
 	assert_true("overview opens", review.overview(nb))
 	local q = vim.fn.getqflist()
 	local qw = vim.fn.getqflist({ winid = 0 }).winid
-	local nw = vim.fn.bufwinid(nb)
-	for i = #q, 1, -1 do
+	-- first to last: each take moves the lines below it, so this only works
+	-- if the jump finds the suggestion afresh
+	for i = 1, #q do
 		vim.api.nvim_set_current_win(qw)
 		vim.api.nvim_win_set_cursor(qw, { i, 0 })
 		review.qf_jump()
-		vim.cmd("normal do")
+		vim.cmd("normal dp")
 	end
-	local got = vim.api.nvim_buf_get_lines(nb, 0, -1, false)
-	assert_true("every overview entry was takeable by do from where it landed", vim.tbl_contains(got, "  added under B") and vim.tbl_contains(got, "  added under C") and got[1]:match("^NEWS"))
+	assert_eq("every overview entry was takeable by dp from where it landed",
+		{ "NEWS n1", "Section A", "Section B", "  other", "  added under B", "Section C" }, lines_of(nb))
+end
+
+print("\n=== with no review open, the overview jumps into the notes window ===")
+do
+	local r = new_repo({ "Section A", "  existing", "Section B", "  other" })
+	build(r, "2026-10-01", {
+		item("n1"),
+		item("a1", { kind = "add", target = { under = "Section B" }, after = "  added under B", source = "", headline = "add under B" }),
+	})
+	local nb = open_notes(r)
+	review.attach(nb)
+	assert_true("overview opens", review.overview(nb))
+	local q = vim.fn.getqflist()
+	local rb = review_buf_of(nb)
+	vim.api.nvim_set_current_win(vim.fn.bufwinid(rb))
+	vim.cmd("quit")
+	assert_true("the review is closed", review_buf_of(nb) == nil)
+	local nw = vim.fn.bufwinid(nb)
+	local qw = vim.fn.getqflist({ winid = 0 }).winid
+	vim.api.nvim_set_current_win(qw)
+	vim.api.nvim_win_set_cursor(qw, { #q, 0 })
+	review.qf_jump()
+	assert_eq("the jump lands in the notes window", nw, vim.api.nvim_get_current_win())
+	assert_eq("on the line aligned with the hunk", q[#q].lnum, vim.api.nvim_win_get_cursor(nw)[1])
 end
 
 print("\n=== taken by decision: an edited taken suggestion is still taken, never re-proposed or declined ===")
