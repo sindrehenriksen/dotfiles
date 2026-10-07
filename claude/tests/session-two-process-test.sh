@@ -219,6 +219,47 @@ assert_eq "end_reason stays closed-by-pass" "closed-by-pass" "$(read_field close
 assert_eq "a close is deliberate" "true" "$(read_field closed .end_deliberate)"
 assert_eq "a closed session is not left open" "false" "$(read_field closed .left_open)"
 
+echo "=== a close from outside still wins over runs left open before it ==="
+# Event logs in the shapes real sessions had when a close was followed by
+# the process's own SessionEnd: earlier runs that never recorded an end
+# (starts with no pid, a SIGKILL, a shutdown) used to take that SessionEnd,
+# which then overwrote the close as the session's end.
+events() { # sid, then one event per argument
+    local sid=$1
+    shift
+    printf '%s\n' "$@" > "$STORE_DIR/$sid.jsonl"
+    : > "$PROJ_DIR/$sid.jsonl"
+}
+start_ev() { # source [pid]
+    jq -cn --arg s "$1" --arg p "${2:-}" --arg cwd "$PROJ_DIR" \
+        '{event:"start", time:1, source:$s, cwd:$cwd, boot:"1"} + (if $p == "" then {} else {pid: ($p | tonumber)} end)'
+}
+end_ev() { # reason [pid]
+    jq -cn --arg r "$1" --arg p "${2:-}" \
+        '{event:"end", time:2, reason:$r} + (if $p == "" then {} else {pid: ($p | tonumber)} end)'
+}
+expect_closed() { # sid desc
+    assert_eq "$2: end_reason is the close" "closed-by-pass" "$(read_field "$1" .end_reason)"
+    assert_eq "$2: deliberate" "true" "$(read_field "$1" .end_deliberate)"
+    assert_eq "$2: not left open" "false" "$(read_field "$1" .left_open)"
+}
+events resumed-no-pid "$(start_ev resume)" "$(start_ev resume)" "$(start_ev resume)" \
+    "$(end_ev closed-by-pass)" "$(end_ev other 991001)"
+expect_closed resumed-no-pid "latest start had no pid"
+events compacted "$(start_ev resume)" "$(start_ev resume)" "$(end_ev other)" \
+    "$(start_ev compact 991002)" "$(end_ev closed-by-pass)" "$(end_ev other 991002)"
+expect_closed compacted "latest start had a pid, earlier ones none"
+events compacted-same-pid "$(start_ev startup 991003)" "$(start_ev compact 991003)" \
+    "$(end_ev closed-by-pass)" "$(end_ev other 991003)"
+expect_closed compacted-same-pid "the same process recorded two starts"
+events late-close "$(start_ev resume)" "$(start_ev startup 991004)" "$(end_ev other 991004)" "$(end_ev closed-by-pass)"
+assert_eq "a close after the process already ended does not replace its end" "other" "$(read_field late-close .end_reason)"
+assert_eq "so that session is still left open" "true" "$(read_field late-close .left_open)"
+events stale-then-exit "$(start_ev startup 991005)" "$(start_ev resume)" "$(end_ev prompt_input_exit 991006)"
+assert_eq "an end with an unrecorded pid closes the latest run, never an older one" \
+    "prompt_input_exit" "$(read_field stale-then-exit .end_reason)"
+assert_eq "...so the session is ended" "true" "$(read_field stale-then-exit .ended)"
+
 echo "=== recorder never logged an error ==="
 if [ -s "$TMP/recorder.log" ]; then
     bad "recorder log is empty"

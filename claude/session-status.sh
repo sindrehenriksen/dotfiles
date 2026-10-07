@@ -148,14 +148,19 @@ parse_etime_secs() {
 # closes only its own process's run. One session id can have more than one
 # process at a time (opened in a second window while the first still runs),
 # so "an end after the last start" would let one process's exit end another
-# that is still running. An end carrying a pid closes the latest open run
-# with that pid, else the latest open run with no pid (a start recorded
-# before events carried one); an end without a pid (the `close` verb, a
-# desk-run call's own end, an older record) closes the latest open run. An
-# end that finds no open run is ignored, which is what makes the first end
-# of a run win: `close` followed by the process's own SessionEnd, or a
-# stray second SessionEnd. The events alone say the session ended when its
-# latest run is closed; the join below still overrules that with liveness.
+# that is still running. A start with a pid also closes any open run with
+# that pid, since one process holds one run of a session: a `compact` start
+# fires inside the process that is already running it. An end carrying a
+# pid closes the latest open run with that pid, else the latest run when it
+# is open and has no pid (a start that recorded none); an end without a pid
+# (the `close` verb, a desk-run call's own end, an older record) closes the
+# latest run when it is open. Anything else is ignored, which is what makes
+# the first end of a run win: `close` followed by the process's own
+# SessionEnd, or a stray second SessionEnd. Runs a process left open (a
+# SIGKILL, a shutdown, starts that recorded no pid) are never a target for
+# a later process's end, so that end cannot overwrite how the latest run
+# ended. The events alone say the session ended when its latest run is
+# closed; the join below still overrules that with liveness.
 #
 # Which ends are deliberate, by the reason the end recorded. Claude Code
 # 2.1.292 reports `prompt_input_exit` for every way of leaving at the
@@ -176,14 +181,18 @@ EVENTS_REDUCE='
     | (any(.[]; .event=="start" and .source=="desk-run")) as $any_desk_run
     | (to_entries | map(select(.value.event=="start")) | last | .key) as $lsi
     | (reduce .[] as $x ({runs: [], end: null};
-        if $x.event == "start" then .runs += [{pid: ($x.pid // null), closed: false}] | .end = null
+        if $x.event == "start" then
+          ($x.pid // null) as $p
+          | .runs |= map(if $p != null and .pid == $p then .closed = true else . end)
+          | .runs += [{pid: $p, closed: false}] | .end = null
         elif $x.event == "end" then
-          (.runs | to_entries | map(select(.value.closed | not))) as $open
+          ((.runs | length) - 1) as $li
+          | (if $li < 0 or .runs[$li].closed then null else $li end) as $latest_open
           | (if ($x.pid // null) != null
-             then (($open | map(select(.value.pid == $x.pid)) | last)
-                   // ($open | map(select(.value.pid == null)) | last))
-             else ($open | last) end) as $hit
-          | if $hit == null then . else .runs[$hit.key].closed = true | .end = $x end
+             then ((.runs | to_entries | map(select((.value.closed | not) and .value.pid == $x.pid)) | last | .key)
+                   // (if $latest_open != null and .runs[$latest_open].pid == null then $latest_open else null end))
+             else $latest_open end) as $k
+          | if $k == null then . else .runs[$k].closed = true | .end = $x end
         else . end)) as $r
     | (if ($r.runs | length) > 0 and ($r.runs | last | .closed) then $r.end else null end) as $e
     | (if $lsi == null then null
