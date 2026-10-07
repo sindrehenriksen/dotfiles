@@ -112,10 +112,10 @@ rec_start sess-d "$PROJ_DIR" "$tp_d" startup
 "$RECORDER" close sess-d
 rec_end sess-d other
 log_d="$STORE_DIR/sess-d.jsonl"
-assert_eq "sess-d: end reason is closed-by-pass (first end wins)" "closed-by-pass" \
-    "$(jq -rs 'map(select(.event=="end")) | last | .reason' "$log_d")"
-assert_eq "sess-d: only one end event, the later SessionEnd was a no-op" "1" \
-    "$(jq -rs 'map(select(.event=="end")) | length' "$log_d")"
+# Both ends are recorded; the reader's sess-d assertions below check that
+# the first one is the one that counts.
+assert_eq "sess-d: the close and the later SessionEnd are both recorded" "closed-by-pass,other" \
+    "$(jq -rs 'map(select(.event=="end") | .reason) | join(",")' "$log_d")"
 
 # --- sess-g: close, then close-failed — a survivor's own event -------------
 tp_g="$PROJ_DIR/sess-g.jsonl"

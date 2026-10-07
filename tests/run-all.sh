@@ -90,6 +90,7 @@ BASH_SUITES=(
 	claude/tests/session-status-resolve-test.sh
 	claude/tests/session-status-human-test.sh
 	claude/tests/session-status-title-test.sh
+	claude/tests/session-two-process-test.sh
 	git-hooks/test-commit-msg.sh
 	git-hooks/test-desk-denylist.sh
 )

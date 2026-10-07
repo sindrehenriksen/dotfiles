@@ -32,11 +32,15 @@
 # the user later resumes themselves gets a real second start event, e.g. "resume",
 # which would overwrite `source` and — checked against the last start
 # alone — silently drop the exclusion right as the user starts actually using
-# it), ended, end_reason, close_failed, close_failed_at, transcript_path,
+# it), ended (true only when no process for the session is live and its
+# latest run has an end event; see EVENTS_REDUCE for how ends are matched to
+# processes), end_reason (that end's reason, null unless ended),
+# close_failed, close_failed_at, transcript_path,
 # has_start_event, pid, tty (the last two null unless live), duplicate_pids
 # (true when more than one $CLAUDE_CONFIG_DIR/sessions/*.json pid file
-# names this session id — a resumed session's stale leftover, or genuine
-# corruption; the live one among them, if any, is still what pid/tty/
+# names this session id — the session open in two processes at once, a
+# resumed session's stale leftover, or genuine corruption; the live one
+# among them, if any, is still what pid/tty/
 # status report, but a caller acting on liveness — the hotkey, `close` —
 # must refuse outright rather than trust that choice). close_failed is
 # true once a `close-failed` event (claude/hooks/session-recorder.sh) has
@@ -131,13 +135,33 @@ parse_etime_secs() {
 #    reading one file at a time — slower, but a single bad record can no
 #    longer sink every other one.
 # --------------------------------------------------------------------------
+# Each start event opens a run for the process that wrote it; an end event
+# closes only its own process's run. One session id can have more than one
+# process at a time (opened in a second window while the first still runs),
+# so "an end after the last start" would let one process's exit end another
+# that is still running. An end carrying a pid closes the latest open run
+# with that pid, else the latest open run with no pid (a start recorded
+# before events carried one); an end without a pid (the `close` verb, a
+# desk-run call's own end, an older record) closes the latest open run. An
+# end that finds no open run is ignored, which is what makes the first end
+# of a run win: `close` followed by the process's own SessionEnd, or a
+# stray second SessionEnd. The events alone say the session ended when its
+# latest run is closed; the join below still overrules that with liveness.
 EVENTS_REDUCE='
     (map(select(.event=="start")) | last) as $s
     | (any(.[]; .event=="start" and .source=="desk-run")) as $any_desk_run
     | (to_entries | map(select(.value.event=="start")) | last | .key) as $lsi
-    | (if $lsi == null then null
-       else (to_entries | map(select(.key > $lsi and .value.event=="end")) | last | .value)
-       end) as $e
+    | (reduce .[] as $x ({runs: [], end: null};
+        if $x.event == "start" then .runs += [{pid: ($x.pid // null), closed: false}] | .end = null
+        elif $x.event == "end" then
+          (.runs | to_entries | map(select(.value.closed | not))) as $open
+          | (if ($x.pid // null) != null
+             then (($open | map(select(.value.pid == $x.pid)) | last)
+                   // ($open | map(select(.value.pid == null)) | last))
+             else ($open | last) end) as $hit
+          | if $hit == null then . else .runs[$hit.key].closed = true | .end = $x end
+        else . end)) as $r
+    | (if ($r.runs | length) > 0 and ($r.runs | last | .closed) then $r.end else null end) as $e
     | (if $lsi == null then null
        else (to_entries | map(select(.key > $lsi and .value.event=="close-failed")) | last | .value)
        end) as $cf
@@ -631,6 +655,9 @@ entries_ndjson=$(jq -n -c \
     | ($transcripts[$id] // null) as $tp_path
     | ($pf.updatedAt | norm_ms) as $pf_updated
     | ($pf.startedAt | norm_ms) as $pf_started
+    # A live process outranks any end event: a session is ended only once
+    # none of its processes is still running.
+    | ($ev.ended and ($is_live | not)) as $ended
     | ($ti.custom_titles | length) as $name_count
     | (
         if $name_count > 0 then $ti.custom_titles[-1]
@@ -641,7 +668,7 @@ entries_ndjson=$(jq -n -c \
     | (if $name_count > 1 then $ti.custom_titles[0:-1] else [] end) as $older_names
     | (
         if $is_live then ($pf.status // "live")
-        elif $ev.ended then "ended"
+        elif $ended then "ended"
         elif $ev.has_start_event then "orphaned"
         else "unknown"
         end
@@ -671,8 +698,8 @@ entries_ndjson=$(jq -n -c \
         last_human_message: $last_human_message,
         source: $ev.source,
         any_desk_run_start: ($ev.any_desk_run_start // false),
-        ended: $ev.ended,
-        end_reason: $ev.end_reason,
+        ended: $ended,
+        end_reason: (if $ended then $ev.end_reason else null end),
         close_failed: $ev.close_failed,
         close_failed_at: $ev.close_failed_at,
         transcript_path: $transcript_path,
