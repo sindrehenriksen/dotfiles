@@ -6,7 +6,7 @@
     <string>com.local.desk.morning</string>
     <!-- launchd expands neither ~ nor $HOME, so the paths resolve through a
          shell. Replace the placeholders: the instance's config file, the
-         config directory his sessions live in (CLAUDE_CONFIG_DIR: the
+         config directory the user's sessions live in (CLAUDE_CONFIG_DIR: the
          capture and close steps read sessions from it), and the directory holding the `claude` binary (`dirname "$(command -v
          claude)"`). PATH must put a bash 4+ (Homebrew's) ahead of /bin, and
          reach jq, nvim, perl, rg and ~/.local/bin. The log is the only record
