@@ -68,12 +68,18 @@ echo '{"type":"result","subtype":"success","total_cost_usd":0}'
 FAKE
 chmod +x "$FAKEBIN/claude"
 
-# No sessions at all: capture has nothing to capture and the follow-up tab
-# resolves nothing, both of which are an ordinary "ok".
-cat > "$FAKEBIN/session-status.sh" << 'FAKE'
+# One session, unrecorded (so capture skips it) and named in the notes with a
+# transcript 25 days old, inside the retention margin under the default
+# 30-day cleanup: the retention step makes its one call. The follow-up tab
+# resolves nothing, an ordinary "ok".
+OLD_TRANSCRIPT="$FAKE_HOME/.claude/projects/-example/0e0e0e0e-0000-0000-0000-000000000000.jsonl"
+mkdir -p "$(dirname "$OLD_TRANSCRIPT")"
+printf '%s\n' '{"uuid":"0e0e0e0e-1111","type":"user","message":{"role":"user","content":"hi"}}' > "$OLD_TRANSCRIPT"
+perl -e 'utime(time - 25 * 86400, time - 25 * 86400, $ARGV[0]) or die' "$OLD_TRANSCRIPT"
+cat > "$FAKEBIN/session-status.sh" << FAKE
 #!/usr/bin/env bash
-[ "${1:-}" = "resolve" ] && { echo '[]'; exit 1; }
-exit 0
+[ "\${1:-}" = "resolve" ] && { echo '[]'; exit 1; }
+jq -cn --arg tp "$OLD_TRANSCRIPT" '{id:"0e0e0e0e-0000-0000-0000-000000000000", name:"example-session", name_source:"user", live:false, status:"unknown", has_start_event:false, ended:false, end_reason:null, transcript_path:\$tp}'
 FAKE
 chmod +x "$FAKEBIN/session-status.sh"
 
@@ -102,7 +108,7 @@ notes="$FAKE_HOME/notes"
 desk_test_assert_repo_under_root "$notes" "$ROOT"
 mkdir -p "$notes"
 git -C "$notes" init -q
-printf 'Inbox\n  something to sort\n' > "$notes/notes.md"
+printf 'Inbox\n  something to sort\n- example-session: the thing it was for\n' > "$notes/notes.md"
 printf 'To read\n' > "$notes/reading.md"
 : > "$notes/.desk-notes"
 git -C "$notes" add notes.md reading.md .desk-notes
@@ -139,7 +145,7 @@ done
 echo
 echo "=== rendered prompts ==="
 n_calls="$(find "$CALLS" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')"
-assert_eq "one model call per model step (F-web, J)" "2" "$n_calls"
+assert_eq "one model call per model step (F-web, J, one retention call)" "3" "$n_calls"
 for rec in "$CALLS"/*; do
 	[ -d "$rec" ] || continue
 	assert_true "call $(basename "$rec"): prompt is non-empty" "$([ -s "$rec/prompt.txt" ] && echo true || echo false)"

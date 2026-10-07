@@ -38,6 +38,7 @@ source "$DESK_RUN_DIR/desk-lib/tool-results.sh"
 source "$DESK_RUN_DIR/desk-lib/validate.sh"
 source "$DESK_RUN_DIR/desk-lib/ticket-cache.sh"
 source "$DESK_RUN_DIR/desk-lib/steps.sh"
+source "$DESK_RUN_DIR/desk-lib/retention.sh"
 
 pass="${1:-}"
 if [ -z "$pass" ]; then
@@ -577,6 +578,15 @@ $(git -C "$repo" show "HEAD:$f" 2> /dev/null)"
 
 		capture) result="$(desk_step_capture_sessions "$pass" "$repo" "$scheduled_date" "${files[@]}")" ;;
 		close) result="$(desk_step_close "$pass" "$step_json" "$config" "$repo" "$scheduled_date" "${files[@]}")" ;;
+		retention)
+			result="$(desk_step_retention "$pass" "$step_json" "$config" "$repo" "$scheduled_date" \
+				"$(desk_pass_caps_json "$pass" "$pass_config" "$config")" "${files[@]}")"
+			# Its capped overflow, added to the judge's for the status file.
+			if [ -f "$PASS_SCRATCH/$id-overflow.json" ]; then
+				proposal_overflow_json="$(jq -c --slurpfile o "$PASS_SCRATCH/$id-overflow.json" \
+					'with_entries(.value += ($o[0][.key] // 0))' <<< "$proposal_overflow_json")"
+			fi
+			;;
 		open_tab) result="$(desk_step_open_tab "$step_json" "$repo" "${files[@]}")" ;;
 		*) desk_log "$pass" "unknown step kind: $kind (step $id)" ;;
 	esac

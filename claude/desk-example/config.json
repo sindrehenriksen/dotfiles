@@ -17,6 +17,7 @@
   "keep_open": ["scratchpad"],
   "max_closes": 3,
   "away_days": 5,
+  "retention_warn_days": 14,
 
   "caps": {
     "daily": { "act": 3, "worth_knowing": 3, "wildcard": 1 },
@@ -78,7 +79,16 @@
       "trigger": { "start_calendar_interval": [{ "hour": 16, "minute": 30 }] },
       "steps": [
         { "id": "commit-push", "kind": "commit_push" },
-        { "id": "capture", "kind": "capture" }
+        { "id": "capture", "kind": "capture" },
+        {
+          "id": "retention",
+          "kind": "retention",
+          "prompt": "prompts/retention.md",
+          "tools": ["Read"],
+          "connector": false,
+          "cap": 200,
+          "timeout": 300
+        }
       ]
     },
 

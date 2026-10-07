@@ -69,7 +69,7 @@ desk_step_allowed_tools() {
 	local step_json="$1" scratch="${2:-}"
 	local kind
 	kind="$(jq -r '.kind // empty' <<< "$step_json")"
-	if [ -n "$scratch" ] && { [ "$kind" = "judge" ] || [ "$kind" = "close" ]; }; then
+	if [ -n "$scratch" ] && { [ "$kind" = "judge" ] || [ "$kind" = "close" ] || [ "$kind" = "retention" ]; }; then
 		jq -r --arg scratch "$scratch" '
 			(.tools // []) | map(if . == "Read" then "Read(" + $scratch + "/**)" else . end) | join(",")
 		' <<< "$step_json"
@@ -489,7 +489,7 @@ desk_step_model_call() {
 	# tool.sh) gets wired up for exactly the calls whose --allowedTools
 	# just got a Read(...) glob, never trusting that glob alone.
 	local hook_scratch=""
-	if { [ "$kind" = "judge" ] || [ "$kind" = "close" ]; } \
+	if { [ "$kind" = "judge" ] || [ "$kind" = "close" ] || [ "$kind" = "retention" ]; } \
 		&& jq -e '(.tools // []) | index("Read")' > /dev/null 2>&1 <<< "$step_json"; then
 		hook_scratch="$call_scratch"
 	fi
