@@ -18,7 +18,8 @@
 #
 # Fields per line: id, name, name_source ("user" — a custom title, or a
 # live pid file's own user-set name — vs "ai_or_none": an ai-title fallback
-# or no name at all), older_names, cwd, live, status, last_activity,
+# or no name at all), older_names (earlier custom titles, oldest first, a
+# name repeated back to back listed once), cwd, live, status, last_activity,
 # last_human_message (epoch seconds: the latest transcript record that is text
 # the user typed — not a tool_result, meta or compaction record, task
 # notification or command/bash/system wrapper — falling back to the
@@ -689,7 +690,11 @@ entries_ndjson=$(jq -n -c \
         else ($ti.ai_title // "")
         end
       ) as $name
-    | (if $name_count > 1 then $ti.custom_titles[0:-1] else [] end) as $older_names
+    # A transcript can carry the same custom-title record thousands of
+    # times over, so runs of one name collapse to one entry before the
+    # current name is dropped from the end.
+    | ($ti.custom_titles | reduce .[] as $t ([]; if length > 0 and .[-1] == $t then . else . + [$t] end)
+       | .[0:-1]) as $older_names
     | (
         if $is_live then ($pf.status // "live")
         elif $ended then "ended"

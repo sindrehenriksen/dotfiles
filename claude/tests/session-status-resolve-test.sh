@@ -177,6 +177,16 @@ jq -n --arg pid "$dead_pid_for_dup" --arg sid dup-pid --arg cwd "$PROJ_DIR" \
       name:$name, nameSource:"user", status:"idle", updatedAt:$updated}' \
     > "$CONFIG_DIR/sessions/$dead_pid_for_dup.json"
 
+# --- renamed: each custom title repeated back to back, as real transcripts
+# repeat them, plus a return to the first name -----------------------------
+tp_renamed="$PROJ_DIR/renamed.jsonl"
+for t in "Old Name" "Old Name" "Middle Name" "Old Name" "Renamed Session" "Renamed Session" "Renamed Session"; do
+    jq -cn --arg t "$t" '{type:"custom-title", customTitle:$t, sessionId:"renamed"}'
+done > "$tp_renamed"
+jq -cn --arg sid renamed --arg cwd "$PROJ_DIR" --arg tp "$tp_renamed" \
+    '{session_id:$sid, cwd:$cwd, transcript_path:$tp, source:"startup"}' \
+    | "$HERE/../hooks/session-recorder.sh" start
+
 # --- unnamed sessions with long ids, for resolving by id or id prefix ------
 for sid in deadbeef-0001 deadbeef-0002 cafe1234-0003; do
     tp="$PROJ_DIR/$sid.jsonl"
@@ -247,6 +257,14 @@ tie_count=$(printf '%s' "$out_tie" | jq 'length')
 assert_eq "resolve lists both tied candidates" "2" "$tie_count"
 tie_ids=$(printf '%s' "$out_tie" | jq -r '.[].id' | sort | tr '\n' ',')
 assert_eq "the tied candidates are exactly tie-a and tie-b" "tie-a,tie-b," "$tie_ids"
+
+echo
+echo "=== resolve: older_names lists each earlier name once per run of it ==="
+resolved=$("$READER" resolve "Renamed Session")
+assert_eq "resolves by the current name" "renamed" "$(printf '%s' "$resolved" | jq -r '.id')"
+assert_eq "repeats collapse, order and genuinely different names kept" '["Old Name","Middle Name","Old Name"]' \
+    "$(printf '%s' "$resolved" | jq -c '.older_names')"
+assert_eq "bravo: a single custom title has no older names" '[]' "$(field bravo '.older_names | tojson')"
 
 echo
 echo "=== resolve: an unnamed session by its full id or a unique 8+ character id prefix ==="
