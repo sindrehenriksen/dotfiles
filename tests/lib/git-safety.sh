@@ -231,12 +231,35 @@ desk_test_state_guard_snapshot() {
 	done
 }
 
+# The config dir real sessions write their transcripts under, captured when this
+# file is sourced (run-all.sh does so before desk_test_safe_env_init repoints
+# CLAUDE_CONFIG_DIR at a temp dir). A session that starts mid-run adds an event
+# file under session-events/, which is not a test touching state when that session
+# has a real transcript there; a file a test fabricated has none and still trips
+# the guard.
+: "${DESK_TEST_REAL_CONFIG_DIR:=${CLAUDE_CONFIG_DIR:-$HOME/.claude}}"
+
 # desk_test_state_guard_check <dest_dir> <before_suffix> <after_suffix>:
 # compares each guarded directory's before/after listing, printing a diff
 # for and naming any that changed. Returns non-zero if anything did.
 desk_test_state_guard_check() {
 	local dest="$1" before_suffix="$2" after_suffix="$3" i=0 dir changed=0
 	for dir in "${DESK_TEST_STATE_GUARD_DIRS[@]}"; do
+		local line path id
+		while IFS= read -r line; do
+			path="${line#l }"
+			case "$line" in
+				"l $dir/session-events/"*.jsonl)
+					id="$(basename "$path" .jsonl)"
+					if ! grep -qxF -- "$line" "$dest/state-$i.$before_suffix" \
+						&& compgen -G "$DESK_TEST_REAL_CONFIG_DIR/projects/*/$id.jsonl" > /dev/null; then
+						continue
+					fi
+					;;
+			esac
+			printf '%s\n' "$line"
+		done < "$dest/state-$i.$after_suffix" > "$dest/state-$i.$after_suffix.filtered"
+		mv "$dest/state-$i.$after_suffix.filtered" "$dest/state-$i.$after_suffix"
 		if ! diff -u "$dest/state-$i.$before_suffix" "$dest/state-$i.$after_suffix" > "$dest/state-$i.diff" 2>&1; then
 			printf 'STATE GUARD FAILED: real state under %s changed\n' "$dir" >&2
 			cat "$dest/state-$i.diff" >&2

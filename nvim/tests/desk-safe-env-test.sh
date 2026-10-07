@@ -53,9 +53,25 @@ trap 'rm -rf "$ROOT"' EXIT
 	desk_test_state_guard_snapshot "$ROOT/guard" live3
 	assert_true "a new event file does trip it" \
 		"$(desk_test_state_guard_check "$ROOT/guard" live2 live3 > /dev/null 2>&1 && echo false || echo true)"
+	# A session that started mid-run: its event file counts only with a real transcript.
+	export DESK_TEST_REAL_CONFIG_DIR="$ROOT/real-config"
+	mkdir -p "$DESK_TEST_REAL_CONFIG_DIR/projects/-some-project"
+	: > "$DESK_TEST_REAL_CONFIG_DIR/projects/-some-project/real-sess.jsonl"
+	echo start > "$HOME/.local/state/claude/session-events/real-sess.jsonl"
+	desk_test_state_guard_snapshot "$ROOT/guard" real1
+	assert_true "a new event file whose session has a real transcript passes" \
+		"$(desk_test_state_guard_check "$ROOT/guard" live3 real1 > /dev/null 2>&1 && echo true || echo false)"
+	rm -f "$HOME/.local/state/claude/session-events/fake.jsonl"
+	desk_test_state_guard_snapshot "$ROOT/guard" real2
+	assert_true "...and with the fabricated one gone, only that real session was added: passes" \
+		"$(desk_test_state_guard_check "$ROOT/guard" live2 real2 > /dev/null 2>&1 && echo true || echo false)"
+	echo fab > "$HOME/.local/state/claude/session-events/fabricated.jsonl"
+	desk_test_state_guard_snapshot "$ROOT/guard" real3
+	assert_true "a test-written event file with no transcript still trips it" \
+		"$(desk_test_state_guard_check "$ROOT/guard" real2 real3 > /dev/null 2>&1 && echo false || echo true)"
 	desk_test_state_guard_snapshot "$ROOT/guard" again
 	assert_true "an unchanged state passes the guard" \
-		"$(desk_test_state_guard_check "$ROOT/guard" live3 again > /dev/null 2>&1 && echo true || echo false)"
+		"$(desk_test_state_guard_check "$ROOT/guard" real3 again > /dev/null 2>&1 && echo true || echo false)"
 ) | tee "$ROOT/out"
 grep -q FAIL "$ROOT/out" && fail=1 || fail=0
 echo
