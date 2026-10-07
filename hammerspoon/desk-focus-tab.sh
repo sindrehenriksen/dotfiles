@@ -12,6 +12,9 @@
 # whether the IPC connection worked, not whether the Lua call it ran
 # returned true.
 #
+# A hang or timeout is a failure like any other (exit 124), so the hotkey
+# reports it and still never resumes.
+#
 # Usage: desk-focus-tab.sh <tty>
 set -u
 
@@ -24,7 +27,40 @@ lua_string() {
     printf '"%s"' "$s"
 }
 
-out=$(hs -c "DeskFocusTab($(lua_string "$tty"))")
+# Runs `hs -c "$1"` with a hard time limit, printing what hs printed.
+# stdin is /dev/null on purpose: hs reads a piped or socket stdin as more
+# commands and waits for its EOF, so a caller whose stdin never closes (an
+# agent's shell, a job runner) would otherwise hang here forever. `-t` bounds
+# the IPC send and receive; the watchdog is the backstop for anything else,
+# and a run it has to kill exits 124, the same as timeout(1).
+run_hs() {
+    local limit=${DESK_HS_TIMEOUT_SECS:-6}
+    local flag
+    flag=$(mktemp "${TMPDIR:-/tmp}/desk-hs.XXXXXX") || return 1
+    hs -t "$limit" -c "$1" < /dev/null &
+    local pid=$!
+    (
+        sleep "$limit"
+        if kill -0 "$pid" 2> /dev/null; then
+            printf 'killed' > "$flag"
+            kill -TERM "$pid" 2> /dev/null
+            sleep 1
+            kill -KILL "$pid" 2> /dev/null
+        fi
+    ) > /dev/null 2>&1 &
+    local watchdog=$!
+    wait "$pid"
+    local status=$?
+    kill "$watchdog" 2> /dev/null
+    if [ -s "$flag" ]; then
+        status=124
+        printf 'hs did not return within %ss; killed\n' "$limit" >&2
+    fi
+    rm -f "$flag"
+    return "$status"
+}
+
+out=$(run_hs "DeskFocusTab($(lua_string "$tty"))")
 hs_status=$?
 if [ "$hs_status" -ne 0 ]; then
     printf '%s\n' "$out" >&2

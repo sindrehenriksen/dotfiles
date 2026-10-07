@@ -66,7 +66,11 @@ FAKE
 cat > "$FAKEBIN/hs" <<FAKE
 #!/usr/bin/env bash
 echo "hs" >> "$ORDER_LOG"
-[ "\$1" = "-c" ] && printf '%s\n' "\$2" >> "$HS_EXPR_LOG"
+prev=""
+for a in "\$@"; do
+	[ "\$prev" = "-c" ] && printf '%s\n' "\$a" >> "$HS_EXPR_LOG"
+	prev="\$a"
+done
 cat "$ROOT/state/status.json" > "$HS_STATUS_LOG" 2> /dev/null
 exit 0
 FAKE

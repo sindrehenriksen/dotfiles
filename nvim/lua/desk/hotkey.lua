@@ -28,6 +28,12 @@ local M = {}
 -- never has to land twice.
 M.TOKEN_CHARS = tokens.TOKEN_CHARS
 
+-- How long a default dep's subprocess may run before it is killed and
+-- reported as failed. Above the tab helpers' own hs limit, so their own
+-- message ("did not return within …") is what normally surfaces; this
+-- catches a helper that hangs some other way.
+M.SHELL_DEP_TIMEOUT_MS = 10000
+
 --- The token containing 0-indexed byte column `col` in `line` (nvim
 --- cursor convention), or nil if `col` doesn't sit on a token character.
 --- Returns the token text plus its 0-indexed [start, finish] columns.
@@ -118,10 +124,12 @@ function M.default_deps()
 			for _, a in ipairs(args) do
 				argv[#argv + 1] = a
 			end
-			vim.system(argv, { text = true }, function(res)
+			vim.system(argv, { text = true, timeout = M.SHELL_DEP_TIMEOUT_MS }, function(res)
 				vim.schedule(function()
 					if res.code == 0 then
 						cb(true, nil)
+					elseif res.code == 124 and res.signal ~= 0 then
+						cb(false, cmd .. " timed out")
 					else
 						cb(false, vim.trim((res.stdout or "") .. (res.stderr or "")))
 					end

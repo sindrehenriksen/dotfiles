@@ -477,5 +477,32 @@ do
 end
 
 print()
+print("=== a tab helper that never returns is killed and reported, not waited on ===")
+do
+	local dir = vim.fn.tempname()
+	vim.fn.mkdir(dir, "p")
+	local path = dir .. "/hangs"
+	local fh = io.open(path, "w")
+	fh:write("#!/bin/sh\nexec sleep 30\n")
+	fh:close()
+	vim.fn.system({ "chmod", "+x", path })
+	local saved_timeout = hotkey.SHELL_DEP_TIMEOUT_MS
+	hotkey.SHELL_DEP_TIMEOUT_MS = 300
+	vim.env.DESK_FOCUS_TAB_BIN = path
+	local result
+	hotkey.default_deps().focus_tty("ttys001", function(ok, err)
+		result = { ok = ok, err = err }
+	end)
+	vim.wait(5000, function()
+		return result ~= nil
+	end, 20)
+	vim.env.DESK_FOCUS_TAB_BIN = nil
+	hotkey.SHELL_DEP_TIMEOUT_MS = saved_timeout
+	assert_eq("the callback fires", true, result ~= nil)
+	assert_eq("as a failure", false, result and result.ok)
+	assert_eq("naming the timeout", true, result ~= nil and (result.err or ""):find("timed out", 1, true) ~= nil)
+end
+
+print()
 print(string.format("=== summary: %d passed, %d failed ===", pass, fail))
 os.exit(fail == 0 and 0 or 1)

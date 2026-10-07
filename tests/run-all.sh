@@ -92,6 +92,7 @@ BASH_SUITES=(
 	claude/tests/session-status-title-test.sh
 	claude/tests/session-two-process-test.sh
 	git-hooks/test-commit-msg.sh
+	hammerspoon/tests/hs-timeout-test.sh
 	git-hooks/test-desk-denylist.sh
 )
 
