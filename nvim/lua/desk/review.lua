@@ -376,6 +376,10 @@ function M.confirm(msg, choices)
 	return vim.fn.confirm(msg, choices, 3)
 end
 
+-- The review split's winbar: the keys in one line, so the table in the
+-- desk guide doesn't have to be open beside it.
+M.KEY_HINT = "]c/[c next/prev · do take (notes) · ␣gA take one · ␣gD decline · u undo · ␣go list · :w save"
+
 --- The review key: opens the merged view in a stacked split (or focuses
 --- the one already open for this proposal). Returns true, or false, why.
 function M.open_review(notes_buf)
@@ -453,6 +457,7 @@ function M.open_review(notes_buf)
 	vim.api.nvim_buf_set_lines(review_buf, 0, -1, false, merged)
 	vim.bo[review_buf].modified = false
 	vim.api.nvim_win_set_buf(review_win, review_buf)
+	vim.wo[review_win].winbar = M.KEY_HINT
 
 	local s = {
 		notes_buf = notes_buf,

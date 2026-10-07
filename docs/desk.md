@@ -301,7 +301,7 @@ In the review split:
 | `<leader>go` | The overview. |
 | `:w` | The commit point: records as declined every suggestion whose lines are gone from both the split and your notes, restores any declined this session whose lines are back, and records pending takes. Closing the split without saving records nothing. |
 
-A take is remembered when you make it and recorded on the next save of either buffer, so a suggestion you edit right after taking stays taken. The winbar shows the status line: each pass's last result, untaken suggestions, closes and lockouts.
+A take is remembered when you make it and recorded on the next save of either buffer, so a suggestion you edit right after taking stays taken. The winbar shows the status line: each pass's last result, untaken suggestions, closes and lockouts. The review split's own winbar lists its keys in one line.
 
 ## Scheduling
 
