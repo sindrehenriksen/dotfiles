@@ -125,6 +125,8 @@ expr="$(cat "$HS_EXPR_LOG")"
 sid="$(jq -r '.id' "$SESSIONS_FIXTURE" | head -1)"
 assert_true "the expression is a DeskOpenTab call resuming F's session id" \
 	"$(case "$expr" in "DeskOpenTab(\"claude --resume '$sid'\", \"$sid\", \""*) echo true ;; *) echo false ;; esac)"
+assert_true "it asks for a background open, never taking focus" \
+	"$(case "$expr" in *", { background = true })") echo true ;; *) echo false ;; esac)"
 assert_true "it is a plain resume: his default permissions, no restricted envelope" \
 	"$(case "$expr" in *--restricted* | *--permission-mode* | *--tools* | *--strict-mcp-config*) echo false ;; *) echo true ;; esac)"
 

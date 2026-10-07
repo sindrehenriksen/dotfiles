@@ -41,6 +41,7 @@ cat > "$FAKEBIN/desk-open-tab-fake.sh" <<FAKE
 printf '%s\n' "\$1" > "$ARGV_LOG.command"
 printf '%s\n' "\$2" > "$ARGV_LOG.session"
 printf '%s\n' "\$3" > "$ARGV_LOG.cwd"
+printf '%s\n' "\${4:-}" > "$ARGV_LOG.mode"
 exit 0
 FAKE
 chmod +x "$FAKEBIN/desk-open-tab-fake.sh"
@@ -97,6 +98,7 @@ cwd_arg="$(cat "$ARGV_LOG.cwd" 2> /dev/null)"
 session_arg="$(cat "$ARGV_LOG.session" 2> /dev/null)"
 assert_eq "cwd_outside is expanded to \$HOME" "$HOME/dev/example-workspace" "$cwd_arg"
 assert_eq "no session id is pinned (a fresh launch, not a resume)" "" "$session_arg"
+assert_eq "it opens in the background, never taking focus" "background" "$(cat "$ARGV_LOG.mode" 2> /dev/null)"
 assert_true "the command starts with the claude binary" "$(grep -qE "^'claude' " <<< "$command_line" && echo true || echo false)"
 assert_true "a --restricted tab is never tagged DESK_HEADLESS (its own real hooks never load)" \
 	"$([[ "$command_line" != DESK_HEADLESS=1\ * ]] && echo true || echo false)"

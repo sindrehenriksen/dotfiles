@@ -4,8 +4,10 @@
 -- closing hs.alert.show — don't error), then exercises the pure parts with
 -- plain Lua: DeskTab.pick_target (slot geometry) and the UUID validation
 -- gate on DeskOpenTab, plus DeskTab.pick_tab_by_tty and DeskFocusTab's
--- early-exit paths. Never touches a real screen, window or osascript
--- call — run with the system `lua`, not Hammerspoon.
+-- early-exit paths, and the background open: DeskTab.pick_target's
+-- avoid rule, DeskTab.match_script_window and DeskTab.focus_was_taken.
+-- Never touches a real screen, window or osascript call — run with the
+-- system `lua`, not Hammerspoon.
 --
 -- Run: lua hammerspoon/tests/tab-function-test.lua
 local pass, fail = 0, 0
@@ -34,12 +36,16 @@ package.preload["hs.ipc"] = function() return {} end
 
 local osascript_calls = 0
 local last_osascript_script = nil
+local timers_started = 0
+-- What the stubbed Ghostty dictionary reports for `{id, name} of every window`.
+local script_windows_reply = { {}, {} }
 
 hs = {
   window = {
     animationDuration = 0,
     focusedWindow = function() return nil end,
     frontmostWindow = function() return nil end,
+    orderedWindows = function() return {} end,
     get = function() return nil end,
   },
   hotkey = {
@@ -62,14 +68,27 @@ hs = {
   usb = { watcher = { new = function() return setmetatable({}, inert) end } },
   caffeinate = { watcher = { new = function() return setmetatable({}, inert) end } },
   alert = { show = function() return "alert-uuid" end, closeSpecific = function() end },
-  timer = { doAfter = function() return setmetatable({}, inert) end },
+  timer = {
+    doAfter = function() return setmetatable({}, inert) end,
+    doEvery = function()
+      timers_started = timers_started + 1
+      return setmetatable({}, inert)
+    end,
+    secondsSinceEpoch = function() return 0 end,
+  },
   screen = { allScreens = function() return {} end },
-  application = { get = function() return nil end },
+  application = {
+    get = function() return nil end,
+    frontmostApplication = function() return nil end,
+  },
   osascript = {
     applescript = function(script)
+      if script:find("get {id, name} of every window", 1, true) then
+        return true, script_windows_reply, ""
+      end
       osascript_calls = osascript_calls + 1
       last_osascript_script = script
-      return false, "stub: never actually run in tests"
+      return false, nil, { OSAScriptErrorMessageKey = "stub: never actually run in tests" }
     end,
   },
 }
@@ -221,6 +240,111 @@ assert_eq("its own content survives the re-quoting intact", true,
   last_osascript_script ~= nil and last_osascript_script:find("abc-123", 1, true) ~= nil)
 
 hs.window.frontmostWindow = real_frontmost
+
+-- ---------------------------------------------------------------------------
+-- Background opens (the scheduled passes): never into the window being
+-- typed in, and Ghostty's own window id is what the script targets.
+-- ---------------------------------------------------------------------------
+local wide_windows = {
+  { id = 42, screen_id = "wide", frame = nudged },     -- the upper_C window
+  { id = 43, screen_id = "laptop", frame = elsewhere },
+  { id = 44, screen_id = "wide", frame = elsewhere },
+}
+d = DeskTab.pick_target(screens, wide_windows, slot_frame_of, nil, 42)
+assert_eq("typing in the upper_C window: another window gets the tab", "existing_window", d.mode)
+assert_eq("...the frontmost other one on the ultrawide", 44, d.window_id)
+assert_eq("...and the diversion is flagged", true, d.diverted)
+
+d = DeskTab.pick_target(screens, wide_windows, slot_frame_of, nil, 43)
+assert_eq("typing in some other window: upper_C is still the target", 42, d.window_id)
+assert_eq("...not flagged as diverted", nil, d.diverted)
+
+d = DeskTab.pick_target(screens, { wide_windows[1], wide_windows[2] }, slot_frame_of, nil, 42)
+assert_eq("no other window on the ultrawide: any other Ghostty window", 43, d.window_id)
+
+d = DeskTab.pick_target(screens, { wide_windows[1] }, slot_frame_of, nil, 42)
+assert_eq("the only Ghostty window is the one being typed in: a new window", "new_window", d.mode)
+assert_eq("...placed on the ultrawide", "wide", d.screen_id)
+
+d = DeskTab.pick_target(laptop_only, { { id = 3, screen_id = "laptop", frame = slot } },
+  slot_frame_of, { id = 3, app = "Ghostty" }, 3)
+assert_eq("laptop-only, typing in the front Ghostty window: a new window", "new_window", d.mode)
+assert_eq("...left unplaced (no ultrawide slot)", nil, d.screen_id)
+
+local hs_wins = {
+  { id = 10, title = "~/dev" },
+  { id = 11, title = "notes" },
+  { id = 12, title = "~/dev" },
+}
+local sc_wins = {
+  { id = "tab-group-a", name = "~/dev" },
+  { id = "tab-group-b", name = "notes" },
+  { id = "tab-group-c", name = "~/dev" },
+}
+assert_eq("a unique title maps straight across", "tab-group-b",
+  DeskTab.match_script_window(11, hs_wins, sc_wins))
+assert_eq("a shared title maps by front-to-back rank (first)", "tab-group-a",
+  DeskTab.match_script_window(10, hs_wins, sc_wins))
+assert_eq("a shared title maps by front-to-back rank (second)", "tab-group-c",
+  DeskTab.match_script_window(12, hs_wins, sc_wins))
+assert_eq("an unknown window has no match", nil, DeskTab.match_script_window(99, hs_wins, sc_wins))
+assert_eq("a shared title counted differently on the two sides is not guessed", nil,
+  DeskTab.match_script_window(10, hs_wins, { sc_wins[1], sc_wins[2] }))
+
+assert_eq("focus moved onto a new Ghostty tab: taken", true,
+  DeskTab.focus_was_taken({ app = "Safari", window_id = 1 }, { app = "Ghostty", window_id = 2 }))
+assert_eq("focus moved between Ghostty windows: taken", true,
+  DeskTab.focus_was_taken({ app = "Ghostty", window_id = 1 }, { app = "Ghostty", window_id = 2 }))
+assert_eq("focus unchanged: not taken", false,
+  DeskTab.focus_was_taken({ app = "Ghostty", window_id = 1 }, { app = "Ghostty", window_id = 1 }))
+assert_eq("the user moved to another app: left alone", false,
+  DeskTab.focus_was_taken({ app = "Ghostty", window_id = 1 }, { app = "Mail", window_id = 9 }))
+
+-- DeskOpenTab end to end against the stub: laptop only, the user typing in
+-- Ghostty window 5, a second Ghostty window 6 behind it.
+local function fake_win(id, title)
+  return {
+    id = function() return id end,
+    title = function() return title end,
+    application = function() return { name = function() return "Ghostty" end } end,
+    screen = function() return { id = function() return "laptop" end } end,
+    frame = function() return slot end,
+  }
+end
+local win5, win6 = fake_win(5, "typing here"), fake_win(6, "other")
+hs.window.frontmostWindow = function() return win5 end
+hs.window.focusedWindow = function() return win5 end
+hs.window.orderedWindows = function() return { win5, win6 } end
+hs.application.frontmostApplication = function()
+  return { name = function() return "Ghostty" end, activate = function() end }
+end
+script_windows_reply = { { "tab-group-5", "tab-group-6" }, { "typing here", "other" } }
+
+osascript_calls, timers_started, last_osascript_script = 0, 0, nil
+DeskOpenTab("echo hi", nil, nil, { background = true })
+assert_eq("background: the tab goes into the other window, by Ghostty's own id", true,
+  last_osascript_script ~= nil
+    and last_osascript_script:find('new tab in window id "tab-group-6"', 1, true) ~= nil)
+assert_eq("background: the focus guard is started", 1, timers_started)
+
+osascript_calls, timers_started, last_osascript_script = 0, 0, nil
+DeskOpenTab("echo hi", nil, nil)
+assert_eq("hotkey (no background): the front window gets the tab, as asked", true,
+  last_osascript_script ~= nil
+    and last_osascript_script:find('new tab in window id "tab-group-5"', 1, true) ~= nil)
+assert_eq("hotkey: no focus guard", 0, timers_started)
+
+script_windows_reply = { { "tab-group-5", "tab-group-6" }, { "typing here", "renamed" } }
+osascript_calls, timers_started, last_osascript_script = 0, 0, nil
+DeskOpenTab("echo hi", nil, nil, { background = true })
+assert_eq("target window not identifiable to Ghostty: a new window, never an untargeted tab", true,
+  last_osascript_script ~= nil
+    and last_osascript_script:find("new window with configuration", 1, true) ~= nil)
+
+hs.window.frontmostWindow = real_frontmost
+hs.window.focusedWindow = function() return nil end
+hs.window.orderedWindows = function() return {} end
+hs.application.frontmostApplication = function() return nil end
 
 -- ---------------------------------------------------------------------------
 -- DeskTab.pick_tab_by_tty
