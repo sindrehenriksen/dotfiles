@@ -178,6 +178,7 @@ local n1_id = id_by_headline(repo, "headline n1")
 assert_true("the taken item is recorded as taken", ledger.taken_by_id(ledger.read(repo))[n1_id] ~= nil)
 assert_eq("the other suggestion is not taken", false, ledger.taken_by_id(ledger.read(repo))[id_by_headline(repo, "headline a1")] ~= nil)
 assert_eq("one taken reported", 1, cres.taken)
+assert_eq("the message says what the commit takes", "Take 1 suggestion\n\nTaken:\n- headline n1", vim.trim(select(2, git.run(repo, { "log", "-1", "--format=%B" }))))
 assert_eq("the user's buffer is saved", false, vim.bo[nb].modified)
 
 print("\n=== not now: a hunk left alone is carried by the next pass, batched with new items ===")
@@ -1238,6 +1239,68 @@ do
 		return false
 	end)
 	assert_eq(":q in the notes window: the window left showing them has their own values", { false, false, false }, opts(vim.fn.bufwinid(nb2)))
+end
+
+print("\n=== the commit key's message: the takes and the sections edited ===")
+do
+	local function sug(id, over)
+		return vim.tbl_extend("force", { id = id, kind = "new", before = "", after = "", headline = "headline " .. id }, over)
+	end
+	local head = { "- alpha", "    - a1", "- beta (an aside)", "    - b1", "**gamma:**", "    - g1", "- delta", "    - d1" }
+	local now = { "NEWS n1", "- alpha", "    - a1 edited", "- beta (an aside)", "**gamma:**", "    - g1", "    - g2" }
+	local news = sug("n1", { after = "NEWS n1", headline = "news one" })
+	local drop = sug("r1", { kind = "remove", before = "    - b1", headline = "drop b1" })
+	assert_eq(
+		"takes and own edits, each section once, named without its markup",
+		"Take 2 suggestions, edit 3 sections\n\nTaken:\n- news one\n- drop b1\n\nEdited:\n- alpha\n- gamma\n- delta",
+		review.commit_message(head, now, { news, drop })
+	)
+	assert_eq("a section deleted whole is named as itself", "Edit 1 section\n\nEdited:\n- delta", review.commit_message({ "- a", "- delta", "  - d1" }, { "- a" }, {}))
+	assert_eq("only takes", "Take 1 suggestion\n\nTaken:\n- news one", review.commit_message({ "- alpha" }, { "NEWS n1", "- alpha" }, { news }))
+	assert_eq("an edit above every section", "Edit 1 section\n\nEdited:\n- top", review.commit_message({ "  loose", "- alpha" }, { "  looser", "- alpha" }, {}))
+	assert_eq(
+		"a session's section: its name; a link: its label",
+		"Edit 2 sections\n\nEdited:\n- some-session\n- read this",
+		review.commit_message({ "- some-session", "  x", "- [read this](https://example.invalid/a)", "  y" }, { "- some-session", "  x2", "- [read this](https://example.invalid/a)", "  y2" }, {})
+	)
+	assert_eq("an edited take is still a take, and the edit an edit: a column-0 line heads its own section", "Take 1 suggestion, edit 1 section\n\nTaken:\n- news one\n\nEdited:\n- NEWS n1, edited", review.commit_message({ "- alpha" }, { "NEWS n1, edited", "- alpha" }, { news }))
+	assert_eq("blank lines alone are no edit", "Update notes", review.commit_message({ "- alpha" }, { "- alpha", "" }, {}))
+	local many = {}
+	for i = 1, 999 do
+		many[i] = sug("m" .. i, { after = "M" .. i })
+	end
+	local big = {}
+	for i = 1, 999 do
+		big[#big + 1] = "M" .. i
+		big[#big + 1] = "- s" .. i
+		big[#big + 1] = "  own " .. i
+	end
+	local subject = review.commit_message({}, big, many):match("^[^\n]*")
+	assert_eq("the subject fits under 50 columns at any count", "Take 999 suggestions, edit 999 sections", subject)
+
+	local r = new_repo({ "- alpha", "    - a1", "- beta", "    - b1" })
+	build(r, "2026-10-01", {
+		item("n1", { headline = "news one" }),
+		item("a2", { kind = "add", target = { under = "- beta" }, after = "    - b2", source = "", headline = "add b2" }),
+	})
+	local nb = open_notes(r)
+	review.attach(nb)
+	assert_true("review opens", review.open_review(nb))
+	local rb = review_buf_of(nb)
+	go_to(vim.fn.bufwinid(rb), rb, "NEWS n1")
+	assert_true("take one", review.take(rb))
+	local k = assert(line_of(nb, "NEWS n1"))
+	vim.api.nvim_buf_set_lines(nb, k - 1, k, false, { "NEWS n1, reworded" })
+	go_to(vim.fn.bufwinid(rb), rb, "    - b2")
+	assert_true("take another", review.take(rb))
+	local a = assert(line_of(nb, "    - a1"))
+	vim.api.nvim_buf_set_lines(nb, a - 1, a, false, { "    - a1, mine" })
+	assert_true("commit", (review.commit(nb)))
+	assert_eq(
+		"the commit says what it took, edited take included, and which sections he edited",
+		"Take 2 suggestions, edit 2 sections\n\nTaken:\n- news one\n- add b2\n\nEdited:\n- NEWS n1, reworded\n- alpha",
+		vim.trim(select(2, git.run(r, { "log", "-1", "--format=%B" })))
+	)
 end
 
 print(string.format("\n=== summary: %d passed, %d failed ===", pass, fail))

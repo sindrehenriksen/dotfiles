@@ -287,7 +287,7 @@ In a notes buffer:
 |---|---|
 | `<leader>gR` | Open the review split above your notes and focus it, or focus the one already open. Reopening over a split with unsaved declines asks to save, discard or cancel. |
 | `do` | (notes window, while a review is open) Take the diff hunk under the cursor: every adjacent suggestion in it. |
-| `<leader>gc` | Save the buffer, commit the file, and record suggestions now in `HEAD` as taken. |
+| `<leader>gc` | Save the buffer, commit the file, and record suggestions now in `HEAD` as taken. The message says what changed, as in `Take 6 suggestions, edit 3 sections`, with a body listing the taken suggestions' headlines and the sections your own edits touched; a section is the nearest column-0 line at or above a changed line, so a session's name where it heads its notes. Lines a taken suggestion brought in or took out are not your edits; a take you reworded counts as both. |
 | `<leader>go` | Overview: a quickfix list with one headline per remaining diff hunk; `<CR>` jumps to it in the review split, where `dp` takes it, or in your notes window when no review is open. Without leaving the list, `t` or `dp` takes the entry's suggestion and `x` or `gD` declines it, as `<leader>gA` and `<leader>gD` do in the split: recorded on the split's save, undone with `u` there. An entry in the other file needs its review open first, which `<CR>` does. The list's title names these keys. |
 | `<leader>gd` | Declined in the last 14 days (also `:DeskDeclined`); `r` on an entry restores it, so the next pass proposes it again. |
 | `<leader>gx` | The hotkey: act on the token under the cursor. |

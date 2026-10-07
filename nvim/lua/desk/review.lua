@@ -157,15 +157,15 @@ end
 
 --- Records, as taken, the suggestions the user took since the last flush. One
 --- whose take the user has undone (the text is not there, and the buffer is back
---- before the take) is dropped. Returns how many were recorded.
+--- before the take) is dropped. Returns how many were recorded, and them.
 function M.flush_taken(notes_buf)
 	local pend = pending_taken[notes_buf]
 	if not pend then
-		return 0
+		return 0, {}
 	end
 	pending_taken[notes_buf] = nil
 	if not vim.api.nvim_buf_is_valid(notes_buf) then
-		return 0
+		return 0, {}
 	end
 	local lines, seq = buf_lines(notes_buf), undo_seq(notes_buf)
 	local items = {}
@@ -186,7 +186,7 @@ function M.flush_taken(notes_buf)
 			s.taken_saved[item.id] = true
 		end
 	end
-	return #items
+	return #items, items
 end
 
 local function pending_ids(notes_buf)
@@ -1583,13 +1583,166 @@ end
 -- The user's commit key
 -- ---------------------------------------------------------------------------
 
---- Saves the user's notes buffer and commits the file as it is, then records any
+-- A section's name for the commit message: its head line without list,
+-- heading or bold markup, a link's URL, a trailing colon or a parenthetical
+-- aside, and kept short.
+local function section_label(line)
+	local t = line:gsub("^#+%s*", ""):gsub("^[-*+]%s+%[.?%]%s*", ""):gsub("^[-*+]%s+", "")
+	t = t:gsub("%[([^%]]*)%]%b()", "%1"):gsub("%*%*", "")
+	t = vim.trim((t:gsub("%s+%(.*$", ""))):gsub(":$", "")
+	if t == "" then
+		t = vim.trim(line)
+	end
+	if vim.fn.strchars(t) > 60 then
+		t = vim.fn.strcharpart(t, 0, 59) .. "…"
+	end
+	return t
+end
+
+-- The nearest column-0 line at or above `row` of `lines`, or nil at the top.
+local function section_head(lines, row)
+	for i = math.min(row, #lines), 1, -1 do
+		if lines[i]:match("^%S") then
+			return lines[i]
+		end
+	end
+end
+
+-- Marks used, in `lines` (a list of { text, used }), the first unused run
+-- matching each block of `blocks`.
+local function consume(lines, blocks)
+	for _, b in ipairs(blocks) do
+		for pos = 1, #lines - #b + 1 do
+			local hit = #b > 0
+			for k = 1, #b do
+				hit = hit and not lines[pos + k - 1].used and lines[pos + k - 1].text == b[k]
+			end
+			if hit then
+				for k = 1, #b do
+					lines[pos + k - 1].used = true
+				end
+				break
+			end
+		end
+	end
+end
+
+--- The `<leader>gc` commit message for a file going from `head` to `now`
+--- with `taken` (the suggestions this commit takes, in proposal order) in
+--- it: a subject under 50 columns counting the takes and the sections the
+--- user's own edits touched, and a body naming both. A section is the
+--- nearest column-0 line at or above a changed line, which is also where a
+--- session's name heads its notes, so a new column-0 line is its own;
+--- lines a taken suggestion brought in or took out are not the user's
+--- edits. Returns the message.
+function M.commit_message(head, now, taken)
+	local afters, befores = {}, {}
+	for _, item in ipairs(taken) do
+		afters[#afters + 1] = snippet.split_lines(item.after)
+		if leaves_before(item) or item.kind == "edit" then
+			befores[#befores + 1] = snippet.split_lines(item.before)
+		end
+	end
+	local sections, seen = {}, {}
+	for _, h in ipairs(diff_indices(head, now)) do
+		local added, removed = {}, {}
+		for i = h[3], h[3] + h[4] - 1 do
+			added[#added + 1] = { text = now[i], row = i, side = now }
+		end
+		for i = h[1], h[1] + h[2] - 1 do
+			removed[#removed + 1] = { text = head[i], row = i, side = head }
+		end
+		consume(added, afters)
+		consume(removed, befores)
+		-- Each line of the user's own is named from its own side, so a
+		-- section deleted whole is named as itself.
+		for _, l in ipairs(vim.list_extend(added, removed)) do
+			if not l.used and l.text:match("%S") then
+				local line = section_head(l.side, l.row)
+				local name = line and section_label(line) or "top"
+				if not seen[name] then
+					seen[name] = true
+					sections[#sections + 1] = name
+				end
+			end
+		end
+	end
+	local function count(n, one)
+		return string.format("%d %s%s", n, one, n == 1 and "" or "s")
+	end
+	local parts = {}
+	if #taken > 0 then
+		parts[#parts + 1] = "take " .. count(#taken, "suggestion")
+	end
+	if #sections > 0 then
+		parts[#parts + 1] = "edit " .. count(#sections, "section")
+	end
+	local subject = #parts > 0 and table.concat(parts, ", ") or "update notes"
+	subject = subject:sub(1, 1):upper() .. subject:sub(2)
+	local body = {}
+	if #taken > 0 then
+		body[#body + 1] = "Taken:"
+		for _, item in ipairs(taken) do
+			body[#body + 1] = "- " .. (item.headline or item.id)
+		end
+	end
+	if #sections > 0 then
+		if #body > 0 then
+			body[#body + 1] = ""
+		end
+		body[#body + 1] = "Edited:"
+		for _, name in ipairs(sections) do
+			body[#body + 1] = "- " .. name
+		end
+	end
+	if #body == 0 then
+		return subject
+	end
+	return subject .. "\n\n" .. table.concat(body, "\n")
+end
+
+-- The suggestions a commit of `file` from `head` to `now` takes, in
+-- proposal order: the pending takes just recorded (`flushed`, edited or
+-- not), and any whose change is in `now` but not in `head`.
+local function taken_in_commit(repo, file, head, now, flushed)
+	local ids = {}
+	for _, item in ipairs(flushed) do
+		ids[item.id] = true
+	end
+	local p = proposal.read(repo)
+	if not p then
+		return flushed
+	end
+	local out = {}
+	local base = proposal.base_lines(repo, p, file)
+	for _, item in ipairs(p.items) do
+		if
+			item.file == file
+			and not item.deferred
+			and (ids[item.id] or (proposal.proposed_in(item, now, base) and not proposal.proposed_in(item, head, base)))
+		then
+			out[#out + 1] = item
+			ids[item.id] = nil
+		end
+	end
+	for _, item in ipairs(flushed) do
+		if ids[item.id] then
+			out[#out + 1] = item
+		end
+	end
+	return out
+end
+
+--- Saves the user's notes buffer and commits the file as it is, with a
+--- message saying what changed (`commit_message`), then records any
 --- suggestion now in HEAD as taken. A no-op commit when nothing changed.
 function M.commit(bufnr)
 	local repo, file = M.repo_context(bufnr)
 	if not repo then
 		return false, file
 	end
+	-- Recorded before the save, which would otherwise record them unseen.
+	local _, flushed = M.flush_taken(bufnr)
 	if vim.bo[bufnr].modified then
 		vim.api.nvim_buf_call(bufnr, function()
 			vim.cmd("silent write")
@@ -1597,9 +1750,12 @@ function M.commit(bufnr)
 	end
 	local _, dirty = git.run(repo, { "status", "--porcelain", "--", file })
 	if vim.trim(dirty) ~= "" then
+		local head = proposal.lines_at(repo, "HEAD", file)
+		local now = vim.fn.readfile(repo .. "/" .. file)
+		local msg = M.commit_message(head, now, taken_in_commit(repo, file, head, now, flushed))
 		local ok, _, err = git.run(repo, { "add", "--", file })
 		if ok then
-			ok, _, err = git.run(repo, { "commit", "-q", "-m", "notes", "--", file })
+			ok, _, err = git.run(repo, { "commit", "-q", "-m", msg, "--", file })
 		end
 		if not ok then
 			return false, "git commit failed: " .. err
