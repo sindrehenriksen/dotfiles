@@ -169,6 +169,7 @@ write_config() { # interval
 			jira: {prompt: "prompts/watch-fetch.md", tool: "mcp__tickets__search"},
 			github_repos: ["org/repo"],
 			send: {prompt: "prompts/watch-send.md"},
+			skip: {bot_authors: ["^github-actions", "^Automation", "\\[bot\\]$"], bot_signatures: ["^🤖 Review Bot"]},
 			preamble: "prompts/watch-preamble.md"}}}' > "$INST/config.json"
 }
 write_config 15
@@ -183,6 +184,10 @@ issue() { # key status [parent] [links-json] [comments-json] [updated] [summary]
 		  parent:(if $p == "" then null else {key:$p} end), issuelinks:$l, updated:$u, created:"2026-09-01T10:00:00.000+0300"}
 		  + (if $c == null then {} else {comment:{comments:$c}, description:"AC: keep the retry flag."} end))}'
 }
+cmt() { # id author body [created]
+	jq -cn --arg id "$1" --arg a "$2" --arg b "$3" --arg t "${4:-$future}" '{id:$id, author:{displayName:$a}, created:$t, updated:$t, body:$b}'
+}
+with_assignee() { jq -c --arg a "$1" '.fields.assignee.displayName = $a'; }
 link() { jq -cn --arg k "$1" '{type:{inward:"relates to",outward:"relates to"}, outwardIssue:{key:$k, fields:{summary:"linked", status:{name:"To Do"}}}}'; }
 headless() { jq -cs '{issues:{nodes:.}}'; }
 rest() { jq -cs '{issues:., isLast:true}'; }
@@ -262,18 +267,23 @@ assert_eq "nothing is queued" "0" "$(jq '[.queues[].changes[]] | length' "$DESK_
 assert_eq "the PR is snapshotted" "h1" "$(jq -r '.prs["org/repo#40"].head' "$DESK_WATCH_STATE_FILE")"
 
 echo
-echo "=== the next run forwards every movement to the live session ==="
+echo "=== the next run forwards what is substantive to the live session ==="
 # Pretend the last run was a while ago, past the scheduled interval.
 jq '.last_run.at -= 3600 | .last_jira_ok -= 3600 | .last_gh_ok -= 3600 | .scope.refreshed_at -= 600' "$DESK_WATCH_STATE_FILE" > "$ROOT/s" && mv "$ROOT/s" "$DESK_WATCH_STATE_FILE"
 future="$(date -u -v+1H +%Y-%m-%dT%H:%M:%S.000+0000 2> /dev/null || date -u -d '+1 hour' +%Y-%m-%dT%H:%M:%S.000+0000)"
 {
 	issue ABC-11 "Done" ABC-1 "[]" "[{\"id\":\"901\",\"author\":{\"displayName\":\"Dev One\"},\"created\":\"$future\",\"updated\":\"$future\",\"body\":\"Merged; steps 2-4 not checked yet.<!-- bot-meta {\\\"channel\\\":\\\"C0X\\\"} -->\"}]"
 	issue LNK-7 "In Progress"
-	issue OTH-3 "To Do" "" "[]" "[]" "" "Mentions ABC-2 in passing"
+	issue OTH-3 "To Do" "" "[]" "[$(cmt 905 "Dev Two" "This depends on ABC-2 landing first.")]" "" "Another team's ticket"
+	issue ABC-2 "To Do" "" "[]" "[$(cmt 906 "Automation" "Moved by rule")]"
 } | rest > "$FIX/changes-result.json"
 pr 40 "[ABC-11] Build the thing" "abc-11-build" MERGED h2 '[{"name":"tests","status":"COMPLETED","conclusion":"SUCCESS"},{"name":"evals","status":"COMPLETED","conclusion":"FAILURE"}]' \
 	| jq -s '.[0].updatedAt = "2026-10-07T09:00:00Z"' > "$FIX/prs.json"
-jq -n --arg t "$future" '{comments:[{id:"IC_1",author:{login:"dev1"},createdAt:$t,body:"Dropped the retry flag."}],reviews:[]}' > "$FIX/pr-40.json"
+jq -n --arg t "$future" '{comments:[
+		{id:"IC_1",author:{login:"dev1"},createdAt:$t,body:"Dropped the retry flag."},
+		{id:"IC_2",author:{login:"github-actions"},createdAt:$t,body:"Slack announcement: thread link"},
+		{id:"IC_3",author:{login:"dev2"},createdAt:$t,body:"FYI the bot said:\n🤖 Review Bot: looks fine"}],
+	reviews:[{id:"R_1",author:{login:"dev1"},submittedAt:$t,state:"COMMENTED",body:"🤖 Review Bot — automated review. Summary: fine."}]}' > "$FIX/pr-40.json"
 : > "$CALLS"
 : > "$WATCH_TEST_SENT"
 "$RUN" watch --scheduled > "$ROOT/run2.out" 2>&1
@@ -284,14 +294,23 @@ assert_eq "one send, to alpha's current name" "alpha-session" "$(jq -r '.to' "$W
 msg="$(jq -r 'select(.to == "alpha-session") | .message' "$WATCH_TEST_SENT")"
 assert_eq "the message starts with the marker" "[desk-watch] Watcher update for alpha-session" "$(head -n1 <<< "$msg" | cut -d: -f1)"
 assert_contains "the preamble rides along" "STANDING PREAMBLE" "$msg"
-assert_contains "a child's status change is forwarded" 'ABC-11 "Summary of ABC-11" (child of ABC-1): status To Do → Done' "$msg"
+assert_not_contains "a child's status-only move is not listed" "status To Do → Done" "$msg"
 assert_contains "a new comment is forwarded" 'new comment by Dev One: "Merged; steps 2-4 not checked yet."' "$msg"
-assert_contains "a linked ticket's change is forwarded" "LNK-7" "$msg"
+assert_contains "a linked ticket's rename is forwarded, its status move with it" 'LNK-7 "Summary of LNK-7" (linked to ABC-1): status To Do → In Progress; renamed from "linked"' "$msg"
 assert_not_contains "a bot's hidden HTML comment is left out" "bot-meta" "$msg"
-assert_contains "a ticket that mentions a tracked key is forwarded" "(mentions ABC-2)" "$msg"
+assert_contains "a comment on a ticket that mentions a tracked key is forwarded" '(mentions ABC-2): new comment by Dev Two: "This depends on ABC-2 landing first."' "$msg"
+assert_not_contains "that ticket's first sighting is not listed" "new under the watch" "$msg"
 assert_contains "a PR on a child's key is forwarded, with its new state and commits" "PR #40" "$msg"
 assert_contains "the failing check is named" "1 failed (evals)" "$msg"
 assert_contains "a new PR comment is forwarded" 'comment by dev1: "Dropped the retry flag."' "$msg"
+assert_not_contains "a bot account's comment is not" "Slack announcement" "$msg"
+assert_not_contains "a review opening with a bot's signature is not" "automated review" "$msg"
+assert_contains "a person pasting bot output is" 'comment by dev2: "FYI the bot said: 🤖 Review Bot: looks fine"' "$msg"
+assert_contains "the footer counts the status move" "1 status move" "$msg"
+assert_contains "the bot comments" "2 bot comments" "$msg"
+assert_contains "the bot review" "1 bot review" "$msg"
+assert_contains "and the first-seen ticket" "1 first-seen ticket" "$msg"
+assert_eq "the footer is the message's last line" "Skipped since the last update, not listed" "$(tail -n1 <<< "$msg" | cut -d: -f1)"
 assert_eq "beta has nothing that moved, so no message" "0" "$(jq -c 'select(.to == "beta-session")' "$WATCH_TEST_SENT" | wc -l | tr -d ' ')"
 assert_eq "the queue is emptied on a confirmed send" "0" "$(jq --arg s "$SID_A" '.queues[$s].changes | length' "$DESK_WATCH_STATE_FILE")"
 assert_eq "last seen advances" "alpha-session" "$(jq -r --arg s "$SID_A" '.last_sent[$s].name' "$DESK_WATCH_STATE_FILE")"
@@ -310,14 +329,13 @@ sessions << EOF
 $SID_A alpha-session false
 $SID_B beta-session true
 EOF
-echo '{"issues":[], "isLast": true}' > "$FIX/changes-result.json"
-issue ABC-2 "In Review" | rest > "$FIX/changes-result.json"
+issue ABC-2 "To Do" | with_assignee "Dev Two" | rest > "$FIX/changes-result.json"
 prs_none
 : > "$WATCH_TEST_SENT"
 "$RUN" watch > /dev/null 2>&1
 assert_eq "nothing is sent to a session that is not running" "0" "$(wc -l < "$WATCH_TEST_SENT" | tr -d ' ')"
 assert_eq "its change waits in the queue" "1" "$(jq --arg s "$SID_A" '.queues[$s].changes | length' "$DESK_WATCH_STATE_FILE")"
-issue ABC-2 "Done" | rest > "$FIX/changes-result.json"
+issue ABC-2 "To Do" | with_assignee "Dev Three" | rest > "$FIX/changes-result.json"
 "$RUN" watch > /dev/null 2>&1
 assert_eq "a second change queues behind it" "2" "$(jq --arg s "$SID_A" '.queues[$s].changes | length' "$DESK_WATCH_STATE_FILE")"
 sessions << EOF
@@ -328,14 +346,14 @@ echo '{"issues":[], "isLast": true}' > "$FIX/changes-result.json"
 "$RUN" watch > /dev/null 2>&1
 assert_eq "once live: one message, to its new name" "alpha-renamed" "$(jq -r .to "$WATCH_TEST_SENT" | tr '\n' ' ' | sed 's/ $//')"
 msg="$(jq -r .message "$WATCH_TEST_SENT")"
-assert_contains "it carries the first queued change" "status To Do → In Review" "$msg"
-assert_contains "and the second" "status In Review → Done" "$msg"
+assert_contains "it carries the first queued change" "assignee Dev One → Dev Two" "$msg"
+assert_contains "and the second" "assignee Dev Two → Dev Three" "$msg"
 assert_contains "it says when the last update went out" "Changes since " "$msg"
 assert_eq "and the queue is empty afterwards" "0" "$(jq --arg s "$SID_A" '.queues[$s].changes | length' "$DESK_WATCH_STATE_FILE")"
 
 echo
 echo "=== a name that does not address the session alone holds the queue ==="
-issue ABC-2 "Reopened" | rest > "$FIX/changes-result.json"
+issue ABC-2 "To Do" | with_assignee "Dev Four" | rest > "$FIX/changes-result.json"
 sessions << EOF
 $SID_A alpha-renamed true
 $SID_OTHER alpha-renamed true
@@ -390,6 +408,19 @@ out="$("$CLI" run --dry-run 2>&1)"
 assert_contains "desk-watch run runs the watch pass" "would send to alpha-renamed" "$out"
 
 echo
+echo "=== with DESK_CONFIG unset, the machine-local default is used ==="
+mkdir -p "$ROOT/xdg/desk"
+ln -s "$INST/config.json" "$ROOT/xdg/desk/config.json"
+out="$(env -u DESK_CONFIG -u DESK_CONFIG_DEFAULT XDG_CONFIG_HOME="$ROOT/xdg" "$CLI" run --dry-run 2>&1)"
+assert_contains "desk-watch run finds the instance through the default link" "watch: dry run" "$out"
+assert_not_contains "and its prompts resolve beside the real config, not the link" "Could not open file" "$out"
+out="$(env -u DESK_CONFIG -u DESK_CONFIG_DEFAULT XDG_CONFIG_HOME="$ROOT/xdg" "$RUN" watch --dry-run 2>&1)"
+assert_contains "so does desk-run" "watch: dry run" "$out"
+out="$(env -u DESK_CONFIG -u DESK_CONFIG_DEFAULT XDG_CONFIG_HOME="$ROOT/no-xdg" "$CLI" run --dry-run 2>&1)"; rc=$?
+assert_eq "with neither, it refuses" "2" "$rc"
+assert_contains "and names the default it looked for" "$ROOT/no-xdg/desk/config.json" "$out"
+
+echo
 echo "=== a failed ticket fetch keeps the window ==="
 jira_before="$(jq .last_jira_ok "$DESK_WATCH_STATE_FILE")"
 FAKE_JIRA_FAIL=1 "$RUN" watch > "$ROOT/fail.out" 2>&1
@@ -407,19 +438,6 @@ echo
 echo "=== the message stays under its cap ==="
 q="$(jq -n '{changes: [range(0; 60) | {at: 1800000000, ref: "ABC-\(.)", title: "t", context: "", what: ("x" * 300)}], dropped: 3}')"
 m="$(desk_watch_message '{"label":"L"}' "$q" n "$INST/prompts/watch-preamble.md" 4000 UTC)"
-echo
-echo "=== with DESK_CONFIG unset, the machine-local default is used ==="
-mkdir -p "$ROOT/xdg/desk"
-ln -s "$INST/config.json" "$ROOT/xdg/desk/config.json"
-out="$(env -u DESK_CONFIG -u DESK_CONFIG_DEFAULT XDG_CONFIG_HOME="$ROOT/xdg" "$CLI" run --dry-run 2>&1)"
-assert_contains "desk-watch run finds the instance through the default link" "watch: dry run" "$out"
-assert_not_contains "and its prompts resolve beside the real config, not the link" "Could not open file" "$out"
-out="$(env -u DESK_CONFIG -u DESK_CONFIG_DEFAULT XDG_CONFIG_HOME="$ROOT/xdg" "$RUN" watch --dry-run 2>&1)"
-assert_contains "so does desk-run" "watch: dry run" "$out"
-out="$(env -u DESK_CONFIG -u DESK_CONFIG_DEFAULT XDG_CONFIG_HOME="$ROOT/no-xdg" "$CLI" run --dry-run 2>&1)"; rc=$?
-assert_eq "with neither, it refuses" "2" "$rc"
-assert_contains "and names the default it looked for" "$ROOT/no-xdg/desk/config.json" "$out"
-
 [ "${#m}" -le 4000 ] && ok "a long queue fits the cap (${#m} chars)" || bad "a long queue fits the cap (${#m} chars)"
 assert_contains "the rest are named, not lost" "more, too long to include" "$m"
 assert_contains "dropped changes are counted" "Plus 3 older changes" "$m"
@@ -446,10 +464,35 @@ issue ABC-2 "Blocked" | jq -cs '{issues:., isLast:false, nextPageToken:"p2"}' > 
 assert_eq "a short pagination keeps the ticket window" "$jira_before" "$(jq .last_jira_ok "$DESK_WATCH_STATE_FILE")"
 
 echo
+echo "=== a run with only skipped changes sends nothing, and the counts carry ==="
+sessions << EOF
+$SID_A alpha-renamed true
+EOF
+"$CLI" add --session "$SID_A" ABC-1 > /dev/null
+jq --arg s "$SID_A" '.queues[$s].changes = [] | .queues[$s].skipped = {}' "$DESK_WATCH_STATE_FILE" > "$ROOT/s" && mv "$ROOT/s" "$DESK_WATCH_STATE_FILE"
+{
+	issue ABC-1 "In QA" "" "[$(link LNK-7)]" "[$(cmt 907 "github-actions" "Deployed to dev")]"
+} | rest > "$FIX/changes-result.json"
+prs_none
+: > "$WATCH_TEST_SENT"
+"$RUN" watch > /dev/null 2>&1
+assert_eq "a status move and a bot comment alone send nothing" "0" "$(wc -l < "$WATCH_TEST_SENT" | tr -d ' ')"
+assert_eq "nothing is queued" "0" "$(jq --arg s "$SID_A" '.queues[$s].changes | length' "$DESK_WATCH_STATE_FILE")"
+assert_eq "the skipped changes are counted" '{"status moves":1,"bot comments":1}' "$(jq -c --arg s "$SID_A" '.queues[$s].skipped' "$DESK_WATCH_STATE_FILE")"
+issue ABC-1 "In QA" "" "[$(link LNK-7)]" "[$(cmt 907 "github-actions" "Deployed to dev"),$(cmt 908 "Dev One" "QA found a gap in the plan.")]" | rest > "$FIX/changes-result.json"
+"$RUN" watch > /dev/null 2>&1
+msg="$(jq -r .message "$WATCH_TEST_SENT")"
+assert_contains "the next substantive change goes out" 'new comment by Dev One: "QA found a gap in the plan."' "$msg"
+assert_contains "with the earlier skips in its footer" "1 status move" "$msg"
+assert_eq "and the counts reset after the send" '{}' "$(jq -c --arg s "$SID_A" '.queues[$s].skipped' "$DESK_WATCH_STATE_FILE")"
+
+echo
 echo "=== a dry run with a lookback and no state: only what moved ==="
-{ issue ABC-2 "In Review"; } | rest > "$FIX/changes-result.json"
+{ issue ABC-2 "In Review" "" "[]" "[$(cmt 909 "Dev One" "Picked this up.")]"; } | rest > "$FIX/changes-result.json"
 out="$(DESK_WATCH_STATE_FILE="$ROOT/fresh-state.json" "$RUN" watch --dry-run --lookback-minutes 60 2>&1)"
-assert_contains "the ticket that moved is listed" 'ABC-2 "Summary of ABC-2": first seen by the watcher' "$out"
+assert_contains "a comment in the window is listed" 'new comment by Dev One: "Picked this up."' "$out"
+assert_not_contains "a ticket with no snapshot is not listed as news" "new under the watch" "$out"
+assert_contains "it is counted instead" "first-seen ticket" "$out"
 assert_not_contains "a ticket only the scope query returned is not" "ABC-11" "$out"
 [ -f "$ROOT/fresh-state.json" ] && bad "the dry run wrote state" || ok "the dry run wrote no state"
 

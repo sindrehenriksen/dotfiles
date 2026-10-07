@@ -433,6 +433,10 @@ desk_watch_message() {
 		     then "- … and \(($lines | length) - $fit.n) more, too long to include, on \([$c[$fit.n:][] | .ref] | unique | .[0:20] | join(", "))\(if ([$c[$fit.n:][] | .ref] | unique | length) > 20 then " and others" else "" end); look them up if they matter.\n"
 		     else "" end)
 		  + (if $dropped > 0 then "- Plus \($dropped) older change\(if $dropped == 1 then "" else "s" end) the queue no longer holds.\n" else "" end)
+		  # Everything left out on purpose is counted, so nothing is invisible.
+		  + "\nSkipped since the last update, not listed: "
+		  + (($q.skipped // {}) | to_entries | map(select(.value > 0)) | sort_by(-.value)
+		     | if length == 0 then "nothing" else map("\(.value) \(if .value == 1 then (.key | sub("s$"; "")) else .key end)") | join(", ") end) + "."
 		| sub("\\s+$"; "")'
 }
 
@@ -616,10 +620,12 @@ desk_watch_main() {
 		--slurpfile scope "$work/scope.json" --slurpfile changes "$work/changes.json" --slurpfile prs "$work/prs.json" \
 		--argjson now "$now" --argjson jira_since "${jira_since:-$now}" --argjson gh_since "$gh_since" \
 		--argjson baseline_jira "$baseline_jira" --argjson baseline_gh "$baseline_gh" \
-		--argjson queue_max "$(jq -r '.queue_max // 200' <<< "$pass_config")" '
+		--argjson queue_max "$(jq -r '.queue_max // 200' <<< "$pass_config")" \
+		--argjson skip "$(jq -c '.skip // {}' <<< "$pass_config")" --argjson lookback "$([ -n "$lookback" ] && echo true || echo false)" '
 		{entries: $entries, state: $state[0], scope_issues: $scope[0], change_issues: $changes[0], prs: $prs[0],
 		 now: $now, jira_since: $jira_since, gh_since: $gh_since,
-		 baseline_jira: $baseline_jira, baseline_gh: $baseline_gh, queue_max: $queue_max}' > "$work/diff-input.json"
+		 baseline_jira: $baseline_jira, baseline_gh: $baseline_gh, queue_max: $queue_max,
+		 skip: $skip, lookback: $lookback}' > "$work/diff-input.json"
 	new_state="$(jq -c -f "$DESK_WATCH_DIFF_JQ" "$work/diff-input.json" 2> "$work/diff.err")" || new_state=""
 	if [ -z "$new_state" ]; then
 		desk_log "$pass" "watch: the diff failed: $(head -c 400 "$work/diff.err")"
@@ -680,7 +686,7 @@ desk_watch_main() {
 			sent=$((sent + 1))
 			desk_log "$pass" "watch: $label: sent $n change(s) to $name"
 			new_state="$(jq -c --arg s "$sid" --arg name "$name" --argjson now "$now" --argjson n "$n" '
-				.queues[$s].changes = [] | .queues[$s].dropped = 0 | del(.queues[$s].queued_since)
+				.queues[$s].changes = [] | .queues[$s].dropped = 0 | .queues[$s].skipped = {} | del(.queues[$s].queued_since)
 				| .last_sent[$s] = {at: $now, name: $name, changes: $n}' <<< "$new_state")"
 		else
 			held=$((held + 1))

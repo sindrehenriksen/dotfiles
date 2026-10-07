@@ -15,6 +15,17 @@
 #   $baseline_jira, $baseline_gh   true on a source's first run: snapshots
 #                   are recorded and nothing is queued
 #   $queue_max      the most change lines a session's queue keeps
+#   skip            {bot_authors, bot_signatures}: regexes for an automated
+#                   account's name, and for the opening of a post a bot makes
+#                   through a person's account
+#   lookback        true for a --lookback-minutes run with no snapshots to
+#                   compare against
+#
+# Only substantive changes are queued: new human content, a change to scope
+# or plan, a ticket or PR new to the watch. The rest (a status or state move
+# with nothing else, a bot's post, labels, check results, a ticket only first
+# seen) is counted per kind in the queue's `skipped`, which the message's
+# footer reports.
 #
 # Prints the new state. Every change it queues is one line of plain text a
 # watch session reads; the message around them is built in watch.sh.
@@ -24,6 +35,8 @@
 | .scope_issues as $scope_issues | .change_issues as $change_issues | .prs as $prs
 | .now as $now | .jira_since as $jira_since | .gh_since as $gh_since
 | .baseline_jira as $baseline_jira | .baseline_gh as $baseline_gh | .queue_max as $queue_max
+| (.skip.bot_authors // []) as $bot_authors | (.skip.bot_signatures // []) as $bot_signatures
+| (.lookback // false) as $lookback
 |
 
 # HTML comments (bots' hidden metadata) are dropped: they carry nothing a
@@ -45,6 +58,13 @@ def ts:
 		       end)
 	) catch null
 	end;
+
+# A post is a bot's when its author matches a bot account, or when it opens
+# with a bot's signature (a bot posting through a person's account). A
+# person quoting bot output further down is still a person.
+def is_bot($author; $body):
+	(($author // "") as $a | any($bot_authors[]; . as $re | $a | test($re; "i")))
+	or (($body // "") | sub("^\\s+"; "") as $b | any($bot_signatures[]; . as $re | $b | test($re)));
 
 def desc_sig: if . == null then null else (length | tostring) + ":" + .[0:200] + "|" + .[-200:] end;
 
@@ -92,35 +112,45 @@ def ticket_snapshot($prev):
 # its status change later.
 def link_seed: {summary, status, done} | with_entries(select(.value != null));
 
+# Each change as {text, skip}: skip names the kind a skipped change is
+# counted under, null for a substantive one.
 def field_changes($prev):
 	. as $i
 	| [
 		(if ($prev | has("status")) and $prev.status != $i.status
-		 then "status \($prev.status) → \($i.status)" else empty end),
+		 then {text: "status \($prev.status) → \($i.status)", skip: "status moves"} else empty end),
 		(if ($prev | has("summary")) and $prev.summary != $i.summary
-		 then "renamed from \"\($prev.summary)\"" else empty end),
+		 then {text: "renamed from \"\($prev.summary)\"", skip: null} else empty end),
 		(if ($prev | has("assignee")) and $prev.assignee != $i.assignee
-		 then "assignee \($prev.assignee // "none") → \($i.assignee // "none")"
+		 then {text: "assignee \($prev.assignee // "none") → \($i.assignee // "none")", skip: null}
 		 elif ($prev | has("assignee") | not) and ($prev | has("labels")) and $i.assignee != null
-		 then "assigned to \($i.assignee)" else empty end),
+		 then {text: "assigned to \($i.assignee)", skip: null} else empty end),
 		(if ($prev | has("resolution")) and $prev.resolution != $i.resolution
-		 then "resolution \($prev.resolution // "none") → \($i.resolution // "none")"
+		 then {text: "resolution \($prev.resolution // "none") → \($i.resolution // "none")", skip: "status moves"}
 		 elif ($prev | has("resolution") | not) and ($prev | has("labels")) and $i.resolution != null
-		 then "resolved as \($i.resolution)" else empty end),
+		 then {text: "resolved as \($i.resolution)", skip: "status moves"} else empty end),
 		(if ($prev | has("parent")) and $prev.parent != $i.parent
-		 then "moved from \($prev.parent // "no parent") to \($i.parent // "no parent")" else empty end),
+		 then {text: "moved from \($prev.parent // "no parent") to \($i.parent // "no parent")", skip: null} else empty end),
 		(if ($prev | has("labels")) then
-			(($i.labels - $prev.labels) | if length > 0 then "labels added: \(join(", "))" else empty end),
-			(($prev.labels - $i.labels) | if length > 0 then "labels removed: \(join(", "))" else empty end)
+			(($i.labels - $prev.labels) | if length > 0 then {text: "labels added: \(join(", "))", skip: "label changes"} else empty end),
+			(($prev.labels - $i.labels) | if length > 0 then {text: "labels removed: \(join(", "))", skip: "label changes"} else empty end)
 		 else empty end),
 		(if ($prev | has("links")) then
 			([$i.links[] | "\(.rel) \(.key)"] | unique) as $now_links
-			| (($now_links - $prev.links) | if length > 0 then "link added: \(join("; "))" else empty end),
-			  (($prev.links - $now_links) | if length > 0 then "link removed: \(join("; "))" else empty end)
+			| (($now_links - $prev.links) | if length > 0 then {text: "link added: \(join("; "))", skip: null} else empty end),
+			  (($prev.links - $now_links) | if length > 0 then {text: "link removed: \(join("; "))", skip: null} else empty end)
 		 else empty end),
 		(if $i.has_desc and ($prev.desc_sig != null) and $prev.desc_sig != ($i.desc | desc_sig)
-		 then "description edited" else empty end)
+		 then {text: "description edited", skip: null} else empty end)
 	];
+
+# One event for a ticket's or PR's field changes: substantive when any
+# change is, carrying every change's text; otherwise skipped under the
+# first change's kind.
+def field_event($f):
+	if ($f | length) == 0 then empty
+	elif any($f[]; .skip == null) then {what: ([$f[].text] | join("; ")), skip: null}
+	else {what: ([$f[].text] | join("; ")), skip: $f[0].skip} end;
 
 def comment_changes($prev):
 	. as $i
@@ -136,7 +166,8 @@ def comment_changes($prev):
 	          else empty end
 	        elif (($c.created | ts) // 0) > $jira_since then
 	          {at: ($c.created | ts), what: "new comment by \($c.author): \"\($c.body | excerpt(500))\""}
-	        else empty end ]
+	        else empty end
+	      | . + {skip: (if is_bot($c.author; $c.body) then "bot comments" else null end)} ]
 	  end;
 
 # Each ticket's change lines (empty when nothing moved), keyed by ticket.
@@ -153,15 +184,20 @@ def ticket_events:
 	      # has not moved; it is a snapshot, not news.
 	      elif $prev == null and ($moved | index($i.key)) == null then empty
 	      elif $prev == null then
-	        { key: $i.key, title: $i.summary, at: (($i.updated | ts) // $now),
-	          what: ((if (($i.created | ts) // 0) > $jira_since then "created" else "first seen by the watcher" end)
-	                 + " (\($i.type // "ticket"), \($i.status)\(if $i.assignee then ", " + $i.assignee else "" end))") },
-	        ($i | comment_changes({}) | .[] | {key: $i.key, title: $i.summary} + .)
+	        # A ticket new to the watch: created in the window, or under a
+	        # tracked key (a new child), is news. One only first seen, with
+	        # no snapshot to compare (a mention, a lookback run), is counted:
+	        # what moved on it shows as its comments.
+	        ((($i.created | ts) // 0) > $jira_since) as $created
+	        | { key: $i.key, title: $i.summary, at: (($i.updated | ts) // $now),
+	            skip: (if $created or (($i.parent != null) and (all_keys | index($i.parent)) != null and ($lookback | not))
+	                   then null else "first-seen tickets" end),
+	            what: ((if $created then "created" else "new under the watch" end)
+	                   + " (\($i.type // "ticket"), \($i.status)\(if $i.assignee then ", " + $i.assignee else "" end))") },
+	          ($i | comment_changes({}) | .[] | {key: $i.key, title: $i.summary} + .)
 	      else
-	        ($i | field_changes($prev)) as $f
-	        | (if ($f | length) > 0
-	           then {key: $i.key, title: $i.summary, at: (($i.updated | ts) // $now), what: ($f | join("; "))}
-	           else empty end),
+	        (($i | field_changes($prev)) as $f | field_event($f)
+	         | {key: $i.key, title: $i.summary, at: (($i.updated | ts) // $now)} + .),
 	          ($i | comment_changes($prev) | .[] | {key: $i.key, title: $i.summary} + .)
 	      end ];
 
@@ -191,24 +227,24 @@ def checks_line:
 def pr_field_changes($prev):
 	. as $p
 	| [
-		(if $prev.state != $p.state then "now \($p.state | ascii_downcase)" else empty end),
+		(if $prev.state != $p.state then {text: "now \($p.state | ascii_downcase)", skip: "PR state changes"} else empty end),
 		(if ($prev | has("draft")) and $prev.draft != $p.draft
-		 then (if $p.draft then "back to draft" else "ready for review" end) else empty end),
+		 then {text: (if $p.draft then "back to draft" else "ready for review" end), skip: "PR state changes"} else empty end),
 		(if ($prev | has("review")) and $prev.review != $p.review
-		 then "review decision \($prev.review // "none") → \($p.review // "none")" else empty end),
-		(if $prev.title != $p.title then "retitled from \"\($prev.title)\"" else empty end),
+		 then {text: "review decision \($prev.review // "none") → \($p.review // "none")", skip: "PR state changes"} else empty end),
+		(if $prev.title != $p.title then {text: "retitled from \"\($prev.title)\"", skip: null} else empty end),
 		(if ($prev | has("head")) and $prev.head != $p.head
-		 then "new commits (head \($prev.head[0:7]) → \($p.head[0:7]))" else empty end),
+		 then {text: "new commits (head \($prev.head[0:7]) → \($p.head[0:7]))", skip: null} else empty end),
 		(if ($prev | has("labels")) then
-			(($p.labels - $prev.labels) | if length > 0 then "labels added: \(join(", "))" else empty end),
-			(($prev.labels - $p.labels) | if length > 0 then "labels removed: \(join(", "))" else empty end)
+			(($p.labels - $prev.labels) | if length > 0 then {text: "labels added: \(join(", "))", skip: "label changes"} else empty end),
+			(($prev.labels - $p.labels) | if length > 0 then {text: "labels removed: \(join(", "))", skip: "label changes"} else empty end)
 		 else empty end),
 		(if ($prev | has("body_sig")) and $prev.body_sig != ($p.body | desc_sig)
-		 then "description edited: \"\($p.body | excerpt(600))\"" else empty end),
+		 then {text: "description edited: \"\($p.body | excerpt(600))\"", skip: null} else empty end),
 		# Checks are reported when the failing set changes, or when a run
 		# finishes; a check that is merely still running is not movement.
 		(if (($prev.failing // []) != $p.checks.fail) or ((($prev.checks_done // true) | not) and $p.checks.pending == 0)
-		 then ($p | checks_line) else empty end)
+		 then {text: ($p | checks_line), skip: "check results"} else empty end)
 	];
 
 def pr_comment_changes($prev):
@@ -220,6 +256,7 @@ def pr_comment_changes($prev):
 	           elif (($c.at | ts) // 0) > $gh_since then .
 	           else empty end
 	         | {at: ($c.at | ts),
+	            skip: (if is_bot($c.author; $c.body) then (if $c.kind == "review" then "bot reviews" else "bot comments" end) else null end),
 	            what: (if $c.kind == "review"
 	                   then "review by \($c.author): \($c.state | ascii_downcase)\(if ($c.body // "") != "" then ", \"" + ($c.body | excerpt(500)) + "\"" else "" end)"
 	                   else "comment by \($c.author): \"\($c.body | excerpt(500))\"" end)} ]
@@ -232,13 +269,15 @@ def pr_events:
 	    | {key: $p.id, title: $p.title, pr_keys: $p.keys, url: $p.url} as $base
 	    | if $baseline_gh then empty
 	      elif $prev == null then
-	        $base + {at: (($p.updated | ts) // $now),
-	                 what: ((if (($p.created | ts) // 0) > $gh_since then "opened" else "first seen by the watcher" end)
-	                        + " (\($p.state | ascii_downcase)\(if $p.draft then ", draft" else "" end), branch \($p.branch))")},
-	        ($p | pr_comment_changes({}) | .[] | $base + .)
+	        # A PR opened in the window is news; one only first seen (it
+	        # was already open when it came into scope) is counted.
+	        ((($p.created | ts) // 0) > $gh_since) as $opened
+	        | $base + {at: (($p.updated | ts) // $now), skip: (if $opened then null else "first-seen PRs" end),
+	                   what: ((if $opened then "opened" else "new under the watch" end)
+	                          + " (\($p.state | ascii_downcase)\(if $p.draft then ", draft" else "" end), branch \($p.branch))")},
+	          ($p | pr_comment_changes({}) | .[] | $base + .)
 	      else
-	        ($p | pr_field_changes($prev)) as $f
-	        | (if ($f | length) > 0 then $base + {at: (($p.updated | ts) // $now), what: ($f | join("; "))} else empty end),
+	        (($p | pr_field_changes($prev)) as $f | field_event($f) | $base + {at: (($p.updated | ts) // $now)} + .),
 	          ($p | pr_comment_changes($prev) | .[] | $base + .)
 	      end ];
 
@@ -284,15 +323,17 @@ scope_maps as $maps
 	| ([ $tev[] | . as $ev
 	     | relation($e; $maps; ($tix[$ev.key] // {key: $ev.key})) as $rel
 	     | select($rel != null)
-	     | {at: ($ev.at // $now), ref: $ev.key, title: $ev.title, context: $rel, what: $ev.what} ]
+	     | {at: ($ev.at // $now), ref: $ev.key, title: $ev.title, context: $rel, what: $ev.what, skip: $ev.skip} ]
 	   + [ $pev[] | . as $ev
 	       | ([$ev.pr_keys[] | . as $k | select(($scope | index($k)) != null)]) as $hit
 	       | select(($hit | length) > 0)
 	       | {at: ($ev.at // $now), ref: ("PR " + ($ev.key | sub("^.*#"; "#"))), title: $ev.title,
-	          context: ($hit | join(", ")), what: $ev.what, url: $ev.url} ]) as $new
+	          context: ($hit | join(", ")), what: $ev.what, url: $ev.url, skip: $ev.skip} ]) as $events
+	| [$events[] | select(.skip == null) | del(.skip)] as $new
 	| ($queues[$sid] // {changes: [], dropped: 0}) as $q
 	| (($q.changes // []) + $new | sort_by(.at)) as $all
 	| .[$sid] = ($q + {
+		skipped: (reduce ($events[] | select(.skip != null) | .skip) as $k ($q.skipped // {}; .[$k] += 1)),
 		changes: (if ($all | length) > $queue_max then $all[-$queue_max:] else $all end),
 		dropped: (($q.dropped // 0) + ([($all | length) - $queue_max, 0] | max)),
 		new_this_run: ($new | length),
