@@ -138,6 +138,15 @@ snapshot() {
 
 lines() { jq -r ".$1[]" <<< "$2" | sort; }
 
+# The check drives the opener that Hammerspoon has loaded, which is
+# whatever init.lua it last read, not this checkout. An opener from before
+# DeskTab.background_target can tab into a window other than Ghostty's
+# front one, which moves that window, so the check refuses to drive it.
+if [ "$(hs_lua 'return "DESK_OPENER " .. type(DeskTab and DeskTab.background_target)' 2> /dev/null | grep '^DESK_OPENER ' | tail -n1)" != "DESK_OPENER function" ]; then
+	echo "ABORT: the opener Hammerspoon has loaded predates this check; merge and reload Hammerspoon first. Nothing was opened"
+	exit 2
+fi
+
 echo "Put focus where this case needs it; recording in ${countdown}s..."
 sleep "$countdown"
 

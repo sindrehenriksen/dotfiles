@@ -32,6 +32,10 @@ cat > "$ROOT/hs" << STUB
 #!/usr/bin/env bash
 for a in "\$@"; do
 	case "\$a" in
+	*DESK_OPENER*)
+		[ -f "$ROOT/old-opener" ] && echo "DESK_OPENER nil" || echo "DESK_OPENER function"
+		exit 0
+		;;
 	*"close tab"*)
 		printf '%s\n' "\$a" >> "$ROOT/closed"
 		exit 0
@@ -117,6 +121,16 @@ for kind in empty garbage locked windowless novisible; do
 	assert_eq "the opener was never called" "0" "$(opened)"
 	assert_eq "it says it aborted before opening" "1" "$(has "$kind" '^ABORT')"
 done
+
+echo
+echo "=== Hammerspoon has an older opener loaded ==="
+touch "$ROOT/old-opener"
+snap Ghostty 175 "$V0" "$T0" > "$ROOT/snap.1"
+run_case oldopener
+rm -f "$ROOT/old-opener"
+assert_eq "exits 2" "2" "$(status oldopener)"
+assert_eq "the opener was never called" "0" "$(opened)"
+assert_eq "it says why" "1" "$(has oldopener '^ABORT: the opener Hammerspoon has loaded predates')"
 
 echo
 echo "=== focus moved ==="
