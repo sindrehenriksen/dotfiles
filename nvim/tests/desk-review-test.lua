@@ -479,6 +479,58 @@ do
 		{ "NEWS n1", "Section A", "Section B", "  other", "  added under B", "Section C" }, lines_of(nb))
 end
 
+print("\n=== the overview opens across the top and shows each entry's suggestion as the cursor moves ===")
+do
+	local base = { "Section A" }
+	for i = 1, 60 do
+		base[#base + 1] = "  line " .. i
+	end
+	base[#base + 1] = "Section Z"
+	local r = new_repo(base)
+	build(r, "2026-10-01", {
+		item("n1", { headline = "news" }),
+		item("z1", { kind = "add", target = { under = "Section Z" }, after = "  added under Z", source = "", headline = "add under Z" }),
+	})
+	local nb = open_notes(r)
+	review.attach(nb)
+	assert_true("review opens", review.open_review(nb))
+	local rb = review_buf_of(nb)
+	local rw, nw = vim.fn.bufwinid(rb), vim.fn.bufwinid(nb)
+	vim.api.nvim_win_set_cursor(rw, { 30, 0 })
+	assert_true("overview opens", review.overview(nb))
+	local qw = vim.fn.getqflist({ winid = 0 }).winid
+	local qbuf = vim.api.nvim_win_get_buf(qw)
+	assert_eq("the list is at the very top", 1, vim.fn.win_screenpos(qw)[1])
+	assert_eq("full width", vim.o.columns, vim.api.nvim_win_get_width(qw))
+	assert_true("above the review split", vim.fn.win_screenpos(qw)[1] < vim.fn.win_screenpos(rw)[1])
+	assert_eq("the cursor is in the list", qw, vim.api.nvim_get_current_win())
+	assert_eq("the first entry already shows in the split", 1, vim.api.nvim_win_get_cursor(rw)[1])
+	vim.api.nvim_win_set_cursor(qw, { 2, 0 })
+	vim.api.nvim_exec_autocmds("CursorMoved", { buffer = qbuf })
+	local z = line_of(rb, "  added under Z")
+	assert_eq("moving in the list puts the split's cursor on that entry's suggestion", z, vim.api.nvim_win_get_cursor(rw)[1])
+	assert_true("scrolled into view", vim.fn.line("w0", rw) <= z and vim.fn.line("w$", rw) >= z and vim.fn.line("w0", rw) > 1)
+	assert_true("the notes window scrolls with it", vim.fn.line("w0", nw) > 1)
+	assert_eq("the cursor stays in the list", qw, vim.api.nvim_get_current_win())
+	vim.api.nvim_buf_call(qbuf, function()
+		vim.cmd("doautocmd FileType qf")
+	end)
+	assert_eq("a list buffer set up again previews once, not twice", 1, #vim.api.nvim_get_autocmds({ event = "CursorMoved", buffer = qbuf }))
+	review.qf_jump()
+	assert_eq("<CR> still jumps", { rw, z }, { vim.api.nvim_get_current_win(), vim.api.nvim_win_get_cursor(rw)[1] })
+	vim.cmd([[execute "normal! 1\<C-o>"]])
+	assert_eq("Ctrl-O returns to where the user was before the preview moved it", 30, vim.api.nvim_win_get_cursor(rw)[1])
+	vim.cmd("cclose")
+	vim.cmd("copen")
+	assert_true("in any other list nothing previews", (function()
+		vim.fn.setqflist({}, " ", { title = "other", items = { { bufnr = nb, lnum = 5, text = "x" } } })
+		local before = vim.api.nvim_win_get_cursor(rw)
+		vim.api.nvim_exec_autocmds("CursorMoved", { buffer = vim.api.nvim_get_current_buf() })
+		return vim.deep_equal(before, vim.api.nvim_win_get_cursor(rw))
+	end)())
+	vim.cmd("cclose")
+end
+
 print("\n=== with no review open, the overview jumps into the notes window ===")
 do
 	local r = new_repo({ "Section A", "  existing", "Section B", "  other" })

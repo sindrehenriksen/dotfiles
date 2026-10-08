@@ -77,6 +77,7 @@ end
 -- ---------------------------------------------------------------------------
 
 local sessions = {} -- notes bufnr -> session
+local preview -- the overview's preview state, below
 
 local function live_session(bufnr)
 	local s = bufnr and sessions[bufnr]
@@ -1637,7 +1638,12 @@ function M.overview(notes_buf)
 		items = items,
 		context = { desk_review_buf = s and s.review_buf, desk_repo = repo },
 	})
-	vim.cmd("copen")
+	-- Across the very top, above the split, so the list and the suggestion
+	-- it shows are both in view. A list open elsewhere moves there.
+	vim.cmd("cclose")
+	preview = {}
+	vim.cmd("topleft copen " .. math.min(#items, 10))
+	M.qf_preview()
 	return true
 end
 
@@ -1648,6 +1654,60 @@ end
 local function is_loclist_win(win)
 	local info = vim.fn.getwininfo(win)[1]
 	return info ~= nil and info.loclist == 1
+end
+
+-- What the overview's preview last did: the window it moved, where that
+-- window's cursor was before (`origin`) and where the preview left it
+-- (`last`), so a jump records the place the user left, not the preview's.
+preview = {}
+
+-- Where an overview entry shows: the review split's line of its suggestion,
+-- looked up now (takes and edits since the list was made move the lines),
+-- else the line of the entry's file where that file shows. nil when
+-- neither is in a window.
+local function entry_target(entry)
+	local s = sessions[entry.bufnr]
+	local id = type(entry.user_data) == "table" and entry.user_data.id
+	local rw = s and vim.api.nvim_buf_is_valid(s.review_buf) and vim.fn.bufwinid(s.review_buf) or -1
+	if rw ~= -1 and id then
+		for _, r in ipairs(M.remaining(s)) do
+			if r.item.id == id then
+				return rw, r.lnum
+			end
+		end
+	end
+	local win = vim.fn.bufwinid(entry.bufnr)
+	if win ~= -1 then
+		return win, entry.lnum
+	end
+end
+
+--- The overview's preview, on every cursor move in the list: the entry's
+--- suggestion is scrolled into view with the cursor on it, in the review
+--- split, while the cursor stays in the list.
+function M.qf_preview()
+	local qwin = vim.api.nvim_get_current_win()
+	if is_loclist_win(qwin) or vim.fn.getqflist({ title = 0 }).title ~= M.OVERVIEW_TITLE then
+		return
+	end
+	local entry = vim.fn.getqflist()[vim.fn.line(".")]
+	if not entry or not entry.bufnr or entry.bufnr == 0 then
+		return
+	end
+	local win, lnum = entry_target(entry)
+	if not win or win == qwin then
+		return
+	end
+	local here = vim.api.nvim_win_get_cursor(win)
+	if preview.win ~= win or not vim.deep_equal(here, preview.last) then
+		preview = { win = win, origin = here }
+	end
+	lnum = math.max(1, math.min(lnum, vim.api.nvim_buf_line_count(vim.api.nvim_win_get_buf(win))))
+	vim.api.nvim_win_set_cursor(win, { lnum, 0 })
+	vim.api.nvim_win_call(win, function()
+		vim.cmd("normal! zvzz")
+	end)
+	preview.last = vim.api.nvim_win_get_cursor(win)
 end
 
 --- The quickfix `<CR>` handler for every quickfix buffer (installed once,
@@ -1685,24 +1745,17 @@ function M.qf_jump()
 		win = vim.fn.bufwinid(b)
 		item.bufnr = b
 	end
-	local lnum = item.lnum
-	local s = sessions[item.bufnr]
-	local id = type(item.user_data) == "table" and item.user_data.id
-	local review_win = s and vim.api.nvim_buf_is_valid(s.review_buf) and vim.fn.bufwinid(s.review_buf) or -1
-	if review_win ~= -1 and id then
-		-- looked up now, not when the list was made: takes and edits since
-		-- then move the lines
-		for _, r in ipairs(M.remaining(s)) do
-			if r.item.id == id then
-				win, lnum = review_win, r.lnum
-			end
-		end
-	end
-	if win == -1 then
+	local lnum
+	win, lnum = entry_target(item)
+	if not win then
 		vim.notify("desk: your notes are not showing in any window", vim.log.levels.WARN)
 		return
 	end
 	vim.api.nvim_set_current_win(win)
+	if preview.win == win and preview.origin and vim.deep_equal(vim.api.nvim_win_get_cursor(win), preview.last) then
+		vim.api.nvim_win_set_cursor(win, preview.origin)
+	end
+	preview = {}
 	vim.cmd("normal! m'")
 	vim.cmd("diffupdate")
 	vim.api.nvim_win_set_cursor(win, { math.max(lnum, 1), 0 })
@@ -2165,6 +2218,11 @@ local function install_qf_autocmd()
 		pattern = "qf",
 		callback = function(args)
 			vim.keymap.set("n", "<CR>", M.qf_jump, { buffer = args.buf, desc = "Desk: jump (jumplist-safe)" })
+			vim.api.nvim_create_autocmd("CursorMoved", {
+				group = vim.api.nvim_create_augroup("desk_qf_preview_" .. args.buf, { clear = true }),
+				buffer = args.buf,
+				callback = M.qf_preview,
+			})
 			vim.keymap.set("n", "r", M.qf_restore, { buffer = args.buf, desc = "Desk: restore this declined item" })
 			-- The overview's own keys; in any other list they keep their meaning.
 			for lhs, verb in pairs({ t = "take", dp = "take", x = "decline", gD = "decline" }) do
