@@ -426,12 +426,13 @@ desk_follow_gh() {
 	esac
 }
 
-# desk_follow_fetch_prs <pass> <pass_config> <state> <keys json> <since epoch> <with_comments true|false> <out>
+# desk_follow_fetch_prs <pass> <pass_config> <state> <keys json> <since epoch> <with_comments true|false> <out> [<limit>]
 # Every PR in the configured repos updated since <since> whose title or
-# branch carries one of <keys>, normalized, as one JSON array in <out>;
-# returns non-zero (and writes null) when a listing fails.
+# branch carries one of <keys> (every PR when <keys> is null), normalized,
+# as one JSON array in <out>; returns non-zero (and writes null) when a
+# listing fails. <limit> is per repo, default 100.
 desk_follow_fetch_prs() {
-	local pass="$1" pass_config="$2" state="$3" keys="$4" since="$5" with_comments="$6" out="$7"
+	local pass="$1" pass_config="$2" state="$3" keys="$4" since="$5" with_comments="$6" out="$7" limit="${8:-100}"
 	local repos since_iso all='[]' repo listed
 	echo null > "$out"
 	mapfile -t repos < <(jq -r '(.github_repos // [])[]' <<< "$pass_config")
@@ -441,20 +442,20 @@ desk_follow_fetch_prs() {
 	fi
 	since_iso="$(date -u -r "$since" +%Y-%m-%dT%H:%M:%SZ 2> /dev/null || date -u -d "@$since" +%Y-%m-%dT%H:%M:%SZ)"
 	for repo in "${repos[@]}"; do
-		listed="$(desk_follow_gh pr list --repo "$repo" --state all --limit 100 --search "updated:>=$since_iso" \
-			--json number,title,headRefName,state,isDraft,updatedAt,createdAt,reviewDecision,headRefOid,labels,url,body,statusCheckRollup 2> /dev/null)" \
+		listed="$(desk_follow_gh pr list --repo "$repo" --state all --limit "$limit" --search "updated:>=$since_iso" \
+			--json number,title,headRefName,state,isDraft,updatedAt,createdAt,reviewDecision,headRefOid,labels,url,body,statusCheckRollup,author 2> /dev/null)" \
 			|| { desk_log "$pass" "follow: gh pr list failed for $repo"; return 1; }
 		jq -e 'type == "array"' > /dev/null 2>&1 <<< "$listed" || { desk_log "$pass" "follow: gh pr list for $repo was not a list"; return 1; }
 		listed="$(jq -c --arg repo "$repo" --argjson keys "$keys" '
 			def pass_c: IN("SUCCESS", "NEUTRAL", "SKIPPED");
 			def fail_c: IN("FAILURE", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "ERROR", "STARTUP_FAILURE");
 			[.[] | ([(.title + " " + .headRefName) | scan("[A-Za-z][A-Za-z0-9]+-[0-9]+") | ascii_upcase] | unique) as $k
-			 | select(($k - ($k - $keys)) | length > 0)
+			 | select($keys == null or (($k - ($k - $keys)) | length > 0))
 			 | (.statusCheckRollup // []) as $c
 			 | { id: "\($repo)#\(.number)", repo: $repo, number, title, branch: .headRefName, url,
 			     state, draft: .isDraft, review: (.reviewDecision // null) | (if . == "" then null else . end),
 			     head: .headRefOid, labels: ([.labels[]?.name] | sort), body: (.body // ""),
-			     updated: .updatedAt, created: .createdAt, keys: $k,
+			     updated: .updatedAt, created: .createdAt, keys: $k, author: (.author.login // null),
 			     checks: {
 			       pass: ([$c[] | select(((.conclusion // .state // "") | pass_c))] | length),
 			       fail: ([$c[] | select(((.conclusion // .state // "") | fail_c)) | (.name // .context // "check")] | unique),

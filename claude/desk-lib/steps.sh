@@ -288,6 +288,13 @@ desk_seed_named_file() {
 		declined.json)
 			desk_write_declined_items "$repo" "$(jq -c '.files // []' <<< "$ctx_json")" "$dest_dir/declined.json"
 			;;
+		ticket-digest.json)
+			# Built by desk_ticket_digest_build right after its fetch step.
+			local digest_file
+			digest_file="$(jq -r '.pass_scratch // empty' <<< "$ctx_json")/ticket-digest.json"
+			if [ -s "$digest_file" ]; then cp -f "$digest_file" "$dest_dir/ticket-digest.json"
+			else echo '{}' > "$dest_dir/ticket-digest.json"; fi
+			;;
 		*.json)
 			# A fetch step's reply is seeded as <lowercased step id>.json.
 			# The mail step additionally answers to f-private.json (its id
@@ -578,6 +585,11 @@ desk_step_model_call() {
 		tools_arg="$(jq -r '(.tools // []) | map(select(startswith("mcp__") | not)) | join(",")' <<< "$step_json")"
 		tools_args=(--tools "$tools_arg")
 	fi
+	# A ticket digest's search result is far past Claude Code's output
+	# limit, so it reaches the stream only as a saved file, copied out here
+	# for desk_ticket_digest_collect.
+	local spill_dir=""
+	jq -e '.ticket_digest' > /dev/null 2>&1 <<< "$step_json" && spill_dir="$PASS_SCRATCH/${id}-spill"
 	local rc
 	desk_call_model \
 		--scratch "$call_scratch" \
@@ -594,6 +606,7 @@ desk_step_model_call() {
 		${session_name:+--session-id-file "$call_scratch.session-id"} \
 		--timeout "$timeout" \
 		--config-dir "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" \
+		${spill_dir:+--spill-dir "$spill_dir"} \
 		--out "$out"
 	rc=$?
 

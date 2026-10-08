@@ -144,7 +144,7 @@ A judge, close or retention step whose `tools` include `Read` gets it narrowed t
 | Kind | What it does | Kind-specific keys |
 |---|---|---|
 | `commit_push` | Commits the configured files exactly as they are on disk, only when `HEAD` is `main` with no rebase or merge in progress; records suggestions now in `HEAD` as taken; pushes if `push_enabled`. Never pulls, merges, rebases or force-pushes. | none |
-| `fetch` | One model call. A failure flags the pass `partial` instead of stopping it; a later slot the same scheduled date reruns only the fetches that failed, reusing the ones that succeeded. If its id is `ticket_status_step_id`, it gets `{{jql}}` and its `ticket_search_tool` results become the ticket cache. | none |
+| `fetch` | One model call. A failure flags the pass `partial` instead of stopping it; a later slot the same scheduled date reruns only the fetches that failed, reusing the ones that succeeded. If its id is `ticket_status_step_id`, it gets `{{jql}}` and its `ticket_search_tool` results become the ticket cache. | `ticket_digest` (optional): the step also runs the [ticket digest](#the-ticket-digest)'s query |
 | `judge` | Seeds its input files, makes one call, validates the reply, caps tiered items and builds the proposal. A reply that is not the items shape fails the pass. | `input_files` (default: all eight names listed below) |
 | `write` | A pinned single-tool write, currently built around one case: removing a label (`pinned_label`) from mail threads. It removes the label from exactly the threads the `mail_fetch_step_id` step's digest search returned. The deny hook refuses any call whose arguments are not one of those pinned `{threadId, labelIds}` pairs, and the runner fails the pass if the ids acted on differ from the pinned set. Refuses outright if that fetch failed or its search query was not exactly `{{digest_query}}`. | `pinned_label` (default `UNREAD`); `tools`: exactly one |
 | `capture` | No model call. Adds a line on top of the captures file (`captures_file`) for each recorded session that is live (`running`) or left open, its last run stopped without a deliberate end (`dropped`, the reader's `left_open`; see "How a session ended" under [How it works](#how-it-works)), once per session and kind. A session you named that is already mentioned in your notes is skipped; an unnamed one is labelled `<auto title> · <first 8 chars of its id>`. | none |
@@ -185,6 +185,7 @@ A prompt is plain text with `{{name}}` placeholders, filled in one pass; a place
 | `pass`, `run_status` | the follow-up summary and status | the pass's name, and a paragraph on how its run went: its steps, and whether all ran, which sources failed, or where it stopped |
 | `items`, `item_count`, `open_note` | the follow-up summary and status | the pass's own staged items as a JSON array (`file`, `kind`, `headline`, `tier`, `source`, `before`, `after`), how many, and a line about older items still waiting, or empty |
 | `deletion_date`, `days_left` | retention | `YYYY-MM-DD` the transcript can be deleted from (today when already due), and the whole days until then |
+| `ticket_digest_jql`, `ticket_digest_fields` | a fetch step with `ticket_digest` | the digest's query, which the call must run character for character, and the fields to ask for |
 
 A close prompt gets only `scratch`, `today`, `session_name` and `session_id`; a retention prompt gets those plus `deletion_date` and `days_left`; a follow-up summary or status prompt gets `pass`, `today`, `run_status`, `items`, `item_count` and `open_note`. The summary runs as a turn of the session it summarises, so it has that conversation and no input files; the status prompt is the first turn of an interactive session, with the user's own permissions, like the follow-up tab itself.
 
@@ -200,6 +201,7 @@ A close prompt gets only `scratch`, `today`, `session_name` and `session_id`; a 
 | `tickets.json` | `[{key, summary, status, previous_status}]` for tickets whose status changed since the last check |
 | `sessions.json` | `[{name, status}]` from the reader |
 | `open-items.json` | suggestions still waiting on you, in the item shape below, with their runner-assigned ids |
+| `ticket-digest.json` | the [ticket digest](#the-ticket-digest), `{}` when its step failed |
 | `declined.json` | the 50 suggestions you most recently declined, same shape; a declined suggestion is also blocked by content (file, kind, target, normalised before/after), so a regenerated copy under a new id is dropped even without a URL source |
 
 A close or retention call's cwd holds `session.json` (its reader entry), `transcript-tail.jsonl` and the captures file (`notes.md` by default).
@@ -293,6 +295,35 @@ A ticket's field changes travel together: when any of them is forwarded, the lin
 | `queue_max` | `200` | Per session; older changes past it are counted, not kept. |
 | `skip.bot_authors` | `[]` | Regexes, case-insensitive, for the author names of automated accounts: a GitHub login, or a Jira display name. |
 | `skip.bot_signatures` | `[]` | Regexes for the opening of a post a bot makes through a person's account, matched against the raw body after leading whitespace. |
+
+## The ticket digest
+
+The follow pass covers the tickets a follow session holds, within minutes. The ticket digest covers the rest of a project's tickets and a repo's pull requests, once a pass: what changed on them since the pass's last good fetch, for the judge to hold against the user's bar like any other candidate. Between them they carry what the ticket tracker's and the code host's own notifications would, so those can be muted. Neither covers chat: direct messages and channel posts stay a mail-and-chat fetch step's job.
+
+A fetch step with a `ticket_digest` key runs the digest's query beside its own work, with `{{ticket_digest_jql}}` and `{{ticket_digest_fields}}`; its prompt tells the call to run that query exactly and to leave the result alone. The runner, not the model, reads the result. A day's result usually runs past Claude Code's output limit, and then it reaches the stream as a saved file, which the call's spill directory copies out, so the model does not see the tickets' text. The cost of that is pagination, as for the follow pass: a result whose last page says more follow counts as failed, so the window is capped at `max_window_days`, and a pass after a long absence covers only its last days. Pull requests come from `gh pr list` and `gh pr view` in each of `github_repos`, every one updated in the window.
+
+**What counts as a change** is the follow pass's diff, run against the digest's own snapshots, with the same `skip` rules and these differences:
+
+- Everything a followed session covers is left to the follow pass: a ticket in a session's scope or under one of its tracked keys, and a PR carrying any such key. The count goes in `left_to_follows`.
+- The user's own comments and reviews (`self`, matched against Jira display names and GitHub logins) are counted, and so are the state moves of a PR the user opened.
+- A PR whose author matches `pr_skip_authors` (a dependency bot) is counted, unless its title or a label matches `pr_keep`.
+- For a PR, opening, ready for review, merging and closing are news, with reviews and comments by people. New commits, a retitle and description edits are counted, as are review-decision changes, labels and checks.
+- A ticket created in the window is counted as `new tickets`, since a new-tickets fetch reports those, and one first seen with no snapshot is counted as the follow pass counts it; its comments in the window are still listed.
+
+**What the judge gets**, as `ticket-digest.json`: `{window: {since, until}, entries, more, counted, left_to_follows}`. Each entry is one ticket (`kind: "ticket"`, `key`, `summary`, `type`, `status`, `assignee`, `parent`) or one PR (`kind: "pr"`, `pr`, `title`, `url`, `state`, `draft`, `author`, `keys`), with its `changes` oldest first (`at`, `what`), at most `max_changes` of them, and `earlier_changes` counting the rest. Entries with a person's post come first, then the most recently moved, up to `max_entries`; `more` names the ones past the cap. A listed PR's `url` is an allowed source for the judge's items, since the runner read it from `gh` itself; a ticket is cited as `ticket:<KEY>`.
+
+**Snapshots** are kept in `ticket-digest-state.json` under the state directory, and the pass installs the new ones only when its fetch window moves, so a pass that fails and is retried compares against the same snapshots again, and a retry slot reuses the cached fetch. One left unmoved for 180 days is dropped. The follow list and follow state are only read.
+
+| Key (under `ticket_digest`) | Default | Meaning |
+|---|---|---|
+| `jql` | required | The tickets to cover, e.g. `project = ABC`. The runner adds `AND updated >= -<minutes>m`. |
+| `github_repos` | the follow pass's | `owner/name` repos whose PRs are covered. |
+| `skip.bot_authors`, `skip.bot_signatures` | none | Added to the follow pass's `skip` lists. |
+| `self` | `[]` | The user's names and logins. |
+| `pr_skip_authors`, `pr_keep` | `[]`, none | Regexes, case-insensitive. |
+| `max_window_days` | `4` | The window's floor. |
+| `max_entries`, `max_changes` | `25`, `6` | The caps on what the judge gets. |
+| `pr_limit` | `200` | PRs listed per repo; a listing that reaches it is logged as cut short. |
 
 ## Review keys
 
@@ -390,4 +421,4 @@ The two live canaries, `nvim/tests/desk-run-canary.sh` and `desk-run-canary-rest
 
 ## State and overrides
 
-Everything the runner writes lives under `~/.local/state/desk` (`$DESK_STATE_DIR`): `status.json`, `ticket-status.json`, `lock/`, `guard/`, `scratch/` (removed after each pass), `runs/` (visible calls, kept seven days), `fetch-cache/`, `briefs/` and `logs/`. Each has its own override, read at the top of `claude/desk-lib/common.sh` and the file that owns it, which is also where the timing knobs (`DESK_LOCK_MAX_WAIT_SECS`, `DESK_STALE_RUNNING_MINUTES`, …) are. The recorder's store is `$CLAUDE_SESSION_STORE`. Both nvim and the runner locate the tab helpers through `$DESK_OPEN_TAB_BIN` and `$DESK_FOCUS_TAB_BIN` (`close-session.sh` its own through `$DESK_CLOSE_TAB_BIN`) (the older `$DESK_OPEN_TAB` and `$DESK_FOCUS_TAB` still work as aliases on both sides). nvim also reads `$DESK_READER` and `$DESK_OPEN_URL`. All default to the names on `PATH` and `open`.
+Everything the runner writes lives under `~/.local/state/desk` (`$DESK_STATE_DIR`): `status.json`, `ticket-status.json`, `ticket-digest-state.json` (`$DESK_TICKET_DIGEST_STATE_FILE`), `lock/`, `guard/`, `scratch/` (removed after each pass), `runs/` (visible calls, kept seven days), `fetch-cache/`, `briefs/` and `logs/`. Each has its own override, read at the top of `claude/desk-lib/common.sh` and the file that owns it, which is also where the timing knobs (`DESK_LOCK_MAX_WAIT_SECS`, `DESK_STALE_RUNNING_MINUTES`, …) are. The recorder's store is `$CLAUDE_SESSION_STORE`. Both nvim and the runner locate the tab helpers through `$DESK_OPEN_TAB_BIN` and `$DESK_FOCUS_TAB_BIN` (`close-session.sh` its own through `$DESK_CLOSE_TAB_BIN`) (the older `$DESK_OPEN_TAB` and `$DESK_FOCUS_TAB` still work as aliases on both sides). nvim also reads `$DESK_READER` and `$DESK_OPEN_URL`. All default to the names on `PATH` and `open`.

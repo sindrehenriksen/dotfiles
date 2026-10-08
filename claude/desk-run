@@ -39,6 +39,7 @@ source "$DESK_RUN_DIR/desk-lib/validate.sh"
 source "$DESK_RUN_DIR/desk-lib/ticket-cache.sh"
 source "$DESK_RUN_DIR/desk-lib/steps.sh"
 source "$DESK_RUN_DIR/desk-lib/retention.sh"
+source "$DESK_RUN_DIR/desk-lib/ticket-digest.sh"
 
 pass="${1:-}"
 if [ -z "$pass" ]; then
@@ -378,6 +379,11 @@ for ((i = 0; i < steps_len; i++)); do
 
 		fetch)
 			any_fetch_step_ran="true"
+			ticket_digest_cfg="$(desk_ticket_digest_config "$step_json" "$config")"
+			if [ -n "$ticket_digest_cfg" ] && [ "$(jq -r '.jql // empty' <<< "$ticket_digest_cfg")" = "" ]; then
+				desk_log "$pass" "$id: ticket_digest has no jql — no ticket digest"
+				ticket_digest_cfg=""
+			fi
 			if desk_fetch_already_done "$pass" "$scheduled_date" "$id"; then
 				desk_fetch_cache_restore "$pass" "$scheduled_date" "$id"
 				result="ok"
@@ -407,10 +413,21 @@ $(git -C "$repo" show "HEAD:$f" 2> /dev/null)"
 					jql="$(desk_build_jql "$notes_text" "$tokens_json")"
 					placeholders="$(jq -c --arg jql "$jql" '. + {jql: $jql}' <<< "$common_placeholders")"
 				fi
+				if [ -n "$ticket_digest_cfg" ]; then
+					placeholders="$(jq -c --argjson d "$(desk_ticket_digest_window "$id" "$ticket_digest_cfg" \
+						"$gmail_window_start" "$gmail_window_end")" '. + $d' <<< "$placeholders")"
+				fi
 				result="$(desk_step_fetch "$pass" "$step_json" "" "$placeholders" "" "" "$scheduled_date")"
+				if [ "$result" = "ok" ] && [ -n "$ticket_digest_cfg" ]; then
+					desk_ticket_digest_collect "$pass" "$id" "$ticket_digest_cfg" \
+						"$(jq -r '(.tools // [])[0] // empty' <<< "$step_json")" || result="failed"
+				fi
 				if [ "$result" = "ok" ]; then
 					desk_fetch_cache_save "$pass" "$scheduled_date" "$id" "$digest_query"
 				fi
+			fi
+			if [ -n "$ticket_digest_cfg" ] && [ "$result" = "ok" ]; then
+				desk_ticket_digest_build "$pass" "$id" "$ticket_digest_cfg" "$timezone" || result="failed"
 			fi
 			if [ "$id" = "$ticket_status_step_id" ] && [ "$result" = "ok" ]; then
 				desk_build_ticket_cache "$PASS_SCRATCH/${id}-tool-uses.jsonl" "$PASS_SCRATCH/${id}-tool-results.jsonl" \
@@ -471,6 +488,12 @@ $(git -C "$repo" show "HEAD:$f" 2> /dev/null)"
 					done
 					workspace_url="$(jq -r '.slack_workspace_url // empty' <<< "$config")"
 					allowed_urls="$(desk_allowed_urls "$workspace_url" "${results_files[@]}")"
+					# The ticket digest's PR links came from gh, read by the
+					# runner itself, never from a model.
+					if [ -s "$PASS_SCRATCH/ticket-digest.json" ]; then
+						allowed_urls="$allowed_urls
+$(jq -r '(.entries // [])[] | .url // empty' "$PASS_SCRATCH/ticket-digest.json" 2> /dev/null)"
+					fi
 					validated_json="$(desk_validate_items "$items_json" "$allowed_urls")"
 					capped="$(desk_apply_caps "$validated_json" "$caps_json" "$pass")"
 					kept_json="$(jq -c '.kept' <<< "$capped")"
@@ -653,6 +676,7 @@ elif [ "$overall_result" != "failed" ]; then
 	# set at all when no fetch step ran this pass (a weekend commit-only
 	# invocation) — last_fetch_ok stays wherever it last legitimately was.
 	[ "$any_fetch_step_ran" = "true" ] && desk_status_set_fetch_ok "$pass" "$gmail_window_end"
+	desk_ticket_digest_commit
 fi
 
 desk_status_set_result "$pass" "$overall_result" "$stopped_at" "$failed_sources_json" "$scheduled_date"
