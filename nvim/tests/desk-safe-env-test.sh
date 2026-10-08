@@ -74,6 +74,18 @@ trap 'rm -rf "$ROOT"' EXIT
 	desk_test_state_guard_snapshot "$ROOT/guard" again
 	assert_true "an unchanged state passes the guard" \
 		"$(desk_test_state_guard_check "$ROOT/guard" real3 again > /dev/null 2>&1 && echo true || echo false)"
+	echo 1 > "$HOME/.local/state/claude/input-bell-real-sess"
+	desk_test_state_guard_snapshot "$ROOT/guard" bell1
+	assert_true "a live session ringing for the first time passes the guard" \
+		"$(desk_test_state_guard_check "$ROOT/guard" again bell1 > /dev/null 2>&1 && echo true || echo false)"
+	echo 2 > "$HOME/.local/state/claude/input-bell-real-sess"
+	desk_test_state_guard_snapshot "$ROOT/guard" bell2
+	assert_true "and rewriting its bell file passes too" \
+		"$(desk_test_state_guard_check "$ROOT/guard" bell1 bell2 > /dev/null 2>&1 && echo true || echo false)"
+	echo 1 > "$HOME/.local/state/claude/input-bell-fabricated"
+	desk_test_state_guard_snapshot "$ROOT/guard" bell3
+	assert_true "a bell file for a session with no transcript trips it" \
+		"$(desk_test_state_guard_check "$ROOT/guard" bell2 bell3 > /dev/null 2>&1 && echo false || echo true)"
 ) | tee "$ROOT/out"
 grep -q FAIL "$ROOT/out" && fail=1 || fail=0
 echo

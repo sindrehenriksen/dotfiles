@@ -208,11 +208,13 @@ desk_test_guard_not_real_repo() {
 # Code's per-version lock files (`locks/`, skipped), the recorder hook's
 # event files and log, which every live session appends to, and the
 # reader's cache, which the nvim marks, the status line and any `resolve`
-# rewrite in place. Those are compared by path only. The reader cache is
+# rewrite in place, and the bell hook's per-session `input-bell-<id>`
+# files, which a live session rewrites each time it rings. Those are
+# compared by path only. The reader cache is
 # keyed by config dir, so a test that reached the real cache with its own
 # temp config dir still shows up as a new path. Everything else is compared
 # by content.
-_DESK_TEST_STATE_LIVE_APPENDED=(-path '*/session-events/*' -o -path '*/live-sessions/*' -o -path '*/session-reader-cache/*' -o -name session-recorder.log)
+_DESK_TEST_STATE_LIVE_APPENDED=(-path '*/session-events/*' -o -path '*/live-sessions/*' -o -path '*/session-reader-cache/*' -o -name session-recorder.log -o -name 'input-bell-*')
 DESK_TEST_STATE_GUARD_DIRS=("$HOME/.local/state/claude" "$HOME/.local/state/desk")
 
 # desk_test_state_guard_snapshot <dest_dir> <suffix>: writes each guarded
@@ -234,7 +236,8 @@ desk_test_state_guard_snapshot() {
 # The config dir real sessions write their transcripts under, captured when this
 # file is sourced (run-all.sh does so before desk_test_safe_env_init repoints
 # CLAUDE_CONFIG_DIR at a temp dir). A session that starts mid-run adds an event
-# file under session-events/, which is not a test touching state when that session
+# file under session-events/, and one that rings for the first time an
+# input-bell-<id> file, which is not a test touching state when that session
 # has a real transcript there; a file a test fabricated has none and still trips
 # the guard.
 : "${DESK_TEST_REAL_CONFIG_DIR:=${CLAUDE_CONFIG_DIR:-$HOME/.claude}}"
@@ -249,8 +252,9 @@ desk_test_state_guard_check() {
 		while IFS= read -r line; do
 			path="${line#l }"
 			case "$line" in
-				"l $dir/session-events/"*.jsonl)
+				"l $dir/session-events/"*.jsonl | "l $dir/input-bell-"*)
 					id="$(basename "$path" .jsonl)"
+					id="${id#input-bell-}"
 					if ! grep -qxF -- "$line" "$dest/state-$i.$before_suffix" \
 						&& compgen -G "$DESK_TEST_REAL_CONFIG_DIR/projects/*/$id.jsonl" > /dev/null; then
 						continue
