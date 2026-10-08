@@ -116,5 +116,8 @@ assert_eq "a malformed --date is refused" "2" "$?"
 assert_eq "no items file is a usage error" "2" "$?"
 
 echo
+help="$(bash "$PROPOSE" --help 2>/dev/null)"; rc=$?
+[ "$rc" = 0 ] && ok "--help exits 0" || bad "--help exit $rc"
+printf '%s' "$help" | grep -q 'session:<its session id>' && ok "--help states the session item rules" || bad "--help lacks the session item rules"
 echo "=== summary: $pass passed, $fail failed ==="
 [ "$fail" -eq 0 ]

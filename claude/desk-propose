@@ -14,6 +14,9 @@
 # waiting carried over, anything declined or already in the notes dropped,
 # and an item naming an open one in `supersedes` replacing it. Ids become
 # <pass>-<date>-<n>-<id>; --pass defaults to "session" and --date to today.
+# A session sets each item's `source` to `session:<its session id>`, gives
+# each item its own headline, and prefers an `edit` of a stale line to an
+# `add` beneath it. It shows the user the items before staging them.
 #
 # Every item is checked before anything is staged, and one that does not
 # fit the shape fails the whole call, naming it, so the session can fix it
@@ -50,7 +53,7 @@ while [ $# -gt 0 ]; do
 		--pass) [ $# -ge 2 ] || usage; pass="$2"; shift 2 ;;
 		--date) [ $# -ge 2 ] || usage; date_arg="$2"; shift 2 ;;
 		--dry-run) dry_run=true; shift ;;
-		-h | --help) usage ;;
+		-h | --help) sed -n '2,/^set -u/p' "$DESK_PROPOSE_DIR/desk-propose" | sed -e '$d' -e 's/^# \{0,1\}//'; exit 0 ;;
 		--*) echo "desk-propose: unknown option $1" >&2; usage ;;
 		*) [ -z "$items_path" ] || usage; items_path="$1"; shift ;;
 	esac
