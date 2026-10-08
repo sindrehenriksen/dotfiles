@@ -1511,6 +1511,20 @@ do
 	)
 	assert_eq("an edited take is still a take, and the edit an edit: a column-0 line heads its own section", "Take 1 suggestion, edit 1 section\n\nTaken:\n- news one\n\nEdited:\n- NEWS n1, edited", review.commit_message({ "- alpha" }, { "NEWS n1, edited", "- alpha" }, { news }))
 	assert_eq("blank lines alone are no edit", "Update notes", review.commit_message({ "- alpha" }, { "- alpha", "" }, {}))
+	assert_eq(
+		"a column-0 bullet with nothing under it belongs to the heading above; one with indented lines heads its own",
+		"Edit 2 sections\n\nEdited:\n- Topic\n- sess",
+		review.commit_message(
+			{ "Topic", "- a", "- b", "- sess", "    child" },
+			{ "Topic", "- a, edited", "- b, edited", "- c, new", "- sess", "    child, edited" },
+			{}
+		)
+	)
+	assert_eq("a reworded heading is one section, by its new name", "Edit 1 section\n\nEdited:\n- New name", review.commit_message({ "Old name", "- x" }, { "New name", "- x" }, {}))
+	local long = sug("l1", { after = "LONG", headline = string.rep("word ", 30) })
+	local capped = review.commit_message({ "Topic" }, { "Topic", "LONG" }, { long })
+	assert_eq("a long headline is one body line, capped at 72 with …", "- " .. string.rep("word ", 13) .. "word…", capped:match("Taken:\n([^\n]*)"))
+	assert_eq("(72 columns)", 72, vim.fn.strchars(capped:match("Taken:\n([^\n]*)")))
 	local many = {}
 	for i = 1, 999 do
 		many[i] = sug("m" .. i, { after = "M" .. i })

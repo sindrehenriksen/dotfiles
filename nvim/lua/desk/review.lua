@@ -1918,16 +1918,35 @@ local function section_label(line)
 	if t == "" then
 		t = vim.trim(line)
 	end
-	if vim.fn.strchars(t) > 60 then
-		t = vim.fn.strcharpart(t, 0, 59) .. "…"
-	end
 	return t
 end
 
--- The nearest column-0 line at or above `row` of `lines`, or nil at the top.
+-- A body line of the commit message: one per item, capped at 72 columns
+-- rather than wrapped.
+local function body_item(text)
+	local line = "- " .. text
+	if vim.fn.strchars(line) > 72 then
+		line = vim.fn.strcharpart(line, 0, 71) .. "…"
+	end
+	return line
+end
+
+-- The section heading at or above `row` of `lines`, or nil at the top: the
+-- nearest column-0 line that is not a bullet, or is one with indented lines
+-- under it (a session's section). A column-0 bullet with nothing under it
+-- belongs to the heading above it.
+local function is_heading(lines, i)
+	local l = lines[i]
+	if not (l and l:match("^%S")) then
+		return false
+	end
+	local bullet = l:match("^[-*+]%s") or l:match("^%d+[.)]%s")
+	return not bullet or (lines[i + 1] ~= nil and lines[i + 1]:match("^%s+%S") ~= nil)
+end
+
 local function section_head(lines, row)
 	for i = math.min(row, #lines), 1, -1 do
-		if lines[i]:match("^%S") then
+		if is_heading(lines, i) then
 			return lines[i]
 		end
 	end
@@ -1955,11 +1974,11 @@ end
 --- The `<leader>gc` commit message for a file going from `head` to `now`
 --- with `taken` (the suggestions this commit takes, in proposal order) in
 --- it: a subject under 50 columns counting the takes and the sections the
---- user's own edits touched, and a body naming both. A section is the
---- nearest column-0 line at or above a changed line, which is also where a
---- session's name heads its notes, so a new column-0 line is its own;
---- lines a taken suggestion brought in or took out are not the user's
---- edits. Returns the message.
+--- user's own edits touched, and a body naming both, one line per item.
+--- A section is the heading at or above a changed line (`section_head`),
+--- which is also where a session's name heads its notes; lines a taken
+--- suggestion brought in or took out are not the user's edits. Returns the
+--- message.
 function M.commit_message(head, now, taken)
 	local afters, befores = {}, {}
 	for _, item in ipairs(taken) do
@@ -1975,7 +1994,11 @@ function M.commit_message(head, now, taken)
 			added[#added + 1] = { text = now[i], row = i, side = now }
 		end
 		for i = h[1], h[1] + h[2] - 1 do
-			removed[#removed + 1] = { text = head[i], row = i, side = head }
+			-- A heading changed into another heading is a rename: named once,
+			-- by its new name.
+			local j = h[3] + math.min(i - h[1], h[4] - 1)
+			local renamed = h[4] > 0 and is_heading(head, i) and is_heading(now, j)
+			removed[#removed + 1] = { text = head[i], row = i, side = head, used = renamed }
 		end
 		consume(added, afters)
 		consume(removed, befores)
@@ -2008,7 +2031,7 @@ function M.commit_message(head, now, taken)
 	if #taken > 0 then
 		body[#body + 1] = "Taken:"
 		for _, item in ipairs(taken) do
-			body[#body + 1] = "- " .. (item.headline or item.id)
+			body[#body + 1] = body_item(item.headline or item.id)
 		end
 	end
 	if #sections > 0 then
@@ -2017,7 +2040,7 @@ function M.commit_message(head, now, taken)
 		end
 		body[#body + 1] = "Edited:"
 		for _, name in ipairs(sections) do
-			body[#body + 1] = "- " .. name
+			body[#body + 1] = body_item(name)
 		end
 	end
 	if #body == 0 then
