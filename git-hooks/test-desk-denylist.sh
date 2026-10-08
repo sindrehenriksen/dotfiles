@@ -348,6 +348,15 @@ status=0
 [ "$status" -ne 0 ] && ok "the CLI form fails closed on a comments/blank-only list file" \
 	|| bad "the CLI form did NOT fail closed on a comments/blank-only list file"
 
+bad_deny="$TMP/bad-pattern-denylist.txt"
+printf 'invented-secret-marker\nunclosed(group\n' > "$bad_deny"
+status=0
+out="$("$DENYLIST_CHECK" "$cli_repo" "HEAD~2..HEAD~1" "$bad_deny" 2>&1)" || status=$?
+[ "$status" -ne 0 ] && ok "the CLI form fails closed on a malformed pattern" \
+	|| bad "the CLI form did NOT fail closed on a malformed pattern"
+printf '%s\n' "$out" | grep -q "invalid pattern 'unclosed(group'" && ok "the malformed-pattern refusal names the pattern" \
+	|| bad "the malformed-pattern refusal doesn't name the pattern (got: $out)"
+
 echo
 echo "=== summary: $pass passed, $fail failed ==="
 [ "$fail" -eq 0 ]

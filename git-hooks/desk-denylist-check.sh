@@ -29,9 +29,10 @@
 # line embeds a PCRE `(?-i)` marker turning case-sensitivity back on from
 # that point onward. Fails closed: a git error (a bad ref, an unreachable
 # range, a range built from a zero sha with nothing to fall back to), a
-# missing list file, or a list file with no actual patterns (blank/comment
-# lines only — an empty list is far more likely a mistake than a
-# deliberate allow-everything) all refuse rather than silently pass.
+# missing list file, a pattern perl cannot compile, or a list file with no
+# actual patterns (blank/comment lines only — an empty list is far more
+# likely a mistake than a deliberate allow-everything) all refuse rather
+# than silently pass.
 set -u
 
 # desk_denylist_check_range <repo> <range> <list_file>
@@ -54,18 +55,27 @@ desk_denylist_check_range() {
 		return 1
 	fi
 
-	local fail=0 pattern
+	local fail=0 pattern rc
 	while IFS= read -r pattern || [ -n "$pattern" ]; do
 		[ -n "$pattern" ] || continue
 		case "$pattern" in \#*) continue ;; esac
-		if PATTERN="$pattern" perl -0777 -ne '
+		PATTERN="$pattern" perl -0777 -ne '
 			my $p = $ENV{PATTERN};
 			exit(0) if /(?i)$p/ms;
 			exit(1);
-		' <<< "$log_text"; then
-			echo "desk-denylist-check: '$pattern' matched in $range ($repo) — refusing" >&2
-			fail=1
-		fi
+		' <<< "$log_text"
+		rc=$?
+		# 0 is a match and 1 a clean miss; anything else (a regex perl
+		# cannot compile dies with 255) must not read as a miss.
+		case "$rc" in
+			0)
+				echo "desk-denylist-check: '$pattern' matched in $range ($repo) — refusing" >&2
+				fail=1 ;;
+			1) ;;
+			*)
+				echo "desk-denylist-check: invalid pattern '$pattern' in $list_file (perl exit $rc) — refusing" >&2
+				fail=1 ;;
+		esac
 	done < "$list_file"
 
 	return "$fail"
