@@ -32,8 +32,10 @@
 # Idle. A session is idle when its user's last human message is at least
 # `close_after_working_days` working days old, the same measure and the same
 # function (desk-lib/lock.sh's desk_working_days_since) the close step uses;
-# the threshold comes from $DESK_CONFIG when it is set, else 3. Idle ones are
-# listed with their last-message date and not opened, so the user decides.
+# the threshold comes from the desk config ($DESK_CONFIG, else
+# ${XDG_CONFIG_HOME:-~/.config}/desk/config.json, as the close step finds
+# it), else 3. Idle ones are listed with their last-message date and not
+# opened, so the user decides.
 #
 # Line format (tab-separated):
 #   <status> <id> <last message, local YYYY-MM-DD HH:MM> <idle working days>
@@ -156,11 +158,14 @@ fmt_time() {
 
 idle_threshold=3
 idle_source=default
+# The same config the close step reads: $DESK_CONFIG, else the default path.
+desk_config="${DESK_CONFIG:-}"
+[ -n "$desk_config" ] || desk_config="${DESK_CONFIG_DEFAULT:-${XDG_CONFIG_HOME:-$HOME/.config}/desk/config.json}"
 if [ -n "$idle_days_override" ]; then
 	idle_threshold="$idle_days_override"
 	idle_source=flag
-elif [ -n "${DESK_CONFIG:-}" ] && [ -r "$DESK_CONFIG" ]; then
-	v="$(jq -r '.close_after_working_days // empty' "$DESK_CONFIG" 2> /dev/null)"
+elif [ -r "$desk_config" ]; then
+	v="$(jq -r '.close_after_working_days // empty' "$desk_config" 2> /dev/null)"
 	if [[ "$v" =~ ^[0-9]+$ ]]; then
 		idle_threshold="$v"
 		idle_source=config

@@ -28,6 +28,7 @@ export REOPEN_BOOT_TIME=1791300000
 export REOPEN_CONFIRM_SECS=0
 export REOPEN_TAB_TIMEOUT_SECS=2
 unset DESK_CONFIG
+export DESK_CONFIG_DEFAULT="$TMP/no-desk-config.json"
 PREV_BOOT=1790000000
 OLDER_BOOT=1780000000
 WORK="$TMP/work"
@@ -225,6 +226,14 @@ printf '{"close_after_working_days": 20}\n' > "$TMP/config.json"
 out=$(DESK_CONFIG="$TMP/config.json" "$CLI" --dry-run)
 assert_eq "twelve-day-old message is active under a 20-day threshold" would-open "$(status_of "$out" "$IDLE")"
 assert_eq "summary names the config as the source" "20(config)" "$(summary_field "$(tail -n 1 <<< "$out")" idle_after_working_days)"
+out=$(DESK_CONFIG_DEFAULT="$TMP/config.json" "$CLI" --dry-run)
+assert_eq "with DESK_CONFIG unset, the default config path is read" "20(config)" \
+	"$(summary_field "$(tail -n 1 <<< "$out")" idle_after_working_days)"
+mkdir -p "$TMP/xdg/desk"
+cp "$TMP/config.json" "$TMP/xdg/desk/config.json"
+out=$(env -u DESK_CONFIG_DEFAULT XDG_CONFIG_HOME="$TMP/xdg" "$CLI" --dry-run)
+assert_eq "...which is under XDG_CONFIG_HOME" "20(config)" \
+	"$(summary_field "$(tail -n 1 <<< "$out")" idle_after_working_days)"
 
 echo
 echo "=== a real run opens the active ones, in the background, resumed in their cwd ==="

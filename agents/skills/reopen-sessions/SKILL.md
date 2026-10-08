@@ -48,7 +48,7 @@ Exit codes: `0` nothing failed (including nothing to do), `1` at least one sessi
 - To end a session so it isn't reopened next time, tell the user: Ctrl+C twice or `/exit`. Closing the tab doesn't count; it reads the same as a shutdown.
 - A locked screen makes every open fail with that reason; ask the user to unlock and run the command again.
 - `older_orphans` counts sessions left open by an earlier boot (weeks-old crashes). They are not listed; `--all-boots` lists them if the user asks.
-- The idle threshold is the desk config's `close_after_working_days` when `DESK_CONFIG` is set, otherwise 3; `--idle-days N` overrides it for one run.
+- The idle threshold is the desk config's `close_after_working_days` (from `DESK_CONFIG`, else `~/.config/desk/config.json`), otherwise 3; `--idle-days N` overrides it for one run.
 - Never call the tab helper (`desk-open-tab.sh`) yourself to "finish the job": the command is what refuses empty ids, re-checks that a session is not already live, and keeps each open from hanging.
 - A `failed` with a timeout may still have opened its tab late. Run `--dry-run` again before retrying; a session that came up shows as `running`.
 - A session whose transcript belongs to another Claude config directory fails with that reason; it can be reopened by running the command with that `CLAUDE_CONFIG_DIR`.
