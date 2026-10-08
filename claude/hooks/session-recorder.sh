@@ -57,12 +57,16 @@ boot_id() {
 # start. A recorded path can name a transcript that never existed (a session
 # resumed from another directory is given that directory's project folder),
 # so the transcript counts as present if any start's path exists, or the
-# session's transcript sits in a sibling project folder of one.
+# session's transcript sits in a sibling project folder of one. The boot is
+# claimed before the scan, so a session starting meanwhile skips it, and a
+# record touched in the last minute is left alone: another session's start
+# may have just written it, before its transcript exists.
 maybe_prune() {
     local boot=$1 last_boot="" f tp sid g keep
     [ -f "$BOOT_MARKER" ] && last_boot=$(cat "$BOOT_MARKER" 2>/dev/null)
     [ "$last_boot" = "$boot" ] && return 0
-    for f in "$STORE_DIR"/*.jsonl; do
+    printf '%s' "$boot" > "$BOOT_MARKER" 2>/dev/null
+    while IFS= read -r f; do
         [ -f "$f" ] || continue
         sid=$(basename "$f" .jsonl)
         keep=""
@@ -73,8 +77,7 @@ maybe_prune() {
             done
         done < <(jq -r 'select(.event=="start") | .transcript_path // empty | select(. != "")' "$f" 2>/dev/null)
         [ -n "$keep" ] || rm -f "$f"
-    done
-    printf '%s' "$boot" > "$BOOT_MARKER" 2>/dev/null
+    done < <(find "$STORE_DIR" -maxdepth 1 -type f -name '*.jsonl' -mmin +1 2>/dev/null)
 }
 
 # The Claude Code process a hook was fired by: the parent, or the

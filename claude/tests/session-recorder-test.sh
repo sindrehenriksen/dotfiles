@@ -255,9 +255,27 @@ echo "=== prune keeps a record whose recorded path is wrong but whose transcript
 printf 'stale' > "$STORE_DIR/.last-pruned-boot"
 jq -cn '{event:"start", time:1, source:"startup", cwd:"/gone", transcript_path:"/nonexistent/projects/-gone/sess-gone.jsonl", boot:"0"}' \
     > "$STORE_DIR/sess-gone.jsonl"
-rec_start sess-prune-trigger "$PROJ_DIR" "$PROJ_DIR/sess-prune-trigger.jsonl" startup
+# Every record so far is old; one written moments ago (another session
+# starting at the same time, its transcript not on disk yet) is not.
+touch -t 202001010000 "$STORE_DIR"/*.jsonl
+jq -cn '{event:"start", time:1, source:"startup", cwd:"/fresh", transcript_path:"/nonexistent/projects/-fresh/sess-fresh.jsonl", boot:"0"}' \
+    > "$STORE_DIR/sess-fresh.jsonl"
+# A jq shim notes the marker each time the scan reads a record, so a start
+# that begins mid-scan can be shown to skip it.
+mkdir -p "$TMP/shim"
+cat > "$TMP/shim/jq" <<SHIM
+#!/usr/bin/env bash
+case "\$*" in *'select(.event=="start") | .transcript_path'*) cat "$STORE_DIR/.last-pruned-boot" >> "$TMP/marker-during-scan"; echo >> "$TMP/marker-during-scan" ;; esac
+exec "$(command -v jq)" "\$@"
+SHIM
+chmod +x "$TMP/shim/jq"
+jq -cn --arg sid sess-prune-trigger --arg cwd "$PROJ_DIR" --arg tp "$PROJ_DIR/sess-prune-trigger.jsonl" \
+    '{session_id:$sid, cwd:$cwd, transcript_path:$tp, source:"startup"}' | PATH="$TMP/shim:$PATH" "$RECORDER" start
+assert_eq "the boot is claimed before the scan reads any record" "" \
+    "$([ -s "$TMP/marker-during-scan" ] || echo "no scan seen"; grep -vx "$(cat "$STORE_DIR/.last-pruned-boot")" "$TMP/marker-during-scan" | sort -u)"
 assert_eq "sess-w's record survives the prune" "true" "$([ -f "$STORE_DIR/sess-w.jsonl" ] && echo true || echo false)"
 assert_eq "a record whose transcript is gone everywhere is pruned" "false" "$([ -f "$STORE_DIR/sess-gone.jsonl" ] && echo true || echo false)"
+assert_eq "a record written moments ago is left alone" "true" "$([ -f "$STORE_DIR/sess-fresh.jsonl" ] && echo true || echo false)"
 
 kill "$c_pid" 2>/dev/null
 wait "$c_pid" 2>/dev/null
