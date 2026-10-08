@@ -50,7 +50,22 @@ case "$cwd" in
 			*) q="$(sed -n 's/^digest_query=//p' prompt.txt)" ;;
 		esac
 		jq -nc --arg q "$q" '{type:"assistant",message:{content:[{type:"tool_use",id:"u1",name:"mcp__claude_ai_Gmail__search_threads",input:{query:$q}}]}}'
-		echo '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"u1","content":[{"type":"text","text":"{\"threads\":[{\"id\":\"thread-1\",\"subject\":\"Daily Digest 1\"},{\"id\":\"thread-2\",\"subject\":\"Daily Digest 2\"}]}"}]}]}}'
+		case "$cwd" in
+			*/unopened-*)
+				# The connector's shape: the subject is on each message,
+				# not on the thread. Only thread-1 is opened.
+				echo '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"u1","content":[{"type":"text","text":"{\"threads\":[{\"id\":\"thread-1\",\"messages\":[{\"subject\":\"Nested Digest One\"}]},{\"id\":\"thread-3\",\"messages\":[{\"subject\":\"Digest Three\"}]}]}"}]}]}}'
+				opened="thread-1"
+				;;
+			*)
+				echo '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"u1","content":[{"type":"text","text":"{\"threads\":[{\"id\":\"thread-1\",\"subject\":\"Daily Digest 1\"},{\"id\":\"thread-2\",\"subject\":\"Daily Digest 2\"}]}"}]}]}}'
+				opened="thread-1 thread-2"
+				;;
+		esac
+		for t in $opened; do
+			jq -nc --arg t "$t" '{type:"assistant",message:{content:[{type:"tool_use",id:("g-" + $t),name:"mcp__claude_ai_Gmail__get_thread",input:{threadId:$t,messageFormat:"PLAIN_TEXT"}}]}}'
+			jq -nc --arg t "$t" '{type:"user",message:{content:[{type:"tool_result",tool_use_id:("g-" + $t),content:[{type:"text",text:("{\"id\":\"" + $t + "\",\"messages\":[{\"plaintext_body\":\"a digest\"}]}")}]}]}}'
+		done
 		echo '{"type":"result","subtype":"success"}'
 		;;
 	*-W-*)
@@ -58,7 +73,7 @@ case "$cwd" in
 		# (the mismatch case: the pass name itself carries which).
 		case "$cwd" in
 			*/full-*) ids='["thread-1","thread-2"]' ;;
-			*/partial-*) ids='["thread-1"]' ;;
+			*/partial-* | */unopened-*) ids='["thread-1"]' ;;
 			*) ids='[]' ;;
 		esac
 		jq -nc --argjson ids "$ids" '
@@ -118,7 +133,7 @@ cfg="$ROOT/config.json"
 jq -n --arg repo "$repo" --arg fpp "$f_private_prompt" --arg wp "$w_prompt" '
 def w_steps: {
 	steps: [
-		{id: "F-private", kind: "fetch", prompt: $fpp, tools: ["mcp__claude_ai_Gmail__search_threads"], connector: true, timeout: 30},
+		{id: "F-private", kind: "fetch", prompt: $fpp, tools: ["mcp__claude_ai_Gmail__search_threads", "mcp__claude_ai_Gmail__get_thread"], connector: true, timeout: 30},
 		{id: "W", kind: "write", prompt: $wp, tools: ["mcp__claude_ai_Gmail__unlabel_thread"], connector: true, pinned_label: "UNREAD", timeout: 30}
 	]
 };
@@ -131,7 +146,7 @@ def w_steps: {
 	mail_fetch_step_id: "F-private",
 	files: ["notes.md", "reading.md"],
 	dry_run: false,
-	passes: { full: w_steps, partial: w_steps, mismatch: w_steps }
+	passes: { full: w_steps, partial: w_steps, mismatch: w_steps, unopened: w_steps }
 }' > "$cfg"
 
 echo "=== W unlabels every pinned id: the pass succeeds ==="
@@ -161,6 +176,18 @@ assert_true "the log says why: the query never matched" \
 	"$(grep -q 'the digest query never matched' "$ROOT/mismatch.out" && echo true || echo false)"
 assert_true "W's own model call never actually ran (refused before it, not after)" \
 	"$(grep -q 'model call: W' "$ROOT/mismatch.out" && echo false || echo true)"
+
+echo
+echo "=== a digest the fetch never opened stays unread, and is named in the log ==="
+DESK_CONFIG="$cfg" "$DESK_RUN" unopened > "$ROOT/unopened.out" 2>&1
+rc_unopened=$?
+assert_eq "the pass exits ok, W having marked exactly the opened thread" "0" "$rc_unopened"
+assert_true "W was pinned only the thread the fetch opened" \
+	"$(grep -q 'would unlabel thread-1 (Nested Digest One)' "$ROOT/unopened.out" && ! grep -q 'would unlabel thread-3' "$ROOT/unopened.out" && echo true || echo false)"
+assert_true "the unopened one is logged by its subject as left unread" \
+	"$(grep -q 'leaving thread-3 (Digest Three) unread' "$ROOT/unopened.out" && echo true || echo false)"
+assert_true "no thread is logged as (unknown)" \
+	"$(grep -q '(unknown)' "$ROOT/unopened.out" && echo false || echo true)"
 
 echo
 echo "=== summary: $pass passed, $fail failed ==="

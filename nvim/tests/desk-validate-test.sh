@@ -95,6 +95,38 @@ assert_true "a URL never in the raw results is not allowed" \
 	"$(grep -qxF 'https://evil.example/phish' <<< "$allowed_urls" && echo false || echo true)"
 
 echo
+echo "=== desk_allowed_urls: Slack's prose result, channel only in the call's arguments ==="
+# The shape the Slack connector returns: `{"messages": "<prose>"}`, one
+# `Message TS:` line per message, and no channel anywhere in the result.
+slack_dir="$ROOT/slack"
+mkdir -p "$slack_dir"
+cat > "$slack_dir/F-chat-tool-uses.jsonl" <<'JSONL'
+{"type":"tool_use","id":"s1","name":"mcp__chat__read_channel","input":{"channel_id":"CCHANA01","oldest":"1700000000","latest":"1700090000.000000","limit":100,"response_format":"detailed"}}
+{"type":"tool_use","id":"s2","name":"mcp__chat__read_thread","input":{"channel_id":"CCHANA01","message_ts":"1700000200.000200"}}
+{"type":"tool_use","id":"s3","name":"mcp__chat__read_channel","input":{"channel_id":"CCHANB02","oldest":"1700000000","latest":"1700090000"}}
+JSONL
+jq -c . > "$slack_dir/F-chat-tool-results.jsonl" <<'JSON'
+{"type":"tool_result","tool_use_id":"s1","content":[{"type":"text","text":"{\"messages\": \"=== Message from Ada (U0001) at 2023-11-14 22:15:00 ===\\nMessage TS: 1700000100.000100\\nA short note.\\n\\n=== Message from Bo (U0002) at 2023-11-14 22:16:40 ===\\nMessage TS: 1700000200.000200\\nThread replies: 2\\nAn opening post.\"}"}]}
+{"type":"tool_result","tool_use_id":"s2","content":[{"type":"text","text":"{\"messages\": \"=== Message from Bo (U0002) ===\\nMessage TS: 1700000200.000200\\nAn opening post.\\n\\n=== Reply from Ada (U0001) ===\\nMessage TS: 1700000300.000300\\nA reply.\"}"}]}
+{"type":"tool_result","tool_use_id":"s3","content":[{"type":"text","text":"{\"messages\": \"=== Message from Cy (U0003) ===\\nMessage TS: 1700000400.000400\\nElsewhere.\"}"}]}
+JSON
+slack_allowed="$(desk_allowed_urls "https://example.slack.com" "$slack_dir/F-chat-tool-results.jsonl")"
+allowed_has() { grep -qxF "$1" <<< "$slack_allowed" && echo true || echo false; }
+allowed_lacks() { grep -qxF "$1" <<< "$slack_allowed" && echo false || echo true; }
+assert_true "a channel message's Message TS pairs with the channel_id it was read from" \
+	"$(allowed_has https://example.slack.com/archives/CCHANA01/p1700000100000100)"
+assert_true "a thread reply's ts pairs with the thread call's channel" \
+	"$(allowed_has https://example.slack.com/archives/CCHANA01/p1700000300000300)"
+assert_true "the thread parent the call named is allowed" \
+	"$(allowed_has https://example.slack.com/archives/CCHANA01/p1700000200000200)"
+assert_true "each call's ts pairs with its own channel" \
+	"$(allowed_has https://example.slack.com/archives/CCHANB02/p1700000400000400)"
+assert_true "a ts is never paired with a channel another call read" \
+	"$(allowed_lacks https://example.slack.com/archives/CCHANB02/p1700000100000100)"
+assert_true "a window bound in the arguments is not a message" \
+	"$(allowed_lacks https://example.slack.com/archives/CCHANA01/p1700090000000000)"
+
+echo
 echo "=== desk_validate_items: drops an item whose source URL isn't verifiable ==="
 items='[
   {"id":"i1","file":"notes.md","kind":"new","target":"top","before":"","after":"a Slack item","source":"https://example.slack.com/archives/CEXAMPLEID/p1700000000123456","headline":"h1"},

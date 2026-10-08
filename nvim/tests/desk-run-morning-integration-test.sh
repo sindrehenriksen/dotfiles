@@ -64,6 +64,8 @@ case "$cwd" in
 		q="$(sed -n 's/^digest_query=//p' prompt.txt)"
 		jq -nc --arg q "$q" '{type:"assistant",message:{content:[{type:"tool_use",id:"u1",name:"mcp__claude_ai_Gmail__search_threads",input:{query:$q}}]}}'
 		echo '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"u1","content":[{"type":"text","text":"{\"threads\":[{\"id\":\"thread-1\",\"subject\":\"Daily Digest\"}]}"}]}]}}'
+		echo '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"u1b","name":"mcp__claude_ai_Gmail__get_thread","input":{"threadId":"thread-1"}}]}}'
+		echo '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"u1b","content":[{"type":"text","text":"{\"id\":\"thread-1\"}"}]}]}}'
 		echo '{"type":"result","subtype":"success"}'
 		;;
 	*-T-*)
@@ -84,10 +86,11 @@ case "$cwd" in
 			printf '%s\n' "$hook_script_path" > "$J_HOOK_SCRIPT_PATH_LOG"
 			[ -f "$hook_script_path" ] && cp "$hook_script_path" "$J_HOOK_SCRIPT_COPY" 2> /dev/null
 		fi
-		# Four ACT items against a cap of three, and one candidate just
-		# below the bar.
-		jq -nc '{type:"assistant",message:{content:[{type:"text",text:({items:[range(1;5) as $n
-			| {id:"j\($n)",file:"notes.md",kind:"new",target:"top",before:"",after:"a validated item \($n)",source:"notes",headline:"h\($n)",tier:"act"}],
+		# Four ACT items against a cap of three, one citing a URL no
+		# fetch returned, and one candidate just below the bar.
+		jq -nc '{type:"assistant",message:{content:[{type:"text",text:({items:([range(1;5) as $n
+			| {id:"j\($n)",file:"notes.md",kind:"new",target:"top",before:"",after:"a validated item \($n)",source:"notes",headline:"h\($n)",tier:"act"}]
+			+ [{id:"j5",file:"notes.md",kind:"new",target:"top",before:"",after:"an unverifiable item",source:"https://example.invalid/never-fetched",headline:"unverifiable",tier:"worth_knowing"}]),
 			near_misses:[{headline:"close call",why_not:"routine for now"}]} | tojson)}]}}'
 		echo '{"type":"result","subtype":"success"}'
 		;;
@@ -100,6 +103,13 @@ case "$cwd" in
 		;;
 	*-W-*)
 		printf '%s\n' "$@" >> "$W_LOG"
+		echo '{"type":"result","subtype":"success"}'
+		;;
+	*-F-last-*)
+		# Runs after W: copies what the run status will be told.
+		for f in "$DESK_SCRATCH_ROOT"/testpass-*/run-notes.txt "$DESK_SCRATCH_ROOT"/testpass-*/dropped.json; do
+			[ -f "$f" ] && cp "$f" "$HELD_DIR/"
+		done
 		echo '{"type":"result","subtype":"success"}'
 		;;
 	*)
@@ -168,11 +178,12 @@ jq -n --arg repo "$repo" --arg prompt "$prompt" --arg fpp "$f_private_prompt" '{
 		testpass: {
 			steps: [
 				{id: "commit-push", kind: "commit_push"},
-				{id: "F-private", kind: "fetch", prompt: $fpp, tools: ["mcp__claude_ai_Gmail__search_threads"], connector: true, timeout: 30},
+				{id: "F-private", kind: "fetch", prompt: $fpp, tools: ["mcp__claude_ai_Gmail__search_threads", "mcp__claude_ai_Gmail__get_thread"], connector: true, timeout: 30},
 				{id: "T", kind: "fetch", prompt: $prompt, tools: ["mcp__example-tickets__search"], connector: false, timeout: 30},
 				{id: "J", kind: "judge", prompt: $prompt, tools: ["Read"], connector: false, timeout: 30},
 				{id: "F-after", kind: "fetch", prompt: $prompt, tools: [], connector: false, timeout: 30},
-				{id: "W", kind: "write", prompt: $prompt, tools: ["mcp__claude_ai_Gmail__unlabel_thread"], connector: true, pinned_label: "UNREAD", timeout: 30}
+				{id: "W", kind: "write", prompt: $prompt, tools: ["mcp__claude_ai_Gmail__unlabel_thread"], connector: true, pinned_label: "UNREAD", timeout: 30},
+				{id: "F-last", kind: "fetch", prompt: $prompt, tools: [], connector: false, timeout: 30}
 			]
 		}
 	}
@@ -209,10 +220,19 @@ assert_eq "and the near miss" '["close call"]' "$(jq -c '[.[].headline]' "$ROOT/
 assert_eq "the status file counts the capped one" "1" "$(jq '.proposal.overflow.act' "$STATE/status.json" 2> /dev/null)"
 
 echo
+echo "=== an item whose source no fetch returned is dropped, logged and counted ==="
+assert_eq "it is recorded for the follow-up summary" '["unverifiable"]' "$(jq -c '[.[].headline]' "$ROOT/held/dropped.json" 2> /dev/null)"
+assert_true "the log names it and why" \
+	"$(grep -q 'judge J: dropped unverifiable: its source https://example.invalid/never-fetched is not in any fetch result' "$ROOT/run.out" && echo true || echo false)"
+assert_eq "the status file counts it" "1" "$(jq '.proposal.dropped' "$STATE/status.json" 2> /dev/null)"
+
+echo
 echo "=== W ran dry (logged, never actually called) ==="
 assert_true "W never made a model call" "$([ ! -s "$W_LOG" ] && echo true || echo false)"
 assert_true "the log names the thread id and subject" \
-	"$(grep -q 'thread-1' "$ROOT/run.out" && grep -q 'Daily Digest' "$ROOT/run.out" && echo true || echo false)"
+	"$(grep -q 'would unlabel thread-1 (Daily Digest)' "$ROOT/run.out" && echo true || echo false)"
+assert_true "the run status will say it only would have marked it read" \
+	"$(grep -qF 'W ran dry-run, so it marked nothing read: it would mark 1 digest thread(s) read.' "$ROOT/held/run-notes.txt" 2> /dev/null && echo true || echo false)"
 
 echo
 echo "=== J's deny hook was copied into this pass's own scratch, never pointed at the live repo file ==="

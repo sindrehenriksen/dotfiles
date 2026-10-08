@@ -170,6 +170,7 @@ assert_true "the closure note landed in the proposal" \
 	"$(jq -e '.items[] | select(.id | endswith("-c1"))' > /dev/null 2>&1 <<< "$proposal_blob" && echo true || echo false)"
 assert_true "the turn-citation marker was stripped from the note text" \
 	"$(jq -r '.items[] | select(.id | endswith("-c1")) | .after' <<< "$proposal_blob" | grep -q '\[turn' && echo false || echo true)"
+assert_true "a real close leaves no note on how the step ran" "$([ ! -s "$PASS_SCRATCH/run-notes.txt" ] && echo true || echo false)"
 rm -rf "$PASS_SCRATCH"
 
 echo
@@ -187,6 +188,10 @@ result="$(desk_step_close "testpass" "$step_json" "$log_only_config" "$repo" "20
 assert_eq "the step reports ok" "ok" "$result"
 assert_true "the throwaway process is still alive (never signaled)" "$(kill -0 "$pid2" 2> /dev/null && echo true || echo false)"
 assert_true "session-recorder was never called" "$([ ! -s "$RECORDER_LOG" ] && echo true || echo false)"
+assert_true "the run status will say the close was only log-only" \
+	"$(grep -qF 'ran log-only, so it closed no session: its closure note for 1 session(s) says what it would close, and each session is still open.' "$PASS_SCRATCH/run-notes.txt" 2> /dev/null && echo true || echo false)"
+assert_eq "the staged note is marked as a would-close" "would_close" \
+	"$(git -C "$repo" show refs/desk/proposal:proposal.json 2> /dev/null | jq -r '[.items[] | select(.session_id == "sess-2") | .capture_kind] | first // empty')"
 kill "$pid2" 2> /dev/null
 rm -rf "$PASS_SCRATCH"
 

@@ -621,6 +621,12 @@ desk_step_model_call() {
 	local call_cost
 	call_cost="$(desk_extract_total_cost_usd "$out")"
 	[ -n "$call_cost" ] && printf '%s\n' "$call_cost" >> "$PASS_SCRATCH/.costs.log"
+	# What it cost against its cap, and how it ended (a call stopped by
+	# --max-budget-usd ends on an error subtype, not a success), so a
+	# step's budget and timeout can be set from what it actually used.
+	local call_end
+	call_end="$(jq -r 'select(.type == "result") | "\(.subtype // "?"), \((.duration_ms // 0) / 1000 | floor)s"' "$out" 2> /dev/null | tail -n1)"
+	desk_log "$pass" "model call: $id${label:+ ($label)} ended ${call_end:-without a result}, ${call_cost:-?} of $max_budget_usd USD (timeout ${timeout}s)"
 	# A visible call's own cwd is left standing (desk_call_model's own
 	# header comment): a follow-up `claude --resume` needs it, and
 	# desk_prune_old_runs is the only thing that ever sweeps it, days
@@ -1073,7 +1079,7 @@ desk_step_close() {
 		return
 	}
 
-	local n closes_this_pass=0
+	local n closes_this_pass=0 held_log_only=0 held_over_cap=0
 	n="$(jq 'length' <<< "$candidates")"
 	desk_log "$pass" "close: $n candidate(s) idle >= $close_after working days"
 
@@ -1121,7 +1127,13 @@ desk_step_close() {
 		fi
 
 		if [ "$would_close" = "true" ]; then
-			desk_log "$pass" "close: session $name — would close (log_only or over max_closes); capture queued"
+			if [ "$log_only" = "true" ]; then
+				held_log_only=$((held_log_only + 1))
+				desk_log "$pass" "close: session $name — would close (log_only); capture queued"
+			else
+				held_over_cap=$((held_over_cap + 1))
+				desk_log "$pass" "close: session $name — would close (over max_closes); capture queued"
+			fi
 			continue
 		fi
 
@@ -1197,7 +1209,21 @@ desk_step_close() {
 			desk_log "$pass" "close: session $name survived SIGTERM — recorded as a failed close"
 		fi
 	done
+	local step_id
+	step_id="$(jq -r '.id' <<< "$step_json")"
+	[ "$held_log_only" -eq 0 ] || desk_run_note "$step_id ran log-only, so it closed no session: its closure note for $held_log_only session(s) says what it would close, and each session is still open."
+	[ "$held_over_cap" -eq 0 ] || desk_run_note "$step_id reached its limit of $max_closes close(s) this pass: $held_over_cap more session(s) got a closure note on what it would close, and are still open."
 	echo "ok"
+}
+
+# desk_run_note <sentence>: one line on how a step ran that its result
+# alone does not say (a dry-run write, a log-only close), for the run
+# status the follow-up prompts get (desk_follow_up_run_status). Written by
+# the step that knows, since a mode in the config says nothing about
+# whether the step ran.
+desk_run_note() {
+	[ -n "${PASS_SCRATCH:-}" ] || return 0
+	printf '%s\n' "$*" >> "$PASS_SCRATCH/run-notes.txt"
 }
 
 # desk_follow_up_summary <pass> <scheduled_date> <session_json> [<repo>]
@@ -1437,7 +1463,9 @@ desk_open_follow_up_tab() {
 # desk_follow_up_run_status <pass>
 # One paragraph on how this pass's run went, from the status file the pass
 # has just written and the pass's step list: which steps it has, and whether
-# they all ran, which sources failed, or where it stopped.
+# they all ran, which sources failed, or where it stopped; then each step's
+# own note on how it ran (desk_run_note), such as a write that was only
+# logged or a close that was log-only.
 desk_follow_up_run_status() {
 	local pass="$1" steps
 	# Each step as "<id> (<what it does>)", so a reply can name it in words.
@@ -1450,7 +1478,8 @@ desk_follow_up_run_status() {
 				write: "marking the fetched mail read", capture: "session capture", close: "closing idle sessions",
 				retention: "transcript deletion warnings", open_tab: "tab"}[.kind] // .kind end) + ")"]
 		| join(", ")' "$DESK_CONFIG" 2> /dev/null)"
-	desk_status_read | jq -r --arg p "$pass" --arg steps "$steps" '
+	local summary
+	summary="$(desk_status_read | jq -r --arg p "$pass" --arg steps "$steps" '
 		(.passes[$p] // {}) as $s
 		| (($s.failed_sources // []) | join(", ")) as $failed
 		| "Its steps, in order: \($steps). "
@@ -1458,7 +1487,11 @@ desk_follow_up_run_status() {
 			elif $s.result == "partial" then "It finished partial: these sources failed and are retried at the next slot: \($failed). Every other step ran."
 			elif $s.result == "failed" then "It failed at step \($s.stopped_at // "unknown"), so the steps after that did not run."
 				+ (if $failed != "" then " These sources had failed too: \($failed)." else "" end)
-			else "Its result was not recorded." end)'
+			else "Its result was not recorded." end)')"
+	local notes=""
+	[ -n "${PASS_SCRATCH:-}" ] && [ -s "$PASS_SCRATCH/run-notes.txt" ] \
+		&& notes="$(tr '\n' ' ' < "$PASS_SCRATCH/run-notes.txt" | sed 's/ *$//')"
+	printf '%s%s\n' "$summary" "${notes:+ $notes}"
 }
 
 # desk_follow_up_status_command <pass> <scheduled_date> <dir> [<repo>]
@@ -1496,8 +1529,9 @@ desk_follow_up_status_command() {
 # (desk_follow_up_run_status), this pass's items as the runner staged them
 # (open items whose id carries `<pass>-<scheduled_date>-`, read from <repo>'s
 # proposal) as `items` and `item_count`, `open_note`, a line about older
-# items still waiting, and `capped` and `near_misses`, JSON arrays of what
-# the pass held back.
+# items still waiting, `capped` and `near_misses`, JSON arrays of what
+# the pass held back, and `dropped`, the items it threw out because their
+# source URL was in no fetch result.
 desk_follow_up_placeholders() {
 	local pass="$1" scheduled_date="$2" repo="${3:-}"
 	local open='{"items":[]}'
@@ -1507,15 +1541,17 @@ desk_follow_up_placeholders() {
 	fi
 	# What the pass held back: items over the caps, and candidates the judge
 	# put just below the bar. Both are `[]` when there were none.
-	local capped='[]' near='[]'
+	local capped='[]' near='[]' dropped='[]'
 	if [ -n "${PASS_SCRATCH:-}" ]; then
 		capped="$(cat "$PASS_SCRATCH/capped.json" 2> /dev/null)"
 		jq -e 'type == "array"' > /dev/null 2>&1 <<< "$capped" || capped='[]'
 		near="$(cat "$PASS_SCRATCH/near-misses.json" 2> /dev/null)"
 		jq -e 'type == "array"' > /dev/null 2>&1 <<< "$near" || near='[]'
+		dropped="$(cat "$PASS_SCRATCH/dropped.json" 2> /dev/null)"
+		jq -e 'type == "array"' > /dev/null 2>&1 <<< "$dropped" || dropped='[]'
 	fi
 	jq -c --arg prefix "$pass-$scheduled_date-" --arg today "$(date +%F)" --arg pass "$pass" \
-		--argjson capped "$capped" --argjson near "$near" \
+		--argjson capped "$capped" --argjson near "$near" --argjson dropped "$dropped" \
 		--arg run_status "$(desk_follow_up_run_status "$pass")" '
 		[.items[] | select(.id | startswith($prefix))] as $mine
 		| ((.items | length) - ($mine | length)) as $older
@@ -1524,13 +1560,14 @@ desk_follow_up_placeholders() {
 			today: $today,
 			run_status: $run_status,
 			item_count: ($mine | length | tostring),
-			items: ($mine | map({file, kind, headline, tier, source, before, after}
+			items: ($mine | map({file, kind, headline, tier, source, before, after, capture_kind}
 				| with_entries(select(.value != null and .value != ""))) | tojson),
 			open_note: (if $older > 0
 				then "\($older) earlier suggestion(s) from previous passes also still wait for review; say so in one line."
 				else "" end),
 			capped: ($capped | tojson),
-			near_misses: ($near | tojson)
+			near_misses: ($near | tojson),
+			dropped: ($dropped | tojson)
 		}' <<< "$open"
 }
 

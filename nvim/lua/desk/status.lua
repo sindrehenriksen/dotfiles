@@ -9,8 +9,9 @@
 -- `failed_sources`) are pinned; the rest is the runner's own shape
 -- (claude/desk-lib/status.sh, read-only here): `proposal` is `{state:
 -- "pending"|"partial"|"none", partial, overflow: {act, worth_knowing,
--- wildcard}, counts, untaken}` — `untaken` is how many suggestions still
--- wait on the user (not taken, not declined), and `state` alone doesn't mean
+-- wildcard}, counts, untaken, dropped}` — `untaken` is how many suggestions still
+-- wait on the user (not taken, not declined), `dropped` how many the pass
+-- threw out for an unverifiable source URL, and `state` alone doesn't mean
 -- "something's unresolved", so the segment only shows when `untaken` is
 -- nonzero. `closes` / `refused_closes` / `failed_closes` / `lockouts` are
 -- each a plain count. If the runner ends up writing something else, this is

@@ -163,7 +163,10 @@ desk_validate_items() {
 	for ((i = 0; i < n; i++)); do
 		local item before_n after_n
 		item="$(jq -c ".[$i]" <<< "$items_json")"
-		desk_source_allowed "$item" "$allowed_urls" || continue
+		if ! desk_source_allowed "$item" "$allowed_urls"; then
+			desk_record_dropped "$item"
+			continue
+		fi
 		before_n="$(jq -r 'if (.also_sources | type) == "array" then (.also_sources | length) elif has("also_sources") then 1 else 0 end' <<< "$item")"
 		item="$(desk_validate_also_sources "$item" "$allowed_urls")"
 		after_n="$(jq -r '(.also_sources // []) | length' <<< "$item")"
@@ -282,6 +285,19 @@ desk_record_capped() {
 	jq -c --argjson prev "$prev" '$prev + [.[] | {tier, headline, source, file, kind, after}
 		| with_entries(select(.value != null and .value != ""))]' <<< "$1" > "$file.tmp" 2> /dev/null \
 		&& mv -f "$file.tmp" "$file"
+}
+
+# desk_record_dropped <item-json>: adds an item dropped because its source
+# URL was not in the allowed set to $PASS_SCRATCH/dropped.json, which the
+# status file counts and the follow-up summary names. Nothing is recorded
+# outside a pass.
+desk_record_dropped() {
+	[ -n "${PASS_SCRATCH:-}" ] || return 0
+	local file="$PASS_SCRATCH/dropped.json" prev
+	prev="$(cat "$file" 2> /dev/null)"
+	jq -e 'type == "array"' > /dev/null 2>&1 <<< "$prev" || prev='[]'
+	jq -c --argjson prev "$prev" '$prev + [{headline, source, tier} | with_entries(select(.value != null and .value != ""))]' \
+		<<< "$1" > "$file.tmp" 2> /dev/null && mv -f "$file.tmp" "$file"
 }
 
 # desk_near_misses <reply-json>: the judge reply's `near_misses`, the

@@ -324,5 +324,23 @@ assert_true "the prompt asks for one line each, and nothing for an empty list" \
 unset PASS_SCRATCH
 
 echo
+echo "=== how steps ran, and what the runner threw out, reach the summary prompt ==="
+PASS_SCRATCH="$ROOT/modes-scratch"
+mkdir -p "$PASS_SCRATCH"
+echo '[{"headline":"unverifiable headline","source":"https://example.invalid/x"}]' > "$PASS_SCRATCH/dropped.json"
+desk_run_note "close ran log-only, so it closed no session."
+desk_run_note "W ran dry-run, so it marked nothing read."
+desk_status_set_result morning ok "" '[]' 2026-11-04
+seed_judge_session morning 2026-11-04 "aaaaaaaa-0000-4000-8000-000000000013" > /dev/null
+desk_open_follow_up_tab morning 2026-11-04 J "$repo" > /dev/null 2>&1
+assert_true "the run status carries each step's note, after the result" \
+	"$(grep -qF 'every step ran. close ran log-only, so it closed no session. W ran dry-run, so it marked nothing read.' "$PROMPT_COPY" && echo true || echo false)"
+assert_true "the dropped item is handed over" \
+	"$(grep -qF '[{"headline":"unverifiable headline","source":"https://example.invalid/x"}]' "$PROMPT_COPY" && echo true || echo false)"
+assert_true "every placeholder of the summary prompt was filled" \
+	"$(grep -qE '\{\{[a-z_]+\}\}' "$PROMPT_COPY" && echo false || echo true)"
+unset PASS_SCRATCH
+
+echo
 echo "=== summary: $pass passed, $fail failed ==="
 [ "$fail" -eq 0 ]

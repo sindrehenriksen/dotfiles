@@ -11,8 +11,9 @@
 # meaningful for "failed"), failed_sources (array), scheduled_date (the
 # guard's own key, set on the most recent "ok" — desk-lib/lock.sh's
 # desk_scheduled_date_for, not necessarily last_run's own calendar date).
-# Top-level: proposal ({state, partial, overflow, counts, untaken} —
-# untaken is how many suggestions still wait on the user), closes/refused_closes/
+# Top-level: proposal ({state, partial, overflow, counts, untaken, dropped} —
+# untaken is how many suggestions still wait on the user, dropped how many
+# this pass threw out for a source URL no fetch returned), closes/refused_closes/
 # failed_closes/lockouts (plain counts; closed_names holds the last few
 # closed sessions' names), push (a plain status string),
 # ticket_cache_age. The runner writes the per-pass fields and the push/lockouts/

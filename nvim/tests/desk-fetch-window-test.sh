@@ -165,9 +165,11 @@ mkdir -p "$cache_dir"
 printf 'a-fixed-cached-query-never-recomputed' > "$cache_dir/digest_query"
 cat > "$cache_dir/F-private-tool-uses.jsonl" << 'JSONL'
 {"type":"tool_use","id":"u1","name":"mcp__claude_ai_Gmail__search_threads","input":{"query":"a-fixed-cached-query-never-recomputed"}}
+{"type":"tool_use","id":"u2","name":"mcp__claude_ai_Gmail__get_thread","input":{"threadId":"cached-thread-1"}}
 JSONL
 cat > "$cache_dir/F-private-tool-results.jsonl" << 'JSONL'
 {"type":"tool_result","tool_use_id":"u1","content":[{"type":"text","text":"{\"threads\":[{\"id\":\"cached-thread-1\",\"subject\":\"Cached Digest\"}]}"}]}
+{"type":"tool_result","tool_use_id":"u2","content":[{"type":"text","text":"{\"id\":\"cached-thread-1\"}"}]}
 JSONL
 DESK_CONFIG="$cfg" "$DESK_RUN" cachehit > "$ROOT/cachehit.out" 2>&1
 rc_cachehit=$?
