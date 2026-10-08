@@ -669,7 +669,15 @@ cache_json=$(jq -c --argjson keep "$kept_paths_json" --slurpfile newf "$WORK_DIR
     | $kept + $newf[0]
 ' <<< "$cache_json" 2>/dev/null)
 [ -n "$cache_json" ] || cache_json='{}'
-printf '%s' "$cache_json" > "$CONSOLIDATED_CACHE" 2>/dev/null
+# Written aside and renamed into place: a concurrent run reading a file
+# truncated mid-write would fall back to no titles at all.
+if cache_tmp=$(mktemp "$CONSOLIDATED_CACHE.XXXXXX" 2>/dev/null); then
+    if printf '%s' "$cache_json" > "$cache_tmp" 2>/dev/null; then
+        mv -f "$cache_tmp" "$CONSOLIDATED_CACHE" 2>/dev/null || rm -f "$cache_tmp"
+    else
+        rm -f "$cache_tmp"
+    fi
+fi
 
 # id -> {custom_titles, ai_title} keyed by session id rather than by path.
 printf '%s' "$cache_json" > "$WORK_DIR/cache.json"

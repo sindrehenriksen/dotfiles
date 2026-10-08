@@ -118,5 +118,18 @@ assert_eq "big7 resolves its last title" "Final Name 7" "$(name_of big7)"
 assert_eq "an earlier fixture still resolves" "Fifth" "$(name_of s2)"
 
 echo
+echo "=== the cache is replaced whole, never truncated in place ==="
+# A concurrent reader must see the old file or the new one, never a
+# half-written one, so the write goes to a temp file renamed into place.
+cache="$CLAUDE_SESSION_READER_CACHE/transcripts.json"
+inode() { if [ -r /proc/stat ]; then stat -c %i "$1"; else stat -f %i "$1"; fi; }
+before=$(inode "$cache")
+title_rec "Sixth" s2 >> "$tp2"
+assert_eq "a changed transcript is picked up" "Sixth" "$(name_of s2)"
+[ "$(inode "$cache")" != "$before" ] && ok "the cache file was replaced, not rewritten" \
+	|| bad "the cache file was rewritten in place (same inode)"
+assert_eq "no temp file is left behind" "transcripts.json" "$(ls "$CLAUDE_SESSION_READER_CACHE")"
+
+echo
 echo "=== summary: $pass passed, $fail failed ==="
 [ "$fail" -eq 0 ]
