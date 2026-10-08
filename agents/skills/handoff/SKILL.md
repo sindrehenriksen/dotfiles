@@ -6,7 +6,7 @@ allowed-tools: Read, Grep, Glob, Bash
 
 # Handoff
 
-Carrying work across a context boundary. The deliverable is prompts the user pastes — text only, no tool calls beyond checking state. **If this workspace has its own handoff layer, read that too** and apply it on top of this.
+Carrying work across a context boundary. The deliverable is prompts the user pastes — text only, no tool calls beyond checking state. **If this workspace has its own handoff layer, read that too** and apply it on top of this. A session that follows tickets (it has had `[desk-follow]` updates) also carries what the `desk-follow` skill's "Before compacting" section lists.
 
 **Two prompts for an in-place `/compact` is the default shape.** Anything the user says about the shape overrides it — how many conversations, what to keep or drop, what the next session should do first. Take that as given and don't re-ask; ask only when a detail would change the prompts and can't be inferred.
 

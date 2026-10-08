@@ -42,3 +42,14 @@ All of these change only that local file: no repo, no ticket, nothing anyone els
 ## When a `[desk-follow]` message arrives
 
 It comes from the follow pass, not from the user, and its own preamble says how to handle it: take the update in, and start the reply with `[needs-you]` only when the bar it sets is met. Don't answer it with SendMessage. The sender has already exited, and the reply in this session is the whole channel. A `[desk-watch]` message is the same thing under its older name.
+
+## Before compacting
+
+The follow itself survives a compaction: what this session follows is on disk under its session id, which compaction keeps, and every update re-sends the bar. What lives only in the conversation is what updates are judged against, so a handoff for this session (the `handoff` skill) carries, per followed ticket:
+
+- what the user agreed: the plan, the acceptance criteria, and any gaps or trade-offs he accepted, with where he said so;
+- what this session has already raised with him and his answer, so it isn't raised again;
+- asks still open, on him or on others;
+- tickets another followed session owns ("also followed by" in an update), so this one leaves them to it.
+
+The individual updates and the "nothing new" replies are the drop-list.
