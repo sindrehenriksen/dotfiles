@@ -39,6 +39,8 @@ export DESK_FOLLOW_FILE="$STATE/follow.json"
 export DESK_FOLLOW_STATE_FILE="$STATE/follow-state.json"
 export DESK_TICKET_DIGEST_STATE_FILE="$STATE/ticket-digest-state.json"
 export CLAUDE_CONFIG_DIR="$ROOT/claude-config"
+# The reader caches per config dir under the real state dir unless told otherwise.
+export CLAUDE_SESSION_READER_CACHE="$ROOT/reader-cache"
 mkdir -p "$STATE" "$CLAUDE_CONFIG_DIR"
 
 FIX="$ROOT/fix"

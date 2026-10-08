@@ -121,6 +121,8 @@ export DESK_SCRATCH_ROOT="$STATE/scratch"
 export DESK_LOG_DIR="$STATE/logs"
 export DESK_TICKET_CACHE="$STATE/ticket-status.json"
 export CLAUDE_CONFIG_DIR="$ROOT/claude-config"
+# The reader caches per config dir under the real state dir unless told otherwise.
+export CLAUDE_SESSION_READER_CACHE="$ROOT/reader-cache"
 export DESK_LOCK_MAX_WAIT_SECS=2
 export DESK_LOCK_POLL_SECS=1
 
