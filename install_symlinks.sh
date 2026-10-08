@@ -17,7 +17,7 @@ link() {
 # Skills every account gets. Anything more specific belongs to the repo that
 # owns it, linked by that repo's own installer into the one account it serves —
 # see docs/overlays.md for why each account needs its own skills DIRECTORY.
-generic_skills=(execution browser pr-description ci-debugging handoff team desk-watch)
+generic_skills=(execution browser pr-description ci-debugging handoff team desk-follow)
 
 link ~/dotfiles/.bashrc ~/.bashrc
 link ~/dotfiles/.gitconfig ~/.gitconfig
@@ -77,7 +77,11 @@ if [[ "$(uname)" == "Darwin" ]]; then
     # never a repo-relative path).
     mkdir -p ~/.local/bin
     link ~/dotfiles/claude/desk-run ~/.local/bin/desk-run
-    link ~/dotfiles/claude/desk-watch ~/.local/bin/desk-watch
+    link ~/dotfiles/claude/desk-follow ~/.local/bin/desk-follow
+    # desk-follow's older name: its links dangle once the rename lands.
+    for old in ~/.local/bin/desk-watch ~/.agents/skills/desk-watch ~/.claude/skills/desk-watch ~/.claude-work/skills/desk-watch; do
+        if [ -L "$old" ] && [ ! -e "$old" ]; then rm "$old"; fi
+    done
     link ~/dotfiles/claude/desk-propose ~/.local/bin/desk-propose
     link ~/dotfiles/claude/session-status.sh ~/.local/bin/session-status.sh
     link ~/dotfiles/hammerspoon/desk-open-tab.sh ~/.local/bin/desk-open-tab.sh

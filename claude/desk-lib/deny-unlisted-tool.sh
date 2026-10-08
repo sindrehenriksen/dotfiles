@@ -22,7 +22,7 @@
 #
 # `--ignore-keys <k1,k2>`: with `--pinned`, these keys are dropped from
 # tool_input before the comparison, for a field the tool takes that has no
-# effect outside the call (the watch pass's send pins `to` and `message`
+# effect outside the call (the follow pass's send pins `to` and `message`
 # and ignores SendMessage's transcript-only `summary` and the preview
 # fields Claude Code adds to its input). Any other extra key still fails
 # the comparison.

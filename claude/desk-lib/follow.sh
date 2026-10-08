@@ -1,84 +1,97 @@
 #!/usr/bin/env bash
-# The watch pass: forwards movement on the tickets a Claude Code session
+# The follow pass: forwards movement on the tickets a Claude Code session
 # tracks to that session, as a cross-session message. docs/desk.md, "The
-# watch pass", has the whole contract; this file is its runner and the
-# watch list's CLI (claude/desk-watch).
+# follow pass", has the whole contract; this file is its runner and the
+# follow list's CLI (claude/desk-follow).
 #
 # Two files, both machine-local, because session ids only exist on this
 # machine:
-#   $DESK_WATCH_FILE        the watch list, edited only by the CLI:
+#   $DESK_FOLLOW_FILE        the follow list, edited only by the CLI:
 #                           {"entries": {<session id>: {label, keys, related, added_at}}}
-#   $DESK_WATCH_STATE_FILE  the runner's own state: snapshots, scope, the
+#   $DESK_FOLLOW_STATE_FILE  the runner's own state: snapshots, scope, the
 #                           per-session queues, last runs. Written only by
-#                           a non-dry run, under the watch lock.
+#                           a non-dry run, under the follow lock.
 #
 # A run never touches the notes repo, the status file or the shared runner
 # lock: it takes its own lock, so a morning pass never holds it up and a
-# second watch run (the schedule and a manual one) waits briefly or skips.
+# second follow run (the schedule and a manual one) waits briefly or skips.
 set -u
 
-DESK_WATCH_FILE="${DESK_WATCH_FILE:-$DESK_STATE_DIR/watch.json}"
-DESK_WATCH_STATE_FILE="${DESK_WATCH_STATE_FILE:-$DESK_STATE_DIR/watch-state.json}"
+# This pass was called the watch pass, its files watch.json and
+# watch-state.json, and its overrides DESK_WATCH_FILE and
+# DESK_WATCH_STATE_FILE, which still apply. A file still at its old default
+# path moves to the new default the first time it is looked for, so the
+# sessions already followed and their snapshots carry over.
+desk_follow_default_path() { # override, older override, new default, old default
+	if [ -n "$1" ]; then printf '%s\n' "$1"; return; fi
+	if [ -n "$2" ]; then printf '%s\n' "$2"; return; fi
+	[ -e "$3" ] || [ ! -e "$4" ] || mv -n "$4" "$3" 2> /dev/null || true
+	printf '%s\n' "$3"
+}
+DESK_FOLLOW_FILE="$(desk_follow_default_path "${DESK_FOLLOW_FILE:-}" "${DESK_WATCH_FILE:-}" \
+	"$DESK_STATE_DIR/follow.json" "$DESK_STATE_DIR/watch.json")"
+DESK_FOLLOW_STATE_FILE="$(desk_follow_default_path "${DESK_FOLLOW_STATE_FILE:-}" "${DESK_WATCH_STATE_FILE:-}" \
+	"$DESK_STATE_DIR/follow-state.json" "$DESK_STATE_DIR/watch-state.json")"
 DESK_GH_BIN="${DESK_GH_BIN:-gh}"
-DESK_WATCH_DIFF_JQ="$DESK_LIB_DIR/watch-diff.jq"
+DESK_FOLLOW_DIFF_JQ="$DESK_LIB_DIR/follow-diff.jq"
 
-# The first characters of every watcher message. A watch session's
-# preamble names it, and a hook can tell a watcher turn by it.
-DESK_WATCH_MARKER="[desk-watch]"
+# The first characters of every follow message. A follow session's
+# preamble names it, and a hook can tell a follow turn by it.
+DESK_FOLLOW_MARKER="[desk-follow]"
 # The floor on the scheduled interval, in minutes.
-DESK_WATCH_MIN_INTERVAL=15
+DESK_FOLLOW_MIN_INTERVAL=15
 # How many sends that ran but went unconfirmed the same queue gets before
 # its changes count as sent.
-DESK_WATCH_MAX_UNCONFIRMED="${DESK_WATCH_MAX_UNCONFIRMED:-2}"
+DESK_FOLLOW_MAX_UNCONFIRMED="${DESK_FOLLOW_MAX_UNCONFIRMED:-2}"
 
-_desk_watch_reader() { "${DESK_READER:-session-status.sh}" "$@"; }
+_desk_follow_reader() { "${DESK_READER:-session-status.sh}" "$@"; }
 
-# --- the watch list ----------------------------------------------------------
+# --- the follow list ----------------------------------------------------------
 
-desk_watch_entries() {
+desk_follow_entries() {
 	local e
-	e="$(jq -c '.entries // {}' "$DESK_WATCH_FILE" 2> /dev/null)"
+	e="$(jq -c '.entries // {}' "$DESK_FOLLOW_FILE" 2> /dev/null)"
 	[ -n "$e" ] || e='{}'
 	printf '%s\n' "$e"
 }
 
-_desk_watch_write_list() { # entries-json
-	desk_write_atomic "$DESK_WATCH_FILE" "$(jq -n --argjson e "$1" '{entries: $e}')
+_desk_follow_write_list() { # entries-json
+	desk_write_atomic "$DESK_FOLLOW_FILE" "$(jq -n --argjson e "$1" '{entries: $e}')
 "
 }
 
 # A session token (a full id, a name, or an 8+ character id prefix) to its
 # session id, through the reader. A full id the reader does not know is
 # still accepted, since the session may not have been recorded yet.
-desk_watch_resolve_session() {
+desk_follow_resolve_session() {
 	local token="$1" hit id
 	if [[ "$token" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]]; then
 		printf '%s\n' "$token"
 		return 0
 	fi
-	hit="$(_desk_watch_reader resolve "$token" 2> /dev/null)" || {
-		echo "desk-watch: no single session matches '$token'" >&2
+	hit="$(_desk_follow_reader resolve "$token" 2> /dev/null)" || {
+		echo "desk-follow: no single session matches '$token'" >&2
 		return 1
 	}
 	id="$(jq -r '.id // empty' <<< "$hit" 2> /dev/null)"
-	[ -n "$id" ] || { echo "desk-watch: no single session matches '$token'" >&2; return 1; }
+	[ -n "$id" ] || { echo "desk-follow: no single session matches '$token'" >&2; return 1; }
 	printf '%s\n' "$id"
 }
 
-_desk_watch_valid_key() { [[ "$1" =~ ^[A-Z][A-Z0-9]+-[0-9]+$ ]]; }
+_desk_follow_valid_key() { [[ "$1" =~ ^[A-Z][A-Z0-9]+-[0-9]+$ ]]; }
 
-# desk_watch_cli_add <session id> <label or ""> <keys csv> <related csv>
-desk_watch_cli_add() {
+# desk_follow_cli_add <session id> <label or ""> <keys csv> <related csv>
+desk_follow_cli_add() {
 	local sid="$1" label="$2" keys="$3" related="$4" k entries
 	for k in ${keys//,/ } ${related//,/ }; do
-		_desk_watch_valid_key "$k" || { echo "desk-watch: '$k' is not a ticket key (like ABC-123)" >&2; return 2; }
+		_desk_follow_valid_key "$k" || { echo "desk-follow: '$k' is not a ticket key (like ABC-123)" >&2; return 2; }
 	done
-	[ -n "$keys$related" ] || { echo "desk-watch: name at least one ticket key" >&2; return 2; }
+	[ -n "$keys$related" ] || { echo "desk-follow: name at least one ticket key" >&2; return 2; }
 	if [ -z "$label" ]; then
-		label="$(_desk_watch_reader resolve "$sid" 2> /dev/null | jq -r '.name // empty' 2> /dev/null)"
+		label="$(_desk_follow_reader resolve "$sid" 2> /dev/null | jq -r '.name // empty' 2> /dev/null)"
 		[ -n "$label" ] || label="${sid:0:8}"
 	fi
-	entries="$(desk_watch_entries)"
+	entries="$(desk_follow_entries)"
 	entries="$(jq -c --arg sid "$sid" --arg label "$label" --arg keys "$keys" --arg related "$related" \
 		--argjson now "$(desk_now)" '
 		def csv: split(",") | map(select(. != ""));
@@ -86,17 +99,17 @@ desk_watch_cli_add() {
 			| .label = $label
 			| .keys = ((.keys + ($keys | csv)) | unique)
 			| .related = ((.related + ($related | csv)) - .keys | unique))' <<< "$entries")"
-	_desk_watch_write_list "$entries"
-	jq -r --arg sid "$sid" '.[$sid] | "watching \(.keys + .related | join(", ")) for \(.label)"' <<< "$entries"
+	_desk_follow_write_list "$entries"
+	jq -r --arg sid "$sid" '.[$sid] | "following \(.keys + .related | join(", ")) for \(.label)"' <<< "$entries"
 }
 
-# desk_watch_cli_remove <session id> [keys csv]: without keys, the whole
-# watch goes; with keys, only those.
-desk_watch_cli_remove() {
+# desk_follow_cli_remove <session id> [keys csv]: without keys, the whole
+# follow goes; with keys, only those.
+desk_follow_cli_remove() {
 	local sid="$1" keys="${2:-}" entries
-	entries="$(desk_watch_entries)"
+	entries="$(desk_follow_entries)"
 	if ! jq -e --arg sid "$sid" 'has($sid)' <<< "$entries" > /dev/null; then
-		echo "desk-watch: session ${sid:0:8} is not watched" >&2
+		echo "desk-follow: session ${sid:0:8} is not followed" >&2
 		return 1
 	fi
 	entries="$(jq -c --arg sid "$sid" --arg keys "$keys" '
@@ -105,22 +118,22 @@ desk_watch_cli_remove() {
 		  else .[$sid].keys -= $drop | .[$sid].related -= $drop
 		  | if ((.[$sid].keys + .[$sid].related) | length) == 0 then del(.[$sid]) else . end
 		  end' <<< "$entries")"
-	_desk_watch_write_list "$entries"
+	_desk_follow_write_list "$entries"
 	if jq -e --arg sid "$sid" 'has($sid)' <<< "$entries" > /dev/null; then
-		jq -r --arg sid "$sid" '.[$sid] | "still watching \(.keys + .related | join(", ")) for \(.label)"' <<< "$entries"
+		jq -r --arg sid "$sid" '.[$sid] | "still following \(.keys + .related | join(", ")) for \(.label)"' <<< "$entries"
 	else
-		echo "stopped watching for session ${sid:0:8}"
+		echo "stopped following for session ${sid:0:8}"
 	fi
 }
 
-# desk_watch_cli_list [--json]: every watch, with the session's current
+# desk_follow_cli_list [--json]: every follow, with the session's current
 # name and liveness, what waits in its queue, and when it last got an update.
-desk_watch_cli_list() {
+desk_follow_cli_list() {
 	local as_json="${1:-}" entries state sessions
-	entries="$(desk_watch_entries)"
-	state="$(cat "$DESK_WATCH_STATE_FILE" 2> /dev/null)"
+	entries="$(desk_follow_entries)"
+	state="$(cat "$DESK_FOLLOW_STATE_FILE" 2> /dev/null)"
 	jq -e . > /dev/null 2>&1 <<< "$state" || state='{}'
-	sessions="$(_desk_watch_reader 2> /dev/null | jq -cs 'map({(.id): {name, live}}) | add // {}' 2> /dev/null)"
+	sessions="$(_desk_follow_reader 2> /dev/null | jq -cs 'map({(.id): {name, live}}) | add // {}' 2> /dev/null)"
 	[ -n "$sessions" ] || sessions='{}'
 	local listed
 	listed="$(jq -c --argjson s "$state" --argjson live "$sessions" '
@@ -136,7 +149,7 @@ desk_watch_cli_list() {
 		return 0
 	fi
 	jq -r '
-		if length == 0 then "nothing is watched"
+		if length == 0 then "nothing is followed"
 		else .[] | "\(.label)  (\(.session_id[0:8]), \(if .live then "live" else "not running" end)\(if .name and .name != .label then ", now named " + .name else "" end))\n"
 			+ "  tracks: \(.keys | join(", "))\(if (.related | length) > 0 then "; related: " + (.related | join(", ")) else "" end)\n"
 			+ "  queued: \(.queued)\(if .queued_since then " since " + (.queued_since | strflocaltime("%a %d %b %H:%M")) else "" end)"
@@ -149,24 +162,24 @@ desk_watch_cli_list() {
 
 # The scheduled interval in minutes: the pass's `interval_minutes`, default
 # and floor 15.
-desk_watch_interval_minutes() {
-	local pass_config="$1" pass="${2:-watch}" v
+desk_follow_interval_minutes() {
+	local pass_config="$1" pass="${2:-follow}" v
 	v="$(jq -r '.interval_minutes // empty' <<< "$pass_config")"
-	[ -n "$v" ] || v="$DESK_WATCH_MIN_INTERVAL"
-	if ! [[ "$v" =~ ^[0-9]+$ ]] || [ "$v" -lt "$DESK_WATCH_MIN_INTERVAL" ]; then
-		desk_log "$pass" "interval_minutes $v is under the ${DESK_WATCH_MIN_INTERVAL}-minute floor; using $DESK_WATCH_MIN_INTERVAL"
-		v="$DESK_WATCH_MIN_INTERVAL"
+	[ -n "$v" ] || v="$DESK_FOLLOW_MIN_INTERVAL"
+	if ! [[ "$v" =~ ^[0-9]+$ ]] || [ "$v" -lt "$DESK_FOLLOW_MIN_INTERVAL" ]; then
+		desk_log "$pass" "interval_minutes $v is under the ${DESK_FOLLOW_MIN_INTERVAL}-minute floor; using $DESK_FOLLOW_MIN_INTERVAL"
+		v="$DESK_FOLLOW_MIN_INTERVAL"
 	fi
 	printf '%s\n' "$v"
 }
 
 # --- fetching ------------------------------------------------------------------
 
-DESK_WATCH_SCOPE_FIELDS='["summary","status","issuetype","parent","issuelinks","assignee","labels","resolution","updated","created"]'
-DESK_WATCH_CHANGE_FIELDS='["summary","status","issuetype","parent","issuelinks","assignee","labels","resolution","updated","created","comment","description"]'
+DESK_FOLLOW_SCOPE_FIELDS='["summary","status","issuetype","parent","issuelinks","assignee","labels","resolution","updated","created"]'
+DESK_FOLLOW_CHANGE_FIELDS='["summary","status","issuetype","parent","issuelinks","assignee","labels","resolution","updated","created","comment","description"]'
 
-# One Jira search result issue to the shape watch-diff.jq reads.
-_DESK_WATCH_NORM_ISSUE='
+# One Jira search result issue to the shape follow-diff.jq reads.
+_DESK_FOLLOW_NORM_ISSUE='
 	def str: if . == null then null elif type == "string" then . else tojson end;
 	def link_of($l): ($l.outwardIssue // $l.inwardIssue) as $o
 		| if $o == null then empty
@@ -194,7 +207,7 @@ _DESK_WATCH_NORM_ISSUE='
 
 # Every issue in the results of the calls whose jql is exactly $3, as one
 # JSON array, or "null" when no such call returned anything parseable.
-_desk_watch_issues_for() { # tool-uses tool-results jql tool
+_desk_follow_issues_for() { # tool-uses tool-results jql tool
 	local pairs
 	pairs="$(desk_tool_call_pairs "$1" "$2" "$4")"
 	jq -c --arg q "$3" "
@@ -207,16 +220,16 @@ _desk_watch_issues_for() { # tool-uses tool-results jql tool
 		| (\$tail != null and ((\$tail.nextPageToken // \$info.endCursor // null) != null
 			and (\$tail.isLast != true) and (\$info.hasNextPage // true) != false)) as \$short
 		| if (\$pages | length) == 0 or any(\$pages[]; . == null) or \$short then null
-		  else [\$pages[][] | $_DESK_WATCH_NORM_ISSUE] | unique_by(.key) end" <<< "$pairs" 2> /dev/null
+		  else [\$pages[][] | $_DESK_FOLLOW_NORM_ISSUE] | unique_by(.key) end" <<< "$pairs" 2> /dev/null
 }
 
-_desk_watch_jql_keys() { jq -r 'join(", ")' <<< "$1"; }
+_desk_follow_jql_keys() { jq -r 'join(", ")' <<< "$1"; }
 
 # A tool result past Claude Code's output limit arrives as a pointer ("...
 # Output has been saved to <path>"); the call's --spill-dir copied the
 # file out. Rewrites each such result's content to the saved text (a
 # content-block array is joined), leaving every other result as it was.
-_desk_watch_resolve_spills() { # results.jsonl spill-dir
+_desk_follow_resolve_spills() { # results.jsonl spill-dir
 	local line text file saved
 	while IFS= read -r line; do
 		text="$(jq -r "$_DESK_JQ_RESULT_TEXT" <<< "$line" 2> /dev/null)"
@@ -232,12 +245,12 @@ _desk_watch_resolve_spills() { # results.jsonl spill-dir
 	done < "$1"
 }
 
-# desk_watch_fetch_jira <pass> <pass_config> <entries> <state> <now> <jira_since or ""> <scope_due true|false> <out_dir>
+# desk_follow_fetch_jira <pass> <pass_config> <entries> <state> <now> <jira_since or ""> <scope_due true|false> <out_dir>
 # One model call, read-only, that runs the scope query (when due) and the
 # changes query (unless this is the source's first run). Writes
 # <out_dir>/scope.json and changes.json: an issue array, or null for a query
 # that did not run or did not come back.
-desk_watch_fetch_jira() {
+desk_follow_fetch_jira() {
 	local pass="$1" pass_config="$2" entries="$3" state="$4" now="$5" since="$6" scope_due="$7" out_dir="$8"
 	local jira tool prompt_rel
 	jira="$(jq -c '.jira // {}' <<< "$pass_config")"
@@ -246,7 +259,7 @@ desk_watch_fetch_jira() {
 	echo null > "$out_dir/scope.json"
 	echo null > "$out_dir/changes.json"
 	if [ -z "$tool" ] || [ -z "$prompt_rel" ]; then
-		desk_log "$pass" "watch: no jira.tool or jira.prompt configured — no ticket fetch"
+		desk_log "$pass" "follow: no jira.tool or jira.prompt configured — no ticket fetch"
 		return 1
 	fi
 
@@ -254,8 +267,8 @@ desk_watch_fetch_jira() {
 	tracked="$(jq -c '[.[] | (.keys // []) + (.related // []) | .[]] | unique' <<< "$entries")"
 	keys_only="$(jq -c '[.[] | (.keys // [])[]] | unique' <<< "$entries")"
 	if [ "$scope_due" = "true" ]; then
-		scope_jql="key in ($(_desk_watch_jql_keys "$tracked"))"
-		[ "$(jq 'length' <<< "$keys_only")" -gt 0 ] && scope_jql="$scope_jql OR parent in ($(_desk_watch_jql_keys "$keys_only"))"
+		scope_jql="key in ($(_desk_follow_jql_keys "$tracked"))"
+		[ "$(jq 'length' <<< "$keys_only")" -gt 0 ] && scope_jql="$scope_jql OR parent in ($(_desk_follow_jql_keys "$keys_only"))"
 	fi
 	if [ -n "$since" ]; then
 		# Everything already in scope, any new child, and any ticket that
@@ -266,8 +279,8 @@ desk_watch_fetch_jira() {
 		[ "$minutes" -gt 43200 ] && minutes=43200
 		local mentions
 		mentions="$(jq -r 'map("text ~ \"\\\"" + . + "\\\"\"") | join(" OR ")' <<< "$tracked")"
-		changes_jql="(key in ($(_desk_watch_jql_keys "$scope_keys"))"
-		[ "$(jq 'length' <<< "$keys_only")" -gt 0 ] && changes_jql="$changes_jql OR parent in ($(_desk_watch_jql_keys "$keys_only"))"
+		changes_jql="(key in ($(_desk_follow_jql_keys "$scope_keys"))"
+		[ "$(jq 'length' <<< "$keys_only")" -gt 0 ] && changes_jql="$changes_jql OR parent in ($(_desk_follow_jql_keys "$keys_only"))"
 		changes_jql="$changes_jql OR $mentions) AND updated >= -${minutes}m"
 	fi
 	if [ "$scope_jql" = "none" ] && [ "$changes_jql" = "none" ]; then
@@ -278,8 +291,8 @@ desk_watch_fetch_jira() {
 	scratch="$(desk_scratch_dir "$pass-jira")"
 	prompt_file="$scratch/prompt.txt"
 	placeholders="$(jq -n --arg a "$scope_jql" --arg b "$changes_jql" --arg today "$(date +%F)" \
-		--arg fa "$(jq -r 'join(", ")' <<< "$DESK_WATCH_SCOPE_FIELDS")" \
-		--arg fb "$(jq -r 'join(", ")' <<< "$DESK_WATCH_CHANGE_FIELDS")" \
+		--arg fa "$(jq -r 'join(", ")' <<< "$DESK_FOLLOW_SCOPE_FIELDS")" \
+		--arg fb "$(jq -r 'join(", ")' <<< "$DESK_FOLLOW_CHANGE_FIELDS")" \
 		'{scope_jql: $a, changes_jql: $b, scope_fields: $fa, changes_fields: $fb, today: $today}')"
 	desk_render_prompt "$(desk_prompt_path "$prompt_rel")" "$placeholders" > "$prompt_file"
 	local mcp_config
@@ -291,7 +304,7 @@ desk_watch_fetch_jira() {
 		printf '%s\n' '{"mcpServers":{}}' > "$mcp_config"
 	fi
 	out="$out_dir/jira-stream.jsonl"
-	desk_log "$pass" "watch: ticket fetch (scope: $([ "$scope_jql" = none ] && echo no || echo yes), changes: $([ "$changes_jql" = none ] && echo no || echo yes))"
+	desk_log "$pass" "follow: ticket fetch (scope: $([ "$scope_jql" = none ] && echo no || echo yes), changes: $([ "$changes_jql" = none ] && echo no || echo yes))"
 	local model max_output
 	model="$(jq -r '.model // empty' <<< "$jira")"
 	# Results past this many tokens are saved to a file instead of reaching
@@ -311,40 +324,40 @@ desk_watch_fetch_jira() {
 	)
 	local rc=$?
 	rm -rf "$scratch"
-	desk_watch_note_cost "$out"
+	desk_follow_note_cost "$out"
 	desk_extract_tool_uses "$out" > "$out_dir/jira-uses.jsonl"
 	desk_extract_tool_results "$out" > "$out_dir/jira-results-raw.jsonl"
-	_desk_watch_resolve_spills "$out_dir/jira-results-raw.jsonl" "$out_dir/spill" > "$out_dir/jira-results.jsonl"
+	_desk_follow_resolve_spills "$out_dir/jira-results-raw.jsonl" "$out_dir/spill" > "$out_dir/jira-results.jsonl"
 	local got ok="true"
 	if [ "$scope_jql" != "none" ]; then
-		got="$(_desk_watch_issues_for "$out_dir/jira-uses.jsonl" "$out_dir/jira-results.jsonl" "$scope_jql" "$tool")"
+		got="$(_desk_follow_issues_for "$out_dir/jira-uses.jsonl" "$out_dir/jira-results.jsonl" "$scope_jql" "$tool")"
 		if [ -n "$got" ] && [ "$got" != "null" ]; then printf '%s\n' "$got" > "$out_dir/scope.json"
-		else desk_log "$pass" "watch: the scope query did not come back — keeping the previous scope"; fi
+		else desk_log "$pass" "follow: the scope query did not come back — keeping the previous scope"; fi
 	fi
 	if [ "$changes_jql" != "none" ]; then
-		got="$(_desk_watch_issues_for "$out_dir/jira-uses.jsonl" "$out_dir/jira-results.jsonl" "$changes_jql" "$tool")"
+		got="$(_desk_follow_issues_for "$out_dir/jira-uses.jsonl" "$out_dir/jira-results.jsonl" "$changes_jql" "$tool")"
 		if [ -n "$got" ] && [ "$got" != "null" ]; then printf '%s\n' "$got" > "$out_dir/changes.json"
-		else desk_log "$pass" "watch: the changes query did not come back (call rc $rc)"; ok="false"; fi
+		else desk_log "$pass" "follow: the changes query did not come back (call rc $rc)"; ok="false"; fi
 	fi
 	[ "$ok" = "true" ]
 }
 
 # gh, read-only: `pr list` and `pr view` and nothing else.
-desk_watch_gh() {
+desk_follow_gh() {
 	case "${1:-} ${2:-}" in
 		"pr list" | "pr view") "$DESK_GH_BIN" "$@" ;;
 		*)
-			desk_log - "watch: refusing gh $* (only pr list and pr view)"
+			desk_log - "follow: refusing gh $* (only pr list and pr view)"
 			return 2
 			;;
 	esac
 }
 
-# desk_watch_fetch_prs <pass> <pass_config> <state> <keys json> <since epoch> <with_comments true|false> <out>
+# desk_follow_fetch_prs <pass> <pass_config> <state> <keys json> <since epoch> <with_comments true|false> <out>
 # Every PR in the configured repos updated since <since> whose title or
 # branch carries one of <keys>, normalized, as one JSON array in <out>;
 # returns non-zero (and writes null) when a listing fails.
-desk_watch_fetch_prs() {
+desk_follow_fetch_prs() {
 	local pass="$1" pass_config="$2" state="$3" keys="$4" since="$5" with_comments="$6" out="$7"
 	local repos since_iso all='[]' repo listed
 	echo null > "$out"
@@ -355,10 +368,10 @@ desk_watch_fetch_prs() {
 	fi
 	since_iso="$(date -u -r "$since" +%Y-%m-%dT%H:%M:%SZ 2> /dev/null || date -u -d "@$since" +%Y-%m-%dT%H:%M:%SZ)"
 	for repo in "${repos[@]}"; do
-		listed="$(desk_watch_gh pr list --repo "$repo" --state all --limit 100 --search "updated:>=$since_iso" \
+		listed="$(desk_follow_gh pr list --repo "$repo" --state all --limit 100 --search "updated:>=$since_iso" \
 			--json number,title,headRefName,state,isDraft,updatedAt,createdAt,reviewDecision,headRefOid,labels,url,body,statusCheckRollup 2> /dev/null)" \
-			|| { desk_log "$pass" "watch: gh pr list failed for $repo"; return 1; }
-		jq -e 'type == "array"' > /dev/null 2>&1 <<< "$listed" || { desk_log "$pass" "watch: gh pr list for $repo was not a list"; return 1; }
+			|| { desk_log "$pass" "follow: gh pr list failed for $repo"; return 1; }
+		jq -e 'type == "array"' > /dev/null 2>&1 <<< "$listed" || { desk_log "$pass" "follow: gh pr list for $repo was not a list"; return 1; }
 		listed="$(jq -c --arg repo "$repo" --argjson keys "$keys" '
 			def pass_c: IN("SUCCESS", "NEUTRAL", "SKIPPED");
 			def fail_c: IN("FAILURE", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "ERROR", "STARTUP_FAILURE");
@@ -387,7 +400,7 @@ desk_watch_fetch_prs() {
 			[ "$prev_updated" = "$pr_updated" ] && continue
 			num="$(jq -r .number <<< "$pr")"
 			repo_of="$(jq -r .repo <<< "$pr")"
-			view="$(desk_watch_gh pr view "$num" --repo "$repo_of" --json comments,reviews 2> /dev/null)" || continue
+			view="$(desk_follow_gh pr view "$num" --repo "$repo_of" --json comments,reviews 2> /dev/null)" || continue
 			jq -e . > /dev/null 2>&1 <<< "$view" || continue
 			all="$(jq -c --argjson i "$i" --argjson v "$view" '
 				.[$i].comments = (
@@ -400,31 +413,31 @@ desk_watch_fetch_prs() {
 	printf '%s\n' "$all" > "$out"
 }
 
-desk_watch_note_cost() {
+desk_follow_note_cost() {
 	local c
 	c="$(desk_extract_total_cost_usd "$1")"
-	[ -n "$c" ] && [ -n "${DESK_WATCH_COSTS:-}" ] && printf '%s\n' "$c" >> "$DESK_WATCH_COSTS"
+	[ -n "$c" ] && [ -n "${DESK_FOLLOW_COSTS:-}" ] && printf '%s\n' "$c" >> "$DESK_FOLLOW_COSTS"
 	return 0
 }
 
 # --- the message -----------------------------------------------------------------
 
-# desk_watch_message <entry json> <queue json> <name> <preamble file> <max chars> <timezone>
+# desk_follow_message <entry json> <queue json> <name> <preamble file> <max chars> <timezone>
 # The whole message one session gets: the marker line, the instance's
 # standing preamble, then every queued change, oldest first.
-desk_watch_message() {
+desk_follow_message() {
 	local entry="$1" queue="$2" name="$3" preamble_file="$4" max="$5" tz="$6" preamble=""
 	[ -f "$preamble_file" ] && preamble="$(cat "$preamble_file")"
 	TZ="${tz:-${TZ:-UTC}}" jq -jn --argjson e "$entry" --argjson q "$queue" --arg name "$name" \
-		--arg marker "$DESK_WATCH_MARKER" --arg preamble "$preamble" --argjson max "$max" '
+		--arg marker "$DESK_FOLLOW_MARKER" --arg preamble "$preamble" --argjson max "$max" '
 		def when: strflocaltime("%a %d %b %H:%M");
 		($q.changes // []) as $c
 		| ([$c[].ref] | unique) as $refs
 		| ($q.dropped // 0) as $dropped
 		| [$c[] | "- \(.at | when) \(.ref) \"\(.title // "")\"\(if (.context // "") != "" then " (" + .context + ")" else "" end): \(.what)"] as $lines
-		| ("\($marker) Watcher update for \($e.label): \($c | length) change\(if ($c | length) == 1 then "" else "s" end) on \($refs | .[0:6] | join(", "))\(if ($refs | length) > 6 then " and more" else "" end). Not from the user.") as $head
+		| ("\($marker) Update for \($e.label): \($c | length) change\(if ($c | length) == 1 then "" else "s" end) on \($refs | .[0:6] | join(", "))\(if ($refs | length) > 6 then " and more" else "" end). Not from the user.") as $head
 		| ($preamble | sub("\\s+$"; "")) as $pre
-		| ("Changes since \(if $q.since then ($q.since | when) else "the watch started" end), oldest first:") as $intro
+		| ("Changes since \(if $q.since then ($q.since | when) else "following started" end), oldest first:") as $intro
 		| ($head + "\n\n" + (if $pre != "" then $pre + "\n\n" else "" end) + $intro + "\n") as $top
 		# Lines are kept whole, oldest first, while they fit; the rest are
 		# named by ticket only.
@@ -443,14 +456,14 @@ desk_watch_message() {
 		| sub("\\s+$"; "")'
 }
 
-# desk_watch_clock <epoch> <timezone>: HH:MM local, for a log line.
-desk_watch_clock() {
+# desk_follow_clock <epoch> <timezone>: HH:MM local, for a log line.
+desk_follow_clock() {
 	TZ="${2:-${TZ:-UTC}}" jq -rn --argjson t "$1" '$t | strflocaltime("%H:%M")'
 }
 
 # --- sending -----------------------------------------------------------------------
 
-# desk_watch_send_verdict <stream file> <pinned args file> <to>
+# desk_follow_send_verdict <stream file> <pinned args file> <to>
 # Reads a send call's stream and prints one line: the verdict, a tab, and
 # the first line of the tool's result (for the log).
 #   confirmed    the pinned SendMessage call ran, and its result reports a
@@ -463,11 +476,11 @@ desk_watch_clock() {
 # "“<the message's first line>” → <to> (another Claude session on this
 # machine; in that session's inbox, … that session may hold it … or refuse
 # it …)", "msg_id": …}. So the words after the recipient are boilerplate
-# naming what *may* happen, and the preview before it is the watcher's own
+# naming what *may* happen, and the preview before it is desk-follow's own
 # text: neither is read as an outcome. Only a past-tense outcome after the
 # recipient (refused, held, dropped, …) keeps a success from confirming. A
 # hold reported later, as a delivery notice, reaches no headless sender.
-desk_watch_send_verdict() {
+desk_follow_send_verdict() {
 	local stream="$1" pinned="$2" to="$3"
 	jq -rs --slurpfile want "$pinned" --arg to "$to" '
 		def text_of: if (.content | type) == "string" then .content
@@ -498,16 +511,16 @@ desk_watch_send_verdict() {
 		| "\($v)\t\($t | gsub("[\\r\\n\\t]+"; " ") | .[0:300])"' "$stream" 2> /dev/null
 }
 
-# desk_watch_send <pass> <send config json> <to> <message file> <work dir>
+# desk_follow_send <pass> <send config json> <to> <message file> <work dir>
 # One restricted model call whose only tool is SendMessage, pinned by the
 # deny hook to exactly {to, message} (its transcript-only `summary` aside).
-# Prints desk_watch_send_verdict's line; "failed" when the call could not
+# Prints desk_follow_send_verdict's line; "failed" when the call could not
 # be made at all.
-desk_watch_send() {
+desk_follow_send() {
 	local pass="$1" send="$2" to="$3" message_file="$4" work="$5"
 	local prompt_rel scratch prompt_file pinned settings hook out
 	prompt_rel="$(jq -r '.prompt // empty' <<< "$send")"
-	[ -n "$prompt_rel" ] || { desk_log "$pass" "watch: no send.prompt configured"; printf 'failed\tno send.prompt configured\n'; return; }
+	[ -n "$prompt_rel" ] || { desk_log "$pass" "follow: no send.prompt configured"; printf 'failed\tno send.prompt configured\n'; return; }
 	scratch="$(desk_scratch_dir "$pass-send")"
 	pinned="$scratch/pinned-args.json"
 	# The message as written, and with one trailing newline, since a copied
@@ -519,7 +532,7 @@ desk_watch_send() {
 		'($m | sub("\\s+$"; "")) as $t
 		| [($t, $t + "\n") as $msg | {to: $to, message: $msg}, {to: $to, recipient: $to, message: $msg}]' > "$pinned"
 	hook="${DESK_DENY_HOOK_SCRIPT:-$DESK_LIB_DIR/deny-unlisted-tool.sh}"
-	[ -f "$hook" ] || { desk_log "$pass" "watch: deny hook missing ($hook) — not sending"; rm -rf "$scratch"; printf 'failed\tdeny hook missing\n'; return; }
+	[ -f "$hook" ] || { desk_log "$pass" "follow: deny hook missing ($hook) — not sending"; rm -rf "$scratch"; printf 'failed\tdeny hook missing\n'; return; }
 	settings="$scratch/deny-hook-settings.json"
 	jq -n --arg cmd "$(desk_shq "$hook") --pinned $(desk_shq "$pinned") --ignore-keys summary,content,type,recipient_kind -- SendMessage" \
 		'{hooks: {PreToolUse: [{hooks: [{type: "command", command: $cmd, timeout: 10}]}]}}' > "$settings"
@@ -537,9 +550,9 @@ desk_watch_send() {
 		${model:+--model "$model"} \
 		--timeout "$(jq -r '.timeout // 180' <<< "$send")" \
 		--config-dir "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" --out "$out" > /dev/null
-	desk_watch_note_cost "$out"
+	desk_follow_note_cost "$out"
 	local verdict
-	verdict="$(desk_watch_send_verdict "$out" "$pinned" "$to")"
+	verdict="$(desk_follow_send_verdict "$out" "$pinned" "$to")"
 	rm -rf "$scratch"
 	[ -n "$verdict" ] || verdict="$(printf 'failed\tthe send call left no readable stream')"
 	printf '%s\n' "$verdict"
@@ -547,8 +560,8 @@ desk_watch_send() {
 
 # --- the pass ------------------------------------------------------------------------
 
-# desk_watch_main <pass> <pass_config> [--dry-run] [--scheduled] [--lookback-minutes N]
-desk_watch_main() {
+# desk_follow_main <pass> <pass_config> [--dry-run] [--scheduled] [--lookback-minutes N]
+desk_follow_main() {
 	local pass="$1" pass_config="$2"
 	shift 2
 	local dry_run="false" scheduled="false" lookback=""
@@ -557,59 +570,59 @@ desk_watch_main() {
 			--dry-run) dry_run="true"; shift ;;
 			--scheduled) scheduled="true"; shift ;;
 			--lookback-minutes) lookback="${2:-}"; shift 2 ;;
-			*) desk_log "$pass" "watch: unknown option $1"; return 2 ;;
+			*) desk_log "$pass" "follow: unknown option $1"; return 2 ;;
 		esac
 	done
 	if [ -n "$lookback" ] && ! [[ "$lookback" =~ ^[0-9]+$ ]]; then
-		desk_log "$pass" "watch: --lookback-minutes takes whole minutes"
+		desk_log "$pass" "follow: --lookback-minutes takes whole minutes"
 		return 2
 	fi
 
 	local entries
-	entries="$(desk_watch_entries)"
+	entries="$(desk_follow_entries)"
 	if [ "$(jq 'length' <<< "$entries")" -eq 0 ]; then
-		desk_log "$pass" "watch: nothing is watched ($DESK_WATCH_FILE)"
+		desk_log "$pass" "follow: nothing is followed ($DESK_FOLLOW_FILE)"
 		return 0
 	fi
 
 	local state now
-	state="$(cat "$DESK_WATCH_STATE_FILE" 2> /dev/null)"
+	state="$(cat "$DESK_FOLLOW_STATE_FILE" 2> /dev/null)"
 	jq -e 'type == "object"' > /dev/null 2>&1 <<< "$state" || state='{}'
 	now="$(desk_now)"
 
 	local interval
-	interval="$(desk_watch_interval_minutes "$pass_config" "$pass")"
+	interval="$(desk_follow_interval_minutes "$pass_config" "$pass")"
 	if [ "$scheduled" = "true" ]; then
 		local last_run
 		last_run="$(jq -r '.last_run.at // 0' <<< "$state")"
 		if [ $((now - last_run)) -lt $((interval * 60 - 60)) ]; then
-			desk_log "$pass" "watch: last run was under $interval minutes ago — skipping"
+			desk_log "$pass" "follow: last run was under $interval minutes ago — skipping"
 			return 0
 		fi
 	fi
 
-	# Its own lock, never the runner's: the watch touches nothing a morning
-	# pass does. Waits a minute at most for another watch run.
+	# Its own lock, never the runner's: the follow pass touches nothing a morning
+	# pass does. Waits a minute at most for another follow run.
 	local lockdir
-	lockdir="$(DESK_LOCK_NAME=watch DESK_LOCK_MAX_WAIT_SECS="${DESK_WATCH_LOCK_WAIT_SECS:-60}" desk_lock_acquire "$pass")"
+	lockdir="$(DESK_LOCK_NAME=follow DESK_LOCK_MAX_WAIT_SECS="${DESK_FOLLOW_LOCK_WAIT_SECS:-60}" desk_lock_acquire "$pass")"
 	if [ -z "$lockdir" ]; then
-		desk_log "$pass" "watch: another watch run holds the lock — skipping"
+		desk_log "$pass" "follow: another follow run holds the lock — skipping"
 		return 0
 	fi
 	local work
-	work="$(desk_scratch_dir "$pass-watch")"
+	work="$(desk_scratch_dir "$pass-follow")"
 	# shellcheck disable=SC2064
-	trap "DESK_LOCK_NAME=watch desk_lock_release; rm -rf '$work'" EXIT
-	export DESK_WATCH_COSTS="$work/costs.log"
-	: > "$DESK_WATCH_COSTS"
+	trap "DESK_LOCK_NAME=follow desk_lock_release; rm -rf '$work'" EXIT
+	export DESK_FOLLOW_COSTS="$work/costs.log"
+	: > "$DESK_FOLLOW_COSTS"
 	DESK_DENY_HOOK_SCRIPT="$work/deny-unlisted-tool.sh"
-	cp "$DESK_LIB_DIR/deny-unlisted-tool.sh" "$DESK_DENY_HOOK_SCRIPT" || { desk_log "$pass" "watch: couldn't copy the deny hook"; return 2; }
+	cp "$DESK_LIB_DIR/deny-unlisted-tool.sh" "$DESK_DENY_HOOK_SCRIPT" || { desk_log "$pass" "follow: couldn't copy the deny hook"; return 2; }
 	export DESK_DENY_HOOK_SCRIPT
 
 	# Re-read under the lock: another run may have just finished.
-	state="$(cat "$DESK_WATCH_STATE_FILE" 2> /dev/null)"
+	state="$(cat "$DESK_FOLLOW_STATE_FILE" 2> /dev/null)"
 	jq -e 'type == "object"' > /dev/null 2>&1 <<< "$state" || state='{}'
-	# The watch list changed: drop queues for sessions no longer watched.
+	# The follow list changed: drop queues for sessions no longer followed.
 	state="$(jq -c --argjson e "$entries" '.queues = ((.queues // {}) | with_entries(select(.key as $k | $e | has($k))))' <<< "$state")"
 
 	# Windows: since the last fetch that came back, overlapping by five
@@ -626,7 +639,7 @@ desk_watch_main() {
 	fi
 
 	# Scope: tracked tickets, their children, and what links to either;
-	# refreshed every scope_refresh_minutes, or when the watch list's keys
+	# refreshed every scope_refresh_minutes, or when the follow list's keys
 	# changed since the last refresh.
 	local scope_due="false" refresh_minutes refreshed keys_sig
 	refresh_minutes="$(jq -r '.scope_refresh_minutes // 60' <<< "$pass_config")"
@@ -638,7 +651,7 @@ desk_watch_main() {
 	fi
 
 	local jira_ok="true"
-	desk_watch_fetch_jira "$pass" "$pass_config" "$entries" "$state" "$now" "$jira_since" "$scope_due" "$work" || jira_ok="false"
+	desk_follow_fetch_jira "$pass" "$pass_config" "$entries" "$state" "$now" "$jira_since" "$scope_due" "$work" || jira_ok="false"
 	local scope_issues change_issues
 	scope_issues="$(cat "$work/scope.json")"
 	change_issues="$(cat "$work/changes.json")"
@@ -646,7 +659,7 @@ desk_watch_main() {
 		jira_ok="false"
 	fi
 
-	# PRs: matched against every key any watch's scope holds, including
+	# PRs: matched against every key any follow's scope holds, including
 	# children and links the scope query just found.
 	local all_scope gh_ok="true"
 	all_scope="$(jq -c --argjson s "$scope_issues" --argjson c "$change_issues" --argjson k "$keys_sig" '
@@ -654,7 +667,7 @@ desk_watch_main() {
 		+ [($s // [])[] | .key, (.links[] | .key)] + [($c // [])[] | .key] | unique' <<< "$state")"
 	local with_comments="true"
 	[ "$baseline_gh" = "true" ] && with_comments="false"
-	desk_watch_fetch_prs "$pass" "$pass_config" "$state" "$all_scope" "$gh_since" "$with_comments" "$work/prs.json" || gh_ok="false"
+	desk_follow_fetch_prs "$pass" "$pass_config" "$state" "$all_scope" "$gh_since" "$with_comments" "$work/prs.json" || gh_ok="false"
 
 	local new_state
 	jq -n --argjson entries "$entries" --slurpfile state <(printf '%s\n' "$state") \
@@ -667,9 +680,9 @@ desk_watch_main() {
 		 now: $now, jira_since: $jira_since, gh_since: $gh_since,
 		 baseline_jira: $baseline_jira, baseline_gh: $baseline_gh, queue_max: $queue_max,
 		 skip: $skip, lookback: $lookback}' > "$work/diff-input.json"
-	new_state="$(jq -c -f "$DESK_WATCH_DIFF_JQ" "$work/diff-input.json" 2> "$work/diff.err")" || new_state=""
+	new_state="$(jq -c -f "$DESK_FOLLOW_DIFF_JQ" "$work/diff-input.json" 2> "$work/diff.err")" || new_state=""
 	if [ -z "$new_state" ]; then
-		desk_log "$pass" "watch: the diff failed: $(head -c 400 "$work/diff.err")"
+		desk_log "$pass" "follow: the diff failed: $(head -c 400 "$work/diff.err")"
 		return 1
 	fi
 	new_state="$(jq -c --argjson k "$keys_sig" --argjson now "$now" --arg jira_ok "$jira_ok" --arg gh_ok "$gh_ok" \
@@ -680,12 +693,12 @@ desk_watch_main() {
 		    | (if $gh_ok == "true" then .last_gh_ok = $now else . end)
 		  end' <<< "$new_state")"
 
-	# Delivery: one message per watched session with anything queued, to
+	# Delivery: one message per followed session with anything queued, to
 	# its current name, only while it is live and the name addresses it
 	# alone. The queue empties only on a confirmed send.
 	local send preamble_file max_chars tz sent=0 held=0
 	send="$(jq -c '.send // {}' <<< "$pass_config")"
-	preamble_file="$(desk_prompt_path "$(jq -r '.preamble // "prompts/watch-preamble.md"' <<< "$pass_config")")"
+	preamble_file="$(desk_prompt_path "$(jq -r '.preamble // "prompts/follow-preamble.md"' <<< "$pass_config")")"
 	max_chars="$(jq -r '.message_max_chars // 8000' <<< "$pass_config")"
 	tz="$(jq -r '.timezone // empty' "$DESK_CONFIG" 2> /dev/null)"
 	local sid entry queue n hit name live dup back
@@ -696,20 +709,20 @@ desk_watch_main() {
 		queue="$(jq -c --argjson st "$new_state" --arg s "$sid" '.since = ($st.last_sent[$s].at // null)' <<< "$queue")"
 		n="$(jq '.changes | length' <<< "$queue")"
 		[ "$n" -gt 0 ] || continue
-		hit="$(_desk_watch_reader resolve "$sid" 2> /dev/null)" || hit=""
+		hit="$(_desk_follow_reader resolve "$sid" 2> /dev/null)" || hit=""
 		name="$(jq -r '.name // empty' <<< "$hit" 2> /dev/null)"
 		live="$(jq -r '.live // false' <<< "$hit" 2> /dev/null)"
 		dup="$(jq -r '.duplicate_pids // false' <<< "$hit" 2> /dev/null)"
 		local label
 		label="$(jq -r '.label' <<< "$entry")"
 		if [ "$live" != "true" ] || [ -z "$name" ]; then
-			desk_log "$pass" "watch: $label: $n change(s) queued, the session is not running"
+			desk_log "$pass" "follow: $label: $n change(s) queued, the session is not running"
 			held=$((held + 1))
 			continue
 		fi
-		back="$(_desk_watch_reader resolve "$name" 2> /dev/null | jq -r '.id // empty' 2> /dev/null)"
+		back="$(_desk_follow_reader resolve "$name" 2> /dev/null | jq -r '.id // empty' 2> /dev/null)"
 		if [ "$dup" = "true" ] || [ "$back" != "$sid" ]; then
-			desk_log "$pass" "watch: $label: the name '$name' does not address this session alone — $n change(s) stay queued"
+			desk_log "$pass" "follow: $label: the name '$name' does not address this session alone — $n change(s) stay queued"
 			held=$((held + 1))
 			continue
 		fi
@@ -719,12 +732,12 @@ desk_watch_main() {
 		local retry_at
 		retry_at="$(jq -r --arg s "$sid" '.queues[$s].retry_at // 0' <<< "$new_state")"
 		if [ "$scheduled" = "true" ] && [ "$dry_run" != "true" ] && [ "$now" -lt "$retry_at" ]; then
-			desk_log "$pass" "watch: $label: the last send failed — $n change(s) stay queued until the next try at $(desk_watch_clock "$retry_at" "$tz")"
+			desk_log "$pass" "follow: $label: the last send failed — $n change(s) stay queued until the next try at $(desk_follow_clock "$retry_at" "$tz")"
 			held=$((held + 1))
 			continue
 		fi
 		local msg_file="$work/message-${sid:0:8}.txt"
-		desk_watch_message "$entry" "$queue" "$name" "$preamble_file" "$max_chars" "$tz" > "$msg_file"
+		desk_follow_message "$entry" "$queue" "$name" "$preamble_file" "$max_chars" "$tz" > "$msg_file"
 		if [ "$dry_run" = "true" ]; then
 			printf '=== would send to %s (%s change(s)) ===\n' "$name" "$n"
 			cat "$msg_file"
@@ -732,15 +745,15 @@ desk_watch_main() {
 			continue
 		fi
 		local result_line verdict detail
-		result_line="$(desk_watch_send "$pass" "$send" "$name" "$msg_file" "$work")"
+		result_line="$(desk_follow_send "$pass" "$send" "$name" "$msg_file" "$work")"
 		verdict="${result_line%%$'\t'*}"
 		detail="${result_line#*$'\t'}"
 		local tries
 		tries="$(jq -r --arg s "$sid" '.queues[$s].unconfirmed_sends // 0' <<< "$new_state")"
-		if [ "$verdict" = "unconfirmed" ] && [ $((tries + 1)) -ge "$DESK_WATCH_MAX_UNCONFIRMED" ]; then
+		if [ "$verdict" = "unconfirmed" ] && [ $((tries + 1)) -ge "$DESK_FOLLOW_MAX_UNCONFIRMED" ]; then
 			# The call ran each time and the session may well have every
 			# copy: sending the same changes again would only repeat them.
-			desk_log "$pass" "watch: $label: the send to $name ran but was not confirmed, ${DESK_WATCH_MAX_UNCONFIRMED} times — treating the $n change(s) as sent, not sending them again (result: $detail)"
+			desk_log "$pass" "follow: $label: the send to $name ran but was not confirmed, ${DESK_FOLLOW_MAX_UNCONFIRMED} times — treating the $n change(s) as sent, not sending them again (result: $detail)"
 			sent=$((sent + 1))
 			new_state="$(jq -c --arg s "$sid" --arg name "$name" --argjson now "$now" --argjson n "$n" '
 				.queues[$s].changes = [] | .queues[$s].dropped = 0 | .queues[$s].skipped = {}
@@ -748,14 +761,14 @@ desk_watch_main() {
 				| .last_sent[$s] = {at: $now, name: $name, changes: $n, confirmed: false}' <<< "$new_state")"
 		elif [ "$verdict" = "confirmed" ]; then
 			sent=$((sent + 1))
-			desk_log "$pass" "watch: $label: sent $n change(s) to $name"
+			desk_log "$pass" "follow: $label: sent $n change(s) to $name"
 			new_state="$(jq -c --arg s "$sid" --arg name "$name" --argjson now "$now" --argjson n "$n" '
 				.queues[$s].changes = [] | .queues[$s].dropped = 0 | .queues[$s].skipped = {}
 				| .queues[$s] |= del(.queued_since, .unconfirmed_sends, .failed_sends, .retry_at)
 				| .last_sent[$s] = {at: $now, name: $name, changes: $n}' <<< "$new_state")"
 		elif [ "$verdict" = "unconfirmed" ]; then
 			held=$((held + 1))
-			desk_log "$pass" "watch: $label: the send to $name ran but was not confirmed — $n change(s) stay queued for one more try (result: $detail)"
+			desk_log "$pass" "follow: $label: the send to $name ran but was not confirmed — $n change(s) stay queued for one more try (result: $detail)"
 			new_state="$(jq -c --arg s "$sid" '.queues[$s].unconfirmed_sends = ((.queues[$s].unconfirmed_sends // 0) + 1) | .queues[$s] |= del(.failed_sends, .retry_at)' <<< "$new_state")"
 		else
 			held=$((held + 1))
@@ -766,24 +779,24 @@ desk_watch_main() {
 			# A minute short, as the interval check is, so launchd's own
 			# drift never pushes the retry a whole interval later.
 			retry_at=$((now + wait_min * 60 - 60))
-			desk_log "$pass" "watch: $label: the send to $name failed — $n change(s) stay queued, next try at $(desk_watch_clock "$retry_at" "$tz") (result: $detail)"
+			desk_log "$pass" "follow: $label: the send to $name failed — $n change(s) stay queued, next try at $(desk_follow_clock "$retry_at" "$tz") (result: $detail)"
 			new_state="$(jq -c --arg s "$sid" --argjson f "$fails" --argjson at "$retry_at" \
 				'.queues[$s].failed_sends = $f | .queues[$s].retry_at = $at' <<< "$new_state")"
 		fi
 	done < <(jq -r 'keys[]' <<< "$entries")
 
 	local cost
-	cost="$(jq -s 'add // 0' "$DESK_WATCH_COSTS" 2> /dev/null || echo 0)"
+	cost="$(jq -s 'add // 0' "$DESK_FOLLOW_COSTS" 2> /dev/null || echo 0)"
 	local result="ok"
 	{ [ "$jira_ok" = "true" ] && [ "$gh_ok" = "true" ]; } || result="partial"
 	if [ "$dry_run" = "true" ]; then
-		desk_log "$pass" "watch: dry run — nothing sent, no state written (jira $jira_ok, github $gh_ok, cost \$$cost)"
+		desk_log "$pass" "follow: dry run — nothing sent, no state written (jira $jira_ok, github $gh_ok, cost \$$cost)"
 		return 0
 	fi
 	new_state="$(jq -c --argjson now "$now" --arg r "$result" --argjson sent "$sent" --argjson held "$held" --argjson cost "$cost" \
 		'.last_run = {at: $now, result: $r, sent: $sent, held: $held, cost_usd: $cost}' <<< "$new_state")"
-	desk_write_atomic "$DESK_WATCH_STATE_FILE" "$new_state
+	desk_write_atomic "$DESK_FOLLOW_STATE_FILE" "$new_state
 "
-	desk_log "$pass" "watch: done: $result (sent $sent, queued for $held, cost \$$cost)"
+	desk_log "$pass" "follow: done: $result (sent $sent, queued for $held, cost \$$cost)"
 	[ "$result" = "ok" ]
 }

@@ -42,7 +42,7 @@ source "$DESK_RUN_DIR/desk-lib/retention.sh"
 
 pass="${1:-}"
 if [ -z "$pass" ]; then
-	echo "usage: desk-run <pass> [watch options]" >&2
+	echo "usage: desk-run <pass> [follow options]" >&2
 	exit 2
 fi
 
@@ -77,13 +77,14 @@ if [ -z "$pass_config" ]; then
 	exit 2
 fi
 
-# A pass of kind "watch" (docs/desk.md, "The watch pass") runs on its own
-# path: no once-a-day guard, no shared lock, no notes repo or status file.
-if [ "$(jq -r '.kind // empty' <<< "$pass_config")" = "watch" ]; then
-	source "$DESK_RUN_DIR/desk-lib/watch.sh"
+# A pass of kind "follow" (docs/desk.md, "The follow pass"; "watch" is its
+# older name) runs on its own path: no once-a-day guard, no shared lock, no
+# notes repo or status file.
+if [[ "$(jq -r '.kind // empty' <<< "$pass_config")" =~ ^(follow|watch)$ ]]; then
+	source "$DESK_RUN_DIR/desk-lib/follow.sh"
 	export DESK_CONFIG
 	export CLAUDE_CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
-	desk_watch_main "$pass" "$pass_config" "${@:2}"
+	desk_follow_main "$pass" "$pass_config" "${@:2}"
 	exit $?
 fi
 

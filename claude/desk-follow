@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+# desk-follow: the follow list a desk follow pass forwards ticket movement
+# from (docs/desk.md, "The follow pass"). Installed as ~/.local/bin/desk-follow.
+#
+#   desk-follow add [--session <id|name>] [--label <text>] [--related <KEY>...] <KEY>...
+#   desk-follow remove [--session <id|name>] [<KEY>...]
+#   desk-follow list [--json]
+#   desk-follow run [--dry-run] [--lookback-minutes N]
+#
+# --session defaults to $CLAUDE_CODE_SESSION_ID, which Claude Code sets in
+# its Bash tool's environment, so a session can register itself. `remove`
+# without keys stops the whole follow; with keys, drops only those.
+# `run` runs the follow pass now (`desk-run <pass>`, the pass of kind
+# "follow" in $DESK_CONFIG, or "watch", its older name), outside its
+# schedule. With $DESK_CONFIG unset, `run` uses ${XDG_CONFIG_HOME:-~/.config}/desk/config.json if it exists.
+set -u
+
+_src="${BASH_SOURCE[0]}"
+while [ -h "$_src" ]; do
+	_dir="$(cd -P "$(dirname "$_src")" && pwd)"
+	_src="$(readlink "$_src")"
+	[[ "$_src" != /* ]] && _src="$_dir/$_src"
+done
+DESK_FOLLOW_DIR="$(cd -P "$(dirname "$_src")" && pwd)"
+source "$DESK_FOLLOW_DIR/desk-lib/common.sh"
+source "$DESK_FOLLOW_DIR/desk-lib/follow.sh"
+
+usage() { sed -n '5,8p' "$DESK_FOLLOW_DIR/desk-follow" | sed 's/^#   //' >&2; exit 2; }
+
+cmd="${1:-}"
+[ -n "$cmd" ] || usage
+shift
+
+session="${CLAUDE_CODE_SESSION_ID:-}"
+label=""
+keys=()
+related=()
+json=""
+run_args=()
+while [ $# -gt 0 ]; do
+	case "$1" in
+		--session) session="${2:-}"; shift 2 ;;
+		--label) label="${2:-}"; shift 2 ;;
+		--related)
+			shift
+			while [ $# -gt 0 ] && [[ "$1" != --* ]]; do related+=("$(tr '[:lower:]' '[:upper:]' <<< "$1")"); shift; done
+			;;
+		--json) json="--json"; shift ;;
+		--dry-run) run_args+=("$1"); shift ;;
+		--lookback-minutes) run_args+=("$1" "${2:-}"); shift 2 ;;
+		--*) echo "desk-follow: unknown option $1" >&2; usage ;;
+		*) keys+=("$(tr '[:lower:]' '[:upper:]' <<< "$1")"); shift ;;
+	esac
+done
+
+need_session() {
+	if [ -z "$session" ]; then
+		echo "desk-follow: no session given and \$CLAUDE_CODE_SESSION_ID is unset — pass --session <id|name>" >&2
+		exit 2
+	fi
+	session="$(desk_follow_resolve_session "$session")" || exit 1
+}
+
+join_csv() { local IFS=,; printf '%s' "$*"; }
+
+case "$cmd" in
+	add)
+		need_session
+		desk_follow_cli_add "$session" "$label" "$(join_csv "${keys[@]+"${keys[@]}"}")" "$(join_csv "${related[@]+"${related[@]}"}")"
+		;;
+	remove)
+		need_session
+		desk_follow_cli_remove "$session" "$(join_csv "${keys[@]+"${keys[@]}"}" "${related[@]+"${related[@]}"}")"
+		;;
+	list) desk_follow_cli_list "$json" ;;
+	run)
+		desk_resolve_config
+		[ -n "$DESK_CONFIG" ] && [ -f "$DESK_CONFIG" ] || { echo "desk-follow: \$DESK_CONFIG is not set or missing, and there is no ${XDG_CONFIG_HOME:-$HOME/.config}/desk/config.json" >&2; exit 2; }
+		export DESK_CONFIG
+		pass="$(jq -r '.passes | to_entries[] | select(.value.kind == "follow" or .value.kind == "watch") | .key' "$DESK_CONFIG" | head -n1)"
+		[ -n "$pass" ] || { echo "desk-follow: no pass of kind \"follow\" in $DESK_CONFIG" >&2; exit 2; }
+		exec "$DESK_FOLLOW_DIR/desk-run" "$pass" "${run_args[@]+"${run_args[@]}"}"
+		;;
+	*) usage ;;
+esac

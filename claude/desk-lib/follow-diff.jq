@@ -1,10 +1,10 @@
-# The watch pass's diff: one run's fetched tickets and pull requests,
-# compared with the snapshots in the watch state, become change lines
-# queued per watched session. Called by claude/desk-lib/watch.sh on one
+# The follow pass's diff: one run's fetched tickets and pull requests,
+# compared with the snapshots in the follow state, become change lines
+# queued per followed session. Called by claude/desk-lib/follow.sh on one
 # input object (a file, since these run past what an argument holds) with:
 #
-#   entries        the watch list: {<session id>: {label, keys, related}}
-#   $state          the previous watch state (see watch.sh)
+#   entries        the follow list: {<session id>: {label, keys, related}}
+#   $state          the previous follow state (see follow.sh)
 #   $scope_issues   normalized tickets from the scope query, or null when it
 #                   did not run this time
 #   $change_issues  normalized tickets from the changes query, or null when
@@ -22,13 +22,13 @@
 #                   compare against
 #
 # Only substantive changes are queued: new human content, a change to scope
-# or plan, a ticket or PR new to the watch. The rest (a status or state move
+# or plan, a ticket or PR new to the follow. The rest (a status or state move
 # with nothing else, a bot's post, labels, check results, a ticket only first
 # seen) is counted per kind in the queue's `skipped`, which the message's
 # footer reports.
 #
 # Prints the new state. Every change it queues is one line of plain text a
-# watch session reads; the message around them is built in watch.sh.
+# follow session reads; the message around them is built in follow.sh.
 
 
 .entries as $entries | .state as $state
@@ -184,7 +184,7 @@ def ticket_events:
 	      # has not moved; it is a snapshot, not news.
 	      elif $prev == null and ($moved | index($i.key)) == null then empty
 	      elif $prev == null then
-	        # A ticket new to the watch: created in the window, or under a
+	        # A ticket new to the follow: created in the window, or under a
 	        # tracked key (a new child), is news. One only first seen, with
 	        # no snapshot to compare (a mention, a lookback run), is counted:
 	        # what moved on it shows as its comments.
@@ -192,7 +192,7 @@ def ticket_events:
 	        | { key: $i.key, title: $i.summary, at: (($i.updated | ts) // $now),
 	            skip: (if $created or (($i.parent != null) and (all_keys | index($i.parent)) != null and ($lookback | not))
 	                   then null else "first-seen tickets" end),
-	            what: ((if $created then "created" else "new under the watch" end)
+	            what: ((if $created then "created" else "new under the follow" end)
 	                   + " (\($i.type // "ticket"), \($i.status)\(if $i.assignee then ", " + $i.assignee else "" end))") },
 	          ($i | comment_changes({}) | .[] | {key: $i.key, title: $i.summary} + .)
 	      else
@@ -273,7 +273,7 @@ def pr_events:
 	        # was already open when it came into scope) is counted.
 	        ((($p.created | ts) // 0) > $gh_since) as $opened
 	        | $base + {at: (($p.updated | ts) // $now), skip: (if $opened then null else "first-seen PRs" end),
-	                   what: ((if $opened then "opened" else "new under the watch" end)
+	                   what: ((if $opened then "opened" else "new under the follow" end)
 	                          + " (\($p.state | ascii_downcase)\(if $p.draft then ", draft" else "" end), branch \($p.branch))")},
 	          ($p | pr_comment_changes({}) | .[] | $base + .)
 	      else
@@ -345,8 +345,8 @@ scope_maps as $maps
 | .tickets = $tickets
 | .prs = (if $prs == null then ($state.prs // {}) else new_pr_snapshots end)
 | .queues = $new_queues
-# Everything a watch tracks is closed: the seam a later pass reads to
-# suggest retiring the watch. The date it was first seen closed is kept.
+# Everything a follow tracks is closed: the seam a later pass reads to
+# suggest retiring the follow. The date it was first seen closed is kept.
 | .all_closed = (reduce ($entries | to_entries[]) as $ent ({};
 	(tracked($ent.value) | map($tickets[.].done // false)) as $done
 	| if ($done | length) > 0 and ($done | all)
