@@ -223,8 +223,8 @@ assert_true "-n still names the session" \
 	"$(grep -qF "'-n' 'Weekly Update'" <<< "$command_line" && echo true || echo false)"
 assert_true "--settings still resolves, independent of restricted" \
 	"$(grep -qE -- "--settings' '$ROOT/workspace/desk/weekly/settings.json'" <<< "$command_line" && echo true || echo false)"
-assert_true "the command is tagged DESK_HEADLESS=1 (the Wednesday tab's session is tagged desk-run too)" \
-	"$([[ "$command_line" == DESK_HEADLESS=1\ * ]] && echo true || echo false)"
+assert_true "the command is not tagged DESK_HEADLESS (an interactive tab is recorded as the user's own)" \
+	"$(grep -q 'DESK_HEADLESS' <<< "$command_line" && echo false || echo true)"
 
 echo
 echo "=== missing cwd or prompt_text: fails rather than opening a bare shell ==="

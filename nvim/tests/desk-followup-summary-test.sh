@@ -256,7 +256,7 @@ desk_status_set_result morning failed commit-push '[]' 2026-10-16
 desk_open_follow_up_tab morning 2026-10-16 J "$repo" > /dev/null 2>&1
 cmd="$(cat "$OPEN_TAB_LOG")"
 assert_true "an interactive claude, named for the pass" \
-	"$(grep -q "^DESK_HEADLESS=1 claude -n 'desk-morning-2026-10-16-status' -- " <<< "$cmd" && echo true || echo false)"
+	"$(grep -q "^claude -n 'desk-morning-2026-10-16-status' -- " <<< "$cmd" && echo true || echo false)"
 assert_true "never a -p call" "$(grep -qE -- '(^| )-p( |$)|--print' <<< "$cmd" && echo false || echo true)"
 assert_eq "no headless call was made for it" "0" "$(wc -l < "$ARGV_LOG" | tr -d ' ')"
 status_prompt="$DESK_RUNS_ROOT/morning-2026-10-16/status/prompt.txt"

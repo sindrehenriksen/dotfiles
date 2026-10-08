@@ -153,7 +153,7 @@ assert_eq "reports ok" "ok" "$result"
 assert_true "the same-named stranger is never resumed" \
 	"$(grep -q "sess-stranger" "$OPEN_TAB_LOG" && echo false || echo true)"
 assert_true "a status session opens instead, an interactive claude" \
-	"$(grep -q "^CMD=DESK_HEADLESS=1 claude -n 'desk-testpass5-$scheduled_date-status'" "$OPEN_TAB_LOG" && echo true || echo false)"
+	"$(grep -q "^CMD=claude -n 'desk-testpass5-$scheduled_date-status'" "$OPEN_TAB_LOG" && echo true || echo false)"
 rm -f "$DESK_GUARD_DIR/followup-testpass5-$scheduled_date"
 jq -cn --arg name "desk-testpass5-$scheduled_date-J" '
 	{name:$name, id:"sess-ours", cwd:"/our/cwd", last_activity:1, live:false}

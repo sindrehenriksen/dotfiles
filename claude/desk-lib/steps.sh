@@ -1451,8 +1451,9 @@ desk_follow_up_run_status() {
 # desk_follow_up_status_command <pass> <scheduled_date> <dir> [<repo>]
 # The command line for the status session a follow-up tab opens when the
 # pass left no session to resume: an interactive `claude`, named
-# desk-<pass>-<date>-status and tagged as the runner's (DESK_HEADLESS), whose
-# first turn is the status prompt (`follow_up_status_prompt` from the config,
+# desk-<pass>-<date>-status and recorded as the user's own session (no
+# DESK_HEADLESS: it is interactive, so a restart reopens it), whose first
+# turn is the status prompt (`follow_up_status_prompt` from the config,
 # else the generic one beside this file) rendered with the run's status and
 # this pass's staged items, if any. The rendered prompt is written to
 # <dir>/prompt.txt and read by the command itself, since the tab helper
@@ -1473,7 +1474,7 @@ desk_follow_up_status_command() {
 	local placeholders
 	placeholders="$(desk_follow_up_placeholders "$pass" "$scheduled_date" "$repo")"
 	desk_render_prompt "$prompt_path" "$placeholders" > "$dir/prompt.txt" || return 1
-	printf 'DESK_HEADLESS=1 claude -n %s -- "$(cat %s)"' \
+	printf 'claude -n %s -- "$(cat %s)"' \
 		"$(desk_shq "desk-$pass-$scheduled_date-status")" "$(desk_shq "$dir/prompt.txt")"
 }
 
@@ -1751,17 +1752,10 @@ desk_step_open_tab() {
 	for a in "${argv[@]}"; do
 		command="${command:+$command }$(desk_shq "$a")"
 	done
-	# A non-restricted tab (the Wednesday weekly's own "default
-	# permissions" envelope) loads the user's real settings and hooks exactly like
-	# any session the user opens by hand, so without this its own genuine
-	# SessionStart would land untagged (source "startup") — indistinguishable
-	# from a session the user actually opened themselves, and never excluded from a
-	# later capture step. A plain env-var prefix on the assembled command
-	# line (never user-controlled content, so never quoted) is the only
-	# lever available here: this call never goes through desk_call_model
-	# (it opens a brand-new terminal tab, not a background call this
-	# process can set its own env on).
-	[ "$restricted" != "true" ] && command="DESK_HEADLESS=1 $command"
+	# No DESK_HEADLESS: this is an interactive session the user works in,
+	# so it is recorded as one of theirs (its own hooks fire, source
+	# "startup"), which is what lets a restart reopen it and a capture
+	# list it. A --restricted tab loads no hooks and records nothing.
 
 	local helper="${DESK_OPEN_TAB_BIN:-${DESK_OPEN_TAB:-desk-open-tab.sh}}"
 	if "$helper" "$command" "" "$cwd" background > /dev/null 2>&1; then
