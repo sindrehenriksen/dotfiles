@@ -608,7 +608,7 @@ $(git -C "$repo" show "HEAD:$f" 2> /dev/null)"
 					'with_entries(.value += ($o[0][.key] // 0))' <<< "$proposal_overflow_json")"
 			fi
 			;;
-		open_tab) result="$(desk_step_open_tab "$step_json" "$repo" "${files[@]}")" ;;
+		open_tab) result="$(desk_step_open_tab "$step_json" "$repo" "$scheduled_date" "${files[@]}")" ;;
 		*) desk_log "$pass" "unknown step kind: $kind (step $id)" ;;
 	esac
 	desk_log "$pass" "step $id ($kind): $result"

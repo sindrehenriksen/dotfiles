@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # claude/desk-lib/steps.sh's
 # desk_step_open_tab — assembling the Wednesday tab's launch command from
-# its step config (cwd_outside, restricted, permission_mode, tools,
+# its step config (cwd or its older name cwd_outside, restricted, permission_mode, tools,
 # strict_mcp_config/mcp_config, settings, skill, the fixed prompt_text) and
 # handing it to
 # hammerspoon/desk-open-tab.sh, and skipping entirely when a session under
@@ -138,7 +138,7 @@ assert_true "the helper was invoked (an ended session doesn't block a new tab)" 
 	"$([ -f "$ARGV_LOG.command" ] && echo true || echo false)"
 
 echo
-echo "=== scratch_dir + notes-diff fields: the tab opens in a fresh scratch dir seeded with notes-diff.md ==="
+echo "=== scratch_dir + notes-diff fields: the notes diff is written to a fresh scratch dir, named by path in the prompt ==="
 notes_repo="$ROOT/notes"
 desk_test_assert_repo_under_root "$notes_repo" "$ROOT"
 mkdir -p "$notes_repo"
@@ -159,25 +159,43 @@ git -C "$notes_repo" commit -q -m "add reading.md"
 scratch_root="$ROOT/weekly-scratch"
 scratch_step_json='{
 	"id": "open-tab", "kind": "open_tab",
-	"cwd_outside": "~/dev/example-workspace",
+	"cwd": "~/dev/example-workspace",
 	"permission_mode": "default",
-	"prompt_text": "Run the weekly update. The notes diff is ./notes-diff.md.",
+	"session_name": "weekly-{{date}}",
+	"prompt_text": "Run the weekly update for {{date}}. The notes diff is {{notes_diff}}.",
 	"scratch_dir": "'"$scratch_root"'",
 	"notes_diff_file": "notes-diff.md",
 	"notes_diff_since": "last_wednesday"
 }'
 : > "$SESSION_STATUS_FIXTURE"
 rm -f "$ARGV_LOG.command" "$ARGV_LOG.cwd"
-result="$(desk_step_open_tab "$scratch_step_json" "$notes_repo" notes.md reading.md)"
+result="$(desk_step_open_tab "$scratch_step_json" "$notes_repo" 2026-10-07 notes.md reading.md)"
 assert_eq "the step reports ok" "ok" "$result"
-scratch_cwd_arg="$(cat "$ARGV_LOG.cwd" 2> /dev/null)"
-assert_true "the tab's cwd is a fresh dir under scratch_dir, not cwd_outside" \
-	"$([[ "$scratch_cwd_arg" == "$scratch_root"/* ]] && echo true || echo false)"
-assert_true "the fresh scratch dir actually exists" "$([ -d "$scratch_cwd_arg" ] && echo true || echo false)"
-diff_file="$scratch_cwd_arg/notes-diff.md"
-assert_true "notes-diff.md was seeded into it" "$([ -s "$diff_file" ] && echo true || echo false)"
+assert_eq "the tab's cwd is the step's cwd, not the scratch dir" "$HOME/dev/example-workspace" "$(cat "$ARGV_LOG.cwd" 2> /dev/null)"
+command_line="$(cat "$ARGV_LOG.command" 2> /dev/null)"
+diff_file="$(sed -nE "s|.*The notes diff is ([^ ']+)\.'.*|\1|p" <<< "$command_line")"
+assert_true "the prompt names the notes diff by an absolute path under scratch_dir" \
+	"$([[ "$diff_file" == "$scratch_root"/*/notes-diff.md ]] && echo true || echo false)"
+assert_true "{{date}} in the prompt is the scheduled date" \
+	"$(grep -qF "weekly update for 2026-10-07." <<< "$command_line" && echo true || echo false)"
+assert_true "{{date}} in session_name is the scheduled date too" \
+	"$(grep -qF "'-n' 'weekly-2026-10-07'" <<< "$command_line" && echo true || echo false)"
+assert_true "notes-diff.md was written there" "$([ -s "$diff_file" ] && echo true || echo false)"
 assert_true "it carries the user's own edit" "$(grep -qF '+ Own new line' "$diff_file" 2> /dev/null && echo true || echo false)"
 assert_true "the diff body is fenced" "$(grep -q '^```$' "$diff_file" 2> /dev/null && echo true || echo false)"
+
+echo
+echo "=== {{date}}: the live check asks about this date's session only ==="
+jq -nc '{id: "s8", name: "weekly-2026-09-30", status: "idle", live: true}' > "$SESSION_STATUS_FIXTURE"
+rm -f "$ARGV_LOG.command"
+result="$(desk_step_open_tab "$scratch_step_json" "$notes_repo" 2026-10-07 notes.md reading.md)"
+assert_true "last week's session still open does not stop this week's tab" "$([ -f "$ARGV_LOG.command" ] && echo true || echo false)"
+jq -nc '{id: "s9", name: "weekly-2026-10-07", status: "idle", live: true}' > "$SESSION_STATUS_FIXTURE"
+rm -f "$ARGV_LOG.command"
+result="$(desk_step_open_tab "$scratch_step_json" "$notes_repo" 2026-10-07 notes.md reading.md)"
+assert_eq "this week's session already live: ok" "ok" "$result"
+assert_true "...and no second tab" "$([ ! -f "$ARGV_LOG.command" ] && echo true || echo false)"
+: > "$SESSION_STATUS_FIXTURE"
 
 echo
 echo "=== restricted: false — the user's default permissions, no isolation flags ==="
@@ -209,7 +227,7 @@ assert_true "the command is tagged DESK_HEADLESS=1 (the Wednesday tab's session 
 	"$([[ "$command_line" == DESK_HEADLESS=1\ * ]] && echo true || echo false)"
 
 echo
-echo "=== missing cwd_outside or prompt_text: fails rather than opening a bare shell ==="
+echo "=== missing cwd or prompt_text: fails rather than opening a bare shell ==="
 bad_step='{"id": "open-tab", "kind": "open_tab", "prompt_text": "x"}'
 result="$(desk_step_open_tab "$bad_step")"
 assert_eq "reports failed" "failed" "$result"

@@ -177,11 +177,15 @@ assert_true "the morning follow-up is an interactive status session" \
 	"$(grep -q "^DESK_HEADLESS=1 claude -n 'desk-example-morning-[0-9-]*-status'" "$TABS_LOG" && echo true || echo false)"
 tab_cmd="$(grep -F weekly-review "$TABS_LOG" | cut -f1)"
 tab_cwd="$(grep -F weekly-review "$TABS_LOG" | cut -f3)"
-assert_true "it opens claude named weekly-review" \
-	"$(grep -qF "'-n' 'weekly-review'" <<< "$tab_cmd" && echo true || echo false)"
-assert_true "its cwd is a fresh dir under scratch_dir" \
-	"$([[ "$tab_cwd" == "$FAKE_HOME/.local/state/desk/weekly/"* ]] && echo true || echo false)"
-assert_true "the notes-diff is waiting there" "$([ -s "$tab_cwd/notes-diff.md" ] && echo true || echo false)"
+assert_true "it opens claude named weekly-review-<date>" \
+	"$(grep -qE "'-n' 'weekly-review-[0-9]{4}-[0-9]{2}-[0-9]{2}'" <<< "$tab_cmd" && echo true || echo false)"
+assert_eq "its cwd is the step's cwd" "$FAKE_HOME" "$tab_cwd"
+diff_path="$(sed -nE "s|.*'Read ([^ :']+):.*|\1|p" <<< "$tab_cmd")"
+assert_true "the prompt names the notes diff under scratch_dir" \
+	"$([[ "$diff_path" == "$FAKE_HOME/.local/state/desk/weekly/"*/notes-diff.md ]] && echo true || echo false)"
+assert_true "the notes-diff is waiting there" "$([ -s "$diff_path" ] && echo true || echo false)"
+assert_true "no placeholder is left in the tab's command" \
+	"$(grep -qE '\{\{[A-Za-z0-9_]+\}\}' <<< "$tab_cmd" && echo false || echo true)"
 
 echo
 echo "=== the plist mirrors the morning trigger ==="

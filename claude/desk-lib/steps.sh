@@ -1625,11 +1625,12 @@ desk_fresh_scratch_dir() {
 }
 
 # ---------------------------------------------------------------------------
-# open_tab: interactive (Wednesday), not run headless. This assembles the weekly pass's own launch envelope —
-# `cwd_outside` (a cwd outside any repo), `permission_mode`, `tools`,
-# `strict_mcp_config`/`mcp_config`, `settings`, and `skill` (passed in
-# explicitly via `--append-system-prompt-file`, since nothing discovers it
-# from that cwd) plus the fixed `prompt_text` — into one shell
+# open_tab: interactive (Wednesday), not run headless. This assembles the
+# weekly pass's own launch envelope — `cwd` (`cwd_outside` is its older
+# name), `permission_mode`, `tools`, `strict_mcp_config`/`mcp_config`,
+# `settings`, and `skill` (passed in explicitly via
+# `--append-system-prompt-file`, so the session starts with it rather than
+# waiting to discover it) plus the fixed `prompt_text` — into one shell
 # command string (desk_shq quotes every argument; Ghostty's own
 # `command:` field takes a whole command line, never an argv array) and
 # hands that straight to the Hammerspoon function through
@@ -1639,15 +1640,16 @@ desk_fresh_scratch_dir() {
 # themselves), so this skips opening a second one — "ok", not "failed", since
 # nothing here actually went wrong.
 #
-# `repo` and `files` (the pass's own notes repo and configured file list —
-# desk-run's own `$repo`/`${files[@]}`) are optional: a caller with neither
-# to hand (the existing open-tab test) gets the exact old behavior, since
-# everything below is gated on the step's own `scratch_dir`/`notes_diff_file`/
-# `notes_diff_since` fields, absent from that fixture. When `scratch_dir` is
-# configured, a fresh directory under it becomes the tab's actual cwd in
-# place of `cwd_outside`, and — when the notes-diff
-# fields are configured too — desk_write_notes_diff seeds that fresh
-# directory with the notes-diff file before the tab opens.
+# `{{date}}` in `session_name` and `prompt_text` is the pass's scheduled date
+# (YYYY-MM-DD; today when none is given), so each week's session has a name
+# of its own and the live check above asks about this week's. `{{notes_diff}}`
+# in `prompt_text` is the notes diff's absolute path.
+#
+# `repo`, `scheduled_date` and `files` (desk-run's own `$repo`,
+# `$scheduled_date` and `${files[@]}`) are optional. When `scratch_dir` is
+# configured, a fresh directory under it holds the step's files: with the
+# notes-diff fields configured too, desk_write_notes_diff writes the notes
+# diff there before the tab opens. The tab's cwd stays `cwd` either way.
 #
 # `restricted` (default true, so an existing config with the field simply
 # absent keeps its full isolation envelope) gates `--restricted`,
@@ -1658,16 +1660,17 @@ desk_fresh_scratch_dir() {
 # when configured either way.
 # ---------------------------------------------------------------------------
 desk_step_open_tab() {
-	local step_json="${1:-}" repo="${2:-}"
+	local step_json="${1:-}" repo="${2:-}" scheduled_date="${3:-}"
 	local -a files=()
-	if [ "$#" -gt 2 ]; then
-		shift 2
+	if [ "$#" -gt 3 ]; then
+		shift 3
 		files=("$@")
 	fi
 	[ -n "$step_json" ] || step_json='{}'
+	[ -n "$scheduled_date" ] || scheduled_date="$(date +%F)"
 	local cwd permission_mode tools_csv strict_mcp mcp_config_rel settings_rel skill_rel prompt_text session_name
 	local scratch_root notes_diff_file notes_diff_since restricted
-	cwd="$(jq -r '.cwd_outside // empty' <<< "$step_json")"
+	cwd="$(jq -r '.cwd // .cwd_outside // empty' <<< "$step_json")"
 	cwd="${cwd/#\~/$HOME}"
 	# Default true: every existing caller (the original Wednesday-tab-only
 	# envelope) configures the full isolation envelope and never sets this
@@ -1689,22 +1692,30 @@ desk_step_open_tab() {
 	notes_diff_since="$(jq -c '.notes_diff_since // empty' <<< "$step_json" | sed -E 's/^"(.*)"$/\1/')"
 
 	if [ -z "$cwd" ] || [ -z "$prompt_text" ]; then
-		desk_log - "open_tab step: missing cwd_outside or prompt_text"
+		desk_log - "open_tab step: missing cwd or prompt_text"
 		echo "failed"
 		return
 	fi
 
+	local notes_diff_path=""
 	if [ -n "$scratch_root" ]; then
 		local fresh_dir
 		fresh_dir="$(desk_fresh_scratch_dir "$scratch_root")"
 		if [ -n "$fresh_dir" ] && [ -d "$fresh_dir" ]; then
-			cwd="$fresh_dir"
 			if [ -n "$notes_diff_file" ] && [ -n "$notes_diff_since" ] && [ -n "$repo" ] && [ "${#files[@]}" -gt 0 ]; then
 				desk_write_notes_diff "$repo" "$fresh_dir/$notes_diff_file" "$notes_diff_since" "${files[@]}"
+				[ -f "$fresh_dir/$notes_diff_file" ] && notes_diff_path="$fresh_dir/$notes_diff_file"
 			fi
 		else
-			desk_log - "open_tab: could not create scratch_dir under '$scratch_root' — keeping cwd_outside"
+			desk_log - "open_tab: could not create scratch_dir under '$scratch_root'"
 		fi
+	fi
+
+	session_name="${session_name//\{\{date\}\}/$scheduled_date}"
+	prompt_text="${prompt_text//\{\{date\}\}/$scheduled_date}"
+	if [[ "$prompt_text" == *"{{notes_diff}}"* ]]; then
+		[ -n "$notes_diff_path" ] || desk_log - "open_tab: the prompt names {{notes_diff}} but no notes diff was written"
+		prompt_text="${prompt_text//\{\{notes_diff\}\}/${notes_diff_path:-(no notes diff could be written)}}"
 	fi
 
 	if [ -n "$session_name" ]; then
