@@ -5,7 +5,8 @@
 # delivered whole once it is, the send pinned to the resolved name (a send
 # to any other name is refused by the deny hook), the dry run, and the
 # seam for retiring a follow whose tickets are all closed, and a ticket
-# another followed session owns going only to that session.
+# another followed session owns going only to that session, and a line on
+# a ticket another followed session also has naming that session.
 # Offline: `claude`, `gh` and the reader are fakes; the fake `claude` runs
 # the deny hook from the settings file the runner hands it, the way Claude
 # Code would. No git repo is touched.
@@ -588,13 +589,16 @@ echo
 echo "=== a ticket another session owns goes only to that session ==="
 SID_P="dddddddd-4444-4444-8444-444444444444"
 SID_Q="eeeeeeee-5555-4555-8555-555555555555"
+SID_R="ffffffff-6666-4666-8666-666666666666"
 export DESK_FOLLOW_FILE="$ROOT/own-follow.json" DESK_FOLLOW_STATE_FILE="$ROOT/own-follow-state.json"
 sessions << EOF
 $SID_P papa-session true
 $SID_Q quebec-session true
+$SID_R romeo-session true
 EOF
 "$CLI" add --session "$SID_P" OWN-1 SHR-3 > /dev/null
 "$CLI" add --session "$SID_Q" QQ-2 SHR-3 > /dev/null
+"$CLI" add --session "$SID_R" RR-1 --related OWN-1 > /dev/null
 # Q's child links to P's key, and P's key links back to it, so each is one
 # hop from the other's scope.
 {
@@ -602,6 +606,7 @@ EOF
 	issue QQ-2 "In Progress"
 	issue QQ-21 "To Do" QQ-2 "[$(link OWN-1)]"
 	issue SHR-3 "To Do"
+	issue RR-1 "To Do"
 } | headless > "$FIX/scope-result.json"
 echo '{"issues":{"nodes":[]}}' > "$FIX/changes-result.json"
 prs_none
@@ -612,15 +617,40 @@ assert_eq "a key both sessions own is in both scopes" "true true" "$(jq -r --arg
 {
 	issue OWN-1 "In Progress" "" "[$(link QQ-21)]" "[$(cmt 951 "Dev One" "Plan changed for QQ-2 too.")]"
 	issue SHR-3 "To Do" "" "[]" "[$(cmt 952 "Dev Two" "Shared news.")]"
+	issue QQ-21 "To Do" QQ-2 "[$(link OWN-1)]" "[$(cmt 953 "Dev Three" "Child news.")]"
 } | rest > "$FIX/changes-result.json"
+pr 41 "[SHR-3] Shared work" "shr-3-work" OPEN h1 | jq -s --arg t "$future" '.[0].createdAt = $t | .[0].updatedAt = $t' > "$FIX/prs.json"
+# Q is renamed since it was followed: the line names it as it is called now.
+sessions << EOF
+$SID_P papa-session true
+$SID_Q quebec-renamed true
+$SID_R romeo-session true
+EOF
 : > "$FOLLOW_TEST_SENT"
 "$RUN" follow > /dev/null 2>&1
 msg_p="$(jq -r 'select(.to == "papa-session") | .message' "$FOLLOW_TEST_SENT")"
-msg_q="$(jq -r 'select(.to == "quebec-session") | .message' "$FOLLOW_TEST_SENT")"
+msg_q="$(jq -r 'select(.to == "quebec-renamed") | .message' "$FOLLOW_TEST_SENT")"
+msg_r="$(jq -r 'select(.to == "romeo-session") | .message' "$FOLLOW_TEST_SENT")"
 assert_contains "the owner gets its ticket's news" 'new comment by Dev One: "Plan changed for QQ-2 too."' "$msg_p"
 assert_not_contains "a session it only links to, or that it mentions, does not" "Plan changed" "$msg_q"
 assert_contains "a shared key's news goes to one owner" 'new comment by Dev Two: "Shared news."' "$msg_p"
 assert_contains "and to the other" 'new comment by Dev Two: "Shared news."' "$msg_q"
+
+echo
+echo "=== a change another followed session also has says so ==="
+assert_contains "a shared key's line names the other owner by its current name" \
+	'SHR-3 "Summary of SHR-3" (also followed by quebec-renamed): new comment by Dev Two' "$msg_p"
+assert_contains "and the other owner's line names the first" \
+	'SHR-3 "Summary of SHR-3" (also followed by papa-session): new comment by Dev Two' "$msg_q"
+assert_contains "a key another session lists as related names that session" \
+	'OWN-1 "Summary of OWN-1" (also followed by romeo-session): new comment by Dev One' "$msg_p"
+assert_contains "and the related session's line names the owner" \
+	'OWN-1 "Summary of OWN-1" (also followed by papa-session): new comment by Dev One' "$msg_r"
+assert_contains "a child line keeps its relation and has no other follower" \
+	'QQ-21 "Summary of QQ-21" (child of QQ-2): new comment by Dev Three' "$msg_q"
+assert_contains "a PR on a shared key names the other session" \
+	'PR #41 "[SHR-3] Shared work" (SHR-3; also followed by quebec-renamed): opened' "$msg_p"
+assert_not_contains "a session is never told it follows its own ticket" "also followed by quebec-renamed" "$msg_q"
 
 echo
 echo "=== summary: $pass passed, $fail failed ==="

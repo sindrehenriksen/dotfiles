@@ -424,7 +424,9 @@ desk_follow_note_cost() {
 
 # desk_follow_message <entry json> <queue json> <name> <preamble file> <max chars> <timezone>
 # The whole message one session gets: the marker line, the instance's
-# standing preamble, then every queued change, oldest first.
+# standing preamble, then every queued change, oldest first. A change's
+# `also` holds the current names of the other followed sessions that have
+# its ticket (desk_follow_also_names).
 desk_follow_message() {
 	local entry="$1" queue="$2" name="$3" preamble_file="$4" max="$5" tz="$6" preamble=""
 	[ -f "$preamble_file" ] && preamble="$(cat "$preamble_file")"
@@ -434,7 +436,9 @@ desk_follow_message() {
 		($q.changes // []) as $c
 		| ([$c[].ref] | unique) as $refs
 		| ($q.dropped // 0) as $dropped
-		| [$c[] | "- \(.at | when) \(.ref) \"\(.title // "")\"\(if (.context // "") != "" then " (" + .context + ")" else "" end): \(.what)"] as $lines
+		| [$c[] | ([(.context // "") | select(. != "")]
+		           + (if ((.also // []) | length) > 0 then ["also followed by " + (.also | join(", "))] else [] end)) as $ctx
+		   | "- \(.at | when) \(.ref) \"\(.title // "")\"\(if ($ctx | length) > 0 then " (" + ($ctx | join("; ")) + ")" else "" end): \(.what)"] as $lines
 		| ("\($marker) Update for \($e.label): \($c | length) change\(if ($c | length) == 1 then "" else "s" end) on \($refs | .[0:6] | join(", "))\(if ($refs | length) > 6 then " and more" else "" end). Not from the user.") as $head
 		| ($preamble | sub("\\s+$"; "")) as $pre
 		| ("Changes since \(if $q.since then ($q.since | when) else "following started" end), oldest first:") as $intro
@@ -454,6 +458,22 @@ desk_follow_message() {
 		  + (($q.skipped // {}) | to_entries | map(select(.value > 0)) | sort_by(-.value)
 		     | if length == 0 then "nothing" else map("\(.value) \(if .value == 1 then (.key | sub("s$"; "")) else .key end)") | join(", ") end) + "."
 		| sub("\\s+$"; "")'
+}
+
+# desk_follow_also_names <queue json> <entries json>: the queue with each
+# change's `also`, the other followed sessions that have its ticket, turned
+# from session ids into their current names (the label when the reader
+# doesn't know one). A session no longer followed is left out.
+desk_follow_also_names() {
+	local queue="$1" entries="$2" names='{}' sid name
+	while IFS= read -r sid; do
+		[ -n "$sid" ] || continue
+		name="$(_desk_follow_reader resolve "$sid" 2> /dev/null | jq -r '.name // empty' 2> /dev/null)"
+		[ -n "$name" ] || name="$(jq -r --arg s "$sid" '.[$s].label // empty' <<< "$entries")"
+		names="$(jq -c --arg s "$sid" --arg n "$name" '.[$s] = $n' <<< "$names")"
+	done < <(jq -r --argjson e "$entries" '[(.changes // [])[] | (.also // [])[] | . as $s | select($e | has($s))] | unique[]' <<< "$queue")
+	jq -c --argjson n "$names" '.changes = [(.changes // [])[]
+		| if has("also") then .also = [.also[] | $n[.] // empty] else . end]' <<< "$queue"
 }
 
 # desk_follow_clock <epoch> <timezone>: HH:MM local, for a log line.
@@ -737,6 +757,7 @@ desk_follow_main() {
 			continue
 		fi
 		local msg_file="$work/message-${sid:0:8}.txt"
+		queue="$(desk_follow_also_names "$queue" "$entries")"
 		desk_follow_message "$entry" "$queue" "$name" "$preamble_file" "$max_chars" "$tz" > "$msg_file"
 		if [ "$dry_run" = "true" ]; then
 			printf '=== would send to %s (%s change(s)) ===\n' "$name" "$n"

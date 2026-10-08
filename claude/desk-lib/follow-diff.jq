@@ -107,6 +107,18 @@ def is_claimed($claimed; $key; $parent):
 
 # A link one hop out can land on another followed session's own ticket;
 # that one is left to the session it belongs to.
+# Whether a session has a ticket: as one of its keys or related keys, or as
+# a child of a key (by its parent too, as is_claimed counts it).
+def has_ticket($e; $maps; $key; $parent):
+	((tracked($e) + own_of($e; $maps)) | index($key)) != null
+	or ($parent != null and (($e.keys // []) | index($parent)) != null);
+
+# The other followed sessions that also have a change's ticket, or for a
+# PR any of its keys: the receiving session is then not alone with it.
+def also_having($sid; $maps; $keys; $parent):
+	[$entries | to_entries[] | select(.key != $sid) | .key as $o | .value as $e
+	 | select(any($keys[]; has_ticket($e; $maps; .; $parent))) | $o];
+
 def scope_of($e; $maps; $claimed):
 	tracked($e) as $t
 	| own_of($e; $maps) as $roots
@@ -345,12 +357,16 @@ scope_maps as $maps
 	| ([ $tev[] | . as $ev
 	     | relation($e; $maps; ($tix[$ev.key] // {key: $ev.key}); $claimed) as $rel
 	     | select($rel != null)
-	     | {at: ($ev.at // $now), ref: $ev.key, title: $ev.title, context: $rel, what: $ev.what, skip: $ev.skip} ]
+	     | also_having($sid; $maps; [$ev.key]; ($tix[$ev.key].parent // null)) as $also
+	     | {at: ($ev.at // $now), ref: $ev.key, title: $ev.title, context: $rel, what: $ev.what, skip: $ev.skip}
+	       + (if ($also | length) > 0 then {also: $also} else {} end) ]
 	   + [ $pev[] | . as $ev
 	       | ([$ev.pr_keys[] | . as $k | select(($scope | index($k)) != null)]) as $hit
 	       | select(($hit | length) > 0)
+	       | also_having($sid; $maps; $ev.pr_keys; null) as $also
 	       | {at: ($ev.at // $now), ref: ("PR " + ($ev.key | sub("^.*#"; "#"))), title: $ev.title,
-	          context: ($hit | join(", ")), what: $ev.what, url: $ev.url, skip: $ev.skip} ]) as $events
+	          context: ($hit | join(", ")), what: $ev.what, url: $ev.url, skip: $ev.skip}
+	         + (if ($also | length) > 0 then {also: $also} else {} end) ]) as $events
 	| [$events[] | select(.skip == null) | del(.skip)] as $new
 	| ($queues[$sid] // {changes: [], dropped: 0}) as $q
 	| (($q.changes // []) + $new | sort_by(.at)) as $all

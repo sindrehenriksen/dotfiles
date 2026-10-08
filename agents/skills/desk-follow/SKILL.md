@@ -36,6 +36,7 @@ All of these change only that local file: no repo, no ticket, nothing anyone els
 - **The session's name is its address.** The follow pass looks up the current name on every run, so renaming the session is fine. If two running sessions share a name, it holds the update rather than guess.
 - **A session that is not running misses nothing.** Its changes queue up, and the next time it runs they arrive as one message.
 - **A new follow, or new keys, starts from now.** Earlier history is not replayed. For anything older, read the tickets directly.
+- **A change can reach more than one session.** A line that says `also followed by <name>` is on a ticket another followed session has too, as a key, a child or a related key, and that session gets the same news.
 - **The follow pass only reads.** It never writes to the tracker or GitHub, and its messages ask the session never to act outward on them.
 
 ## When a `[desk-follow]` message arrives
