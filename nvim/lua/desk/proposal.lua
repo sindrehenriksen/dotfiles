@@ -121,6 +121,13 @@ local function removal_done(item, lines, base, before)
 	return not M.contains(lines, before)
 end
 
+--- Whether `item`'s removal of its `before` is done in `lines`: for a move
+--- or merge, its leaving side, which `proposed_in` does not look at.
+function M.removal_done(item, lines, base)
+	local before = snippet.split_lines(item.before)
+	return #before > 0 and removal_done(item, lines, base, before)
+end
+
 --- Whether `item`'s proposed change is present in `lines`, judged at the
 --- place it applies to rather than anywhere in the file: an insertion's `after` within the block of its landing
 --- anchor (a move or merge at its landing side, not where its `before`

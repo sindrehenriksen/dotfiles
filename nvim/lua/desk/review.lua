@@ -17,6 +17,7 @@
 -- review buffer records nothing. Adjacent suggestions are one diff hunk, so
 -- the decline key (and `<leader>gA`, which takes one) act on a single
 -- suggestion's own lines rather than the whole hunk.
+local apply = require("desk.apply")
 local block = require("desk.block")
 local git = require("desk.git")
 local ledger = require("desk.ledger")
@@ -78,6 +79,7 @@ end
 
 local sessions = {} -- notes bufnr -> session
 local preview -- the overview's preview state, below
+local complete_halves -- a take of half a move finishes it, below
 
 local function live_session(bufnr)
 	local s = bufnr and sessions[bufnr]
@@ -369,7 +371,7 @@ local function entry_lnum(item, ours, merged)
 	if #after > 0 then
 		for _, pos in ipairs(proposal.positions(merged, after)) do
 			for _, h in ipairs(hunks) do
-				if pos >= h[3] and pos <= h[3] + math.max(h[4], 1) - 1 then
+				if pos <= h[3] + math.max(h[4], 1) - 1 and pos + #after - 1 >= h[3] then
 					return math.max(1, math.min(h[2] > 0 and h[1] or h[1] + 1, #ours))
 				end
 			end
@@ -1106,6 +1108,7 @@ function M.open_review(notes_buf)
 		if vim.api.nvim_buf_get_changedtick(notes_buf) == tick and count == "" and line == vim.api.nvim_buf_line_count(notes_buf) then
 			pcall(vim.cmd, string.format("%d,%ddiffget", line, line + 1))
 		end
+		complete_halves(s, pre)
 		note_takes(s, pre)
 		M.refresh_status_line(notes_buf)
 	end, { buffer = notes_buf, desc = "Take the hunk under the cursor (also at the end of the file)" })
@@ -1132,6 +1135,7 @@ function M.open_review(notes_buf)
 				end
 			end
 		end
+		complete_halves(s, pre)
 		note_takes(s, pre)
 		end_take(s, t)
 		M.refresh_status_line(notes_buf)
@@ -1228,9 +1232,12 @@ function M.place_marks(s, ours)
 		local after = snippet.split_lines(item.after)
 		if #after > 0 then
 			for _, pos in ipairs(find_all(review_lines, after)) do
+				-- Any of its lines in a hunk: an `after` with a blank line at
+				-- its edge can have that line matched to one of the notes',
+				-- so the hunk starts below its first line.
 				local inside = false
 				for _, h in ipairs(hunks) do
-					inside = inside or (h[4] > 0 and pos >= h[3] and pos <= h[3] + h[4] - 1)
+					inside = inside or (h[4] > 0 and pos <= h[3] + h[4] - 1 and pos + #after - 1 >= h[3])
 				end
 				if inside then
 					s.marks[item.id] = vim.api.nvim_buf_set_extmark(s.review_buf, MARK_NS, pos - 1, 0, {
@@ -1336,22 +1343,200 @@ function M.item_at(s, line)
 	end
 end
 
+-- A move or merge: it takes lines away in one place and puts them in
+-- another, so it shows as two hunks, and every take or decline acts on both.
+local function two_place(item)
+	return item.kind == "move" or item.kind == "merge"
+end
+
+-- The review-buffer rows of `item`'s added lines: its mark, else an
+-- occurrence of its `after` that a hunk against `notes` overlaps.
+local function landing_range(s, item, notes)
+	local first, last = mark_range(s, item)
+	if first then
+		return first, last
+	end
+	local after = snippet.split_lines(item.after)
+	if #after == 0 then
+		return nil
+	end
+	local review_lines = buf_lines(s.review_buf)
+	local hunks = diff_indices(notes or buf_lines(s.notes_buf), review_lines)
+	for _, pos in ipairs(find_all(review_lines, after)) do
+		for _, h in ipairs(hunks) do
+			if h[4] > 0 and pos <= h[3] + h[4] - 1 and pos + #after - 1 >= h[3] then
+				return pos, pos + #after - 1
+			end
+		end
+	end
+end
+
+-- Replaces lines `first`+1..`last` of the notes with `repl`. Changes made
+-- within one key press are one undo step, so one `u` takes a take back.
+local function set_notes(s, first, last, repl)
+	vim.api.nvim_buf_set_lines(s.notes_buf, first, last, false, repl)
+end
+
+-- Makes the notes match the review across hunk `h` of (notes -> review),
+-- as `dp` there does.
+local function take_hunk(s, h, review_lines)
+	local first = h[2] > 0 and h[1] - 1 or h[1]
+	set_notes(s, first, first + h[2], vim.list_slice(review_lines, h[3], h[3] + h[4] - 1))
+end
+
+-- Takes the hunk holding a move's added lines, or the one holding its
+-- removal, into the notes. Returns whether there was one.
+local function take_landing(s, item)
+	local notes, review_lines = buf_lines(s.notes_buf), buf_lines(s.review_buf)
+	local first, last = landing_range(s, item, notes)
+	if not first then
+		return false
+	end
+	for _, h in ipairs(diff_indices(notes, review_lines)) do
+		if h[4] > 0 and first <= h[3] + h[4] - 1 and last >= h[3] then
+			take_hunk(s, h, review_lines)
+			return true
+		end
+	end
+	return false
+end
+
+local function take_removal(s, item)
+	local notes, review_lines = buf_lines(s.notes_buf), buf_lines(s.review_buf)
+	local start = anchored_start(s, item, notes)
+	if not start then
+		return false
+	end
+	local stop = start + #snippet.split_lines(item.before) - 1
+	for _, h in ipairs(diff_indices(notes, review_lines)) do
+		if h[2] > 0 and start <= h[1] + h[2] - 1 and stop >= h[1] then
+			take_hunk(s, h, review_lines)
+			return true
+		end
+	end
+	return false
+end
+
+-- Takes a whole move or merge as the pass would apply it to the notes
+-- now: both places, blank lines fitted as the proposal fits them, and
+-- nothing of a neighbouring suggestion.
+local function take_whole(s, item)
+	local notes = buf_lines(s.notes_buf)
+	local new, results = apply.apply_file(notes, { item })
+	if results[item.id] ~= "applied" then
+		return false
+	end
+	local hunks = diff_indices(notes, new)
+	for i = #hunks, 1, -1 do
+		local h = hunks[i]
+		local first = h[2] > 0 and h[1] - 1 or h[1]
+		set_notes(s, first, first + h[2], vim.list_slice(new, h[3], h[3] + h[4] - 1))
+	end
+	return #hunks > 0
+end
+
+-- Where a move's lines left the notes, going from `pre` to `now`: the line
+-- that now stands in their place.
+local function removed_line(pre, now)
+	for _, h in ipairs(diff_indices(pre, now)) do
+		if h[2] > 0 and h[4] == 0 then
+			return math.max(1, math.min(h[3] + 1, #now))
+		end
+	end
+	for _, h in ipairs(diff_indices(pre, now)) do
+		if h[2] > 0 then
+			return math.max(1, h[3])
+		end
+	end
+	return 1
+end
+
+local function landing_label(item)
+	local _, land = block.parse_target(item.target)
+	if not land or land.kind == "top" or not land.quote then
+		return "on top"
+	end
+	local q = vim.trim(land.quote)
+	if vim.fn.strchars(q) > 40 then
+		q = vim.fn.strcharpart(q, 0, 39) .. "…"
+	end
+	return (land.kind == "after" and "after " or "under ") .. q
+end
+
+-- The one line saying a take of one place took the other too. `side` is
+-- the place the key acted on, nil when it named neither (the overview).
+local function say_whole(item, side, line)
+	local what = "desk: took the whole " .. item.kind .. ": "
+	local msg
+	if side == "removal" then
+		msg = what .. "removed here, added " .. landing_label(item)
+	elseif side == "landing" then
+		msg = what .. "added here, removed from line " .. line
+	else
+		msg = what .. "removed from line " .. line .. ", added " .. landing_label(item)
+	end
+	vim.notify(msg, vim.log.levels.INFO)
+end
+
+-- After a hunk take (`dp`, `do`) that went from `pre` to the notes now:
+-- a move or merge just taken in one place only is taken in the other
+-- too.
+complete_halves = function(s, pre)
+	for _, item in pairs(s.shown) do
+		if two_place(item) then
+			local now = buf_lines(s.notes_buf)
+			local landed, removed = proposal.proposed_in(item, now, s.base), proposal.removal_done(item, now, s.base)
+			if removed and not landed and not proposal.removal_done(item, pre, s.base) then
+				if take_landing(s, item) then
+					say_whole(item, "removal")
+				end
+			elseif landed and not removed and not proposal.proposed_in(item, pre, s.base) then
+				if take_removal(s, item) then
+					say_whole(item, "landing", removed_line(now, buf_lines(s.notes_buf)))
+				end
+			end
+		end
+	end
+end
+
 -- Declines `item` in the review buffer: its added lines go (an edit's
 -- `before` returns in their place) and its deleted lines come back — an
--- ordinary edit, so `u` undoes it.
+-- ordinary edit, so `u` undoes it. A move that took a blank line along
+-- brings it back too, so its old place reads as the notes do.
 local function decline_item(s, item)
 	local buf = s.review_buf
 	local before = snippet.split_lines(item.before)
 	local changed = false
-	local first, last = mark_range(s, item)
+	local first, last
+	if two_place(item) then
+		first, last = landing_range(s, item)
+	else
+		first, last = mark_range(s, item)
+	end
 	if first then
 		vim.api.nvim_buf_set_lines(buf, first - 1, last, false, item.kind == "edit" and before or {})
 		changed = true
 	end
-	if leaves_before(item) then
+	-- A move whose removal is already in the notes, by hand or by an older
+	-- take: declining it keeps the notes as they are, so only its landing goes.
+	local half = two_place(item) and proposal.removal_done(item, buf_lines(s.notes_buf), s.base)
+	if leaves_before(item) and not half then
 		local row = del_row(s, item)
 		if row then
-			vim.api.nvim_buf_set_lines(buf, row, row, false, before)
+			local restore = before
+			local leave = block.parse_target(item.target)
+			local at = item.kind == "move" and s.base and leave and leave.kind == "at" and block.find_anchor(s.base, leave)
+			local blank = at and apply.bounding_blank(s.base, at + 1, at + #before)
+			local review_lines = buf_lines(buf)
+			local function is_blank(l)
+				return l ~= nil and l:match("^%s*$") ~= nil
+			end
+			if blank and blank == at + #before + 1 and not is_blank(review_lines[row + 1]) then
+				restore = vim.list_extend(vim.deepcopy(before), { "" })
+			elseif blank and blank == at and not is_blank(review_lines[row]) then
+				restore = vim.list_extend({ "" }, before)
+			end
+			vim.api.nvim_buf_set_lines(buf, row, row, false, restore)
 			changed = true
 		end
 	end
@@ -1360,9 +1545,22 @@ end
 
 -- Takes `item` into the user's notes buffer: its lines go in at the place the
 -- review shows them, its deleted lines go out of their anchored occurrence.
+-- A move or merge is taken in both places; one already taken in one place
+-- gets the other. The second result is whether both went in at once.
 local function take_item(s, item)
 	local nbuf = s.notes_buf
 	local notes = buf_lines(nbuf)
+	if two_place(item) then
+		local landed, removed = proposal.proposed_in(item, notes, s.base), proposal.removal_done(item, notes, s.base)
+		if not landed and not removed then
+			return take_whole(s, item), true
+		elseif removed and not landed then
+			return take_landing(s, item)
+		elseif landed and not removed then
+			return take_removal(s, item)
+		end
+		return false
+	end
 	local before = snippet.split_lines(item.before)
 	local after = snippet.split_lines(item.after)
 	local changed = false
@@ -1438,13 +1636,16 @@ local function diff_act(s, verb)
 		return false, "no suggestion under the cursor"
 	end
 	if verb == "diffput" then
+		complete_halves(s, before_notes)
 		note_takes(s, before_notes, acted)
 	end
 	return true
 end
 
--- Declines or takes `item`, as the decline and take-one keys do.
-local function act_on(s, item, verb)
+-- Declines or takes `item`, as the decline and take-one keys do. `side`
+-- is the place of a move or merge the key acted on ("landing" or
+-- "removal"), nil when it named neither.
+local function act_on(s, item, verb, side)
 	if verb == "decline" then
 		if not decline_item(s, item) then
 			return false, "nothing to decline here"
@@ -1452,8 +1653,12 @@ local function act_on(s, item, verb)
 		return true
 	end
 	local pre = buf_lines(s.notes_buf)
-	if not take_item(s, item) then
-		return false, "could not take this suggestion"
+	local ok, whole = take_item(s, item)
+	if not ok then
+		return false, "could not take this suggestion: its place in your notes has changed"
+	end
+	if whole then
+		say_whole(item, side, removed_line(pre, buf_lines(s.notes_buf)))
 	end
 	note_takes(s, pre, item)
 	return true
@@ -1466,11 +1671,11 @@ local function act_on_item(s, verb)
 	if win == -1 then
 		return false, "review buffer has no window"
 	end
-	local item = M.item_at(s, vim.api.nvim_win_get_cursor(win)[1])
+	local item, how = M.item_at(s, vim.api.nvim_win_get_cursor(win)[1])
 	if not item then
 		return nil
 	end
-	return act_on(s, item, verb)
+	return act_on(s, item, verb, how == "add" and "landing" or "removal")
 end
 
 --- The decline key: makes the suggestion under the cursor in the review
@@ -1646,7 +1851,7 @@ function M.item_in_notes_hunk(s, line)
 			pos = row + 0.5
 		end
 		if pos then
-			found[#found + 1] = { item = r.item, pos = pos }
+			found[#found + 1] = { item = r.item, pos = pos, side = pos % 1 == 0 and "landing" or "removal" }
 		end
 	end
 	table.sort(found, function(a, b)
@@ -1655,7 +1860,7 @@ function M.item_in_notes_hunk(s, line)
 		end
 		return a.item.id < b.item.id
 	end)
-	return found[1] and found[1].item, #found
+	return found[1] and found[1].item, #found, found[1] and found[1].side
 end
 
 --- `<leader>gA` (`verb` "take") or `<leader>gD` ("decline") in the notes
@@ -1673,12 +1878,12 @@ function M.notes_act(notes_buf, verb)
 	vim.api.nvim_win_call(win, function()
 		vim.cmd("diffupdate")
 	end)
-	local item, n = M.item_in_notes_hunk(s, vim.api.nvim_win_get_cursor(win)[1])
+	local item, n, side = M.item_in_notes_hunk(s, vim.api.nvim_win_get_cursor(win)[1])
 	if not item then
 		return false, "no suggestion in a hunk here"
 	end
 	local t = begin_take(s)
-	local ok, why = act_on(s, item, verb)
+	local ok, why = act_on(s, item, verb, side)
 	if not ok then
 		return false, why
 	end
@@ -1772,7 +1977,7 @@ function M.remaining(s)
 				lnum = positions[1] or 1
 				for _, pos in ipairs(positions) do
 					for _, h in ipairs(hunks) do
-						if pos >= h[3] and pos <= h[3] + math.max(h[4], 1) - 1 then
+						if pos <= h[3] + math.max(h[4], 1) - 1 and pos + #after - 1 >= h[3] then
 							lnum = pos
 							notes_lnum = h[2] > 0 and h[1] or h[1] + 1
 						end

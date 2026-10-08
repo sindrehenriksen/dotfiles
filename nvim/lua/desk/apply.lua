@@ -82,6 +82,7 @@ local function bounding_blank(lines, first, last)
 	end
 	return nil
 end
+M.bounding_blank = bounding_blank
 
 --- Resolves a before-shaped (leave/removal) anchor against `lines`,
 --- distinguishing "the anchor's own quote is gone entirely" (`"bad_anchor"`

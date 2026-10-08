@@ -1866,6 +1866,133 @@ do
 	assert_true("the top bar still fits in 120 columns", vim.fn.strchars("99 left (99 saved) · " .. review.KEY_HINT) <= 120)
 end
 
+print("\n=== a move is taken or declined whole, from either of its hunks ===")
+do
+	local NOTES = { "Section A", "- a1", "", "Section B", "- b1", "", "Section C", "- c1", "- c2", "- c3", "", "Section D", "- d1" }
+	local MOVE = {
+		id = "mv",
+		file = "notes.md",
+		kind = "move",
+		target = { { at = "Section B" }, { under = "Section C" } },
+		before = "Section B\n- b1",
+		after = "Section B\n- b1",
+		source = "notes",
+		headline = "move B under C",
+	}
+	local function setup()
+		local r = new_repo(NOTES)
+		local sha = build(r, "2026-10-01", { vim.deepcopy(MOVE) })
+		local nb = open_notes(r)
+		review.attach(nb)
+		assert_true("review opens", review.open_review(nb))
+		local rb = review_buf_of(nb)
+		return r, nb, rb, vim.fn.bufwinid(rb), vim.fn.bufwinid(nb), proposal.lines_at(r, sha, "notes.md")
+	end
+	local said = {}
+	local orig_notify = vim.notify
+	vim.notify = function(m)
+		said[#said + 1] = m
+	end
+	local function last_said()
+		return said[#said] or ""
+	end
+	local function on(win, buf, text, keys)
+		go_to(win, buf, text)
+		vim.cmd("diffupdate")
+		vim.cmd("normal " .. keys)
+	end
+
+	-- Each way of taking one hunk, from the landing or from the removal.
+	local takes = {
+		{ "dp on the landing, in the split", "landing", function(_, rb, rw) on(rw, rb, "- b1", "dp") end },
+		{ "dp on the removal, in the split", "removal", function(_, rb, rw) on(rw, rb, "Section C", "dp") end },
+		{ "do on the removal, in the notes", "removal", function(nb, _, _, nw) on(nw, nb, "Section B", "do") end },
+		{ "do on the landing, in the notes", "landing", function(nb, _, _, nw) on(nw, nb, "Section D", "do") end },
+		{ "␣gA on the landing, in the split", "landing", function(_, rb, rw) on(rw, rb, "- b1", "1" .. vim.g.mapleader .. "gA") end },
+		{ "␣gA on the removal, in the notes", "removal", function(nb, _, _, nw) on(nw, nb, "Section B", "1" .. vim.g.mapleader .. "gA") end },
+		{ "t in the overview", nil, function(nb)
+			review.overview(nb)
+			vim.api.nvim_set_current_win(vim.fn.getqflist({ winid = 0 }).winid)
+			vim.cmd("normal t")
+		end },
+	}
+	for _, t in ipairs(takes) do
+		local desc, side, act = t[1], t[2], t[3]
+		local r, nb, rb, rw, nw, want = setup()
+		act(nb, rb, rw, nw)
+		assert_eq(desc .. ": takes the whole move", want, lines_of(nb))
+		local msg = last_said()
+		if side == "removal" then
+			assert_eq(desc .. ": and says so", "desk: took the whole move: removed here, added under Section C", msg)
+		elseif side == "landing" then
+			assert_true(desc .. ": and says so (" .. msg .. ")", msg:match("^desk: took the whole move: added here, removed from line %d+$") ~= nil)
+		else
+			assert_true(desc .. ": and says so (" .. msg .. ")", msg:match("^desk: took the whole move: removed from line %d+, added under Section C$") ~= nil)
+		end
+		vim.api.nvim_set_current_win(rw)
+		vim.cmd("write")
+		assert_eq(desc .. ": recorded taken on the save", true, ledger.taken_by_id(ledger.read(r))[id_by_headline(r, "move B under C")] ~= nil)
+		assert_eq(desc .. ": and not declined", {}, declined_ids(r))
+	end
+
+	-- One u in the notes window takes a do of half a move back whole.
+	local _, nb, _, _, nw = setup()
+	on(nw, nb, "Section B", "do")
+	vim.cmd("normal u")
+	assert_eq("one u in the notes undoes the whole move a do took", NOTES, lines_of(nb))
+
+	-- Each way of declining it, from either side: the split ends up as the
+	-- notes are, so no hunk is left behind.
+	local declines = {
+		{ "␣gD on the landing, in the split", function(_, rb, rw) on(rw, rb, "- b1", "1" .. vim.g.mapleader .. "gD") end },
+		{ "␣gD on the removal, in the notes", function(nb, _, _, nw) on(nw, nb, "Section B", "1" .. vim.g.mapleader .. "gD") end },
+		{ "x in the overview", function(nb)
+			review.overview(nb)
+			vim.api.nvim_set_current_win(vim.fn.getqflist({ winid = 0 }).winid)
+			vim.cmd("normal x")
+		end },
+	}
+	for _, d in ipairs(declines) do
+		local desc, act = d[1], d[2]
+		local r, nb2, rb, rw, nw = setup()
+		act(nb2, rb, rw, nw)
+		assert_eq(desc .. ": the split is the notes again, both places", NOTES, lines_of(rb))
+		assert_eq(desc .. ": the notes are untouched", NOTES, lines_of(nb2))
+		vim.api.nvim_set_current_win(rw)
+		vim.cmd("write")
+		assert_eq(desc .. ": recorded declined on the save", { id_by_headline(r, "move B under C") }, declined_ids(r))
+	end
+
+	-- Half a move already taken by hand: taking the landing finishes it.
+	local _, nb3, rb3, rw3, _, want3 = setup()
+	vim.api.nvim_buf_set_lines(nb3, 3, 6, false, {})
+	go_to(rw3, rb3, "- b1")
+	assert_true("␣gA on the landing of a move whose removal is done", review.take(rb3))
+	assert_eq("adds just the landing", want3, lines_of(nb3))
+
+	-- The same from the overview, both ways.
+	for _, key in ipairs({ "t", "x" }) do
+		local r4, nb4, rb4, _, _, want4 = setup()
+		vim.api.nvim_buf_set_lines(nb4, 3, 6, false, {})
+		local half = lines_of(nb4)
+		review.overview(nb4)
+		local qw4 = vim.fn.getqflist({ winid = 0 }).winid
+		vim.api.nvim_set_current_win(qw4)
+		vim.cmd("normal " .. key)
+		assert_eq(key .. " in the overview on a half-taken move: the list drops it", 0, #vim.fn.getqflist())
+		if key == "t" then
+			assert_eq("t adds just the landing", want4, lines_of(nb4))
+		else
+			assert_eq("x leaves the notes as they are", half, lines_of(nb4))
+			assert_eq("and the split matches them: no hunk left", half, lines_of(rb4))
+			vim.api.nvim_set_current_win(vim.fn.bufwinid(rb4))
+			vim.cmd("write")
+			assert_eq("recorded declined", { id_by_headline(r4, "move B under C") }, declined_ids(r4))
+		end
+	end
+	vim.notify = orig_notify
+end
+
 print(string.format("\n=== summary: %d passed, %d failed ===", pass, fail))
 if fail > 0 then
 	os.exit(1)
