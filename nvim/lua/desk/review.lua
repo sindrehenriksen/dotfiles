@@ -258,7 +258,10 @@ local function first_hunk(win)
 	end)
 end
 
-local function close_session(s)
+-- `quiet` for a close that hands over to another review rather than ending
+-- the user's: the notes the review started from are not put back.
+local function close_session(s, quiet)
+	s.quiet = quiet
 	sessions[s.notes_buf] = nil
 	if vim.api.nvim_buf_is_valid(s.review_buf) then
 		pcall(vim.api.nvim_buf_delete, s.review_buf, { force = true })
@@ -433,6 +436,89 @@ local function open_file_buf(repo, file)
 	end
 	M.attach(b)
 	return b
+end
+
+-- Asks about the split's unsaved declines before it goes; true to go on.
+local function settle_declines(s)
+	if not vim.bo[s.review_buf].modified then
+		return true
+	end
+	local choice = M.confirm("The review split has unsaved declines.", "&Save them\n&Discard them\n&Cancel")
+	if choice == 1 then
+		local saved, why = M.save_review(s)
+		if not saved then
+			return false, why
+		end
+		return true
+	end
+	if choice == 2 then
+		vim.bo[s.review_buf].modified = false
+		return true
+	end
+	return false, "kept the review split: it has unsaved declines"
+end
+
+--- Moves the review from `from_buf`'s file to `file` of the same repo, in
+--- the window the notes were in: unsaved declines ask first (cancelling
+--- keeps the review), and the review opens over the other file. When it
+--- ends, that window shows the notes the move started from again, as they
+--- were. Returns true, or false, why.
+function M.move_review(from_buf, file)
+	local repo = M.repo_context(from_buf)
+	if not repo then
+		return false, "not in a git repo"
+	end
+	local s = live_session(from_buf)
+	if s then
+		local ok, why = settle_declines(s)
+		if not ok then
+			return false, why
+		end
+	end
+	local win = vim.fn.bufwinid(from_buf)
+	if win == -1 then
+		win = vim.api.nvim_get_current_win()
+	end
+	local back = s and s.return_to
+	if not back then
+		back = { buf = from_buf, view = vim.api.nvim_win_call(win, vim.fn.winsaveview) }
+	end
+	if s then
+		close_session(s, true)
+	end
+	local b = vim.fn.bufadd(repo .. "/" .. file)
+	vim.fn.bufload(b)
+	if not vim.api.nvim_win_is_valid(win) then
+		win = vim.api.nvim_get_current_win()
+	end
+	vim.api.nvim_win_set_buf(win, b)
+	vim.api.nvim_set_current_win(win)
+	M.attach(b)
+	local ok, why = M.open_review(b)
+	local ns = sessions[b]
+	if ns and back.buf ~= b then
+		ns.return_to = back
+	end
+	return ok, why
+end
+
+-- Puts back the notes a moved review started from, in the window that
+-- showed the other file, once the review has ended by the user's hand.
+local function return_home(s)
+	local back = s.return_to
+	if s.quiet or not back or sessions[s.notes_buf] or not vim.api.nvim_buf_is_valid(back.buf) then
+		return
+	end
+	local win = vim.fn.win_findbuf(s.notes_buf)[1]
+	if not win or #vim.fn.win_findbuf(back.buf) > 0 then
+		return
+	end
+	vim.api.nvim_win_set_buf(win, back.buf)
+	if back.view then
+		vim.api.nvim_win_call(win, function()
+			vim.fn.winrestview(back.view)
+		end)
+	end
 end
 
 -- ---------------------------------------------------------------------------
@@ -777,6 +863,7 @@ function M.open_review(notes_buf)
 		return false, "no proposal yet"
 	end
 	local existing = sessions[notes_buf]
+	local carried
 	if existing and vim.api.nvim_buf_is_valid(existing.review_buf) then
 		if existing.sha == p.sha then
 			local win = vim.fn.bufwinid(existing.review_buf)
@@ -801,7 +888,8 @@ function M.open_review(notes_buf)
 				return false, "kept the review split: it has unsaved declines"
 			end
 		end
-		close_session(existing)
+		carried = existing.return_to
+		close_session(existing, true)
 	end
 
 	local ours = buf_lines(notes_buf)
@@ -820,8 +908,7 @@ function M.open_review(notes_buf)
 			string.format("desk: nothing to review in %s; %d in %s", file, elsewhere[1].count, elsewhere[1].file),
 			vim.log.levels.INFO
 		)
-		local other = open_file_buf(repo, elsewhere[1].file)
-		return M.open_review(other)
+		return M.move_review(notes_buf, elsewhere[1].file)
 	end
 
 	local notes_win = vim.fn.bufwinid(notes_buf)
@@ -857,6 +944,7 @@ function M.open_review(notes_buf)
 		conflicts = conflicts,
 		base = base,
 		takes = {},
+		return_to = carried,
 	}
 	sessions[notes_buf] = s
 	M.recount_saved(s)
@@ -913,6 +1001,10 @@ function M.open_review(notes_buf)
 				pcall(vim.api.nvim_del_augroup_by_name, "desk_review_notes_" .. notes_buf)
 			end
 			tidy_notes_windows(s)
+			-- The window layout can't change while a buffer is being wiped.
+			vim.schedule(function()
+				return_home(s)
+			end)
 		end,
 	})
 	-- Plain `do` on the last line does nothing when a suggestion is appended
@@ -981,6 +1073,9 @@ function M.open_review(notes_buf)
 	vim.keymap.set("n", "<leader>gc", function()
 		report(M.commit_from_review(review_buf))
 	end, { buffer = review_buf, desc = "Save the declines, then commit your notes" })
+	vim.keymap.set("n", "<leader>gR", function()
+		report(M.switch_review(review_buf))
+	end, { buffer = review_buf, desc = "Move the review to the other file once this one has none left" })
 	map_next_change(review_buf)
 	map_next_change(notes_buf)
 	for lhs, verb in pairs({ ["<leader>gA"] = "take", ["<leader>gD"] = "decline" }) do
@@ -1364,6 +1459,24 @@ function M.undo(review_buf)
 	return true
 end
 
+--- The review key in the split: once this file has no suggestion left,
+--- moves the review to the other file that still has some.
+function M.switch_review(review_buf)
+	local s = session_for_review_buf(review_buf)
+	if not s then
+		return false, "not a desk review buffer"
+	end
+	local other = M.pending_elsewhere(s.repo, s.file)[1]
+	local left = M.left(s)
+	if not other then
+		return false, left > 0 and "nothing waits in the other files" or "no suggestions left"
+	end
+	if left > 0 then
+		return false, string.format("%d left here first; then ␣gR moves to %s", left, other.file)
+	end
+	return M.move_review(s.notes_buf, other.file)
+end
+
 -- ---------------------------------------------------------------------------
 -- The same keys from the notes window. The cursor there can't sit on a
 -- suggestion's own lines (they are filler on that side), so it names a
@@ -1742,9 +1855,21 @@ function M.qf_jump()
 			vim.notify("desk: your notes are not showing in any window", vim.log.levels.WARN)
 			return
 		end
-		-- The other file: open it above, with its own review split above it.
-		local b = open_file_buf(repo, file)
-		M.open_review(b)
+		-- The other file: the review moves there, or with none open it
+		-- opens above, with its own review split above it.
+		local from = ctx.desk_review_buf and session_for_review_buf(ctx.desk_review_buf)
+		local b
+		if from then
+			local ok, why = M.move_review(from.notes_buf, file)
+			if not ok then
+				vim.notify("desk: " .. tostring(why), vim.log.levels.WARN)
+				return
+			end
+			b = vim.fn.bufnr(repo .. "/" .. file)
+		else
+			b = open_file_buf(repo, file)
+			M.open_review(b)
+		end
 		win = vim.fn.bufwinid(b)
 		item.bufnr = b
 	end
@@ -2220,6 +2345,7 @@ function M.recount_saved(s)
 		n = n + 1
 	end
 	s.saved = n
+	s.elsewhere = M.pending_elsewhere(s.repo, s.file, p)[1]
 	return n
 end
 
@@ -2266,7 +2392,8 @@ function M.refresh_status_line(bufnr, recount)
 	if s then
 		local rw = vim.fn.bufwinid(s.review_buf)
 		if rw ~= -1 then
-			vim.wo[rw].winbar = M.KEY_HINT .. "%=" .. bar_text(status.live_count(left, s.saved))
+			local other = s.elsewhere and string.format("%s: %d more ␣gR · ", s.elsewhere.file, s.elsewhere.count) or ""
+			vim.wo[rw].winbar = M.KEY_HINT .. "%=" .. bar_text(other .. status.live_count(left, s.saved))
 		end
 	end
 end

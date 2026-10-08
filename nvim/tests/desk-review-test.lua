@@ -787,6 +787,79 @@ do
 	vim.cmd("cclose")
 end
 
+print("\n=== moving the review between files, and back to the notes it started from ===")
+do
+	local function leader(keys)
+		vim.cmd("normal 1" .. vim.g.mapleader .. keys)
+	end
+	local said = {}
+	local orig_notify, orig_confirm = vim.notify, review.confirm
+	vim.notify = function(m)
+		said[#said + 1] = m
+	end
+	local r = new_repo(BASE)
+	build(r, "2026-10-01", {
+		item("n1"),
+		item("rd", { file = "reading.md", kind = "new", after = "READ paper", headline = "read paper" }),
+	})
+	local nb = open_notes(r)
+	review.attach(nb)
+	local home = vim.api.nvim_get_current_win()
+	vim.api.nvim_win_set_cursor(home, { 3, 0 })
+	assert_true("review opens", review.open_review(nb))
+	local rb = review_buf_of(nb)
+	vim.api.nvim_win_set_cursor(home, { 3, 0 })
+	vim.api.nvim_set_current_win(vim.fn.bufwinid(rb))
+	leader("gR")
+	assert_eq("␣gR in the split with suggestions left says so", "desk: 1 left here first; then ␣gR moves to reading.md", said[#said])
+	assert_eq("and stays", rb, review_buf_of(nb))
+	go_to(vim.fn.bufwinid(rb), rb, "NEWS n1")
+	review.decline(rb)
+	local asked
+	review.confirm = function()
+		asked = true
+		return 3
+	end
+	leader("gR")
+	assert_true("with unsaved declines it asks", asked)
+	assert_eq("cancelling keeps the review", rb, review_buf_of(nb))
+	review.confirm = function()
+		return 1
+	end
+	leader("gR")
+	assert_eq("saving them records the decline", { id_by_headline(r, "headline n1") }, declined_ids(r))
+	local rrb = review_buf_of(nb)
+	assert_true("the review is now of reading.md", rrb ~= nil and vim.api.nvim_buf_get_name(rrb):match("reading.md$") ~= nil)
+	assert_true("shown where the notes were", vim.api.nvim_buf_get_name(vim.api.nvim_win_get_buf(home)):match("reading.md$") ~= nil)
+	assert_eq("two windows, as before", 2, #vim.api.nvim_tabpage_list_wins(0))
+	vim.api.nvim_set_current_win(vim.fn.bufwinid(rrb))
+	vim.cmd("quit")
+	vim.wait(100, function()
+		return vim.api.nvim_win_get_buf(home) == nb
+	end)
+	assert_eq(":q of the moved review leaves the notes it started from", nb, vim.api.nvim_win_get_buf(home))
+	assert_eq("as they were", 3, vim.api.nvim_win_get_cursor(home)[1])
+	assert_eq("in one window", 1, #vim.api.nvim_tabpage_list_wins(0))
+
+	-- started from notes.md with nothing in it: the key goes to reading.md,
+	-- and :q in the reading.md window still ends in notes.md
+	local r2 = new_repo(BASE)
+	build(r2, "2026-10-01", { item("rd", { file = "reading.md", kind = "new", after = "READ paper", headline = "read paper" }) })
+	local nb2 = open_notes(r2)
+	review.attach(nb2)
+	local home2 = vim.api.nvim_get_current_win()
+	assert_true("the key opens reading.md's review", review.open_review(nb2))
+	assert_eq("in the same two windows", 2, #vim.api.nvim_tabpage_list_wins(0))
+	vim.api.nvim_set_current_win(home2)
+	vim.cmd("quit")
+	vim.wait(100, function()
+		return vim.api.nvim_get_current_buf() == nb2
+	end)
+	assert_eq(":q in the reading.md window leaves notes.md", nb2, vim.api.nvim_get_current_buf())
+	assert_eq("in one window", 1, #vim.api.nvim_tabpage_list_wins(0))
+	vim.notify, review.confirm = orig_notify, orig_confirm
+end
+
 print("\n=== the review key asks before discarding unsaved declines ===")
 do
 	local function setup()
@@ -903,7 +976,7 @@ do
 		local text = string.format("%d left (%d saved)", n, saved)
 		local notes_bar, review_bar = bars()
 		assert_eq(desc .. ": the notes bar has its keys, then " .. text .. " on the right", review.NOTES_KEY_HINT .. "%=" .. text, notes_bar)
-		assert_eq(desc .. ": the review bar has its keys, then the same text on the right", review.KEY_HINT .. "%=" .. text, review_bar)
+		assert_eq(desc .. ": the review bar has its keys, then what waits in the other file and the same text", review.KEY_HINT .. "%=reading.md: 1 more ␣gR · " .. text, review_bar)
 	end
 	assert_true("before a review: the recorded count, both files", vim.wo[win].winbar:match("%(4 untaken%)") ~= nil)
 	assert_true("the keys still being learned on the left, the status on the right", vim.wo[win].winbar:match("^" .. vim.pesc(review.NOTES_IDLE_HINT) .. "%%=") ~= nil)
