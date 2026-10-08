@@ -440,8 +440,8 @@ local function mapped(buf, lhs)
 	return false
 end
 assert_true("the decline key is mapped in the review buffer", mapped(rb, "<leader>gD"))
-assert_true("and not in the notes buffer", not mapped(nb7, "<leader>gD"))
-assert_true("take-one is mapped in the review buffer only", mapped(rb, "<leader>gA") and not mapped(nb7, "<leader>gA"))
+assert_true("and in the notes buffer while the review is open", mapped(nb7, "<leader>gD"))
+assert_true("take-one is mapped in both", mapped(rb, "<leader>gA") and mapped(nb7, "<leader>gA"))
 assert_true("dp is the take in the review buffer", vim.api.nvim_buf_call(rb, function()
 	return vim.fn.maparg("dp", "n", false, true).buffer == 1
 end))
@@ -990,6 +990,95 @@ do
 		review.attach(b)
 		return vim.fn.maparg("]c", "n", false, true).buffer ~= 1 and vim.fn.maparg("n", "n", false, true).buffer ~= 1
 	end)())
+end
+
+print("\n=== from the notes window, ␣gA and ␣gD act on the hunk's suggestion and u undoes them ===")
+do
+	local function leader(keys)
+		-- :normal can't start with a space; a count of 1 can
+		vim.cmd("normal 1" .. vim.g.mapleader .. keys)
+	end
+	local r = new_repo(BASE)
+	build(r, "2026-10-01", {
+		item("n1"),
+		item("n2"),
+		item("a1", { kind = "add", target = { under = "Section B" }, after = "  added B", source = "", headline = "add B" }),
+	})
+	local nb = open_notes(r)
+	review.attach(nb)
+	assert_true("review opens", review.open_review(nb))
+	local rb = review_buf_of(nb)
+	local rw, nw = vim.fn.bufwinid(rb), vim.fn.bufwinid(nb)
+	local merged = lines_of(rb)
+	local top, second = merged[1], merged[2]
+	local said = {}
+	local orig = vim.notify
+	vim.notify = function(m)
+		said[#said + 1] = m
+	end
+	local function bar_count()
+		return vim.wo[nw].winbar:match("%%=(%d+ left)")
+	end
+
+	vim.api.nvim_set_current_win(nw)
+	vim.api.nvim_win_set_cursor(nw, { 1, 0 })
+	leader("gD")
+	assert_true("␣gD below the filler declines the topmost suggestion of that hunk", line_of(rb, top) == nil and line_of(rb, second) ~= nil)
+	assert_eq("and says how many are left in it", "desk: 1 more in this hunk", said[#said])
+	assert_eq("the count moves", "2 left", bar_count())
+	assert_eq("the notes are untouched", BASE, lines_of(nb))
+	leader("gD")
+	assert_true("pressed again, it declines the next", line_of(rb, second) == nil)
+	vim.cmd("normal u")
+	assert_true("u in the notes window undoes the latest decline made there", line_of(rb, second) ~= nil and line_of(rb, top) == nil)
+	vim.cmd("normal u")
+	assert_eq("and then the one before", merged, lines_of(rb))
+	assert_eq("the count is back", "3 left", bar_count())
+	assert_eq("the notes are still untouched", BASE, lines_of(nb))
+
+	vim.api.nvim_win_set_cursor(nw, { 1, 0 })
+	leader("gA")
+	assert_eq("␣gA takes just the topmost into the notes", { top, "Section A" }, vim.list_slice(lines_of(nb), 1, 2))
+	assert_eq("a take counts as done", "2 left", bar_count())
+	vim.bo[nb].undolevels = vim.bo[nb].undolevels -- a keypress of its own
+	vim.api.nvim_buf_set_lines(nb, 2, 3, false, { "  existing, edited" })
+	vim.cmd("normal u")
+	assert_eq("u after an edit of the user's own undoes that edit first", { top, "Section A", "  existing" }, vim.list_slice(lines_of(nb), 1, 3))
+	vim.cmd("normal u")
+	assert_eq("then the take", BASE, lines_of(nb))
+	assert_eq("which is no longer counted as done", "3 left", bar_count())
+
+	assert_eq("a line next to no hunk names no suggestion", { false, "no suggestion in a hunk here" }, (function()
+		vim.api.nvim_win_set_cursor(nw, { 2, 0 })
+		return { review.notes_act(nb, "decline") }
+	end)())
+	go_to(nw, nb, "  other")
+	leader("gD")
+	assert_true("above a filler at the end, ␣gD declines that suggestion", line_of(rb, "  added B") == nil)
+	vim.api.nvim_set_current_win(rw)
+	vim.cmd("write")
+	assert_eq("the split's save records it", { id_by_headline(r, "add B") }, declined_ids(r))
+	vim.cmd("quit")
+	assert_true("after the review the notes buffer has no ␣gD", vim.fn.maparg(vim.g.mapleader .. "gD", "n", false, true).buffer ~= 1)
+	assert_true("and u is plain undo again", vim.fn.maparg("u", "n", false, true).buffer ~= 1)
+	vim.notify = orig
+
+	-- a removal: the cursor is on its own line in the notes
+	local r2 = new_repo({ "Section A", "  existing", "  - stale", "Section B", "  other" })
+	build(r2, "2026-10-01", {
+		item("rm", { kind = "remove", target = { at = "  - stale" }, before = "  - stale", after = "", source = "notes", headline = "drop stale" }),
+	})
+	local nb2 = open_notes(r2)
+	review.attach(nb2)
+	assert_true("review opens", review.open_review(nb2))
+	local rb2 = review_buf_of(nb2)
+	go_to(vim.fn.bufwinid(nb2), nb2, "  - stale")
+	leader("gD")
+	assert_true("␣gD on a removal's line brings it back in the split", line_of(rb2, "  - stale") ~= nil)
+	vim.cmd("normal u")
+	go_to(vim.fn.bufwinid(nb2), nb2, "  - stale")
+	leader("gA")
+	assert_eq("␣gA there takes the removal", { "Section A", "  existing", "Section B", "  other" }, lines_of(nb2))
 end
 
 print("\n=== dp in the review split takes the hunk, recorded like do from the notes side ===")

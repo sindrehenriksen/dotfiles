@@ -78,6 +78,19 @@ end
 
 local sessions = {} -- notes bufnr -> session
 
+local function live_session(bufnr)
+	local s = bufnr and sessions[bufnr]
+	if s and vim.api.nvim_buf_is_valid(s.review_buf) then
+		return s
+	end
+end
+
+local function report(ok, err_or_result)
+	if not ok then
+		vim.notify("desk: " .. tostring(err_or_result), vim.log.levels.WARN)
+	end
+end
+
 local function session_for_review_buf(buf)
 	for _, s in pairs(sessions) do
 		if s.review_buf == buf then
@@ -203,7 +216,16 @@ end
 -- more recent one, and plain `u` undoes it.
 -- ---------------------------------------------------------------------------
 
+-- Starts a new undo block in `buf`: edits made through the API with no
+-- keypress between them otherwise join one block, and one `undo` would
+-- take back both acts.
+local function undo_break(buf)
+	vim.bo[buf].undolevels = vim.bo[buf].undolevels
+end
+
 local function begin_take(s)
+	undo_break(s.notes_buf)
+	undo_break(s.review_buf)
 	return {
 		tick = vim.api.nvim_buf_get_changedtick(s.notes_buf),
 		notes_pre = undo_seq(s.notes_buf),
@@ -212,7 +234,7 @@ local function begin_take(s)
 	}
 end
 
-local function end_take(s, t)
+local function end_take(s, t, stack)
 	if vim.api.nvim_buf_get_changedtick(s.notes_buf) == t.tick then
 		return
 	end
@@ -224,7 +246,8 @@ local function end_take(s, t)
 		end
 	end
 	t.pending = nil
-	s.takes[#s.takes + 1] = t
+	stack = stack or s.takes
+	stack[#stack + 1] = t
 end
 
 local function first_hunk(win)
@@ -736,7 +759,7 @@ end
 -- only the window key that leaves it.
 M.KEY_HINT = "n/N next · dp take · ␣gA one · ␣gD decline · u undo · zo/zc/zR/zM fold · C-n down · ␣go list"
 -- The notes window's keys while a review is open.
-M.NOTES_KEY_HINT = "do take · u undo · C-t up"
+M.NOTES_KEY_HINT = "n/N next · do take · ␣gA one · ␣gD decline · u undo · C-t up"
 -- And with no review open, the desk keys still being learned.
 M.NOTES_IDLE_HINT = "␣gR review · ␣gx open/jump · ␣go list"
 
@@ -956,6 +979,14 @@ function M.open_review(notes_buf)
 	end, { buffer = review_buf, desc = "Overview: remaining suggestions" })
 	map_next_change(review_buf)
 	map_next_change(notes_buf)
+	for lhs, verb in pairs({ ["<leader>gA"] = "take", ["<leader>gD"] = "decline" }) do
+		vim.keymap.set("n", lhs, function()
+			report(M.notes_act(notes_buf, verb))
+		end, { buffer = notes_buf, desc = verb == "take" and "Take just the suggestion in this hunk" or "Decline the suggestion in this hunk (u undoes; :w in the split records)" })
+	end
+	vim.keymap.set("n", "u", function()
+		M.notes_undo(notes_buf)
+	end, { buffer = notes_buf, desc = "Undo the latest take or decline made here, else plain undo" })
 
 	-- Edits by hand move the count too; the keys refresh it themselves.
 	vim.api.nvim_create_autocmd("TextChanged", {
@@ -1326,6 +1357,145 @@ function M.undo(review_buf)
 	end)
 	M.refresh_overview(s)
 	M.refresh_status_line(s.notes_buf)
+	return true
+end
+
+-- ---------------------------------------------------------------------------
+-- The same keys from the notes window. The cursor there can't sit on a
+-- suggestion's own lines (they are filler on that side), so it names a
+-- hunk: the one over the cursor line, else the filler just above it (where
+-- `do` acts), else just below. Of several adjacent suggestions in that hunk
+-- the topmost is acted on, so pressing again walks down them. `u` there
+-- undoes the latest take or decline made from that window, then is plain
+-- undo, as a `do` take is undone there.
+-- ---------------------------------------------------------------------------
+
+--- The suggestion the notes window's cursor line `line` acts on, and how
+--- many remain in its hunk; nil when the line is in no hunk.
+function M.item_in_notes_hunk(s, line)
+	local hunks = diff_indices(buf_lines(s.notes_buf), buf_lines(s.review_buf))
+	local hunk
+	for _, want in ipairs({ "over", "above", "below" }) do
+		for _, h in ipairs(hunks) do
+			if
+				(want == "over" and h[2] > 0 and line >= h[1] and line <= h[1] + h[2] - 1)
+				or (want == "above" and h[2] == 0 and h[1] == line - 1)
+				or (want == "below" and h[2] == 0 and h[1] == line)
+			then
+				hunk = hunk or h
+			end
+		end
+	end
+	if not hunk then
+		return nil, 0
+	end
+	-- The hunk's review lines, or for a pure removal the point after h[3]
+	-- (a deletion mark's row counts the lines above it).
+	local lo, hi = hunk[3], hunk[3] + hunk[4] - 1
+	if hunk[4] == 0 then
+		lo, hi = hunk[3] + 1, hunk[3]
+	end
+	local found = {}
+	for _, r in ipairs(M.remaining(s)) do
+		local first, last = mark_range(s, r.item)
+		local row = del_row(s, r.item)
+		local pos
+		if first and first <= hi and last >= lo then
+			pos = first
+		elseif row and row >= lo - 1 and row <= hi then
+			pos = row + 0.5
+		end
+		if pos then
+			found[#found + 1] = { item = r.item, pos = pos }
+		end
+	end
+	table.sort(found, function(a, b)
+		if a.pos ~= b.pos then
+			return a.pos < b.pos
+		end
+		return a.item.id < b.item.id
+	end)
+	return found[1] and found[1].item, #found
+end
+
+--- `<leader>gA` (`verb` "take") or `<leader>gD` ("decline") in the notes
+--- window: acts on the suggestion of the hunk under the cursor as the same
+--- key in the split does, recorded the same way. Returns true, or false, why.
+function M.notes_act(notes_buf, verb)
+	local s = live_session(notes_buf)
+	if not s then
+		return false, "no review open: ␣gR opens one"
+	end
+	local win = vim.fn.bufwinid(notes_buf)
+	if win == -1 then
+		return false, "your notes are not showing in any window"
+	end
+	vim.api.nvim_win_call(win, function()
+		vim.cmd("diffupdate")
+	end)
+	local item, n = M.item_in_notes_hunk(s, vim.api.nvim_win_get_cursor(win)[1])
+	if not item then
+		return false, "no suggestion in a hunk here"
+	end
+	local t = begin_take(s)
+	local ok, why = act_on(s, item, verb)
+	if not ok then
+		return false, why
+	end
+	t.review_post = undo_seq(s.review_buf)
+	s.notes_acts = s.notes_acts or {}
+	if verb == "take" then
+		end_take(s, t, s.notes_acts)
+	else
+		t.notes_post, t.ids, t.pending = t.notes_pre, {}, nil
+		s.notes_acts[#s.notes_acts + 1] = t
+	end
+	vim.api.nvim_win_call(win, function()
+		vim.cmd("diffupdate")
+	end)
+	if n > 1 then
+		vim.notify(string.format("desk: %d more in this hunk", n - 1), vim.log.levels.INFO)
+	end
+	M.refresh_overview(s)
+	M.refresh_status_line(notes_buf)
+	return true
+end
+
+--- `u` in the notes window: undoes the latest take or decline made from
+--- it with `<leader>gA` or `<leader>gD` while nothing has changed in either
+--- buffer since, else plain undo.
+function M.notes_undo(notes_buf)
+	local s = live_session(notes_buf)
+	local a = s and s.notes_acts and s.notes_acts[#s.notes_acts]
+	if not (a and undo_seq(notes_buf) == a.notes_post and undo_seq(s.review_buf) == a.review_post) then
+		local count = vim.v.count > 0 and tostring(vim.v.count) or ""
+		vim.api.nvim_buf_call(notes_buf, function()
+			vim.cmd("normal! " .. count .. "u")
+		end)
+		return true
+	end
+	table.remove(s.notes_acts)
+	if a.review_seq ~= a.review_post then
+		vim.api.nvim_buf_call(s.review_buf, function()
+			vim.cmd("silent undo " .. a.review_seq)
+		end)
+	end
+	if a.notes_pre ~= a.notes_post then
+		vim.api.nvim_buf_call(notes_buf, function()
+			vim.cmd("silent undo " .. a.notes_pre)
+		end)
+		local pend = pending_taken[notes_buf]
+		for _, id in ipairs(a.ids) do
+			if pend and pend.ids[id] and pend.ids[id].seq == a.notes_post then
+				pend.ids[id] = nil
+			end
+		end
+	end
+	vim.api.nvim_buf_call(notes_buf, function()
+		vim.cmd("diffupdate")
+	end)
+	M.refresh_overview(s)
+	M.refresh_status_line(notes_buf)
 	return true
 end
 
@@ -1870,13 +2040,6 @@ end
 -- Status line: the runner's status.json summary in the notes buffer's winbar.
 -- ---------------------------------------------------------------------------
 
-local function live_session(bufnr)
-	local s = bufnr and sessions[bufnr]
-	if s and vim.api.nvim_buf_is_valid(s.review_buf) then
-		return s
-	end
-end
-
 --- How many suggestions still wait in the open review `s`: neither taken
 --- (in the notes, or taken and since edited) nor declined (gone from the
 --- split), saved or not. The live number both of the review's bars show.
@@ -1981,23 +2144,17 @@ end
 
 --- The keys this module adds, layered over gitsigns' own raw per-hunk keys
 --- (<leader>gj/gk/ga/gu/gp/gb, unchanged). `<leader>gD` and `<leader>gA`
---- live in the review split only.
+--- exist only while a review is open, in both of its windows.
 M.KEYMAPS = {
 	{ mode = "n", lhs = "<leader>gR", desc = "Review: open the proposal as a diff against your notes" },
 	{ mode = "n", lhs = "<leader>gc", desc = "Commit your notes (records taken suggestions)" },
 	{ mode = "n", lhs = "<leader>go", desc = "Overview: remaining suggestions" },
 	{ mode = "n", lhs = "<leader>gd", desc = "Declined recently: list, restorable with r" },
-	{ mode = "n", lhs = "<leader>gD", desc = "Decline the suggestion under the cursor (review split)" },
-	{ mode = "n", lhs = "<leader>gA", desc = "Take just the suggestion under the cursor (review split)" },
+	{ mode = "n", lhs = "<leader>gD", desc = "Decline the suggestion under the cursor (while a review is open)" },
+	{ mode = "n", lhs = "<leader>gA", desc = "Take just the suggestion under the cursor (while a review is open)" },
 }
 
 local qf_autocmd_installed = false
-
-local function report(ok, err_or_result)
-	if not ok then
-		vim.notify("desk: " .. tostring(err_or_result), vim.log.levels.WARN)
-	end
-end
 
 local function install_qf_autocmd()
 	if qf_autocmd_installed then
