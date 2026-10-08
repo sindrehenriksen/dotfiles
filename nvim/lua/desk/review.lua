@@ -806,7 +806,7 @@ local function map_next_change(buf)
 end
 
 -- The keys the notes buffer has only while a review of it is open.
-local NOTES_REVIEW_KEYS = { "do", "]c", "[c", "n", "N", "u", "<leader>gA", "<leader>gD" }
+local NOTES_REVIEW_KEYS = { "do", "]c", "[c", "n", "N", "u", "<leader>gA", "<leader>gD", "<leader>gq" }
 
 local function unmap_notes_keys(notes_buf)
 	if not vim.api.nvim_buf_is_valid(notes_buf) then
@@ -931,8 +931,9 @@ end
 -- split's keys, kept to about 120 columns with the count, which is why
 -- zR/zM are left out. Each bar names only the window key that leaves it.
 M.KEY_HINT = "n/N next · dp take · ␣gA one · ␣gD decline · u undo · zo/zc fold · ␣go list · ␣gc commit · C-n down"
--- The notes window's keys while a review is open.
-M.NOTES_KEY_HINT = "n/N next · do take · ␣gA one · ␣gD decline · u undo · ␣gc commit · C-t up"
+-- The notes window's keys while a review is open. ␣gq ends the review from
+-- either window, but only this bar has room for it.
+M.NOTES_KEY_HINT = "n/N next · do take · ␣gA one · ␣gD decline · u undo · ␣gc commit · ␣gq close · C-t up"
 -- And with no review open, the desk keys still being learned.
 M.NOTES_IDLE_HINT = "␣gR review · ␣gx open/jump · ␣go list · ␣gc commit"
 
@@ -1162,6 +1163,11 @@ function M.open_review(notes_buf)
 	vim.keymap.set("n", "<leader>gR", function()
 		report(M.switch_review(review_buf))
 	end, { buffer = review_buf, desc = "Move the review to the other file once this one has none left" })
+	for _, b in ipairs({ review_buf, notes_buf }) do
+		vim.keymap.set("n", "<leader>gq", function()
+			report(M.close_review(s))
+		end, { buffer = b, desc = "End the review (asks about unsaved declines)" })
+	end
 	map_next_change(review_buf)
 	map_next_change(notes_buf)
 	for lhs, verb in pairs({ ["<leader>gA"] = "take", ["<leader>gD"] = "decline" }) do
@@ -1564,6 +1570,36 @@ function M.switch_review(review_buf)
 	return M.move_review(s.notes_buf, other.file)
 end
 
+--- Ends the review `s` as `:q` in its split does, and closes the overview
+--- when it is this review's list: unsaved declines ask first, and
+--- cancelling keeps everything open. Leaves the user in their notes.
+--- Returns true, or false, why.
+function M.close_review(s)
+	if not (s and sessions[s.notes_buf] == s and vim.api.nvim_buf_is_valid(s.review_buf)) then
+		return false, "no review open"
+	end
+	local ok, why = settle_declines(s)
+	if not ok then
+		return false, why
+	end
+	local info = vim.fn.getqflist({ title = 0, context = 0 })
+	local ctx = type(info.context) == "table" and info.context or {}
+	if info.title == M.OVERVIEW_TITLE and (ctx.desk_review_buf == s.review_buf or not session_for_review_buf(ctx.desk_review_buf or -1)) then
+		vim.cmd("cclose")
+	end
+	local review_win = vim.fn.bufwinid(s.review_buf)
+	local notes_win = vim.fn.bufwinid(s.notes_buf)
+	if notes_win == -1 and review_win ~= -1 then
+		vim.api.nvim_win_set_buf(review_win, s.notes_buf)
+		notes_win = review_win
+	end
+	close_session(s)
+	if notes_win ~= -1 and vim.api.nvim_win_is_valid(notes_win) then
+		vim.api.nvim_set_current_win(notes_win)
+	end
+	return true
+end
+
 -- ---------------------------------------------------------------------------
 -- The same keys from the notes window. The cursor there can't sit on a
 -- suggestion's own lines (they are filler on that side), so it names a
@@ -1709,7 +1745,7 @@ end
 
 -- The title is the list's identity too, and the qf window's status line
 -- shows it, so it carries the list's own keys.
-M.OVERVIEW_TITLE = "Desk overview: ⏎ jump (other file: switch) · t/dp take · x/gD decline"
+M.OVERVIEW_TITLE = "Desk overview: ⏎ jump (other file: switch) · t/dp take · x/gD decline · q close list · Q close review"
 M.DECLINED_TITLE = "Desk declined recently"
 M.DECLINED_WINDOW_DAYS = 14
 
@@ -2063,6 +2099,23 @@ function M.qf_act(verb)
 	M.refresh_overview(s)
 	M.refresh_status_line(s.notes_buf)
 	return true
+end
+
+--- The overview's `Q`: ends the review the list belongs to, list and
+--- split together, as `<leader>gq` does. With no review open it closes
+--- the list. Returns true, or false, why.
+function M.qf_close_review()
+	local ctx = vim.fn.getqflist({ context = 0 }).context
+	local s = type(ctx) == "table" and ctx.desk_review_buf and session_for_review_buf(ctx.desk_review_buf)
+	if not s then
+		local entry = vim.fn.getqflist()[vim.fn.line(".")]
+		s = entry and live_session(entry.bufnr)
+	end
+	if not s then
+		vim.cmd("cclose")
+		return true
+	end
+	return M.close_review(s)
 end
 
 -- ---------------------------------------------------------------------------
@@ -2581,14 +2634,21 @@ local function install_qf_autocmd()
 			})
 			vim.keymap.set("n", "r", M.qf_restore, { buffer = args.buf, desc = "Desk: restore this declined item" })
 			-- The overview's own keys; in any other list they keep their meaning.
-			for lhs, verb in pairs({ t = "take", dp = "take", x = "decline", gD = "decline" }) do
+			local verbs = { t = "take", dp = "take", x = "decline", gD = "decline", q = "close list", Q = "close review" }
+			for lhs, verb in pairs(verbs) do
 				vim.keymap.set("n", lhs, function()
 					if vim.fn.getqflist({ title = 0 }).title ~= M.OVERVIEW_TITLE or is_loclist_win(vim.api.nvim_get_current_win()) then
 						vim.api.nvim_feedkeys(vim.v.count > 0 and vim.v.count .. lhs or lhs, "n", false)
 						return
 					end
-					report(M.qf_act(verb))
-				end, { buffer = args.buf, desc = "Desk overview: " .. verb .. " this suggestion" })
+					if verb == "close list" then
+						vim.cmd("cclose")
+					elseif verb == "close review" then
+						report(M.qf_close_review())
+					else
+						report(M.qf_act(verb))
+					end
+				end, { buffer = args.buf, desc = "Desk overview: " .. verb .. (verb:match("^close") and "" or " this suggestion") })
 			end
 		end,
 	})

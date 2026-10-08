@@ -1797,6 +1797,75 @@ do
 	assert_true("into the notes", line_of(nb2, "- vendor-x, editor's own AI") ~= nil)
 end
 
+print("\n=== closing: q closes the overview, Q and ␣gq end the whole review ===")
+do
+	local function setup()
+		local r = new_repo(BASE)
+		build(r, "2026-10-01", {
+			item("n1"),
+			item("a1", { kind = "add", target = { under = "Section A" }, after = "  added", source = "", headline = "add A" }),
+		})
+		local nb = open_notes(r)
+		review.attach(nb)
+		assert_true("overview opens", review.overview(nb))
+		local rb = review_buf_of(nb)
+		return r, nb, rb, vim.fn.getqflist({ winid = 0 }).winid
+	end
+	local function in_list(qw, keys)
+		vim.api.nvim_set_current_win(qw)
+		vim.cmd("normal " .. keys)
+	end
+	local function list_open()
+		return vim.fn.getqflist({ winid = 0 }).winid ~= 0
+	end
+	assert_true("the title names both", review.OVERVIEW_TITLE:match("q close list · Q close review$") ~= nil)
+
+	local _, nb, rb, qw = setup()
+	in_list(qw, "q")
+	assert_true("q closes the list", not list_open())
+	assert_true("and leaves the review open", vim.api.nvim_buf_is_valid(rb) and vim.fn.bufwinid(rb) ~= -1)
+
+	local orig = review.confirm
+	local asked = 0
+	local r2, nb2, rb2, qw2 = setup()
+	vim.api.nvim_set_current_win(vim.fn.bufwinid(rb2))
+	go_to(vim.fn.bufwinid(rb2), rb2, "NEWS n1")
+	assert_true("decline", review.decline(rb2))
+	review.confirm = function()
+		asked = asked + 1
+		return 3
+	end
+	in_list(qw2, "Q")
+	assert_eq("Q over unsaved declines asks", 1, asked)
+	assert_true("cancelling keeps the list", list_open())
+	assert_true("and the split", vim.api.nvim_buf_is_valid(rb2))
+	review.confirm = function()
+		asked = asked + 1
+		return 1
+	end
+	in_list(qw2, "Q")
+	assert_eq("saving records the decline", { id_by_headline(r2, "headline n1") }, declined_ids(r2))
+	assert_true("Q closes the list", not list_open())
+	assert_true("and the split", not vim.api.nvim_buf_is_valid(rb2))
+	assert_eq("leaving the user in their notes", nb2, vim.api.nvim_get_current_buf())
+	assert_true("out of diff mode", not vim.wo.diff)
+	assert_eq("the notes' review keys are gone", "", vim.fn.maparg(vim.g.mapleader .. "gq", "n"))
+	review.confirm = orig
+
+	for _, from in ipairs({ "split", "notes" }) do
+		local _, nb3, rb3 = setup()
+		vim.cmd("cclose")
+		local win = from == "split" and vim.fn.bufwinid(rb3) or vim.fn.bufwinid(nb3)
+		vim.api.nvim_set_current_win(win)
+		vim.cmd("normal 1" .. vim.g.mapleader .. "gq")
+		assert_true("␣gq from the " .. from .. " ends the review", not vim.api.nvim_buf_is_valid(rb3))
+		assert_eq("in the notes", nb3, vim.api.nvim_get_current_buf())
+		assert_eq("one window left", 1, #vim.api.nvim_tabpage_list_wins(0))
+	end
+	assert_true("the notes bar names ␣gq", review.NOTES_KEY_HINT:match("␣gq close") ~= nil)
+	assert_true("the top bar still fits in 120 columns", vim.fn.strchars("99 left (99 saved) · " .. review.KEY_HINT) <= 120)
+end
+
 print(string.format("\n=== summary: %d passed, %d failed ===", pass, fail))
 if fail > 0 then
 	os.exit(1)
