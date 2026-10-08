@@ -308,12 +308,13 @@ function M.sync_taken(repo)
 end
 
 --- `git merge-file` of `ours` (the user's current text) with the proposal: base is
---- the proposal's parent version, theirs the proposal's version. Returns
---- the `--ours` merge (the user's text winning any conflict), the `--union` merge
---- (both sides kept where they conflict), or nil, err.
-function M.merged_lines(repo, p, file, ours_lines)
+--- the proposal's parent version, theirs the proposal's version, or
+--- `theirs` when given. Returns the `--ours` merge (the user's text winning
+--- any conflict), the `--union` merge (both sides kept where they
+--- conflict), or nil, err.
+function M.merged_lines(repo, p, file, ours_lines, theirs)
 	local base = p.parent and M.lines_at(repo, p.parent, file) or {}
-	local theirs = M.lines_at(repo, p.sha, file)
+	theirs = theirs or M.lines_at(repo, p.sha, file)
 	local dir = vim.fn.tempname()
 	vim.fn.mkdir(dir, "p")
 	local function put(name, lines)
@@ -337,6 +338,33 @@ function M.merged_lines(repo, p, file, ours_lines)
 	return out[1], out[2]
 end
 
+-- The proposal's text of `file` with only the `open` items applied: the
+-- tree also holds the changes of items recorded taken or declined since
+-- the pass, which would otherwise come back as hunks no suggestion owns
+-- (a declined line in a review reopened over the same proposal, a taken
+-- one beside the user's rewording of it). Items are placed against the
+-- base independently of each other, so applying a subset leaves the rest
+-- as the pass laid them; the tree itself is kept when that doesn't hold.
+local function open_tree(repo, p, file, base, open)
+	local tree = M.lines_at(repo, p.sha, file)
+	if not base then
+		return tree
+	end
+	local all = {}
+	for _, item in ipairs(p.items) do
+		if item.file == file and not item.deferred then
+			all[#all + 1] = item
+		end
+	end
+	if #all == #open then
+		return tree
+	end
+	if not vim.deep_equal((apply.apply_file(base, all)), tree) then
+		return tree
+	end
+	return (apply.apply_file(base, open))
+end
+
 --- The suggestions of `file` a review can actually show against `ours`
 --- (the user's text): not deferred, not taken or declined, in the merged view but
 --- not yet in the user's text. A suggestion the user's own edit conflicts with is still
@@ -344,23 +372,25 @@ end
 --- text it sits next to. Returns { shown = id -> item, conflicts = id ->
 --- line, merged = lines }, or nil, err.
 function M.reviewable(repo, p, file, ours)
-	local clean, merged = M.merged_lines(repo, p, file, ours)
-	if not clean then
-		return nil, merged
-	end
 	local base = M.base_lines(repo, p, file)
 	local records = ledger.read(repo)
 	local declined = ledger.declined(records)
 	local taken = ledger.taken_by_id(records)
+	local open = {}
+	for _, item in ipairs(p.items) do
+		if item.file == file and not item.deferred and not taken[item.id] and not declined.ids[item.id] then
+			open[#open + 1] = item
+		end
+	end
+	local clean, merged = M.merged_lines(repo, p, file, ours, open_tree(repo, p, file, base, open))
+	if not clean then
+		return nil, merged
+	end
 	local hunks
 	local shown, conflicts = {}, {}
-	for _, item in ipairs(p.items) do
+	for _, item in ipairs(open) do
 		if
-			item.file == file
-			and not item.deferred
-			and not taken[item.id]
-			and not declined.ids[item.id]
-			and M.proposed_in(item, merged, base)
+			M.proposed_in(item, merged, base)
 			and not M.proposed_in(item, ours, base)
 		then
 			shown[item.id] = item

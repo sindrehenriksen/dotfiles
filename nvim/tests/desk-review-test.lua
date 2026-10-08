@@ -668,6 +668,53 @@ do
 	assert_eq("and the next pass carries it again", 1, #proposal.read_items(r4))
 end
 
+print("\n=== a suggestion recorded taken or declined leaves no hunk in a reopened review ===")
+do
+	local function hunk_count(nb, rb)
+		return #vim.diff(table.concat(lines_of(nb), "\n") .. "\n", table.concat(lines_of(rb), "\n") .. "\n", { result_type = "indices" })
+	end
+	-- declined and saved, then the review reopened over the same proposal
+	local r = new_repo(BASE)
+	build(r, "2026-10-01", {
+		item("n1"),
+		item("a1", { kind = "add", target = { under = "Section B" }, after = "  added under B", source = "", headline = "add under B" }),
+	})
+	local nb = open_notes(r)
+	review.attach(nb)
+	assert_true("review opens", review.open_review(nb))
+	local rb = review_buf_of(nb)
+	go_to(vim.fn.bufwinid(rb), rb, "  added under B")
+	assert_true("decline", review.decline(rb))
+	vim.cmd("write")
+	assert_eq("the decline is recorded", 1, #declined_ids(r))
+	vim.cmd("normal 1" .. vim.g.mapleader .. "gq")
+	assert_true("the review ends", not vim.api.nvim_buf_is_valid(rb))
+	assert_true("and reopens", review.open_review(nb))
+	rb = review_buf_of(nb)
+	assert_true("the declined line is not back", line_of(rb, "  added under B") == nil)
+	assert_eq("one hunk, for the one suggestion left", 1, hunk_count(nb, rb))
+	assert_true("overview opens", review.overview(nb))
+	assert_eq("which the overview lists", 1, #vim.fn.getqflist())
+	vim.cmd("cclose")
+
+	-- taken and committed, then reworded in the notes
+	local r2 = new_repo(BASE)
+	build(r2, "2026-10-01", {
+		item("n1"),
+		item("a1", { kind = "add", target = { under = "Section B" }, after = "  added under B", source = "", headline = "add under B" }),
+	})
+	local nb2 = open_notes(r2)
+	vim.api.nvim_buf_set_lines(nb2, 4, 4, false, { "  added under B" })
+	review.commit(nb2)
+	assert_eq("the take is recorded", 1, vim.tbl_count(ledger.taken_by_id(ledger.read(r2))))
+	vim.api.nvim_buf_set_lines(nb2, 4, 5, false, { "  added under B, reworded" })
+	review.attach(nb2)
+	assert_true("review opens", review.open_review(nb2))
+	local rb2 = review_buf_of(nb2)
+	assert_true("the taken line is not proposed beside the rewording", line_of(rb2, "  added under B") == nil)
+	assert_eq("one hunk, for the one suggestion left", 1, hunk_count(nb2, rb2))
+end
+
 print("\n=== the user's line appended where an add lands never makes the suggestion vanish ===")
 do
 	local r = new_repo({ "Section A", "  existing", "Section B", "  other" })
