@@ -435,5 +435,38 @@ do
 end
 
 print()
+print("=== lines edited while the reader runs: labels go where the names are now ===")
+
+do
+	local tmp_dir = vim.fn.tempname()
+	vim.fn.mkdir(tmp_dir, "p")
+	local stub_reader = tmp_dir .. "/fake-session-status.sh"
+	local fd = assert(io.open(stub_reader, "w"))
+	fd:write("#!/usr/bin/env bash\nsleep 0.1\necho " .. vim.fn.shellescape(vim.json.encode({ id = "sess-1", name = "Alpha", live = true, last_activity = now })) .. "\n")
+	fd:close()
+	vim.fn.setfperm(stub_reader, "rwxr-xr-x")
+
+	local old_reader, old_cache = vim.env.DESK_READER, vim.env.DESK_TICKET_CACHE
+	vim.env.DESK_READER = stub_reader
+	vim.env.DESK_TICKET_CACHE = "/nonexistent/desk-ticket-cache-fixture.json"
+
+	local buf = vim.api.nvim_create_buf(false, true)
+	vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "one", "two", "three", "a longer line here, then Alpha" })
+	local settled = settled_reader()
+	annotate.refresh(buf, { tokens = tokens_config })
+	vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "Alpha" })
+	assert_eq("the refresh lands", true, settled.wait(1))
+	settled.restore()
+	assert_eq("painting raised no error", {}, settled.errors)
+	local marks = vim.api.nvim_buf_get_extmarks(buf, annotate.ns, 0, -1, {})
+	assert_eq("one label, on the line that names the session now", { 0 }, vim.tbl_map(function(m)
+		return m[2]
+	end, marks))
+
+	vim.env.DESK_READER = old_reader
+	vim.env.DESK_TICKET_CACHE = old_cache
+end
+
+print()
 print(string.format("=== summary: %d passed, %d failed ===", pass, fail))
 os.exit(fail == 0 and 0 or 1)

@@ -256,6 +256,9 @@ function M.refresh(bufnr, config)
 				by_name[e.name] = e
 			end
 		end
+		-- Scanned again: the user can type while the reader runs, and a
+		-- position from before it can be gone or hold another line by now.
+		session_hits = M.scan(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false), tokens_config, "session")
 		paint(bufnr, session_hits, function(hit)
 			local entry = by_name[hit.id or hit.token.text]
 			return entry and M.session_text(entry)
