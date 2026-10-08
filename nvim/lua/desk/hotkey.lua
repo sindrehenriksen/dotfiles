@@ -112,6 +112,13 @@ function M.find_section_head_line(lines, token)
 	return nil
 end
 
+--- Whether `id` is shaped like a Claude Code session id (a UUID), the only
+--- thing a resume command line may carry, as reopen-sessions.sh insists too.
+function M.is_session_id(id)
+	local h = "%x%x%x%x"
+	return type(id) == "string" and id:match("^" .. h .. h .. "%-" .. h .. "%-" .. h .. "%-" .. h .. "%-" .. h .. h .. h .. "$") ~= nil
+end
+
 --- The command a resumed session's tab runs — built from the reader's own
 --- resolved id, never from the raw cursor token.
 function M.resume_command(session_id)
@@ -290,6 +297,9 @@ function M.run(bufnr, win, config, deps)
 					notify("could not focus the live session's tab" .. (err and (": " .. err) or ""))
 				end
 			end)
+		elseif not M.is_session_id(entry.id) then
+			-- The id goes into a shell command line in the new tab.
+			notify("session '" .. token .. "' has no valid session id on record; not resuming")
 		else
 			(deps.open_tab or function(_, _, _, cb) cb(false, "no open_tab dep") end)(
 				M.resume_command(entry.id),

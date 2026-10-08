@@ -255,13 +255,36 @@ do
 	vim.api.nvim_win_set_buf(win, buf)
 	vim.api.nvim_win_set_cursor(win, { 1, 0 })
 	local rec = new_recorder()
-	local entry = { id = "sess-2", name = "Alpha", live = false, cwd = "/tmp/somewhere" }
+	local id = "0000aaaa-1111-4222-8333-444455556666"
+	local entry = { id = id, name = "Alpha", live = false, cwd = "/tmp/somewhere" }
 	local deps = stub_deps(rec, { reader_resolve = { entry, nil }, open_tab = { true } })
 	hotkey.run(buf, win, config, deps)
 	wait_for("resolve then open_tab complete", function()
 		return #rec.calls >= 2
 	end)
-	assert_eq("open_tab got the resolved id, never the raw token", { "open_tab", "claude --resume sess-2", "sess-2", "/tmp/somewhere" }, rec.calls[2])
+	assert_eq("open_tab got the resolved id, never the raw token", { "open_tab", "claude --resume " .. id, id, "/tmp/somewhere" }, rec.calls[2])
+end
+
+print()
+print("=== session, resolved not live with an id that is no session id: never resumes ===")
+
+do
+	local buf = new_buf({ "Alpha Session: doing the thing" })
+	local win = vim.api.nvim_get_current_win()
+	vim.api.nvim_win_set_buf(win, buf)
+	vim.api.nvim_win_set_cursor(win, { 1, 0 })
+	local rec = new_recorder()
+	local entry = { id = "x;touch /tmp/never", name = "Alpha", live = false, cwd = "/tmp/somewhere" }
+	hotkey.run(buf, win, config, stub_deps(rec, { reader_resolve = { entry, nil }, open_tab = { true } }))
+	wait_for("resolve completes and a notify follows", function()
+		return #rec.calls >= 2
+	end)
+	local touched = {}
+	for _, c in ipairs(rec.calls) do
+		touched[c[1]] = true
+	end
+	assert_eq("open_tab was never called", nil, touched.open_tab)
+	assert_eq("a notify was issued", true, touched.notify)
 end
 
 print()
