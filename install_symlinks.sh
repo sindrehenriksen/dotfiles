@@ -78,6 +78,7 @@ if [[ "$(uname)" == "Darwin" ]]; then
     mkdir -p ~/.local/bin
     link ~/dotfiles/claude/desk-run ~/.local/bin/desk-run
     link ~/dotfiles/claude/desk-watch ~/.local/bin/desk-watch
+    link ~/dotfiles/claude/desk-propose ~/.local/bin/desk-propose
     link ~/dotfiles/claude/session-status.sh ~/.local/bin/session-status.sh
     link ~/dotfiles/hammerspoon/desk-open-tab.sh ~/.local/bin/desk-open-tab.sh
     link ~/dotfiles/hammerspoon/desk-focus-tab.sh ~/.local/bin/desk-focus-tab.sh

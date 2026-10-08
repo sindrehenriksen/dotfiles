@@ -1,0 +1,130 @@
+#!/usr/bin/env bash
+# desk-propose: stages suggestions from a Claude Code session into the desk
+# proposal, for review like any pass's (docs/desk.md, "Edits from sessions").
+# Installed as ~/.local/bin/desk-propose.
+#
+#   desk-propose [--pass <name>] [--date <YYYY-MM-DD>] [--dry-run] <items.json>
+#
+# <items.json> is {"items": [...]} or a bare array, in the item shape of
+# docs/desk.md ("The reply"): id, file, kind, target, before, after,
+# headline, source, and optionally tier, also_sources and supersedes. The
+# notes repo and its files come from $DESK_CONFIG (with it unset,
+# ${XDG_CONFIG_HOME:-~/.config}/desk/config.json). The proposal is rebuilt the
+# way a pass rebuilds it: from the newest HEAD, with every suggestion still
+# waiting carried over, anything declined or already in the notes dropped,
+# and an item naming an open one in `supersedes` replacing it. Ids become
+# <pass>-<date>-<n>-<id>; --pass defaults to "session" and --date to today.
+#
+# Every item is checked before anything is staged, and one that does not
+# fit the shape fails the whole call, naming it, so the session can fix it
+# and run again. Text is cleaned the way a pass cleans a reply (control
+# characters, ANSI sequences, modelines and agent markers removed), but its
+# URLs are kept: the user reviews a session's items before they are staged,
+# which the runner's URL check stands in for on unattended calls. --dry-run
+# checks and prints the cleaned items without staging them.
+#
+# Exit 0 staged (or, with --dry-run, would stage), 1 invalid items or a
+# failed build, 2 usage or config.
+set -u
+
+_src="${BASH_SOURCE[0]}"
+while [ -h "$_src" ]; do
+	_dir="$(cd -P "$(dirname "$_src")" && pwd)"
+	_src="$(readlink "$_src")"
+	[[ "$_src" != /* ]] && _src="$_dir/$_src"
+done
+DESK_PROPOSE_DIR="$(cd -P "$(dirname "$_src")" && pwd)"
+source "$DESK_PROPOSE_DIR/desk-lib/common.sh"
+source "$DESK_PROPOSE_DIR/desk-lib/git-ops.sh"
+source "$DESK_PROPOSE_DIR/desk-lib/validate.sh"
+
+usage() { sed -n '6p' "$DESK_PROPOSE_DIR/desk-propose" | sed 's/^#   //' >&2; exit 2; }
+die() { echo "desk-propose: $1" >&2; exit "${2:-2}"; }
+
+pass="session"
+date_arg=""
+dry_run=false
+items_path=""
+while [ $# -gt 0 ]; do
+	case "$1" in
+		--pass) [ $# -ge 2 ] || usage; pass="$2"; shift 2 ;;
+		--date) [ $# -ge 2 ] || usage; date_arg="$2"; shift 2 ;;
+		--dry-run) dry_run=true; shift ;;
+		-h | --help) usage ;;
+		--*) echo "desk-propose: unknown option $1" >&2; usage ;;
+		*) [ -z "$items_path" ] || usage; items_path="$1"; shift ;;
+	esac
+done
+[ -n "$items_path" ] || usage
+[[ "$pass" =~ ^[A-Za-z0-9_-]+$ ]] || die "--pass takes letters, digits, - and _ only"
+[ -n "$date_arg" ] || date_arg="$(date +%F)"
+[[ "$date_arg" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || die "--date takes YYYY-MM-DD"
+[ -r "$items_path" ] || die "cannot read $items_path"
+
+desk_resolve_config
+[ -n "$DESK_CONFIG" ] && [ -f "$DESK_CONFIG" ] \
+	|| die "\$DESK_CONFIG is not set or missing, and there is no ${XDG_CONFIG_HOME:-$HOME/.config}/desk/config.json"
+repo="$(jq -r '.notes_repo // empty' "$DESK_CONFIG" 2> /dev/null)"
+repo="${repo/#\~/$HOME}"
+mapfile -t files < <(jq -r '(.files // [])[]' "$DESK_CONFIG" 2> /dev/null)
+[ -n "$repo" ] && [ "${#files[@]}" -gt 0 ] || die "$DESK_CONFIG names no notes_repo or files"
+[ "$(git -C "$repo" rev-parse --show-toplevel 2> /dev/null)" = "$(cd "$repo" 2> /dev/null && pwd -P)" ] \
+	|| die "notes_repo $repo is not a repo's toplevel"
+
+items_json="$(jq -c 'if type == "object" and has("items") then .items else . end' "$items_path" 2> /dev/null)" \
+	|| die "$items_path is not JSON" 1
+jq -e 'type == "array"' > /dev/null 2>&1 <<< "$items_json" || die "$items_path holds no items array" 1
+
+files_json="$(printf '%s\n' "${files[@]}" | jq -R . | jq -cs .)"
+problems="$(jq -r --argjson files "$files_json" '
+	def str: type == "string";
+	def anchor: . == "top" or (type == "object" and ((.under // .after // .at) | str));
+	to_entries[] | .key as $i | .value as $it
+	| (if ($it | type) != "object" then ["not an object"] else
+		[ (if ($it.id | str) and ($it.id != "") then empty else "id must be a non-empty string" end),
+		  (if ($files | index($it.file)) != null then empty else "file must be one of \($files | join(", "))" end),
+		  (if ["new","add","link","edit","remove","move","merge"] | index($it.kind) then empty
+		   else "kind must be new, add, link, edit, remove, move or merge" end),
+		  (if ($it.headline | str) and ($it.headline != "") then empty else "headline must be a non-empty string" end),
+		  (if ($it.source | str) and ($it.source != "") then empty else "source must be a non-empty string" end),
+		  (if ($it.before // "" | str) and ($it.after // "" | str) then empty else "before and after must be strings" end),
+		  (if (["edit","remove","move","merge"] | index($it.kind)) and (($it.before // "") == "")
+		   then "a \($it.kind) needs the exact existing lines in before" else empty end),
+		  (if ($it.kind == "move" or $it.kind == "merge")
+		   then (if ($it.target | type) == "array" and ($it.target | length) == 2 and ($it.target | all(anchor)) then empty
+		         else "a \($it.kind) target is [{\"at\": line}, <landing anchor>]" end)
+		   elif ($it.target | anchor) then empty
+		   else "target must be \"top\" or {\"under\"|\"after\"|\"at\": line}" end),
+		  (if $it.tier == null or (["act","worth_knowing","wildcard"] | index($it.tier)) then empty
+		   else "tier must be act, worth_knowing or wildcard" end),
+		  (if $it.supersedes == null or ($it.supersedes | str) then empty else "supersedes must be an id string" end)
+		] end)
+	| .[] | "item \($i + 1) (\($it.id? // "no id")): \(.)"
+' <<< "$items_json" 2> /dev/null)" || die "could not check $items_path" 1
+if [ -n "$problems" ]; then
+	printf '%s\n' "$problems" >&2
+	echo "desk-propose: nothing staged" >&2
+	exit 1
+fi
+
+# Every URL the items carry is allowed: the check is the user's, not this one's.
+all_urls="$(jq -r '.. | strings' <<< "$items_json" | grep -oE 'https?://[^[:space:]"'"'"'<>)]+' | sort -u)"
+cleaned="[]"
+while IFS= read -r item; do
+	cleaned="$(jq -c --argjson it "$(desk_sanitize_item_text "$item" "$all_urls")" '. + [$it]' <<< "$cleaned")"
+done < <(jq -c '.[]' <<< "$items_json")
+
+if [ "$dry_run" = true ]; then
+	jq '{items: .}' <<< "$cleaned"
+	exit 0
+fi
+
+items_file="$(mktemp "${TMPDIR:-/tmp}/desk-propose.XXXXXX")"
+trap 'rm -f "$items_file"' EXIT
+jq -n --argjson items "$cleaned" '{items: $items}' > "$items_file"
+out="$(desk_nvim_cli proposal-build "$repo" "$pass" "$date_arg" "$items_file" "${files[@]}" 2>&1)"
+if ! jq -e '.sha' > /dev/null 2>&1 <<< "$out"; then
+	echo "desk-propose: staging failed: $out" >&2
+	exit 1
+fi
+jq -r '"staged: \(.stats.new) new, \(.stats.superseded) replacing open ones, \(.stats.skipped) skipped (declined or already in the notes), \(.stats.carried) still waiting from before, \(.stats.deferred) deferred (anchor not found); proposal \(.sha[0:12])"' <<< "$out"
