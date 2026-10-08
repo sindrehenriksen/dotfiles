@@ -1979,7 +1979,9 @@ end
 --- which is also where a session's name heads its notes; lines a taken
 --- suggestion brought in or took out are not the user's edits. Returns the
 --- message.
-function M.commit_message(head, now, taken)
+-- The sections the user's own edits touched going from `head` to `now`,
+-- in order, with `taken` (the suggestions the commit takes) not counted.
+local function edited_sections(head, now, taken)
 	local afters, befores = {}, {}
 	for _, item in ipairs(taken) do
 		afters[#afters + 1] = snippet.split_lines(item.after)
@@ -2015,12 +2017,34 @@ function M.commit_message(head, now, taken)
 			end
 		end
 	end
+	return sections
+end
+
+function M.commit_message(head, now, taken)
+	return M.commit_message_files({ { head = head, now = now, taken = taken } })
+end
+
+--- The message for a commit of several files at once, `changes` a list of
+--- { file, head, now, taken } in file order: the subject sums them, and the
+--- body names each item's file when there is more than one.
+function M.commit_message_files(changes)
+	local takes, sections = {}, {}
+	local several = #changes > 1
+	for _, c in ipairs(changes) do
+		for _, item in ipairs(c.taken) do
+			local text = M.entry_text(item, nil, false)
+			takes[#takes + 1] = several and c.file .. ": " .. text or text
+		end
+		for _, name in ipairs(edited_sections(c.head, c.now, c.taken)) do
+			sections[#sections + 1] = several and c.file .. ": " .. name or name
+		end
+	end
 	local function count(n, one)
 		return string.format("%d %s%s", n, one, n == 1 and "" or "s")
 	end
 	local parts = {}
-	if #taken > 0 then
-		parts[#parts + 1] = "take " .. count(#taken, "suggestion")
+	if #takes > 0 then
+		parts[#parts + 1] = "take " .. count(#takes, "suggestion")
 	end
 	if #sections > 0 then
 		parts[#parts + 1] = "edit " .. count(#sections, "section")
@@ -2028,10 +2052,10 @@ function M.commit_message(head, now, taken)
 	local subject = #parts > 0 and table.concat(parts, ", ") or "update notes"
 	subject = subject:sub(1, 1):upper() .. subject:sub(2)
 	local body = {}
-	if #taken > 0 then
+	if #takes > 0 then
 		body[#body + 1] = "Taken:"
-		for _, item in ipairs(taken) do
-			body[#body + 1] = body_item(item.headline or item.id)
+		for _, text in ipairs(takes) do
+			body[#body + 1] = body_item(text)
 		end
 	end
 	if #sections > 0 then
@@ -2081,37 +2105,66 @@ local function taken_in_commit(repo, file, head, now, flushed)
 	return out
 end
 
---- Saves the user's notes buffer and commits the file as it is, with a
---- message saying what changed (`commit_message`), then records any
---- suggestion now in HEAD as taken. A no-op commit when nothing changed.
+--- The notes files of the instance, as the config's `files` names them
+--- (notes.md and reading.md by default).
+function M.notes_files()
+	local cfg = tokens.load()
+	if type(cfg) == "table" and type(cfg.files) == "table" and #cfg.files > 0 then
+		return cfg.files
+	end
+	return { "notes.md", "reading.md" }
+end
+
+--- The commit key: saves every open buffer of the notes files and commits
+--- each file that has changes, in one commit with a message saying what
+--- changed in each (`commit_message_files`), then records any suggestion
+--- now in HEAD as taken. A no-op when nothing changed.
 function M.commit(bufnr)
 	local repo, file = M.repo_context(bufnr)
 	if not repo then
 		return false, file
 	end
-	-- Recorded before the save, which would otherwise record them unseen.
-	local _, flushed = M.flush_taken(bufnr)
-	if vim.bo[bufnr].modified then
-		vim.api.nvim_buf_call(bufnr, function()
-			vim.cmd("silent write")
-		end)
+	local bufs, flushed = {}, {}
+	for _, f in ipairs(M.notes_files()) do
+		local b = vim.fn.bufnr(repo .. "/" .. f)
+		if b ~= -1 and vim.api.nvim_buf_is_loaded(b) then
+			bufs[#bufs + 1] = b
+			-- Recorded before the save, which would otherwise record them unseen.
+			flushed[f] = select(2, M.flush_taken(b))
+			if vim.bo[b].modified then
+				vim.api.nvim_buf_call(b, function()
+					vim.cmd("silent write")
+				end)
+			end
+		end
 	end
-	local _, dirty = git.run(repo, { "status", "--porcelain", "--", file })
-	if vim.trim(dirty) ~= "" then
-		local head = proposal.lines_at(repo, "HEAD", file)
-		local now = vim.fn.readfile(repo .. "/" .. file)
-		local msg = M.commit_message(head, now, taken_in_commit(repo, file, head, now, flushed))
-		local ok, _, err = git.run(repo, { "add", "--", file })
+	local changes, paths = {}, {}
+	for _, f in ipairs(M.notes_files()) do
+		local _, dirty = git.run(repo, { "status", "--porcelain", "--", f })
+		if vim.trim(dirty) ~= "" then
+			local head = proposal.lines_at(repo, "HEAD", f)
+			local now = vim.fn.filereadable(repo .. "/" .. f) == 1 and vim.fn.readfile(repo .. "/" .. f) or {}
+			changes[#changes + 1] = { file = f, head = head, now = now, taken = taken_in_commit(repo, f, head, now, flushed[f] or {}) }
+			paths[#paths + 1] = f
+		end
+	end
+	if #paths > 0 then
+		local args = vim.list_extend({ "add", "--" }, paths)
+		local ok, _, err = git.run(repo, args)
 		if ok then
-			ok, _, err = git.run(repo, { "commit", "-q", "-m", msg, "--", file })
+			ok, _, err = git.run(repo, vim.list_extend({ "commit", "-q", "-m", M.commit_message_files(changes), "--" }, paths))
 		end
 		if not ok then
 			return false, "git commit failed: " .. err
 		end
 	end
-	M.flush_taken(bufnr)
+	for _, b in ipairs(bufs) do
+		M.flush_taken(b)
+	end
 	local taken = proposal.sync_taken(repo)
-	M.refresh_status_line(bufnr, true)
+	for _, b in ipairs(bufs) do
+		M.refresh_status_line(b, true)
+	end
 	return true, { taken = #taken }
 end
 

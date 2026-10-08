@@ -1487,6 +1487,33 @@ do
 	assert_eq("the review stays open", rw, vim.fn.bufwinid(rb))
 end
 
+print("\n=== the commit key commits every notes file with changes, saving both first ===")
+do
+	local r = new_repo(BASE)
+	build(r, "2026-10-01", {
+		item("n1"),
+		item("rd", { file = "reading.md", kind = "new", after = "READ paper", headline = "reading.md: read paper" }),
+	})
+	local nb = open_notes(r)
+	review.attach(nb)
+	assert_true("review opens", review.open_review(nb))
+	local rb = review_buf_of(nb)
+	go_to(vim.fn.bufwinid(rb), rb, "NEWS n1")
+	vim.cmd("normal dp")
+	local rd = vim.fn.bufadd(r .. "/reading.md")
+	vim.fn.bufload(rd)
+	vim.api.nvim_buf_set_lines(rd, 0, -1, false, { "READ paper", "my own line" })
+	assert_true("commit", (review.commit(nb)))
+	assert_eq("both files are in the commit", { "notes.md", "reading.md" }, vim.split(vim.trim(select(2, git.run(r, { "show", "--name-only", "--format=", "HEAD" }))), "\n"))
+	assert_eq("both buffers are saved", { false, false }, { vim.bo[nb].modified, vim.bo[rd].modified })
+	assert_eq(
+		"the message covers both, each item with its file",
+		"Take 2 suggestions, edit 1 section\n\nTaken:\n- notes.md: headline n1\n- reading.md: read paper\n\nEdited:\n- reading.md: my own line",
+		vim.trim(select(2, git.run(r, { "log", "-1", "--format=%B" })))
+	)
+	assert_eq("and nothing is left over", "", vim.trim(select(2, git.run(r, { "status", "--porcelain", "--", "notes.md", "reading.md" }))))
+end
+
 print("\n=== the commit key's message: the takes and the sections edited ===")
 do
 	local function sug(id, over)
