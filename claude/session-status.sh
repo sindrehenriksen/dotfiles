@@ -4,7 +4,9 @@
 # event log (claude/hooks/session-recorder.sh — liveness history, cwd), the
 # pid files Claude Code itself writes for a live session
 # ($CLAUDE_CONFIG_DIR/sessions/*.json), and its transcripts
-# ($CLAUDE_CONFIG_DIR/projects/*/<id>.jsonl — names, last activity).
+# ($CLAUDE_CONFIG_DIR/projects/*/<id>.jsonl — names, last activity). The
+# event log is shared by every config dir, so a session recorded under
+# another one is left out while a process there holds it.
 #
 # Meant to be called often (a status line, an editor annotation), so every
 # join is done in a handful of batched calls over all sessions at once rather
@@ -320,30 +322,38 @@ fi
 live_pairs=()    # sid, idx, live
 pid_tty_pairs=() # sid, idx, pid, tty — only pushed for entries that turn out live
 now_epoch=$(date +%s)
+
+# check_live <pid> <procStart>: sets $live (true/false) and $tty for one
+# pid file entry — alive, a claude process, and started when it says.
+check_live() {
+    local pid=$1 procstart=$2 etime comm p_epoch etime_secs os_epoch diff
+    live="false"
+    tty=""
+    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+        # etime, tty and comm in the one ps call, in that order: none of
+        # the three ever contains a space, so splitting the combined
+        # output on whitespace is safe — but ps truncates every column
+        # except the last one to a fixed width, so comm (which can be a
+        # long path) has to go last, not etime or tty.
+        read -r etime tty comm < <(ps -o etime=,tty=,comm= -p "$pid" 2>/dev/null)
+        case "$comm" in
+            claude|*/claude)
+                p_epoch=$(parse_utc_ctime "$procstart") || p_epoch=""
+                etime_secs=$(parse_etime_secs "$etime") || etime_secs=""
+                if [ -n "$p_epoch" ] && [ -n "$etime_secs" ]; then
+                    os_epoch=$(( now_epoch - etime_secs ))
+                    diff=$(( p_epoch > os_epoch ? p_epoch - os_epoch : os_epoch - p_epoch ))
+                    [ "$diff" -le "$LIVENESS_TOLERANCE_SECS" ] && live="true"
+                fi
+                ;;
+        esac
+    fi
+}
+
 if [ "$pidfiles_grouped" != '{}' ]; then
     while IFS=$'\t' read -r sid idx pid procstart; do
         [ -n "$sid" ] || continue
-        live="false"
-        tty=""
-        if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
-            # etime, tty and comm in the one ps call, in that order: none of
-            # the three ever contains a space, so splitting the combined
-            # output on whitespace is safe — but ps truncates every column
-            # except the last one to a fixed width, so comm (which can be a
-            # long path) has to go last, not etime or tty.
-            read -r etime tty comm < <(ps -o etime=,tty=,comm= -p "$pid" 2>/dev/null)
-            case "$comm" in
-                claude|*/claude)
-                    p_epoch=$(parse_utc_ctime "$procstart") || p_epoch=""
-                    etime_secs=$(parse_etime_secs "$etime") || etime_secs=""
-                    if [ -n "$p_epoch" ] && [ -n "$etime_secs" ]; then
-                        os_epoch=$(( now_epoch - etime_secs ))
-                        diff=$(( p_epoch > os_epoch ? p_epoch - os_epoch : os_epoch - p_epoch ))
-                        [ "$diff" -le "$LIVENESS_TOLERANCE_SECS" ] && live="true"
-                    fi
-                    ;;
-            esac
-        fi
+        check_live "$pid" "$procstart"
         live_pairs+=("$sid" "$idx" "$live")
         if [ "$live" = "true" ]; then
             pid_tty_pairs+=("$sid" "$idx" "$pid" "$tty")
@@ -353,6 +363,33 @@ if [ "$pidfiles_grouped" != '{}' ]; then
         | [$sid, (.key | tostring), (.value.pid | tostring), (.value.procStart // "")] | @tsv
     ' <<< "$pidfiles_grouped")
 fi
+
+# The event store is shared by every config dir, the pid files are not: a
+# session recorded under another config dir and live there would otherwise
+# read here as orphaned and left open. Such sessions are left out. One that
+# is not live there stays, so a reopen can still name the config dir to
+# run it under.
+foreign_live_ids='[]'
+foreign_lines=()
+while IFS= read -r odir; do
+    [ -n "$odir" ] && [ -d "$odir/sessions" ] || continue
+    shopt -s nullglob
+    ofiles=("$odir"/sessions/*.json)
+    shopt -u nullglob
+    [ "${#ofiles[@]}" -gt 0 ] || continue
+    while IFS=$'\t' read -r sid pid procstart; do
+        [ -n "$sid" ] || continue
+        check_live "$pid" "$procstart"
+        [ "$live" = true ] && foreign_lines+=("$sid")
+    done < <(jq -r 'select(.sessionId != null and .pid != null)
+        | [.sessionId, (.pid | tostring), (.procStart // "")] | @tsv' "${ofiles[@]}" 2>/dev/null)
+done < <(jq -r --arg own "${CONFIG_DIR%/}/projects/" '
+    [.[] | .transcript_path // "" | select(. != "" and (startswith($own) | not))
+     | select(test("/projects/")) | sub("/projects/.*$"; "")] | unique[]' <<< "$events_by_id" 2>/dev/null)
+if [ "${#foreign_lines[@]}" -gt 0 ]; then
+    foreign_live_ids=$(printf '%s\n' "${foreign_lines[@]}" | jq -R -s -c 'split("\n") | map(select(length > 0))')
+fi
+[ -n "$foreign_live_ids" ] || foreign_live_ids='[]'
 
 live_lines=()
 if [ "${#live_pairs[@]}" -gt 0 ]; then
@@ -716,6 +753,7 @@ entries_ndjson=$(jq -n -c \
     --argjson pids "$pid_by_id" \
     --argjson ttys "$tty_by_id" \
     --argjson dup_pids "$duplicate_pids_by_id" \
+    --argjson foreign_live "$foreign_live_ids" \
     --slurpfile titlesf "$WORK_DIR/titles.json" \
     --argjson transcripts "$transcript_of_json" \
     --argjson mtimes "$transcript_mtime_json" '
@@ -727,6 +765,7 @@ entries_ndjson=$(jq -n -c \
     | ($events[$id] // {has_start_event:false, cwd:"", transcript_path:"", source:null, any_desk_run_start:false, ended:false, end_reason:null, end_deliberate:null, start_time:null, recorded_tty:null}) as $ev
     | ($pidfiles[$id] // null) as $pf
     | ($live[$id] // false) as $is_live
+    | select($is_live or (($foreign_live | index($id)) == null))
     | ($titles[$id] // {custom_titles: [], ai_title: ""}) as $ti
     | ($transcripts[$id] // null) as $tp_path
     | ($pf.updatedAt | norm_ms) as $pf_updated

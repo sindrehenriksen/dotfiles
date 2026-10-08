@@ -295,6 +295,21 @@ events survived-then-hup "$(start_ev startup 991023)" "$(end_ev closed-by-pass)"
     "$(end_ev other 991023)"
 assert_eq "a survivor later torn down is left open" "true" "$(read_field survived-then-hup .left_open)"
 
+echo "=== a session live under another config dir is not left open ==="
+# The event store is shared by every config dir; pid files are not.
+other_dir="$TMP/other-config"
+mkdir -p "$other_dir/sessions" "$other_dir/projects/p"
+: > "$other_dir/projects/p/elsewhere.jsonl"
+o1=$(spawn_claude elsewhere other)
+mv "$CONFIG_DIR/sessions/$o1.json" "$other_dir/sessions/"
+jq -cn --arg tp "$other_dir/projects/p/elsewhere.jsonl" --arg cwd "$PROJ_DIR" --argjson p "$o1" \
+    '{event:"start", time:1, source:"startup", cwd:$cwd, boot:"1", pid:$p, transcript_path:$tp}' \
+    > "$STORE_DIR/elsewhere.jsonl"
+assert_eq "not listed while its own config dir has it live" "0" \
+    "$("$READER" | jq -s 'map(select(.id == "elsewhere")) | length')"
+crash "$o1"
+assert_eq "once that process is gone it is left open again" "true" "$(read_field elsewhere .left_open)"
+
 echo "=== recorder never logged an error ==="
 if [ -s "$TMP/recorder.log" ]; then
     bad "recorder log is empty"
