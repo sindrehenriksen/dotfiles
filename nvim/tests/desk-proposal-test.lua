@@ -451,6 +451,27 @@ do
 	end
 end
 
+print("\n=== a moved section keeps one blank line between sections, and is taken like any move ===")
+do
+	local r = new_repo({ "Alpha", "- a1", "", "Bravo", "- b1", "", "Charlie", "- c1" })
+	assert(proposal.build(r, "morning", "2026-10-08", {
+		item("mv", { kind = "move", target = { { at = "Bravo" }, { after = "Charlie" } }, before = "Bravo\n- b1", after = "Bravo\n- b1" }),
+		item("gap", { kind = "edit", target = { at = "- a1" }, before = "- a1", after = "- a1 kept\n\n" }),
+	}, FILES))
+	assert_eq("the proposal's text has one blank line between each section",
+		{ "Alpha", "- a1 kept", "", "Charlie", "- c1", "", "Bravo", "- b1" }, tip_lines(r, "notes.md"))
+	local stored = {}
+	for _, it in ipairs(proposal.read(r).items) do
+		stored[it.headline] = it.after
+	end
+	assert_eq("the move is stored as it lands, with its separator", "\nBravo\n- b1", stored["headline mv"])
+	assert_eq("an edge blank line beside an existing one is not", "- a1 kept", stored["headline gap"])
+	assert_eq("both are open", 2, #proposal.open_items(r))
+	write(r, "notes.md", tip_lines(r, "notes.md"))
+	commit_all(r, "take both")
+	assert_eq("taking them records both as taken", 2, #proposal.sync_taken(r))
+end
+
 print(string.format("\n=== summary: %d passed, %d failed ===", pass, fail))
 if fail > 0 then
 	os.exit(1)

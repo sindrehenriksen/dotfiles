@@ -1,7 +1,8 @@
 -- desk.apply.apply_file on its own, no git: items that act at the same spot
 -- must each act on their own committed lines, whatever order they come in.
 -- An insertion landing just above a line that an edit, removal or move
--- takes away must survive, and so must a move's landed lines.
+-- takes away must survive, and so must a move's landed lines. And blank
+-- lines between sections: a moved section's, and those at an after's edges.
 --
 -- Run: nvim --headless -u nvim/tests/minimal_init.lua -l nvim/tests/desk-apply-test.lua
 local apply = require("desk.apply")
@@ -142,6 +143,52 @@ run("stale remove whose quote is gone lands nothing and loses nothing", {
 }, {
 	"# Heading A", "- a1", "- INSERTED", "- a2", "- a3", "", "# Heading B", "- b1",
 })
+
+print("\n=== blank lines between sections: a moved section, and blank lines at an after's edges ===")
+local SECTIONS = { "Alpha", "- a1", "", "Bravo", "- b1", "", "Charlie", "- c1" }
+local function on(lines, desc, items, expected)
+	local got, results = apply.apply_file(vim.deepcopy(lines), items)
+	assert_eq(desc, expected, got)
+	for _, item in ipairs(items) do
+		assert_eq(desc .. ": " .. item.id .. " applied", "applied", results[item.id])
+	end
+end
+on(SECTIONS, "a middle section moved to the end takes one blank line along and lands after one", {
+	it("mv", "move", { { at = "Bravo" }, { after = "Charlie" } }, "Bravo\n- b1", "Bravo\n- b1"),
+}, { "Alpha", "- a1", "", "Charlie", "- c1", "", "Bravo", "- b1" })
+on(SECTIONS, "the last section moved to the top takes the blank line above it, and lands above one", {
+	it("mv", "move", { { at = "Charlie" }, "top" }, "Charlie\n- c1", "Charlie\n- c1"),
+}, { "Charlie", "- c1", "", "Alpha", "- a1", "", "Bravo", "- b1" })
+on(SECTIONS, "the first section moved down takes the blank line below it", {
+	it("mv", "move", { { at = "Alpha" }, { after = "Bravo" } }, "Alpha\n- a1", "Alpha\n- a1"),
+}, { "Bravo", "- b1", "", "Alpha", "- a1", "", "Charlie", "- c1" })
+on(SECTIONS, "a section that already carries its blank line lands with just that one", {
+	it("mv", "move", { { at = "Bravo" }, { after = "Charlie" } }, "Bravo\n- b1", "\nBravo\n- b1"),
+}, { "Alpha", "- a1", "", "Charlie", "- c1", "", "Bravo", "- b1" })
+on(SECTIONS, "a line moved out of a section takes no blank line and gets none", {
+	it("mv", "move", { { at = "- c1" }, { under = "Alpha" } }, "- c1", "- c1"),
+}, { "Alpha", "- a1", "- c1", "", "Bravo", "- b1", "", "Charlie" })
+local TIGHT = { "Alpha", "- a1", "Bravo", "- b1" }
+on(TIGHT, "an edit can add the blank line between two sections", {
+	it("ed", "edit", { at = "- a1" }, "- a1", "- a1\n\n"),
+}, { "Alpha", "- a1", "", "Bravo", "- b1" })
+on(TIGHT, "and an insertion a leading one", {
+	it("ins", "add", { after = "- a1" }, "", "\nNEW"),
+}, { "Alpha", "- a1", "", "NEW", "Bravo", "- b1" })
+on(SECTIONS, "a trailing blank line beside an existing one is dropped", {
+	it("ed", "edit", { at = "- a1" }, "- a1", "- a1 edited\n\n"),
+}, { "Alpha", "- a1 edited", "", "Bravo", "- b1", "", "Charlie", "- c1" })
+on(SECTIONS, "so is one at the end of the file", {
+	it("ins", "add", { under = "Charlie" }, "", "- c2\n\n"),
+}, { "Alpha", "- a1", "", "Bravo", "- b1", "", "Charlie", "- c1", "- c2" })
+on(SECTIONS, "and a leading one at the top, and extra ones beyond the one that separates", {
+	it("top", "new", "top", "", "\nNEWS"),
+	it("ed", "edit", { at = "- b1" }, "- b1", "\n\n- b1 edited"),
+}, { "NEWS", "Alpha", "- a1", "", "Bravo", "", "- b1 edited", "", "Charlie", "- c1" })
+assert_eq("fitted_after gives the text as it lands", "\nBravo\n- b1", apply.fitted_after(SECTIONS,
+	it("mv", "move", { { at = "Bravo" }, { after = "Charlie" } }, "Bravo\n- b1", "Bravo\n- b1")))
+assert_eq("and an after with nothing to fit unchanged", "- a1 edited", apply.fitted_after(SECTIONS,
+	it("ed", "edit", { at = "- a1" }, "- a1", "- a1 edited")))
 
 print(string.format("\n=== summary: %d passed, %d failed ===", pass, fail))
 if fail > 0 then

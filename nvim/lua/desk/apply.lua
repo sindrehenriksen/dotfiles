@@ -29,6 +29,60 @@ local M = {}
 -- nothing is removed.
 local INSERT_KINDS = { new = true, add = true, link = true }
 
+local function is_blank(line)
+	return line ~= nil and line:match("^%s*$") ~= nil
+end
+
+-- Blank lines between sections. `insert` lands between committed lines
+-- `prev` and `nxt` (nil at the file's edges). A blank line at either edge
+-- of it is kept, one at most, only where it separates it from text on
+-- that side; any other is dropped, so an `after` never doubles a blank
+-- line or leaves one at the file's start or end. With `section` (a move
+-- of a block that stood between blank lines), a landing spot that is a
+-- section boundary (blank or the file's edge on one side) also gets a
+-- blank line on each side that meets text. An all-blank `insert` is left
+-- as it is.
+local function fit_edges(insert, prev, nxt, section)
+	local first, last = 1, #insert
+	while first <= last and is_blank(insert[first]) do
+		first = first + 1
+	end
+	while last >= first and is_blank(insert[last]) do
+		last = last - 1
+	end
+	if first > last then
+		return insert
+	end
+	local boundary = section and (prev == nil or is_blank(prev) or nxt == nil or is_blank(nxt))
+	local out = {}
+	if prev ~= nil and not is_blank(prev) and (first > 1 or boundary) then
+		out[#out + 1] = ""
+	end
+	for i = first, last do
+		out[#out + 1] = insert[i]
+	end
+	if nxt ~= nil and not is_blank(nxt) and (last < #insert or boundary) then
+		out[#out + 1] = ""
+	end
+	return out
+end
+
+-- The blank line a move of committed lines `first`..`last` takes along: when
+-- they stand between blank lines (or a blank line and the file's edge),
+-- one of those, so the gap they leave is a single blank line. The one
+-- below, unless that is the file's end. nil when they don't.
+local function bounding_blank(lines, first, last)
+	local above = first > 1 and is_blank(lines[first - 1])
+	local below = last < #lines and is_blank(lines[last + 1])
+	if below and (above or first == 1) then
+		return last + 1
+	end
+	if above and last == #lines then
+		return first - 1
+	end
+	return nil
+end
+
 --- Resolves a before-shaped (leave/removal) anchor against `lines`,
 --- distinguishing "the anchor's own quote is gone entirely" (`"bad_anchor"`
 --- — nothing left to identify a specific edit location against) from "the
@@ -48,6 +102,52 @@ local function resolve_leave(lines, anchor, before_lines)
 		return nil, "content_mismatch"
 	end
 	return pos, "resolved"
+end
+
+--- Where `item` lands in committed `lines`, as the lines its text goes in
+--- between (nil at a file edge), and whether it moves a whole section:
+--- true, prev, next, section. Nothing when it doesn't resolve, and its
+--- text then goes in as it is.
+local function landing(lines, item)
+	local leave_anchor, land_anchor = block.parse_target(item.target)
+	local before_lines = snippet.split_lines(item.before)
+	if INSERT_KINDS[item.kind] then
+		local pos = block.find_after_anchor(lines, land_anchor)
+		if pos then
+			return true, lines[pos], lines[pos + 1], false
+		end
+	elseif item.kind == "edit" then
+		local pos, status = resolve_leave(lines, leave_anchor, before_lines)
+		if status == "resolved" then
+			return true, lines[pos], lines[pos + #before_lines + 1], false
+		end
+	elseif item.kind == "merge" or item.kind == "move" then
+		local leave_pos, leave_status = resolve_leave(lines, leave_anchor, before_lines)
+		local land_pos = leave_status ~= "content_mismatch" and block.find_after_anchor(lines, land_anchor) or nil
+		if land_pos then
+			local section = item.kind == "move"
+				and leave_status == "resolved"
+				and bounding_blank(lines, leave_pos + 1, leave_pos + #before_lines) ~= nil
+			return true, lines[land_pos], lines[land_pos + 1], section
+		end
+	end
+end
+
+--- `item`'s `after` as it lands in committed `lines`: blank lines at its
+--- edges fitted to where it lands (fit_edges). The text itself, unchanged,
+--- when nothing about the edges changes or the item doesn't resolve.
+function M.fitted_after(lines, item)
+	local resolved, prev, nxt, section = landing(lines, item)
+	if not resolved then
+		return item.after
+	end
+	local after = snippet.split_lines(item.after)
+	local fitted = fit_edges(after, prev, nxt, section)
+	if vim.deep_equal(fitted, after) then
+		return item.after
+	end
+	-- A last blank line needs its own newline: one alone ends the text.
+	return snippet.join_lines(fitted, fitted[#fitted] == "")
 end
 
 --- One target file's committed lines (array of strings) + the items that
@@ -89,6 +189,7 @@ function M.apply_file(lines, items)
 
 	for item_index, item in ipairs(items) do
 		local leave_anchor, land_anchor = block.parse_target(item.target)
+		local after_lines = snippet.split_lines(M.fitted_after(lines, item))
 		local function put(gap, insert, in_place)
 			if #insert > 0 then
 				pieces[gap] = pieces[gap] or {}
@@ -100,7 +201,7 @@ function M.apply_file(lines, items)
 			if pos == nil then
 				results[item.id] = "deferred" -- no anchor at all: malformed, nothing to do
 			else
-				put(pos, snippet.split_lines(item.after), false)
+				put(pos, after_lines, false)
 				results[item.id] = "applied"
 				if fell_back then
 					landed_on_top[item.id] = true
@@ -120,7 +221,7 @@ function M.apply_file(lines, items)
 				results[item.id] = "deferred"
 			else
 				claim(pos + 1, #before_lines)
-				put(pos, item.kind == "edit" and snippet.split_lines(item.after) or {}, true)
+				put(pos, item.kind == "edit" and after_lines or {}, true)
 				results[item.id] = "applied"
 			end
 		elseif item.kind == "merge" or item.kind == "move" then
@@ -139,8 +240,14 @@ function M.apply_file(lines, items)
 			else
 				if leave_status == "resolved" then
 					claim(leave_pos + 1, #before_lines)
+					-- A whole section takes one of the blank lines around it
+					-- along, so its old place keeps a single one.
+					local extra = item.kind == "move" and bounding_blank(lines, leave_pos + 1, leave_pos + #before_lines)
+					if extra and free(extra, 1) then
+						claim(extra, 1)
+					end
 				end
-				put(land_pos, snippet.split_lines(item.after), false)
+				put(land_pos, after_lines, false)
 				results[item.id] = "applied"
 				if leave_status == "bad_anchor" or land_fell_back then
 					landed_on_top[item.id] = true

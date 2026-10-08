@@ -87,6 +87,26 @@ out="$("$PROPOSE" --dry-run "$ROOT/items2.json")"
 assert_eq "it prints the cleaned items" "answer2" "$(jq -r '.items[0].id' <<< "$out")"
 assert_eq "...and the proposal did not move" "$before_sha" "$(git -C "$repo" rev-parse refs/desk/proposal)"
 
+echo "=== a blank line between sections survives the cleaning ==="
+repo2="$ROOT/notes2"
+desk_test_assert_repo_under_root "$repo2" "$ROOT"
+mkdir -p "$repo2"
+git -C "$repo2" init -q -b main
+git -C "$repo2" config user.email test@example.invalid
+git -C "$repo2" config user.name "Desk Test"
+printf 'Weekly\n  - posts drafted\nOther\n  - other thing\n' > "$repo2/notes.md"
+: > "$repo2/reading.md"
+: > "$repo2/.desk-notes"
+git -C "$repo2" add -A
+git -C "$repo2" commit -q -m initial
+jq -n --arg r "$repo2" '{notes_repo: $r, files: ["notes.md", "reading.md"]}' > "$ROOT/config2.json"
+jq -n '[{id: "gap", file: "notes.md", kind: "edit", target: {at: "  - posts drafted"}, before: "  - posts drafted",
+	after: "  - posts drafted\n\n", headline: "Space the sections", source: "notes"}]' > "$ROOT/gap.json"
+out="$(DESK_CONFIG="$ROOT/config2.json" "$PROPOSE" "$ROOT/gap.json")"
+case "$out" in "staged: 1 new, "*) ok "an edit that only adds a blank line is staged" ;; *) bad "an edit that only adds a blank line is staged (got [$out])" ;; esac
+assert_eq "...and the proposal has the blank line between the sections" "Weekly|  - posts drafted||Other|  - other thing" \
+	"$(git -C "$repo2" show refs/desk/proposal:notes.md 2> /dev/null | paste -sd'|' -)"
+
 echo "=== config and usage ==="
 DESK_CONFIG="" DESK_CONFIG_DEFAULT="$ROOT/none.json" "$PROPOSE" "$ROOT/items.json" > /dev/null 2>&1
 assert_eq "no config is a config error" "2" "$?"

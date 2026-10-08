@@ -74,11 +74,16 @@ desk_strip_agent_marks() {
 # (beyond the scratch-copy agent mark). The URLs on the user's own line are the user's:
 # `after` may keep any URL `before` already carries, and only URLs the agent
 # adds (in `after` or the headline) are checked against the allowed set.
+# A blank line `after` ends with is kept, newlines and all, since it can
+# be the point of an item (desk.apply fits it to where it lands); every
+# command substitution here would otherwise drop it. A lone final newline
+# only ends the text, and goes as before.
 desk_sanitize_item_text() {
 	local item_json="$1" allowed_urls="$2"
-	local before after headline
+	local before after headline after_tail
 	before="$(jq -r '.before // ""' <<< "$item_json")"
 	after="$(jq -r '.after // ""' <<< "$item_json")"
+	after_tail="$(jq -r '.after // "" | if test("[^\n]") then (capture("(?<t>\n*)$").t | length) else 0 end' <<< "$item_json")"
 	headline="$(jq -r '.headline // ""' <<< "$item_json")"
 	before="$(desk_strip_agent_marks "$before")"
 	local own_urls after_allowed
@@ -94,6 +99,10 @@ desk_sanitize_item_text() {
 		val="$(desk_strip_disallowed_urls "$val" "$allow")"
 		val="$(desk_strip_modelines <<< "$val")"
 		val="$(desk_strip_control_chars <<< "$val")"
+		if [ "$field" = after ] && [ "${after_tail:-0}" -ge 2 ]; then
+			local i
+			for ((i = 0; i < ${after_tail:-0}; i++)); do val+=$'\n'; done
+		fi
 		printf -v "$field" '%s' "$val"
 	done
 	jq -c --arg b "$before" --arg a "$after" --arg h "$headline" \

@@ -399,10 +399,28 @@ function M.build(repo, pass, scheduled_date, new_items, files)
 			head_lines[f] = M.lines_at(repo, head, f)
 		end
 
+		-- An item's `after` with the blank lines at its edges fitted to where
+		-- it lands in HEAD (desk.apply.fitted_after), so what is checked
+		-- against the user's text, stored and applied is the same text.
+		local function fitted(item)
+			local lines = item.file and head_lines[item.file]
+			if not lines then
+				return item
+			end
+			local after = apply.fitted_after(lines, item)
+			if after == item.after then
+				return item
+			end
+			item = vim.deepcopy(item)
+			item.after = after
+			return item
+		end
+
 		-- Carried: last proposal's items that are neither taken nor declined,
 		-- then items the user restored that no pass has re-proposed yet.
 		local carried, carried_ids = {}, {}
 		local function carry(item, base)
+			item = fitted(item)
 			if carried_ids[item.id] or taken[item.id] or declined.ids[item.id] or declined.keys[ledger.content_key(item)] then
 				return
 			end
@@ -437,6 +455,7 @@ function M.build(repo, pass, scheduled_date, new_items, files)
 		local named = ledger.namespace_ids(repo, pass, scheduled_date, new_items, used)
 		local fresh = {}
 		for _, item in ipairs(named) do
+			item = fitted(item)
 			local blocked = ledger.any_url_in(declined.sources, item)
 				or ledger.any_url_in(taken_sources, item)
 				or declined.keys[ledger.content_key(item)]
