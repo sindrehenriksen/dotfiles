@@ -27,6 +27,34 @@ end
 local DAY = 86400
 local now = os.time()
 
+-- Counts the reader calls whose callbacks have run, so a test can wait for
+-- every in-flight refresh to land rather than for the first label, and
+-- keeps any error a callback raises, which a scheduled callback would
+-- otherwise only print.
+local reader = require("desk.reader")
+local function settled_reader()
+	local orig = reader.all
+	local state = { done = 0, errors = {} }
+	reader.all = function(cb)
+		orig(function(...)
+			local okc, err = pcall(cb, ...)
+			if not okc then
+				state.errors[#state.errors + 1] = tostring(err)
+			end
+			state.done = state.done + 1
+		end)
+	end
+	function state.wait(n)
+		return vim.wait(3000, function()
+			return state.done >= n
+		end, 10)
+	end
+	function state.restore()
+		reader.all = orig
+	end
+	return state
+end
+
 print("=== session_text ===")
 
 assert_eq(
@@ -338,14 +366,12 @@ do
 	local buf = vim.api.nvim_create_buf(false, true)
 	vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "Alpha Session: working" })
 
+	local settled = settled_reader()
 	annotate.refresh(buf, { tokens = tokens_config })
-	vim.wait(500, function()
-		return #vim.api.nvim_buf_get_extmarks(buf, annotate.ns, 0, -1, {}) > 0
-	end, 10)
+	assert_eq("the first refresh lands", true, settled.wait(1))
 	annotate.refresh(buf, { tokens = tokens_config }) -- a second refresh, no cache having appeared meanwhile
-	vim.wait(500, function()
-		return #vim.api.nvim_buf_get_extmarks(buf, annotate.ns, 0, -1, {}) > 0
-	end, 10)
+	assert_eq("the second refresh lands", true, settled.wait(2))
+	settled.restore()
 
 	local marks = vim.api.nvim_buf_get_extmarks(buf, annotate.ns, 0, -1, {})
 	assert_eq("exactly one label, not piled up across the two refreshes", 1, #marks)
@@ -396,12 +422,11 @@ do
 
 	-- Two refreshes back to back, like BufEnter immediately followed by
 	-- FocusGained, both still in flight.
+	local settled = settled_reader()
 	annotate.refresh(buf, { tokens = tokens_config })
 	annotate.refresh(buf, { tokens = tokens_config })
-
-	vim.wait(2000, function()
-		return #vim.api.nvim_buf_get_extmarks(buf, annotate.ns, 0, -1, {}) > 0
-	end, 20)
+	assert_eq("both refreshes land", true, settled.wait(2))
+	settled.restore()
 	local marks = vim.api.nvim_buf_get_extmarks(buf, annotate.ns, 0, -1, {})
 	assert_eq("exactly one label once both in-flight refreshes have settled", 1, #marks)
 
