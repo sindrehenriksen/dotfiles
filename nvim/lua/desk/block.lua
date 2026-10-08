@@ -9,6 +9,8 @@
 -- piece, which owns the token table; it isn't needed to resolve an anchor,
 -- since every anchor already carries which kind it is (`under`, `after`,
 -- `top`, or `at` for an edit/removal/move's own `before`).
+local snippet = require("desk.snippet")
+
 local M = {}
 
 local MIN_QUOTE_LEN = 3
@@ -134,9 +136,24 @@ end
 --- Returns nil when the anchor can't be resolved (a bad quote, or one that
 --- doesn't appear) — the caller puts the item on top
 --- and counts it.
-function M.find_anchor(lines, anchor)
+---
+--- `before` (an `at` anchor's own lines) stands in for a quote too short or
+--- blank to search on, such as a line `ok`: the first place those lines sit
+--- together, nil when they don't.
+function M.find_anchor(lines, anchor, before)
 	if not anchor or anchor.kind == "top" then
 		return 0
+	end
+	if anchor.kind == "at" and before and #before > 0 then
+		local q = anchor.quote
+		if type(q) ~= "string" or #q < MIN_QUOTE_LEN or is_blank(q) then
+			for pos = 1, #lines - #before + 1 do
+				if snippet.lines_match_at(lines, pos, before) then
+					return pos - 1
+				end
+			end
+			return nil
+		end
 	end
 	local idx = M.find_line(lines, anchor.quote)
 	if not idx then

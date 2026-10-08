@@ -190,6 +190,21 @@ assert_eq("fitted_after gives the text as it lands", "\nBravo\n- b1", apply.fitt
 assert_eq("and an after with nothing to fit unchanged", "- a1 edited", apply.fitted_after(SECTIONS,
 	it("ed", "edit", { at = "- a1" }, "- a1", "- a1 edited")))
 
+print("\n=== a before whose first line is too short to quote is found by its lines ===")
+local SHORT = { "Status", "- a1", "ok", "- a2" }
+on(SHORT, "a removal of a two-character line removes it", {
+	it("rm", "remove", { at = "ok" }, "ok"),
+}, { "Status", "- a1", "- a2" })
+on(SHORT, "an edit of it rewrites it in place", {
+	it("ed", "edit", { at = "ok" }, "ok", "okay then"),
+}, { "Status", "- a1", "okay then", "- a2" })
+on({ "Status", "", "- a1", "", "- a2" }, "a blank first line, with more under it", {
+	it("rm", "remove", { at = "" }, "\n- a2"),
+}, { "Status", "", "- a1" })
+on(SHORT, "and one that isn't there removes nothing, as a gone quote does", {
+	it("gone", "remove", { at = "no" }, "no"),
+}, SHORT)
+
 print(string.format("\n=== summary: %d passed, %d failed ===", pass, fail))
 if fail > 0 then
 	os.exit(1)

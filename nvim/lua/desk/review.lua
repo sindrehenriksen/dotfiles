@@ -1531,7 +1531,7 @@ local function anchored_start(s, item, lines)
 		return nil
 	end
 	if s.base then
-		local at = block.find_anchor(s.base, leave)
+		local at = block.find_anchor(s.base, leave, before)
 		if at and snippet.lines_match_at(s.base, at + 1, before) then
 			local hunks = diff_indices(s.base, lines)
 			local row = map_row(hunks, at + 1, false)
@@ -1541,7 +1541,7 @@ local function anchored_start(s, item, lines)
 			end
 		end
 	end
-	local at = block.find_anchor(lines, leave)
+	local at = block.find_anchor(lines, leave, before)
 	if at and snippet.lines_match_at(lines, at + 1, before) then
 		return at + 1
 	end
@@ -1566,7 +1566,7 @@ function M.place_del_marks(s)
 		if leaves_before(item) then
 			local leave = block.parse_target(item.target)
 			local before = snippet.split_lines(item.before)
-			local at = leave and leave.kind == "at" and block.find_anchor(s.base, leave)
+			local at = leave and leave.kind == "at" and block.find_anchor(s.base, leave, before)
 			if at and snippet.lines_match_at(s.base, at + 1, before) then
 				local row = math.min(map_row(hunks, at, false), #review_lines)
 				s.dels[item.id] = vim.api.nvim_buf_set_extmark(s.review_buf, MARK_NS, row, 0, { right_gravity = false })
@@ -1790,7 +1790,7 @@ local function decline_item(s, item)
 		if row then
 			local restore = before
 			local leave = block.parse_target(item.target)
-			local at = item.kind == "move" and s.base and leave and leave.kind == "at" and block.find_anchor(s.base, leave)
+			local at = item.kind == "move" and s.base and leave and leave.kind == "at" and block.find_anchor(s.base, leave, before)
 			local blank = at and apply.bounding_blank(s.base, at + 1, at + #before)
 			local review_lines = buf_lines(buf)
 			local function is_blank(l)

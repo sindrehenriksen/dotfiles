@@ -343,6 +343,15 @@ do
 	assert_eq("it is still open", 1, #proposal.open_items(r6))
 end
 
+print("\n=== a removal of a line too short to quote is judged by its lines ===")
+do
+	local r = new_repo({ "Status", "- a1", "ok", "- a2" })
+	local _, st = proposal.build(r, "morning", "2026-10-01", { item("rm", { kind = "remove", target = { at = "ok" }, before = "ok", after = "", source = "notes", headline = "drop ok" }) }, FILES)
+	assert_eq("it is not skipped as already done", 0, st.skipped)
+	assert_eq("it is open", 1, #proposal.open_items(r))
+	assert_eq("the proposal removes the line", { "Status", "- a1", "- a2" }, tip_lines(r, "notes.md"))
+end
+
 print("\n=== a news URL already taken or declined is never proposed again ===")
 do
 	local r = new_repo({ "Section A", "  existing" })

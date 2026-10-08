@@ -95,7 +95,7 @@ local function resolve_leave(lines, anchor, before_lines)
 	if not anchor then
 		return nil, "content_mismatch"
 	end
-	local pos = block.find_anchor(lines, anchor)
+	local pos = block.find_anchor(lines, anchor, before_lines)
 	if pos == nil then
 		return nil, "bad_anchor"
 	end

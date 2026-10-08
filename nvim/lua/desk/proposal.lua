@@ -87,7 +87,7 @@ end
 local function removal_done(item, lines, base, before)
 	local leave = block.parse_target(item.target)
 	if base and leave and leave.kind == "at" then
-		local at = block.find_anchor(base, leave)
+		local at = block.find_anchor(base, leave, before)
 		if at and snippet.lines_match_at(base, at + 1, before) then
 			local hunks = vim.diff(
 				snippet.join_lines(base, true),
@@ -110,7 +110,7 @@ local function removal_done(item, lines, base, before)
 		end
 	end
 	if leave and leave.kind == "at" then
-		local at = block.find_anchor(lines, leave)
+		local at = block.find_anchor(lines, leave, before)
 		if at == nil then
 			return true
 		end
@@ -181,13 +181,13 @@ local function edit_done(item, lines, base, after)
 		return M.contains(lines, after)
 	end
 	if base then
-		local at = block.find_anchor(base, leave)
+		local at = block.find_anchor(base, leave, before)
 		if at and snippet.lines_match_at(base, at + 1, before) then
 			local lo, hi = mapped_range(base, lines, at + 1, at + #before)
 			return overlaps_within(lines, after, lo, hi)
 		end
 	end
-	local at = block.find_anchor(lines, leave)
+	local at = block.find_anchor(lines, leave, before)
 	if not at then
 		return M.contains(lines, after)
 	end
