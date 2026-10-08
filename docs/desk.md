@@ -6,6 +6,17 @@ This repo holds the mechanism only. Everything that makes it someone's (which so
 
 macOS only: tabs open in Ghostty through Hammerspoon, and passes run from launchd. There is no Linux counterpart.
 
+## Day to day
+
+- **Passes run on their own.** A scheduled pass reads its sources and leaves suggestions for your notes; its follow-up tab opens in the background (no focus taken) on a plain summary of what it proposed, what it left out, and what it needs from you. Reply there.
+- **Review suggestions** in your notes: `␣gR` opens them above your notes. `n`/`N` (or `]c`/`[c`) move between them, `dp` takes one into your notes, `␣gA`/`␣gD` take or decline the one under the cursor, `u` undoes. `␣go` lists them all (`t` take, `x` decline, `q` close the list, `Q` end the review). `␣gc` commits. Leaving one alone means "not now": it comes back next time.
+- **Sessions** suggest notes changes the same way, with `desk-propose`; they edit your notes directly only when you ask for that edit.
+- **Follow tickets** by saying "follow this epic" in the session that works on it. The follow pass then sends that session the news, and the session rings the bell (🔔 in its tab title) only when you're needed.
+- **Ending a session:** Ctrl+C twice or `/exit` marks it done. Closing its tab leaves it open, so it is reopened after a restart (ask for "reopen my sessions"). `␣gx` on a session name in your notes jumps to its tab or resumes it.
+- **When something looks off:** the bar above your notes shows each pass's last result; the logs are in `~/.local/state/desk/logs/`.
+
+Everything below is reference: how it works, and every setting.
+
 ## How it works
 
 **The notes repo.** A private git repo holding `notes.md` and `reading.md` at its root, on branch `main`, with an empty `.desk-notes` marker file. The marker, not a path, is what tells nvim a buffer is a desk notes file, so this repo never names where the notes live. nvim attaches to the config's `files` (default those two names), and session captures land in `captures_file` (default the first entry of `files`).
