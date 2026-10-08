@@ -615,6 +615,25 @@ do
 	vim.cmd("normal u")
 	vim.cmd("write")
 	assert_eq("an undone take is not recorded", {}, taken_headlines(r3))
+
+	-- take, undo, then an edit elsewhere, then save: the edit starts a new
+	-- undo branch, which leaves the undone take behind
+	local r4 = new_repo(BASE)
+	build(r4, "2026-10-01", { item("n1") })
+	local nb4 = open_notes(r4)
+	review.attach(nb4)
+	assert_true("review opens", review.open_review(nb4))
+	local nw4 = vim.fn.bufwinid(nb4)
+	vim.api.nvim_set_current_win(nw4)
+	vim.api.nvim_win_set_cursor(nw4, { 1, 0 })
+	vim.cmd("diffupdate")
+	vim.cmd("normal do")
+	vim.cmd("normal u")
+	vim.api.nvim_buf_set_lines(nb4, -1, -1, false, { "  an unrelated edit" })
+	vim.cmd("write")
+	assert_eq("an undone take stays unrecorded after an unrelated edit", {}, taken_headlines(r4))
+	build(r4, "2026-10-02", {})
+	assert_eq("and the next pass carries it again", 1, #proposal.read_items(r4))
 end
 
 print("\n=== the user's line appended where an add lands never makes the suggestion vanish ===")

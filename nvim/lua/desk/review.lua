@@ -144,6 +144,38 @@ local function undo_seq(buf)
 	end)
 end
 
+-- Whether undo state `seq` of `buf` is the current state or one it was
+-- reached from: false once `seq` was undone and the buffer moved on along
+-- another branch, nil when the tree no longer holds it. Undo numbers can't
+-- be compared across branches, since a new branch numbers on from the
+-- highest one used.
+local function undo_reaches(buf, seq)
+	local tree = vim.api.nvim_buf_call(buf, vim.fn.undotree)
+	local parent = {}
+	local function walk(entries, from)
+		local prev = from
+		for _, e in ipairs(entries) do
+			parent[e.seq] = prev
+			if e.alt then
+				walk(e.alt, prev)
+			end
+			prev = e.seq
+		end
+	end
+	walk(tree.entries, 0)
+	if seq ~= 0 and parent[seq] == nil then
+		return nil
+	end
+	local at = tree.seq_cur
+	while at ~= nil do
+		if at == seq then
+			return true
+		end
+		at = parent[at]
+	end
+	return false
+end
+
 local function remember_taken(s, item, pre)
 	s.took_into = s.took_into or {}
 	s.took_into[s.notes_buf] = true
@@ -174,8 +206,9 @@ local function note_takes(s, pre, known)
 end
 
 --- Records, as taken, the suggestions the user took since the last flush. One
---- whose take the user has undone (the text is not there, and the buffer is back
---- before the take) is dropped. Returns how many were recorded, and them.
+--- whose take the user has undone (the text is not there, and the buffer's
+--- undo state no longer descends from the take) is dropped. Returns how many
+--- were recorded, and them.
 function M.flush_taken(notes_buf)
 	local pend = pending_taken[notes_buf]
 	if not pend then
@@ -188,7 +221,11 @@ function M.flush_taken(notes_buf)
 	local lines, seq = buf_lines(notes_buf), undo_seq(notes_buf)
 	local items = {}
 	for _, t in pairs(pend.ids) do
-		if proposal.proposed_in(t.item, lines, t.base) or (seq >= t.seq and not vim.deep_equal(lines, t.pre)) then
+		local kept = undo_reaches(notes_buf, t.seq)
+		if kept == nil then
+			kept = seq >= t.seq
+		end
+		if proposal.proposed_in(t.item, lines, t.base) or (kept and not vim.deep_equal(lines, t.pre)) then
 			items[#items + 1] = t.item
 		end
 	end
