@@ -495,7 +495,9 @@ $(git -C "$repo" show "HEAD:$f" 2> /dev/null)"
 $(jq -r '(.entries // [])[] | .url // empty' "$PASS_SCRATCH/ticket-digest.json" 2> /dev/null)"
 					fi
 					validated_json="$(desk_validate_items "$items_json" "$allowed_urls")"
-					capped="$(desk_apply_caps "$validated_json" "$caps_json" "$pass")"
+					capped="$(desk_apply_caps "$validated_json" "$caps_json")"
+					desk_record_capped "$(jq -c '.overflow' <<< "$capped")"
+					desk_near_misses "$final_text" > "$PASS_SCRATCH/near-misses.json"
 					kept_json="$(jq -c '.kept' <<< "$capped")"
 					# This judge call's own overflow-by-tier — status.json's
 					# `proposal.overflow` (nvim/lua/desk/status.lua's own

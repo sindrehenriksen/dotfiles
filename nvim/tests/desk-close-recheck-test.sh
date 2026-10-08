@@ -42,7 +42,6 @@ export DESK_LOCK_ROOT="$STATE/lock"
 export DESK_GUARD_ROOT="$STATE/guard"
 export DESK_SCRATCH_ROOT="$STATE/scratch"
 export DESK_LOG_DIR="$STATE/logs"
-export DESK_BRIEF_DIR="$STATE/briefs"
 export DESK_KILL_GRACE_SECS=2
 export CLAUDE_CONFIG_DIR="$ROOT/claude-config"
 export DESK_CONFIG="$ROOT/config.json"

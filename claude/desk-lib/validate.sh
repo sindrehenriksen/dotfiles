@@ -4,10 +4,8 @@
 # raw tool_results, never its prose. This is the one place that runs: the
 # source-URL check (desk-lib/tool-results.sh supplies the allowed set),
 # control/ANSI-character and modeline stripping, the close call's turn-citation
-# check, and the daily/weekly tier caps with dated-brief overflow.
+# check, and the daily/weekly tier caps.
 set -u
-
-DESK_BRIEF_DIR="${DESK_BRIEF_DIR:-$DESK_STATE_DIR/briefs}"
 
 # ---------------------------------------------------------------------------
 # Stripping: control and ANSI characters, and vim modelines (the notes
@@ -227,23 +225,18 @@ desk_verify_and_strip_turn_citations() {
 }
 
 # ---------------------------------------------------------------------------
-# Caps: per-tier maximums, overflow to a dated brief. Only tiered items (news, via
-# `tier`) are ever capped; anything else (edits, removals, closure notes)
-# passes straight through uncounted.
+# Caps: per-tier maximums. Only tiered items (news, via `tier`) are ever
+# capped; anything else (edits, removals, closure notes) passes straight
+# through uncounted.
 # ---------------------------------------------------------------------------
 
-# desk_apply_caps <items-json> <caps-json> <pass>
+# desk_apply_caps <items-json> <caps-json>
 # caps-json: {"act": N, "worth_knowing": N, "wildcard": N}. Prints
-# {"kept": [...], "overflow": [...]}. An overflowing tier's dropped items
-# are appended to today's dated brief ($DESK_BRIEF_DIR/<date>.md). The count
-# per tier is reported by the runner in the status file ("overflow"), never
-# as a proposal item: such an item has no text a review could show.
+# {"kept": [...], "overflow": [...]}. The overflow is never a proposal
+# item: the runner counts it per tier in the status file and names it in
+# the follow-up summary (desk_record_capped), where the user can ask for it.
 desk_apply_caps() {
-	local items_json="$1" caps_json="$2" pass="$3"
-	local today brief_file
-	today="$(date +%F)"
-	brief_file="$DESK_BRIEF_DIR/$today.md"
-
+	local items_json="$1" caps_json="$2"
 	local n kept overflow
 	kept="[]"
 	overflow="[]"
@@ -277,14 +270,28 @@ desk_apply_caps() {
 		fi
 	done
 
-	local overflow_n
-	overflow_n="$(jq 'length' <<< "$overflow")"
-	if [ "$overflow_n" -gt 0 ]; then
-		mkdir -p "$DESK_BRIEF_DIR" 2> /dev/null
-		{
-			printf '\n## %s overflow (%s)\n\n' "$pass" "$today"
-			jq -r '.[] | "- [" + (.tier // "?") + "] " + (.headline // "(no headline)") + " — " + (.source // "")' <<< "$overflow"
-		} >> "$brief_file"
-	fi
 	jq -n --argjson kept "$kept" --argjson overflow "$overflow" '{kept: $kept, overflow: $overflow}'
+}
+
+# desk_record_capped <overflow-json>: adds a step's capped items to
+# $PASS_SCRATCH/capped.json, the follow-up summary's list of them.
+desk_record_capped() {
+	local file="$PASS_SCRATCH/capped.json" prev
+	prev="$(cat "$file" 2> /dev/null)"
+	jq -e 'type == "array"' > /dev/null 2>&1 <<< "$prev" || prev='[]'
+	jq -c --argjson prev "$prev" '$prev + [.[] | {tier, headline, source, file, kind, after}
+		| with_entries(select(.value != null and .value != ""))]' <<< "$1" > "$file.tmp" 2> /dev/null \
+		&& mv -f "$file.tmp" "$file"
+}
+
+# desk_near_misses <reply-json>: the judge reply's `near_misses`, the
+# candidates it judged just below the bar, cleaned: at most five, each
+# {headline, why_not} as plain one-line text, anything else dropped.
+desk_near_misses() {
+	jq -c '
+		def clean($n): tostring | gsub("[\u0000-\u001f\u007f]"; " ") | gsub("\\s+"; " ") | sub("^ "; "") | sub(" $"; "") | .[0:$n];
+		if type == "object" and (.near_misses | type) == "array" then
+			[.near_misses[] | objects | select((.headline | type) == "string" and .headline != "")
+			 | {headline: (.headline | clean(120)), why_not: ((.why_not // "") | clean(200))}][0:5]
+		else [] end' <<< "$1" 2> /dev/null || echo '[]'
 }

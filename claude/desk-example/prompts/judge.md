@@ -66,7 +66,8 @@ The fields:
 - `also_sources`: optional, other URLs for the same story, same rule.
 - `headline`: a few words, shown in the user's overview list.
 - `tier`: for news only, `act`, `worth_knowing` or `wildcard`. Stay within
-  {{caps}}; anything beyond that goes to a dated brief instead of the user's notes.
+  {{caps}}; anything beyond that is held back and named in the follow-up
+  summary instead of reaching the user's notes.
 - `supersedes`: optional, the `id` of an item in `open-items.json` this
   replaces.
 

@@ -129,7 +129,7 @@ desk_retention_candidates() {
 }
 
 # desk_retention_label <session_json>
-# What the item and the brief call a session: its user-set name, else the
+# What the item and the follow-up summary call a session: its user-set name, else the
 # auto title with the short id the capture step labels it with.
 desk_retention_label() {
 	local sess="$1" name name_source id
@@ -208,8 +208,9 @@ desk_retention_finish_item() {
 # raises the session's entry to the top of the notes, or adds a line there,
 # with a few bullets on where it stood and the deletion date. Items carry
 # tier `act` and are capped like a judge's under the pass's caps entry
-# before any call is made; the overflow goes to the dated brief and its
-# count to $PASS_SCRATCH/<id>-overflow.json for the status file. A warning
+# before any call is made; the overflow is named in the follow-up summary
+# (desk_record_capped) and its count goes to $PASS_SCRATCH/<id>-overflow.json
+# for the status file. A warning
 # already proposed, taken or declined for the same session and deletion date
 # is never repeated. Prints "ok", or "failed" when the settings, the reader,
 # the notes or the ledger can't be read.
@@ -262,7 +263,8 @@ desk_step_retention() {
 			'. + [{tier: "act", headline: $h, source: ("session:" + $s.id), session_id: $s.id}]' <<< "$stubs")"
 	done
 	local capped kept_ids
-	capped="$(desk_apply_caps "$stubs" "$caps_json" "$pass")"
+	capped="$(desk_apply_caps "$stubs" "$caps_json")"
+	desk_record_capped "$(jq -c '.overflow' <<< "$capped")"
 	kept_ids="$(jq -c '[.kept[].session_id]' <<< "$capped")"
 	jq -c '{act: 0, worth_knowing: 0, wildcard: 0} + ([.overflow[] | .tier] | group_by(.) | map({(.[0]): length}) | add // {})' \
 		<<< "$capped" > "$PASS_SCRATCH/$step_id-overflow.json"

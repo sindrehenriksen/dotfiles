@@ -1495,8 +1495,9 @@ desk_follow_up_status_command() {
 # The placeholders both follow-up prompts get: `pass`, `today`, `run_status`
 # (desk_follow_up_run_status), this pass's items as the runner staged them
 # (open items whose id carries `<pass>-<scheduled_date>-`, read from <repo>'s
-# proposal) as `items` and `item_count`, and `open_note`, a line about older
-# items still waiting.
+# proposal) as `items` and `item_count`, `open_note`, a line about older
+# items still waiting, and `capped` and `near_misses`, JSON arrays of what
+# the pass held back.
 desk_follow_up_placeholders() {
 	local pass="$1" scheduled_date="$2" repo="${3:-}"
 	local open='{"items":[]}'
@@ -1504,7 +1505,17 @@ desk_follow_up_placeholders() {
 		open="$(desk_nvim_cli proposal-open "$repo" 2> /dev/null)"
 		jq -e '.items | type == "array"' > /dev/null 2>&1 <<< "$open" || open='{"items":[]}'
 	fi
+	# What the pass held back: items over the caps, and candidates the judge
+	# put just below the bar. Both are `[]` when there were none.
+	local capped='[]' near='[]'
+	if [ -n "${PASS_SCRATCH:-}" ]; then
+		capped="$(cat "$PASS_SCRATCH/capped.json" 2> /dev/null)"
+		jq -e 'type == "array"' > /dev/null 2>&1 <<< "$capped" || capped='[]'
+		near="$(cat "$PASS_SCRATCH/near-misses.json" 2> /dev/null)"
+		jq -e 'type == "array"' > /dev/null 2>&1 <<< "$near" || near='[]'
+	fi
 	jq -c --arg prefix "$pass-$scheduled_date-" --arg today "$(date +%F)" --arg pass "$pass" \
+		--argjson capped "$capped" --argjson near "$near" \
 		--arg run_status "$(desk_follow_up_run_status "$pass")" '
 		[.items[] | select(.id | startswith($prefix))] as $mine
 		| ((.items | length) - ($mine | length)) as $older
@@ -1517,7 +1528,9 @@ desk_follow_up_placeholders() {
 				| with_entries(select(.value != null and .value != ""))) | tojson),
 			open_note: (if $older > 0
 				then "\($older) earlier suggestion(s) from previous passes also still wait for review; say so in one line."
-				else "" end)
+				else "" end),
+			capped: ($capped | tojson),
+			near_misses: ($near | tojson)
 		}' <<< "$open"
 }
 

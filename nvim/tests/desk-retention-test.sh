@@ -39,7 +39,6 @@ export DESK_GUARD_ROOT="$STATE/guard"
 export DESK_SCRATCH_ROOT="$STATE/scratch"
 export DESK_LOG_DIR="$STATE/logs"
 export DESK_RUNS_ROOT="$STATE/runs"
-export DESK_BRIEF_DIR="$STATE/briefs"
 export CLAUDE_CONFIG_DIR="$ROOT/claude-config"
 export CLAUDE_SESSION_STORE="$ROOT/session-events"
 export CLAUDE_SESSION_READER_CACHE="$ROOT/reader-cache"
@@ -215,8 +214,8 @@ result="$(desk_step_retention "morning" "$step_json" '{}' "$repo" "2027-01-15" '
 assert_eq "the step reports ok" "ok" "$result"
 assert_eq "three calls under an act cap of 3, soonest first" "77777777-0009 0000aaaa-0008 aaaaaaaa-0001" "$(tr '\n' ' ' < "$CALLS" | sed 's/ $//')"
 assert_eq "the overflow is counted for status" '{"act":1,"worth_knowing":0,"wildcard":0}' "$(cat "$PASS_SCRATCH/retention-overflow.json")"
-assert_true "the overflow is in the dated brief" \
-	"$(grep -q 'edge-work: transcript deleted' "$DESK_BRIEF_DIR"/*.md 2> /dev/null && echo true || echo false)"
+assert_true "the overflow is held back for the follow-up summary" \
+	"$(jq -e 'any(.[]; .headline | startswith("edge-work: transcript deleted"))' "$PASS_SCRATCH/capped.json" > /dev/null 2>&1 && echo true || echo false)"
 assert_true "the prompt got every placeholder" \
 	"$(grep -qx "session alpha-work aaaaaaaa-0001 deleted $alpha_date in 10d, today $(date +%F)" "$ROOT/prompt-aaaaaaaa-0001.txt" && echo true || echo false)"
 

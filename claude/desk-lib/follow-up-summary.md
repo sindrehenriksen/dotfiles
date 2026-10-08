@@ -13,12 +13,27 @@ What the pass put in front of the user for review today ({{today}}), after the r
 
 {{open_note}}
 
+What the pass held back, as the runner recorded it, each `[]` when there was nothing. Over the per-tier caps, so never proposed:
+
+```json
+{{capped}}
+```
+
+Judged just below the bar, with why not:
+
+```json
+{{near_misses}}
+```
+
 Write, in this order:
 
 1. One or two sentences on what the pass found overall. If it suggested nothing, say that in one line ("Nothing new since the last pass; nothing for you today.") and name what was checked, from what you read in this conversation: the sources, the tickets, the sessions.
 2. If any step failed or did not run, say which, in plain words, what still ran, and what that means for the user (a source retried at the next slot, a step that will run tomorrow).
 3. Each suggestion in turn, in a short paragraph or bullet: what it is, why it was suggested, and how it relates to what the user has going in their notes, briefly reminding them what that was rather than leaning on a name or key alone. Keep any doubt the source carried.
-4. Any questions whose answer would change a suggestion or what the next pass looks for. Leave this out if there are none.
+4. If anything was held back over the caps, one sentence, not a list: how many, a few words on each, and an offer to show them or propose any of them. Then the same in one sentence for what fell just below the bar. Say nothing at all about a list that is empty.
+5. Any questions whose answer would change a suggestion or what the next pass looks for. Leave this out if there are none.
+
+If the user later asks for one of the held-back ones to be proposed, stage it with `desk-propose` (`desk-propose --help` has the item shape), as a suggestion they review like any other, never by editing their notes.
 
 When there are suggestions, close with one line saying they wait as a diff in the user's notes and nothing changes until they take one.
 

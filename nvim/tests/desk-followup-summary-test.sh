@@ -306,5 +306,23 @@ desk_open_follow_up_tab morning "$d" J "$repo" > /dev/null 2>&1
 assert_eq "a status session, then a later J the same day: still one tab" "1" "$(wc -l < "$OPEN_TAB_LOG" | tr -d ' ')"
 
 echo
+echo "=== what the pass held back reaches the summary prompt ==="
+held_lists() { awk '/^```json$/{getline; print}' "$PROMPT_COPY" | tail -2 | tr '\n' ' '; }
+PASS_SCRATCH="$ROOT/held-back-scratch"
+mkdir -p "$PASS_SCRATCH"
+seed_judge_session morning 2026-11-02 "aaaaaaaa-0000-4000-8000-000000000011" > /dev/null
+desk_open_follow_up_tab morning 2026-11-02 J "$repo" > /dev/null 2>&1
+assert_eq "with nothing held back, both lists are empty" "[] [] " "$(held_lists)"
+echo '[{"tier":"act","headline":"capped headline","source":"notes"}]' > "$PASS_SCRATCH/capped.json"
+echo '[{"headline":"near headline","why_not":"routine"}]' > "$PASS_SCRATCH/near-misses.json"
+seed_judge_session morning 2026-11-03 "aaaaaaaa-0000-4000-8000-000000000012" > /dev/null
+desk_open_follow_up_tab morning 2026-11-03 J "$repo" > /dev/null 2>&1
+assert_eq "the capped item and the near miss are both handed over" \
+	'[{"tier":"act","headline":"capped headline","source":"notes"}] [{"headline":"near headline","why_not":"routine"}] ' "$(held_lists)"
+assert_true "the prompt asks for one line each, and nothing for an empty list" \
+	"$(grep -qF 'Say nothing at all about a list that is empty.' "$PROMPT_COPY" && echo true || echo false)"
+unset PASS_SCRATCH
+
+echo
 echo "=== summary: $pass passed, $fail failed ==="
 [ "$fail" -eq 0 ]

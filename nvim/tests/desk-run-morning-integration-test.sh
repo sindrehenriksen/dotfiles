@@ -34,7 +34,7 @@ source "$HERE/../../tests/lib/git-safety.sh"
 desk_test_git_safety_init "$ROOT"
 
 FAKEBIN="$ROOT/fakebin"
-mkdir -p "$FAKEBIN"
+mkdir -p "$FAKEBIN" "$ROOT/held"
 W_LOG="$ROOT/w-calls.log"
 : > "$W_LOG"
 # J is a judge step with a "Read" tool, so it gets the deny hook's own
@@ -53,6 +53,7 @@ cat > "$FAKEBIN/claude" <<FAKE
 # (prompt.txt) — nothing here depends on shell expansion at write-time
 # except those paths.
 W_LOG="$W_LOG"
+HELD_DIR="$ROOT/held"
 J_HOOK_SCRIPT_PATH_LOG="$J_HOOK_SCRIPT_PATH_LOG"
 J_HOOK_SCRIPT_COPY="$J_HOOK_SCRIPT_COPY"
 FAKE
@@ -83,7 +84,18 @@ case "$cwd" in
 			printf '%s\n' "$hook_script_path" > "$J_HOOK_SCRIPT_PATH_LOG"
 			[ -f "$hook_script_path" ] && cp "$hook_script_path" "$J_HOOK_SCRIPT_COPY" 2> /dev/null
 		fi
-		echo '{"type":"assistant","message":{"content":[{"type":"text","text":"{\"items\":[{\"id\":\"j1\",\"file\":\"notes.md\",\"kind\":\"new\",\"target\":\"top\",\"before\":\"\",\"after\":\"a validated item\",\"source\":\"notes\",\"headline\":\"h1\",\"tier\":\"act\"}]}"}]}}'
+		# Four ACT items against a cap of three, and one candidate just
+		# below the bar.
+		jq -nc '{type:"assistant",message:{content:[{type:"text",text:({items:[range(1;5) as $n
+			| {id:"j\($n)",file:"notes.md",kind:"new",target:"top",before:"",after:"a validated item \($n)",source:"notes",headline:"h\($n)",tier:"act"}],
+			near_misses:[{headline:"close call",why_not:"routine for now"}]} | tojson)}]}}'
+		echo '{"type":"result","subtype":"success"}'
+		;;
+	*-F-after-*)
+		# Runs after J: copies what J's branch held back out of the pass's scratch.
+		for f in "$DESK_SCRATCH_ROOT"/testpass-*/capped.json "$DESK_SCRATCH_ROOT"/testpass-*/near-misses.json; do
+			[ -f "$f" ] && cp "$f" "$HELD_DIR/"
+		done
 		echo '{"type":"result","subtype":"success"}'
 		;;
 	*-W-*)
@@ -108,7 +120,6 @@ export DESK_GUARD_ROOT="$STATE/guard"
 export DESK_SCRATCH_ROOT="$STATE/scratch"
 export DESK_LOG_DIR="$STATE/logs"
 export DESK_TICKET_CACHE="$STATE/ticket-status.json"
-export DESK_BRIEF_DIR="$STATE/briefs"
 export CLAUDE_CONFIG_DIR="$ROOT/claude-config"
 export DESK_LOCK_MAX_WAIT_SECS=2
 export DESK_LOCK_POLL_SECS=1
@@ -158,6 +169,7 @@ jq -n --arg repo "$repo" --arg prompt "$prompt" --arg fpp "$f_private_prompt" '{
 				{id: "F-private", kind: "fetch", prompt: $fpp, tools: ["mcp__claude_ai_Gmail__search_threads"], connector: true, timeout: 30},
 				{id: "T", kind: "fetch", prompt: $prompt, tools: ["mcp__example-tickets__search"], connector: false, timeout: 30},
 				{id: "J", kind: "judge", prompt: $prompt, tools: ["Read"], connector: false, timeout: 30},
+				{id: "F-after", kind: "fetch", prompt: $prompt, tools: [], connector: false, timeout: 30},
 				{id: "W", kind: "write", prompt: $prompt, tools: ["mcp__claude_ai_Gmail__unlabel_thread"], connector: true, pinned_label: "UNREAD", timeout: 30}
 			]
 		}
@@ -187,6 +199,12 @@ assert_true "the proposal holds J's item" \
 	"$(jq -e '.items[] | select(.id | endswith("-j1"))' > /dev/null 2>&1 <<< "$proposal_tree_blob" && echo true || echo false)"
 ledger_ref="$(git -C "$repo" rev-parse refs/desk/ledger 2> /dev/null || true)"
 assert_true "the ledger ref was written too" "$([ -n "$ledger_ref" ] && echo true || echo false)"
+
+echo
+echo "=== what J's branch held back is kept for the follow-up summary ==="
+assert_eq "the item over the ACT cap is recorded" '["h4"]' "$(jq -c '[.[].headline]' "$ROOT/held/capped.json" 2> /dev/null)"
+assert_eq "and the near miss" '["close call"]' "$(jq -c '[.[].headline]' "$ROOT/held/near-misses.json" 2> /dev/null)"
+assert_eq "the status file counts the capped one" "1" "$(jq '.proposal.overflow.act' "$STATE/status.json" 2> /dev/null)"
 
 echo
 echo "=== W ran dry (logged, never actually called) ==="

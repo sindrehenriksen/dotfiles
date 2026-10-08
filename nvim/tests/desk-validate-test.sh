@@ -33,7 +33,6 @@ ROOT="$(mktemp -d)"
 trap 'rm -rf "$ROOT"' EXIT
 
 export DESK_STATE_DIR="$ROOT/state"
-export DESK_BRIEF_DIR="$ROOT/state/briefs"
 
 # shellcheck source=../../claude/desk-lib/common.sh
 source "$LIB/common.sh"
@@ -142,7 +141,7 @@ assert_true "a URL the agent added to after is still stripped" \
 	"$([[ "$(jq -r '.[0].after' <<< "$validated")" != *evil.example* ]] && echo true || echo false)"
 
 echo
-echo "=== desk_apply_caps: overflow goes to the dated brief, never into the proposal ==="
+echo "=== desk_apply_caps: overflow is held back for the follow-up summary, never proposed ==="
 five_act='[
   {"id":"a1","tier":"act","headline":"one","source":"notes"},
   {"id":"a2","tier":"act","headline":"two","source":"notes"},
@@ -151,17 +150,32 @@ five_act='[
   {"id":"a5","tier":"act","headline":"five","source":"notes"}
 ]'
 caps='{"act": 3, "worth_knowing": 3, "wildcard": 1}'
-result="$(desk_apply_caps "$five_act" "$caps" "morning")"
+result="$(desk_apply_caps "$five_act" "$caps")"
 kept_n="$(jq '.kept | length' <<< "$result")"
 overflow_n="$(jq '.overflow | length' <<< "$result")"
 assert_eq "exactly the 3 capped items are kept, no summary item" "3" "$kept_n"
 assert_eq "2 items overflowed" "2" "$overflow_n"
 assert_true "no kept item is an overflow summary" \
 	"$(jq -e '[.kept[].headline] | any(test("more act")) | not' > /dev/null 2>&1 <<< "$result" && echo true || echo false)"
-brief_file="$DESK_BRIEF_DIR/$(date +%F).md"
-assert_true "the dated brief file was written" "$([ -f "$brief_file" ] && echo true || echo false)"
-assert_true "the brief holds the overflowing items' headlines" \
-	"$(grep -q 'four' "$brief_file" && grep -q 'five' "$brief_file" && echo true || echo false)"
+assert_true "no brief file is written any more" "$([ -e "$ROOT/state/briefs" ] && echo false || echo true)"
+PASS_SCRATCH="$ROOT/pass-scratch"
+mkdir -p "$PASS_SCRATCH"
+desk_record_capped "$(jq -c '.overflow' <<< "$result")"
+desk_record_capped '[{"tier":"act","headline":"six","source":"session:x","session_id":"x"}]'
+assert_eq "capped items from every step add up, headline and tier kept" '["four","five","six"]' \
+	"$(jq -c '[.[].headline]' "$PASS_SCRATCH/capped.json")"
+assert_eq "a field the summary does not need is left out" "false" "$(jq '[.[] | has("session_id")] | any' "$PASS_SCRATCH/capped.json")"
+
+echo
+echo "=== desk_near_misses: the judge's below-the-bar list, cleaned ==="
+near="$(desk_near_misses '{"items": [], "near_misses": [
+	{"headline": "a\u0007b\nc", "why_not": "routine"}, {"headline": 3}, "bare", {"headline": ""},
+	{"headline": "two"}, {"headline": "three"}, {"headline": "four"}, {"headline": "five"}, {"headline": "six"}]}')"
+assert_eq "control characters and newlines become spaces, non-entries go, five at most" \
+	'["a b c","two","three","four","five"]' "$(jq -c '[.[].headline]' <<< "$near")"
+assert_eq "why_not defaults to empty" '["routine",""]' "$(jq -c '[.[0:2][].why_not]' <<< "$near")"
+assert_eq "a bare array reply has none" "[]" "$(desk_near_misses '[]')"
+assert_eq "a long headline is cut" "120" "$(desk_near_misses "{\"near_misses\": [{\"headline\": \"$(printf 'x%.0s' {1..300})\"}]}" | jq '.[0].headline | length')"
 
 echo
 echo "=== desk_verify_and_strip_turn_citations ==="

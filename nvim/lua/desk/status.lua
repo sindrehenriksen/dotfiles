@@ -66,7 +66,7 @@ function M.live_count(left, saved)
 end
 
 --- The proposal segment: "proposal pending", "proposal partial", and any
---- "+N more ACT → brief" / worth_knowing / wildcard overflow counts. Only
+--- "+N ACT held back" / worth_knowing / wildcard counts of items over the caps. Only
 --- shown while at least one suggestion still waits on the user (`untaken`).
 local function proposal_segments(status, opts)
 	local out = {}
@@ -90,7 +90,7 @@ local function proposal_segments(status, opts)
 	for _, tier in ipairs({ "act", "worth_knowing", "wildcard" }) do
 		local n = p.overflow and p.overflow[tier]
 		if n and n > 0 then
-			out[#out + 1] = string.format("+%d more %s → brief", n, tier_labels[tier])
+			out[#out + 1] = string.format("+%d %s held back", n, tier_labels[tier])
 		end
 	end
 	return out
