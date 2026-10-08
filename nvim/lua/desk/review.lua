@@ -2100,6 +2100,7 @@ function M.overview(notes_buf)
 	vim.cmd("cclose")
 	preview = {}
 	vim.cmd("topleft copen " .. math.min(#items, 10))
+	M.qf_bars()
 	M.qf_preview()
 	return true
 end
@@ -2139,6 +2140,28 @@ local function entry_target(entry)
 	end
 end
 
+--- The overview list's bars, as every review window has them: its title
+--- and keys in a winbar above the list, and a plain status line below
+--- (the list's name and position) rather than the title again. Any other
+--- list in the window gets its own status line back.
+function M.qf_bars(win)
+	win = win or vim.fn.getqflist({ winid = 0 }).winid
+	if not win or win == 0 or not vim.api.nvim_win_is_valid(win) or is_loclist_win(win) then
+		return
+	end
+	if vim.fn.getqflist({ title = 0 }).title == M.OVERVIEW_TITLE then
+		if vim.w[win].desk_stl == nil then
+			vim.w[win].desk_stl = vim.wo[win].statusline
+		end
+		vim.wo[win].winbar = (M.OVERVIEW_TITLE:gsub("%%", "%%%%"))
+		vim.wo[win].statusline = "%t%=%l/%L "
+	elseif vim.w[win].desk_stl ~= nil then
+		vim.wo[win].winbar = ""
+		vim.wo[win].statusline = vim.w[win].desk_stl
+		vim.w[win].desk_stl = nil
+	end
+end
+
 --- The overview's preview, on every cursor move in the list: the entry's
 --- suggestion is scrolled into view with the cursor on it, in the review
 --- split, while the cursor stays in the list.
@@ -2147,7 +2170,14 @@ function M.qf_preview()
 	if is_loclist_win(qwin) or vim.fn.getqflist({ title = 0 }).title ~= M.OVERVIEW_TITLE then
 		return
 	end
-	local entry = vim.fn.getqflist()[vim.fn.line(".")]
+	M.qf_bars(qwin)
+	-- The list's current entry (QuickFixLine) is the one the cursor is on,
+	-- not the first, which otherwise stays marked wherever you are.
+	local row = vim.fn.line(".")
+	if vim.fn.getqflist({ idx = 0 }).idx ~= row then
+		vim.fn.setqflist({}, "a", { idx = row })
+	end
+	local entry = vim.fn.getqflist()[row]
 	if not entry or not entry.bufnr or entry.bufnr == 0 then
 		return
 	end
@@ -2384,6 +2414,7 @@ function M.list_declined_recently(bufnr, days)
 		end, entries) } },
 	})
 	vim.cmd("copen")
+	M.qf_bars()
 end
 
 --- Restores a declined item: it leaves the decline ledger, so the next pass
@@ -2828,6 +2859,12 @@ local function install_qf_autocmd()
 		return
 	end
 	qf_autocmd_installed = true
+	-- A :grep or :make into the overview's window gives it its own bars back.
+	vim.api.nvim_create_autocmd("QuickFixCmdPost", {
+		callback = function()
+			M.qf_bars()
+		end,
+	})
 	vim.api.nvim_create_autocmd("FileType", {
 		pattern = "qf",
 		callback = function(args)
@@ -2846,12 +2883,21 @@ local function install_qf_autocmd()
 						vim.api.nvim_feedkeys(vim.v.count > 0 and vim.v.count .. lhs or lhs, "n", false)
 						return
 					end
+					-- Said after the key's own redraw, so the reason is not lost
+					-- under it.
+					local function say(ok, why)
+						if not ok then
+							vim.schedule(function()
+								report(ok, why)
+							end)
+						end
+					end
 					if verb == "close list" then
 						vim.cmd("cclose")
 					elseif verb == "close review" then
-						report(M.qf_close_review())
+						say(M.qf_close_review())
 					else
-						report(M.qf_act(verb))
+						say(M.qf_act(verb))
 					end
 				end, { buffer = args.buf, desc = "Desk overview: " .. verb .. (verb:match("^close") and "" or " this suggestion") })
 			end

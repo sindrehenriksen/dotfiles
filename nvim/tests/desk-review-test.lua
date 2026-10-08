@@ -1993,6 +1993,45 @@ do
 	vim.notify = orig_notify
 end
 
+print("\n=== the overview list reads like the review windows: keys above, current entry under the cursor ===")
+do
+	local r = new_repo(BASE)
+	build(r, "2026-10-01", {
+		item("n1"),
+		item("a1", { kind = "add", target = { under = "Section A" }, after = "  added", source = "", headline = "add A" }),
+		item("e1", { kind = "edit", target = { at = "  other" }, before = "  other", after = "  other, edited", source = "", headline = "edit other" }),
+	})
+	local nb = open_notes(r)
+	review.attach(nb)
+	assert_true("overview opens", review.overview(nb))
+	local qw = vim.fn.getqflist({ winid = 0 }).winid
+	assert_eq("the title and keys are in a winbar above the list", review.OVERVIEW_TITLE, vim.wo[qw].winbar)
+	assert_true("the status line below doesn't repeat them", not vim.wo[qw].statusline:match("Desk overview"))
+	vim.api.nvim_set_current_win(qw)
+	vim.api.nvim_win_set_cursor(qw, { 3, 0 })
+	vim.api.nvim_exec_autocmds("CursorMoved", { buffer = vim.api.nvim_get_current_buf() })
+	assert_eq("the current entry follows the cursor", 3, vim.fn.getqflist({ idx = 0 }).idx)
+
+	-- A key that can't act says why, after its own redraw.
+	local k = assert(line_of(nb, "  other"))
+	vim.api.nvim_buf_set_lines(nb, k - 1, k, false, { "  other, mine" })
+	local said
+	local orig = vim.notify
+	vim.notify = function(m)
+		said = m
+	end
+	vim.cmd("normal t")
+	vim.wait(100, function()
+		return said ~= nil
+	end)
+	vim.notify = orig
+	assert_true("t that can't take says so (" .. tostring(said) .. ")", said ~= nil and said:match("^desk: could not take") ~= nil)
+
+	vim.fn.setqflist({}, " ", { title = "something else", items = { { bufnr = nb, lnum = 1, text = "x" } } })
+	review.qf_bars(qw)
+	assert_eq("another list in the window loses the winbar", "", vim.wo[qw].winbar)
+end
+
 print(string.format("\n=== summary: %d passed, %d failed ===", pass, fail))
 if fail > 0 then
 	os.exit(1)
