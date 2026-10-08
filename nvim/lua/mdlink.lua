@@ -48,12 +48,40 @@ function M.link_at(line, col)
 	end
 end
 
+-- Punctuation and symbols beyond ASCII, which GitHub drops from a slug as
+-- it does ASCII's: Latin-1's (not its ª µ º or ² ³ ¹ ¼ ½ ¾), typographic
+-- dashes, quotes and spaces, currency, arrows through dingbats (not the
+-- circled and dingbat numbers), the supplemental and CJK punctuation, and
+-- emoji. Letters and digits of any script stay.
+local DROPPED = {
+	{ 0xA1, 0xA9 }, { 0xAB, 0xB1 }, { 0xB4, 0xB4 }, { 0xB6, 0xB8 }, { 0xBB, 0xBB }, { 0xBF, 0xBF },
+	{ 0xD7, 0xD7 }, { 0xF7, 0xF7 },
+	{ 0x2000, 0x206F }, { 0x20A0, 0x20CF },
+	{ 0x2190, 0x245F }, { 0x2500, 0x2775 }, { 0x2794, 0x2BFF },
+	{ 0x2E00, 0x2E7F }, { 0x3000, 0x3004 }, { 0x3008, 0x3020 },
+	{ 0x1F000, 0x1FAFF },
+}
+
+local function dropped(c)
+	for _, r in ipairs(DROPPED) do
+		if c >= r[1] and c <= r[2] then
+			return true
+		end
+	end
+	return false
+end
+
 --- A heading's anchor as GitHub writes it: lowercased, links reduced to
 --- their text, everything but letters, digits, spaces, `-` and `_`
 --- dropped, spaces turned into `-`.
 function M.slug(text)
 	local t = text:gsub("%[([^%]]*)%]%b()", "%1")
 	t = vim.fn.tolower(t)
+	if t:find("[\128-\255]") then
+		t = vim.fn.list2str(vim.tbl_filter(function(c)
+			return not dropped(c)
+		end, vim.fn.str2list(t)))
+	end
 	t = t:gsub("[^%w%s_%-\128-\255]", "")
 	return (vim.trim(t):gsub("%s", "-"))
 end
