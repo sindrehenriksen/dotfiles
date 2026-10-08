@@ -205,6 +205,15 @@ on(SHORT, "and one that isn't there removes nothing, as a gone quote does", {
 	it("gone", "remove", { at = "no" }, "no"),
 }, SHORT)
 
+print("\n=== a move or merge whose before is gone is deferred, never landed ===")
+for _, kind in ipairs({ "move", "merge" }) do
+	local got, results = apply.apply_file(vim.deepcopy(SECTIONS), {
+		it("mv", kind, { { at = "Delta" }, { after = "Alpha" } }, "Delta\n- d1", "Delta\n- d1"),
+	})
+	assert_eq("a " .. kind .. " of a deleted section is deferred", "deferred", results.mv)
+	assert_eq("and its text is not put back", SECTIONS, got)
+end
+
 print(string.format("\n=== summary: %d passed, %d failed ===", pass, fail))
 if fail > 0 then
 	os.exit(1)

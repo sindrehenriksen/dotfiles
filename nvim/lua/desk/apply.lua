@@ -19,7 +19,8 @@
 -- plain "top"-anchored item, and is counted as applied. See desk.block.find_after_anchor, which the insertion-
 -- shaped half of every kind below goes through for this; a before-shaped
 -- leave/removal anchor keeps its own distinct nil (bad anchor vs. content
--- conflict) via resolve_leave, below.
+-- conflict) via resolve_leave, below. A move or merge whose leaving side is
+-- gone is deferred instead: its text is what the user deleted or reworded.
 local block = require("desk.block")
 local snippet = require("desk.snippet")
 
@@ -229,28 +230,28 @@ function M.apply_file(lines, items)
 			local before_lines = snippet.split_lines(item.before)
 			local leave_pos, leave_status = resolve_leave(lines, leave_anchor, before_lines)
 			local land_pos, land_fell_back
-			if leave_status ~= "content_mismatch" then
+			if leave_status == "resolved" then
 				land_pos, land_fell_back = block.find_after_anchor(lines, land_anchor)
 			end
+			-- A before that is gone from the notes was deleted or reworded
+			-- by the user: landing it would put back text they took out.
 			if
-				leave_status == "content_mismatch"
+				leave_status ~= "resolved"
 				or land_pos == nil
-				or (leave_status == "resolved" and not free(leave_pos + 1, #before_lines))
+				or not free(leave_pos + 1, #before_lines)
 			then
 				results[item.id] = "deferred"
 			else
-				if leave_status == "resolved" then
-					claim(leave_pos + 1, #before_lines)
-					-- A whole section takes one of the blank lines around it
-					-- along, so its old place keeps a single one.
-					local extra = item.kind == "move" and bounding_blank(lines, leave_pos + 1, leave_pos + #before_lines)
-					if extra and free(extra, 1) then
-						claim(extra, 1)
-					end
+				claim(leave_pos + 1, #before_lines)
+				-- A whole section takes one of the blank lines around it
+				-- along, so its old place keeps a single one.
+				local extra = item.kind == "move" and bounding_blank(lines, leave_pos + 1, leave_pos + #before_lines)
+				if extra and free(extra, 1) then
+					claim(extra, 1)
 				end
 				put(land_pos, after_lines, false)
 				results[item.id] = "applied"
-				if leave_status == "bad_anchor" or land_fell_back then
+				if land_fell_back then
 					landed_on_top[item.id] = true
 				end
 			end
