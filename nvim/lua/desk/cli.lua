@@ -243,9 +243,16 @@ elseif verb == "notes-diff" then
 	end
 
 	local additions, removals = {}, {}
+	-- `---`/`+++` are file headers only before a file's first `@@`: after
+	-- it a removed `---` rule reads `----`, an added `++ x` reads `+++ x`.
+	local in_hunks = false
 	for _, line in ipairs(snippet.split_lines(diff_out)) do
 		local head3 = line:sub(1, 3)
-		if head3 == "+++" or head3 == "---" then
+		if line:sub(1, 2) == "@@" then
+			in_hunks = true
+		elseif line:sub(1, 5) == "diff " then
+			in_hunks = false
+		elseif not in_hunks and (head3 == "+++" or head3 == "---") then
 			-- a file header, not a content line
 		elseif line:sub(1, 1) == "+" then
 			local content = line:sub(2)

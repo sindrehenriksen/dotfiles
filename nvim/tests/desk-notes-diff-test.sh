@@ -110,6 +110,24 @@ reading_out="$(nvim -l "$CLI" notes-diff "$repo" reading.md "$since_sha")"
 assert_true "additions/removals both empty, no error" \
 	"$(jq -e '.additions == [] and .removals == [] and (.error | not)' > /dev/null 2>&1 <<< "$reading_out" && echo true || echo false)"
 
+echo
+echo "=== cli.lua notes-diff: content lines that look like file headers are content ==="
+rules="$ROOT/rules"
+desk_test_assert_repo_under_root "$rules" "$ROOT"
+mkdir -p "$rules"
+git -C "$rules" init -q
+git -C "$rules" config user.email test@example.invalid
+git -C "$rules" config user.name "Desk Test"
+printf 'Top\n---\n-- note\nEnd\n' > "$rules/notes.md"
+git -C "$rules" add notes.md
+git -C "$rules" commit -q -m initial
+rules_since="$(git -C "$rules" rev-parse HEAD)"
+printf 'Top\n++ added\nEnd\n' > "$rules/notes.md"
+git -C "$rules" commit -q -am "a rule and a note out, a line in"
+rules_out="$(nvim -l "$CLI" notes-diff "$rules" notes.md "$rules_since")"
+assert_eq "a removed --- rule and -- note are removals" '["---","-- note"]' "$(jq -c '.removals' <<< "$rules_out")"
+assert_eq "an added ++ line is an addition" '["++ added"]' "$(jq -c '.additions' <<< "$rules_out")"
+
 # ---------------------------------------------------------------------------
 # steps.sh's own bash-level wiring: desk_last_weekday_epoch (a pure function
 # of "now", checked against fixed inputs) and desk_write_notes_diff (the
