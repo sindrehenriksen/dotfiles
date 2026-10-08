@@ -115,6 +115,7 @@ LUA_SUITES=(
 	nvim/tests/desk-review-test.lua
 	nvim/tests/desk-status-test.lua
 	nvim/tests/desk-tokens-test.lua
+	nvim/tests/mdlink-test.lua
 )
 
 # Plain-Lua suites: run with the system `lua`, never nvim/Hammerspoon (each

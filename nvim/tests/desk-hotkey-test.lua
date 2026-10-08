@@ -504,5 +504,83 @@ do
 end
 
 print()
+print("=== markdown emphasis and a trailing colon around a session name ===")
+
+do
+	assert_eq("**name:** is the name", "alpha-team", hotkey.clean_token("**alpha-team:**"))
+	assert_eq("__name__ is the name", "alpha-team", hotkey.clean_token("__alpha-team__"))
+	assert_eq("_name_ is the name", "alpha-team", hotkey.clean_token("_alpha-team_"))
+	assert_eq("an underscore inside stays", "my_session", hotkey.clean_token("my_session"))
+
+	-- A bold head with a colon is a section head: a mention elsewhere jumps to it.
+	local buf = new_buf({ "**Alpha-team:**", "  doing the thing", "", "See Alpha-team for context." })
+	local win = vim.api.nvim_get_current_win()
+	vim.api.nvim_win_set_buf(win, buf)
+	vim.api.nvim_win_set_cursor(win, { 4, 6 })
+	local rec = new_recorder()
+	hotkey.run(buf, win, config, { notify = function(msg) record(rec, "notify", msg) end })
+	assert_eq("a mention jumps to the bold head", 1, vim.api.nvim_win_get_cursor(win)[1])
+	assert_eq("nothing dispatched", 0, #rec.calls)
+
+	-- On an underscored head itself: the reader gets the bare name.
+	local buf2 = new_buf({ "__Beta-team__", "  doing the thing" })
+	vim.api.nvim_win_set_buf(win, buf2)
+	vim.api.nvim_win_set_cursor(win, { 1, 4 })
+	local rec2 = new_recorder()
+	hotkey.run(buf2, win, config, stub_deps(rec2, { reader_resolve = { nil, {} } }))
+	assert_eq("resolved by the name without its underscores", { "reader_resolve", "Beta-team" }, rec2.calls[1])
+end
+
+print()
+print("=== a bare word is never handed to the system opener ===")
+
+do
+	local bare = {
+		tokens = {
+			{ pattern = "^WORD%-([a-z]+)$", handler = "url", template = "{1}" },
+			{ pattern = "^.+$", handler = "session" },
+		},
+	}
+	local buf = new_buf({ "WORD-thing" })
+	local win = vim.api.nvim_get_current_win()
+	vim.api.nvim_win_set_buf(win, buf)
+	vim.api.nvim_win_set_cursor(win, { 1, 0 })
+	local rec = new_recorder()
+	hotkey.run(buf, win, bare, stub_deps(rec, { open_url = { true } }))
+	assert_eq("says it is not a link or session", { { "notify", "'WORD-thing' is not a link or session" } }, rec.calls)
+	assert_eq("a scheme is openable", true, hotkey.openable("https://example.invalid/x"))
+	assert_eq("so is a dotted name", true, hotkey.openable("example.invalid"))
+	assert_eq("a bare word is not", false, hotkey.openable("alpha-team"))
+end
+
+print()
+print("=== desk first, then the markdown link under the cursor ===")
+
+do
+	local buf = new_buf({ "see the [collab thread](https://example.invalid/t) and TICKET-7" })
+	local win = vim.api.nvim_get_current_win()
+	vim.api.nvim_win_set_buf(win, buf)
+	local function run_at(text, results)
+		local line = vim.api.nvim_buf_get_lines(buf, 0, 1, false)[1]
+		vim.api.nvim_win_set_cursor(win, { 1, line:find(text, 1, true) - 1 })
+		local rec = new_recorder()
+		local deps = stub_deps(rec, results)
+		deps.follow_link = function(b, w)
+			record(rec, "follow_link")
+			return require("mdlink").link_at(vim.api.nvim_buf_get_lines(b, 0, 1, false)[1], vim.api.nvim_win_get_cursor(w)[2]) ~= nil
+		end
+		hotkey.run(buf, win, config, deps)
+		vim.wait(50)
+		return rec.calls
+	end
+	local calls = run_at("thread", { reader_resolve = { nil, {} } })
+	assert_eq("a link's label that is no session: the reader first, then the link", { { "reader_resolve", "thread" }, { "follow_link" } }, calls)
+	calls = run_at("TICKET-7", { open_url = { true } })
+	assert_eq("a ticket stays the desk's", { { "open_url", "https://example.invalid/TICKET-7" } }, calls)
+	calls = run_at("and", { reader_resolve = { nil, {} } })
+	assert_eq("prose that is neither: tried, and said", "notify", calls[#calls][1])
+end
+
+print()
 print(string.format("=== summary: %d passed, %d failed ===", pass, fail))
 os.exit(fail == 0 and 0 or 1)

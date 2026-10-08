@@ -8,6 +8,8 @@
 --     (never a raw token passed to `claude`) and, live, focuses its
 --     Ghostty tab by tty, or, not live, resumes it by id in its recorded
 --     cwd; ambiguity or a failed focus is reported, never guessed past;
+--   - none of those, but a markdown link under the cursor: that link is
+--     followed (desk-free, in mdlink);
 --   - no match at all: a message, nothing opened.
 --
 -- Every external step (the reader, focusing a tab, opening a tab, opening
@@ -58,6 +60,24 @@ function M.token_under_cursor(line, col)
 	return line:sub(s, e), s - 1, e - 1
 end
 
+--- `token` without the markdown emphasis around it (`**`, `__`, `*`, `_`)
+--- or a trailing colon, as a session name written `**name:**` or
+--- `__name__` has them. `*` and `:` are no token chars anyway; `_` is, so
+--- this is what keeps `__name__` from reaching the reader as itself.
+function M.clean_token(token)
+	local t = token
+	repeat
+		local prev = t
+		t = t:gsub("^[*_]+", ""):gsub("[*_]+$", ""):gsub(":+$", "")
+	until t == prev
+	return t
+end
+
+--- Whether `url` is something to hand the system opener: it has a scheme,
+--- or a dot as a host or a file name does. A bare word is neither, and
+--- `open` on one fails, or opens a file of that name.
+M.openable = require("mdlink").openable
+
 -- Strips a leading heading/list/checkbox marker, a best-effort local re-implementation for this one purpose — it
 -- doesn't need desk.block's full block/section semantics, only "does this
 -- line's own text start by naming this token".
@@ -65,8 +85,9 @@ local function line_names_token(line, token)
 	local rest = line:gsub("^%s*#+%s*", "")
 	rest = rest:gsub("^%s*[-*+]%s*%[[^%]]?%]%s*", "") -- "- [ ] " / "- [x] "
 	rest = rest:gsub("^%s*[-*+]%s*", "")
+	rest = rest:gsub("^[*_]+", "") -- "**name:**", "_name_"
 	local head = rest:match("^(" .. M.TOKEN_CHARS .. "+)")
-	return head == token
+	return head ~= nil and M.clean_token(head) == token
 end
 
 --- The first (file-order) 1-indexed line whose own text names `token` as a
@@ -148,6 +169,9 @@ function M.default_deps()
 		focus_tty = shell_dep({ "DESK_FOCUS_TAB_BIN", "DESK_FOCUS_TAB" }, "desk-focus-tab.sh"),
 		open_tab = shell_dep({ "DESK_OPEN_TAB_BIN", "DESK_OPEN_TAB" }, "desk-open-tab.sh"),
 		open_url = shell_dep({ "DESK_OPEN_URL" }, "open"),
+		follow_link = function(bufnr, win)
+			return require("mdlink").follow_at(bufnr, win)
+		end,
 	}
 end
 
@@ -159,11 +183,22 @@ end
 function M.run(bufnr, win, config, deps)
 	deps = deps or {}
 	local notify = deps.notify or function() end
+	-- What the desk finds nothing in, a markdown link under the cursor may
+	-- still be: `[label](url)` or `[label](#heading)`, followed as gx does.
+	local function follow_link()
+		return (deps.follow_link or function()
+			return false
+		end)(bufnr, win)
+	end
 	local cursor = vim.api.nvim_win_get_cursor(win)
 	local line_num, col = cursor[1], cursor[2]
 	local line = vim.api.nvim_buf_get_lines(bufnr, line_num - 1, line_num, false)[1] or ""
 	local token = M.token_under_cursor(line, col)
-	if not token then
+	token = token and M.clean_token(token)
+	if not token or token == "" then
+		if follow_link() then
+			return
+		end
 		notify("no token under the cursor")
 		return
 	end
@@ -171,6 +206,10 @@ function M.run(bufnr, win, config, deps)
 	local classification = tokens.classify(token, tokens.tokens_from(config))
 
 	if classification.kind == "url" then
+		if not M.openable(classification.url) then
+			notify("'" .. token .. "' is not a link or session")
+			return
+		end
 		(deps.open_url or function(_, cb) cb(false, "no open_url dep") end)(classification.url, function(ok, err)
 			if not ok then
 				notify("could not open " .. classification.url .. (err and (": " .. err) or ""))
@@ -180,6 +219,9 @@ function M.run(bufnr, win, config, deps)
 	end
 
 	if classification.kind == "none" then
+		if follow_link() then
+			return
+		end
 		notify("no match for '" .. token .. "'")
 		return
 	end
@@ -219,7 +261,7 @@ function M.run(bufnr, win, config, deps)
 					names[#names + 1] = c.id or c.name or "?"
 				end
 				notify("ambiguous session '" .. token .. "': " .. table.concat(names, ", "))
-			else
+			elseif not follow_link() then
 				notify("no session named '" .. token .. "' found")
 			end
 			return

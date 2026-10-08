@@ -1174,6 +1174,10 @@ function M.open_review(notes_buf)
 	end
 	map_next_change(review_buf)
 	map_next_change(notes_buf)
+	-- The split shows the notes' text, so the hotkey works there too;
+	-- without it ␣gx falls through to nvim's own gx, which hands a session
+	-- name to the system opener.
+	require("desk.hotkey").attach(review_buf, tokens.load() or { tokens = {} })
 	for lhs, verb in pairs({ ["<leader>gA"] = "take", ["<leader>gD"] = "decline" }) do
 		vim.keymap.set("n", lhs, function()
 			report(M.notes_act(notes_buf, verb))
