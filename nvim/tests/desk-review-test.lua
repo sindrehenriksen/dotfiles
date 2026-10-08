@@ -2033,6 +2033,124 @@ do
 	assert_eq("another list in the window loses the winbar", "", vim.wo[qw].winbar)
 end
 
+print("\n=== a proposal rebuilt under an open review: reloaded in place, refused while declines are unsaved ===")
+do
+	local said = {}
+	local orig_notify, orig_confirm = vim.notify, review.confirm
+	vim.notify = function(m)
+		said[#said + 1] = m
+	end
+	local function last()
+		return said[#said] or ""
+	end
+	local function leader(keys)
+		vim.cmd("normal 1" .. vim.g.mapleader .. keys)
+	end
+	local function setup()
+		local r = new_repo(BASE)
+		build(r, "2026-10-01", {
+			item("n1"),
+			item("a1", { kind = "add", target = { under = "Section A" }, after = "  added", source = "", headline = "add A" }),
+		})
+		local nb = open_notes(r)
+		review.attach(nb)
+		assert_true("review opens", review.open_review(nb))
+		local rb = review_buf_of(nb)
+		return r, nb, rb, vim.fn.bufwinid(rb), vim.fn.bufwinid(nb)
+	end
+	-- What a session staging or a pass does meanwhile: n1 is taken
+	-- elsewhere and drops out of the proposal, and b1 comes in.
+	local function restage(r)
+		local n1
+		for _, it in ipairs(proposal.read_items(r)) do
+			if it.headline == "headline n1" then
+				n1 = it
+			end
+		end
+		ledger.record_taken(r, { assert(n1) })
+		build(r, "2026-10-02", { item("b1", { kind = "add", target = { under = "Section B" }, after = "  b-added", source = "", headline = "add B" }) })
+	end
+
+	-- Entering the split with nothing unsaved: rebuilt in the same windows.
+	local r, nb, rb, rw, nw = setup()
+	go_to(rw, rb, "  added")
+	vim.api.nvim_set_current_win(nw)
+	restage(r)
+	vim.api.nvim_set_current_win(rw)
+	assert_eq("entering the split keeps its buffer", rb, vim.api.nvim_win_get_buf(rw))
+	assert_eq("and its windows", 2, #vim.api.nvim_tabpage_list_wins(0))
+	assert_true("the dropped suggestion is gone from the split", line_of(rb, "NEWS n1") == nil)
+	assert_true("the new one is in it", line_of(rb, "  b-added") ~= nil)
+	assert_eq("the cursor stays on the line it was on", "  added", vim.api.nvim_get_current_line())
+	assert_true("it says so in one line (" .. last() .. ")", last():match("^desk: the proposal changed") ~= nil)
+	assert_eq("the count follows the new proposal", review.KEY_HINT .. "%=2 left (2 saved)", vim.wo[rw].winbar)
+	assert_true("both windows still in diff mode", vim.wo[rw].diff and vim.wo[nw].diff)
+	go_to(rw, rb, "  b-added")
+	assert_true("and the new suggestion can be taken", review.take(rb) and line_of(nb, "  b-added") ~= nil)
+
+	-- Entering the overview: the list is the new proposal's.
+	local r2, nb2 = setup()
+	assert_true("overview opens", review.overview(nb2))
+	local qw = vim.fn.getqflist({ winid = 0 }).winid
+	vim.api.nvim_set_current_win(vim.fn.bufwinid(nb2))
+	restage(r2)
+	vim.api.nvim_set_current_win(qw)
+	local texts = vim.tbl_map(function(e)
+		return e.text
+	end, vim.fn.getqflist())
+	table.sort(texts)
+	assert_eq("entering the overview reloads the review and its list", { "add A", "add B" }, texts)
+
+	-- A take against a stale view, without entering anything first.
+	local r3, nb3, rb3, rw3 = setup()
+	go_to(rw3, rb3, "NEWS n1")
+	restage(r3)
+	local ok3, why3 = review.take(rb3)
+	assert_true("a take on a stale view does not act", not ok3)
+	assert_true("it says the review was reloaded (" .. tostring(why3) .. ")", tostring(why3):match("proposal changed") ~= nil)
+	assert_eq("nothing taken", BASE, lines_of(nb3))
+	assert_true("the split is reloaded", line_of(rb3, "NEWS n1") == nil and line_of(rb3, "  b-added") ~= nil)
+	local r3b, nb3b, rb3b, rw3b = setup()
+	go_to(rw3b, rb3b, "NEWS n1")
+	restage(r3b)
+	vim.cmd("normal dp")
+	assert_eq("dp on a stale view takes nothing", BASE, lines_of(nb3b))
+
+	-- Unsaved declines: the split stays, says why, and refuses to act.
+	local r4, nb4, rb4, rw4, nw4 = setup()
+	go_to(rw4, rb4, "  added")
+	assert_true("decline", review.decline(rb4))
+	local before4 = lines_of(rb4)
+	vim.api.nvim_set_current_win(nw4)
+	restage(r4)
+	vim.api.nvim_set_current_win(rw4)
+	assert_eq("with unsaved declines the split is left as it was", before4, lines_of(rb4))
+	assert_true("it says the proposal changed and ␣gR reloads it (" .. last() .. ")", last():match("proposal changed") ~= nil and last():match("␣gR") ~= nil)
+	go_to(rw4, rb4, "NEWS n1")
+	local okt, whyt = review.take(rb4)
+	assert_true("a take is refused (" .. tostring(whyt) .. ")", not okt and tostring(whyt):match("␣gR") ~= nil)
+	assert_true("so is a decline", not review.decline(rb4))
+	vim.api.nvim_set_current_win(nw4)
+	vim.api.nvim_win_set_cursor(nw4, { 1, 0 })
+	assert_true("and both from the notes window", not review.notes_act(nb4, "take") and not review.notes_act(nb4, "decline"))
+	vim.cmd("normal do")
+	assert_true("do there takes nothing", not vim.bo[nb4].modified)
+	assert_eq("the split is untouched", before4, lines_of(rb4))
+	assert_eq("and the notes", BASE, lines_of(nb4))
+	review.confirm = function()
+		return 1
+	end
+	vim.api.nvim_set_current_win(rw4)
+	leader("gR")
+	assert_eq("␣gR in the split saves the declines first", { id_by_headline(r4, "add A") }, declined_ids(r4))
+	assert_eq("then reloads in the same buffer", rb4, review_buf_of(nb4))
+	assert_true("over the new proposal", line_of(rb4, "NEWS n1") == nil and line_of(rb4, "  b-added") ~= nil)
+	assert_true("with nothing unsaved", not vim.bo[rb4].modified)
+	go_to(rw4, rb4, "  b-added")
+	assert_true("and acts again", review.take(rb4))
+	vim.notify, review.confirm = orig_notify, orig_confirm
+end
+
 print(string.format("\n=== summary: %d passed, %d failed ===", pass, fail))
 if fail > 0 then
 	os.exit(1)

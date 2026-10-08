@@ -538,6 +538,135 @@ local function settle_declines(s)
 	return false, "kept the review split: it has unsaved declines"
 end
 
+-- ---------------------------------------------------------------------------
+-- A stale review: the proposal ref moves while a review is open when a pass
+-- lands or a session stages with desk-propose, and the split then still
+-- shows the old merged text, hunks the overview no longer lists among them.
+-- So entering either review window or the overview, and every take or
+-- decline, compares the sha the review was built from with the ref. With
+-- nothing unsaved the review is rebuilt in its own windows; unsaved
+-- declines are work against the old view, never thrown away here, so the
+-- view stays and refuses to act until `<leader>gR` has them saved or
+-- discarded and reloads it.
+-- ---------------------------------------------------------------------------
+
+M.STALE_RELOADED = "the proposal changed: reloaded the review"
+M.STALE_HELD = "the proposal changed: ␣gR reloads the review, once your unsaved declines are saved or discarded"
+
+local function same_ids(a, b)
+	for id in pairs(a) do
+		if not b[id] then
+			return false
+		end
+	end
+	for id in pairs(b) do
+		if not a[id] then
+			return false
+		end
+	end
+	return true
+end
+
+-- Rebuilds the open review `s` over proposal `p` in its own buffer and
+-- windows, the cursor kept on the line it was on where that line is still
+-- there. A proposal that would show the same suggestions as the same text
+-- (a pass that changed nothing here) only takes over the sha, so the
+-- split's undo history and anything unsaved in it stand; `force` rebuilds
+-- it all the same. `need_shown` leaves it as it was when nothing here
+-- would show. Returns true and whether the view changed, or false, why.
+local function rebuild(s, p, need_shown, force)
+	local ours = buf_lines(s.notes_buf)
+	local r, err = proposal.reviewable(s.repo, p, s.file, ours)
+	if not r then
+		return false, err
+	end
+	if need_shown and next(r.shown) == nil then
+		return false, "nothing to review here"
+	end
+	local old = buf_lines(s.review_buf)
+	if not force and same_ids(s.shown, r.shown) and (vim.deep_equal(r.merged, s.merged) or vim.deep_equal(r.merged, old)) then
+		s.sha, s.shown, s.conflicts, s.held_sha = p.sha, r.shown, r.conflicts, nil
+		s.base = proposal.base_lines(s.repo, p, s.file)
+		M.recount_saved(s)
+		M.refresh_status_line(s.notes_buf)
+		M.refresh_overview(s)
+		return true, false
+	end
+	if vim.bo[s.review_buf].modified then
+		return false, M.STALE_HELD
+	end
+	local rw = vim.fn.bufwinid(s.review_buf)
+	local view = rw ~= -1 and vim.api.nvim_win_call(rw, vim.fn.winsaveview)
+	-- Outside the undo history, as at open: `u` never brings the old view back.
+	local undolevels = vim.bo[s.review_buf].undolevels
+	vim.bo[s.review_buf].undolevels = -1
+	vim.api.nvim_buf_set_lines(s.review_buf, 0, -1, false, r.merged)
+	vim.bo[s.review_buf].undolevels = undolevels
+	vim.bo[s.review_buf].modified = false
+	vim.api.nvim_buf_clear_namespace(s.review_buf, MARK_NS, 0, -1)
+	s.sha, s.shown, s.conflicts, s.merged = p.sha, r.shown, r.conflicts, r.merged
+	s.base = proposal.base_lines(s.repo, p, s.file)
+	-- Their undo states belong to the old view.
+	s.takes, s.notes_acts, s.held_sha = {}, {}, nil
+	M.recount_saved(s)
+	M.place_marks(s, ours)
+	M.place_del_marks(s)
+	if view then
+		local n = math.max(#r.merged, 1)
+		local lnum = math.max(1, math.min(map_row(diff_indices(old, r.merged), view.lnum, false), n))
+		view.topline = math.max(1, math.min(view.topline + lnum - view.lnum, n))
+		view.lnum = lnum
+		vim.api.nvim_win_call(rw, function()
+			vim.cmd("diffupdate")
+			vim.fn.winrestview(view)
+		end)
+	end
+	M.refresh_status_line(s.notes_buf)
+	M.refresh_overview(s)
+	return true, true
+end
+
+--- Checks that the open review `s` shows the current proposal, rebuilding
+--- it in place when it does not and nothing is unsaved. Returns true when
+--- the view is current (rebuilt or not), else false, why. On entering a
+--- window it says what it did itself, the held case once per proposal;
+--- `acting` (a take or decline about to run) leaves the saying to the
+--- caller, and returns false after a rebuild too, since the cursor was on
+--- what the old view showed.
+function M.ensure_current(s, acting)
+	if s.reloading or sessions[s.notes_buf] ~= s or not vim.api.nvim_buf_is_valid(s.review_buf) then
+		return true
+	end
+	local sha = git.ref_sha(s.repo, M.PROPOSAL_REF)
+	if sha == s.sha then
+		return true
+	end
+	local p = sha and proposal.read(s.repo, sha)
+	local ok, changed
+	if p then
+		s.reloading = true
+		ok, changed = rebuild(s, p)
+		s.reloading = nil
+	else
+		ok, changed = false, "the proposal is gone: ␣gq ends this review"
+	end
+	if not ok then
+		if not acting and s.held_sha ~= sha then
+			vim.notify("desk: " .. tostring(changed), vim.log.levels.WARN)
+		end
+		s.held_sha = sha
+		return false, changed
+	end
+	if not changed then
+		return true
+	end
+	if acting then
+		return false, M.STALE_RELOADED .. ", so nothing was done: look again and press again"
+	end
+	vim.notify("desk: " .. M.STALE_RELOADED, vim.log.levels.INFO)
+	return true
+end
+
 --- Moves the review from `from_buf`'s file to `file` of the same repo, in
 --- the window the notes were in: unsaved declines ask first (cancelling
 --- keeps the review), and the review opens over the other file. When it
@@ -977,6 +1106,16 @@ function M.open_review(notes_buf)
 				return false, "kept the review split: it has unsaved declines"
 			end
 		end
+		-- In its own windows, unless nothing would show here: then the
+		-- review goes on below as a fresh one, which moves to the other
+		-- file or says there is nothing.
+		local win = vim.fn.bufwinid(existing.review_buf)
+		vim.bo[existing.review_buf].modified = false -- saved or discarded above
+		if win ~= -1 and rebuild(existing, p, true, true) then
+			vim.api.nvim_set_current_win(win)
+			vim.notify("desk: " .. M.STALE_RELOADED, vim.log.levels.INFO)
+			return true
+		end
 		carried = existing.return_to
 		close_session(existing, true)
 	end
@@ -1031,6 +1170,7 @@ function M.open_review(notes_buf)
 		sha = p.sha,
 		shown = shown,
 		conflicts = conflicts,
+		merged = merged,
 		base = base,
 		takes = {},
 		return_to = carried,
@@ -1079,6 +1219,22 @@ function M.open_review(notes_buf)
 			M.refresh_status_line(notes_buf, true)
 		end,
 	})
+	vim.api.nvim_create_autocmd({ "WinEnter", "FocusGained" }, {
+		group = group,
+		buffer = review_buf,
+		callback = function()
+			M.ensure_current(s)
+		end,
+	})
+	vim.api.nvim_create_autocmd({ "WinEnter", "FocusGained" }, {
+		buffer = notes_buf,
+		callback = function()
+			if sessions[notes_buf] ~= s then
+				return true -- this review is over: drop the autocmd
+			end
+			M.ensure_current(s)
+		end,
+	})
 	vim.api.nvim_create_autocmd("BufWipeout", {
 		group = group,
 		buffer = review_buf,
@@ -1100,6 +1256,10 @@ function M.open_review(notes_buf)
 	-- after it and another hunk precedes it; the range form works, so fall
 	-- back to it when `do` changed nothing there.
 	vim.keymap.set("n", "do", function()
+		local fresh, stale = M.ensure_current(s, true)
+		if not fresh then
+			return report(false, stale)
+		end
 		local tick = vim.api.nvim_buf_get_changedtick(notes_buf)
 		local pre = buf_lines(notes_buf)
 		local count = vim.v.count > 0 and tostring(vim.v.count) or ""
@@ -1119,6 +1279,10 @@ function M.open_review(notes_buf)
 	-- split's end, so from the line above the removal is obtained from the
 	-- notes side instead.
 	vim.keymap.set("n", "dp", function()
+		local fresh, stale = M.ensure_current(s, true)
+		if not fresh then
+			return report(false, stale)
+		end
 		local tick = vim.api.nvim_buf_get_changedtick(notes_buf)
 		local t = begin_take(s)
 		local pre = buf_lines(notes_buf)
@@ -1691,6 +1855,10 @@ function M.decline(review_buf)
 	if not s then
 		return false, "not a desk review buffer"
 	end
+	local fresh, stale = M.ensure_current(s, true)
+	if not fresh then
+		return false, stale
+	end
 	local ok, why = act_on_item(s, "decline")
 	if ok == nil then
 		ok, why = diff_act(s, "diffget")
@@ -1709,6 +1877,10 @@ function M.take(review_buf)
 	local s = session_for_review_buf(review_buf)
 	if not s then
 		return false, "not a desk review buffer"
+	end
+	local fresh, stale = M.ensure_current(s, true)
+	if not fresh then
+		return false, stale
 	end
 	local t = begin_take(s)
 	local ok, why = act_on_item(s, "take")
@@ -1767,6 +1939,11 @@ function M.switch_review(review_buf)
 	local s = session_for_review_buf(review_buf)
 	if not s then
 		return false, "not a desk review buffer"
+	end
+	-- Over a proposal that has moved on the key reloads first, asking about
+	-- unsaved declines as the notes' own review key does.
+	if git.ref_sha(s.repo, M.PROPOSAL_REF) ~= s.sha then
+		return M.open_review(s.notes_buf)
 	end
 	local other = M.pending_elsewhere(s.repo, s.file)[1]
 	local left = M.left(s)
@@ -1874,6 +2051,10 @@ function M.notes_act(notes_buf, verb)
 	local s = live_session(notes_buf)
 	if not s then
 		return false, "no review open: ␣gR opens one"
+	end
+	local fresh, stale = M.ensure_current(s, true)
+	if not fresh then
+		return false, stale
 	end
 	local win = vim.fn.bufwinid(notes_buf)
 	if win == -1 then
@@ -2314,6 +2495,10 @@ function M.qf_act(verb)
 	if not (s and vim.api.nvim_buf_is_valid(s.review_buf)) then
 		return false, "its review is closed: ⏎ opens it"
 	end
+	local fresh, stale = M.ensure_current(s, true)
+	if not fresh then
+		return false, stale
+	end
 	local found
 	for _, r in ipairs(M.remaining(s)) do
 		if r.item.id == data.id then
@@ -2338,6 +2523,19 @@ function M.qf_act(verb)
 	M.refresh_overview(s)
 	M.refresh_status_line(s.notes_buf)
 	return true
+end
+
+--- Entering the overview: the review its list belongs to is checked
+--- against the proposal, as entering the review's windows does.
+function M.qf_check()
+	if is_loclist_win(vim.api.nvim_get_current_win()) or vim.fn.getqflist({ title = 0 }).title ~= M.OVERVIEW_TITLE then
+		return
+	end
+	local ctx = vim.fn.getqflist({ context = 0 }).context
+	local s = type(ctx) == "table" and ctx.desk_review_buf and session_for_review_buf(ctx.desk_review_buf)
+	if s then
+		M.ensure_current(s)
+	end
 end
 
 --- The overview's `Q`: ends the review the list belongs to, list and
@@ -2873,10 +3071,14 @@ local function install_qf_autocmd()
 		pattern = "qf",
 		callback = function(args)
 			vim.keymap.set("n", "<CR>", M.qf_jump, { buffer = args.buf, desc = "Desk: jump (jumplist-safe)" })
-			vim.api.nvim_create_autocmd("CursorMoved", {
-				group = vim.api.nvim_create_augroup("desk_qf_preview_" .. args.buf, { clear = true }),
+			local group = vim.api.nvim_create_augroup("desk_qf_preview_" .. args.buf, { clear = true })
+			vim.api.nvim_create_autocmd("CursorMoved", { group = group, buffer = args.buf, callback = M.qf_preview })
+			vim.api.nvim_create_autocmd({ "WinEnter", "FocusGained" }, {
+				group = group,
 				buffer = args.buf,
-				callback = M.qf_preview,
+				callback = function()
+					M.qf_check()
+				end,
 			})
 			vim.keymap.set("n", "r", M.qf_restore, { buffer = args.buf, desc = "Desk: restore this declined item" })
 			-- The overview's own keys; in any other list they keep their meaning.

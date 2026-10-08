@@ -349,7 +349,7 @@ In the review split:
 | `u` | Undo the latest take or decline made here or from the overview. A take is undone in your notes buffer, unless you have edited your notes since, when it says so and leaves them alone; anything else is plain undo. |
 | `<leader>go` | The overview. |
 | `<leader>gc` | Save the split's declines, then commit your notes as `<leader>gc` in them does. The review stays open. |
-| `<leader>gR` | Once this file has no suggestion left, move the review to the other file, in the same two windows, asking first about unsaved declines; with some left it says how many. The bar shows what waits there, as in `reading.md: 2 more ␣gR`. When another nvim has the other file open (its swap file is there), it says so in one line, with that nvim's pid, and the review stays as it was. |
+| `<leader>gR` | Once this file has no suggestion left, move the review to the other file, in the same two windows, asking first about unsaved declines; with some left it says how many. Over a proposal that changed since the review was built, it reloads the review instead, asking about unsaved declines first, as below. The bar shows what waits there, as in `reading.md: 2 more ␣gR`. When another nvim has the other file open (its swap file is there), it says so in one line, with that nvim's pid, and the review stays as it was. |
 | `zo`/`zc`, `zR`/`zM` | Open or close the fold of unchanged lines under the cursor; open or close them all. |
 | `:w` | The commit point: records as declined every suggestion whose lines are gone from both the split and your notes, restores any declined this session whose lines are back, and records pending takes. |
 | `<leader>gq` | End the review, from either window: unsaved declines ask to save, discard or cancel, and you are left in your notes. The overview goes with it. Only the notes window's bar names it; the split's is full. |
@@ -367,6 +367,8 @@ In your notes window while a review is open, keys that go when it ends. The sugg
 | `<leader>gq` | End the review, as in the review split. |
 
 Not taking something is either a decline, from either window, or leaving it alone: an untaken suggestion comes back with the next pass.
+
+A pass, or a session staging with `desk-propose`, can replace the proposal while a review is open. Entering either review window or the overview notices, and so does every take or decline. With nothing unsaved in the split the review is rebuilt in its own windows, the cursor on the line it was on, and says so in one line; a take or decline that noticed does nothing that once, since the cursor was on the old view, so you look and press again. With unsaved declines the split stays as it is, says the proposal changed, and refuses to take or decline until `<leader>gR` has them saved or discarded and reloads it. A new proposal that would show the same suggestions as the same text is taken over without a word.
 
 A `move` or `merge` shows as two hunks, its removal at the old place and its landing at the new one, and is only ever taken or declined whole. `dp`, `do`, `<leader>gA` and the overview's take on either hunk take both places, and say so in one line, as in `took the whole move: removed here, added under Section C`; the decline keys decline both. One already taken in one place, by hand or by an older take, gets the other place on its next take, and declining it removes just its landing, leaving your notes as they are.
 
