@@ -140,6 +140,13 @@ expect "mid: offset past EOF recovers quietly" "" "$(mid PreToolUse)"
 [ "$(head -n 1 "$STATE")" = "$(wc -c <"$TMP/m.jsonl" | tr -d ' ')" ] && ok "mid: offset reset to the new end" || bad "mid: offset after rotation"
 arec r2 "[needs-you] after rotation" >>"$TMP/m.jsonl"
 expect "mid: marker after rotation rings" "$BELL" "$(mid PreToolUse)"
+# First call: a marker followed by a lot of attachment records still rings.
+rm -f "$STATE"
+{ arec f1 "[needs-you] Blocked on a test question."
+  for i in $(seq 1 400); do jq -nc --arg x "$(head -c 500 /dev/zero | tr '\0' a)" '{type:"attachment", attachment:{text:$x}}'; done
+} >"$TMP/first.jsonl"
+[ "$(wc -c <"$TMP/first.jsonl")" -gt 65536 ] && ok "mid: first-call fixture puts the marker over 64 KB back" || bad "mid: first-call fixture too small"
+expect "mid: first call rings for a marker far back in the turn" "$BELL" "$(mid PreToolUse "$TMP/first.jsonl")"
 expect "mid: unreadable state dir is quiet, exit 0" "" "$(mid PreToolUse "$TMP/none.jsonl")"
 # Blocked-tool events still ring and a missing session id is quiet.
 expect "mid: no session id is quiet" "" "$(mid PreToolUse | jq -c 'del(.session_id)')"

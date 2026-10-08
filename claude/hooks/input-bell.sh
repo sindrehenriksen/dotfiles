@@ -16,7 +16,9 @@
 # so a session that flags a block and carries on does not make him wait
 # for the turn to end. Per session it keeps a state file under
 # `${XDG_STATE_HOME:-~/.local/state}/claude/input-bell-<session id>`: the
-# byte offset scanned so far (first call: the last 64 KB; an offset past
+# byte offset scanned so far (first call: the last 4 MB, since a session's
+# first tool call can follow its marker by hundreds of KB of attachment
+# records; an offset past
 # EOF restarts there) and the uuids of the assistant records already
 # rung. An unchanged transcript costs one `jq` call and a `wc`.
 # Dedup: the idle check stays quiet when any assistant record of its turn
@@ -67,7 +69,7 @@ state_file=""
 rung_list() { [ -n "$state_file" ] && [ -r "$state_file" ] && tail -n +2 "$state_file" 2>/dev/null | tr '\n' ' '; }
 
 # Mid-turn marker scan. Reads only the bytes appended since the last call
-# (the last 64 KB on the first call or after the file shrank), stops at the
+# (the last 4 MB on the first call or after the file shrank), stops at the
 # last complete line, and prints "ring" for an assistant record carrying a
 # line that starts with `[needs-you]`, outside code fences, not rung yet.
 midturn_verdict() {
@@ -78,7 +80,7 @@ midturn_verdict() {
     [ -r "$state_file" ] && off="$(head -n 1 "$state_file" 2>/dev/null)"
     case "$off" in ''|*[!0-9]*) off="" ;; esac
     if [ -z "$off" ] || [ "$off" -gt "$size" ]; then
-        first=1; start=$((size > 65536 ? size - 65536 : 0))
+        first=1; start=$((size > 4194304 ? size - 4194304 : 0))
     else
         start="$off"
     fi
