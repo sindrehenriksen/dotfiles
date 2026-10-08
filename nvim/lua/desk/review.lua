@@ -1192,6 +1192,7 @@ function M.open_review(notes_buf)
 	})
 
 	M.refresh_status_line(notes_buf)
+	M.refresh_overview(s)
 	vim.api.nvim_set_current_win(review_win)
 	first_hunk(review_win)
 	say_elsewhere(repo, file, p)
@@ -1811,12 +1812,25 @@ local function overview_items(s, repo, file)
 end
 
 --- Rebuilds an overview list already open for `s` (after a decline or a save).
+--- A list whose own review has ended since it was made (reopened over a new
+--- proposal, or moved to the other file and back) is `s`'s now: its entries
+--- act on the review that is open, so it follows that one.
 function M.refresh_overview(s)
 	local info = vim.fn.getqflist({ title = 0, context = 0 })
-	if info.title ~= M.OVERVIEW_TITLE or not (info.context and info.context.desk_review_buf == s.review_buf) then
+	if info.title ~= M.OVERVIEW_TITLE then
 		return
 	end
-	vim.fn.setqflist({}, "r", { title = M.OVERVIEW_TITLE, items = overview_items(s, s.repo, s.file), context = info.context })
+	local ctx = type(info.context) == "table" and info.context or {}
+	local rb = ctx.desk_review_buf
+	local stale = not (rb and session_for_review_buf(rb)) and (ctx.desk_repo == nil or ctx.desk_repo == s.repo)
+	if rb ~= s.review_buf and not stale then
+		return
+	end
+	vim.fn.setqflist({}, "r", {
+		title = M.OVERVIEW_TITLE,
+		items = overview_items(s, s.repo, s.file),
+		context = { desk_review_buf = s.review_buf, desk_repo = s.repo },
+	})
 end
 
 --- The overview key: opens the review split if needed, then a quickfix list

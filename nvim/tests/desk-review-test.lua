@@ -1739,6 +1739,64 @@ do
 	)
 end
 
+print("\n=== an overview decline leaves the list, even when the list outlived its review ===")
+do
+	local r = new_repo({ "Section A", "- vendor-x, editor", "Section B", "- low pri: dropping the editor" })
+	build(r, "2026-10-01", {
+		item("e1", { kind = "edit", target = { at = "- vendor-x, editor" }, before = "- vendor-x, editor", after = "- vendor-x, editor's own AI", source = "notes", headline = "Editor stays, its AI goes" }),
+		item("e2", { kind = "edit", target = { at = "- low pri: dropping the editor" }, before = "- low pri: dropping the editor", after = "- low pri: dropping the editor's own AI", source = "notes", headline = "Editor stays, its AI goes" }),
+	})
+	local nb = open_notes(r)
+	review.attach(nb)
+	assert_true("overview opens", review.overview(nb))
+	local qw = vim.fn.getqflist({ winid = 0 }).winid
+	local function press(row, keys)
+		vim.api.nvim_set_current_win(qw)
+		vim.api.nvim_win_set_cursor(qw, { row, 0 })
+		vim.cmd("normal " .. keys)
+	end
+	press(1, "t")
+	assert_eq("taking the top one of two alike leaves one entry", 1, #vim.fn.getqflist())
+	press(1, "x")
+	assert_eq("x on the one left, alike in headline to the taken one, empties the list", 0, #vim.fn.getqflist())
+
+	-- The review is reopened under the list (a new proposal landed): the
+	-- list still names the old review's buffer, and acting from it must
+	-- still update it.
+	local r2 = new_repo({ "Section A", "- vendor-x, editor", "Section B", "- low pri: dropping the editor" })
+	local items = {
+		item("e1", { kind = "edit", target = { at = "- vendor-x, editor" }, before = "- vendor-x, editor", after = "- vendor-x, editor's own AI", source = "notes", headline = "Editor stays, its AI goes" }),
+		item("e2", { kind = "edit", target = { at = "- low pri: dropping the editor" }, before = "- low pri: dropping the editor", after = "- low pri: dropping the editor's own AI", source = "notes", headline = "Editor stays, its AI goes" }),
+	}
+	build(r2, "2026-10-01", items)
+	local nb2 = open_notes(r2)
+	review.attach(nb2)
+	assert_true("overview opens", review.overview(nb2))
+	qw = vim.fn.getqflist({ winid = 0 }).winid
+	build(r2, "2026-10-01", { item("n9") })
+	assert_true("the review reopens on the new proposal", review.open_review(nb2))
+	local function row_of(id)
+		for i, e in ipairs(vim.fn.getqflist()) do
+			if type(e.user_data) == "table" and e.user_data.id == id then
+				return i
+			end
+		end
+	end
+	local e1, e2 = id_by_headline(r2, "Editor stays, its AI goes"), nil
+	for _, it in ipairs(proposal.read_items(r2)) do
+		if it.headline == "Editor stays, its AI goes" and it.id ~= e1 then
+			e2 = it.id
+		end
+	end
+	local n = #vim.fn.getqflist()
+	press(assert(row_of(e2), "e2 listed"), "x")
+	assert_eq("x in a list its review was reopened under drops the entry", nil, row_of(e2))
+	assert_eq("and only that one", n - 1, #vim.fn.getqflist())
+	press(assert(row_of(e1), "e1 listed"), "t")
+	assert_eq("t there takes from the review now open", nil, row_of(e1))
+	assert_true("into the notes", line_of(nb2, "- vendor-x, editor's own AI") ~= nil)
+end
+
 print(string.format("\n=== summary: %d passed, %d failed ===", pass, fail))
 if fail > 0 then
 	os.exit(1)
