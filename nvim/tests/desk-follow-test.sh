@@ -4,7 +4,8 @@
 # to a live session, a queue held for a session that is not running and
 # delivered whole once it is, the send pinned to the resolved name (a send
 # to any other name is refused by the deny hook), the dry run, and the
-# seam for retiring a follow whose tickets are all closed.
+# seam for retiring a follow whose tickets are all closed, and a ticket
+# another followed session owns going only to that session.
 # Offline: `claude`, `gh` and the reader are fakes; the fake `claude` runs
 # the deny hook from the settings file the runner hands it, the way Claude
 # Code would. No git repo is touched.
@@ -582,6 +583,44 @@ assert_contains "the older override is still read" "old  (aaaaaaaa" "$out"
 jq '.passes.follow.kind = "watch"' "$INST/config.json" > "$ROOT/c" && cp "$ROOT/c" "$INST/config.json"
 out="$("$CLI" run --dry-run 2>&1)"
 assert_contains "a pass of the older kind \"watch\" still runs as the follow pass" "follow: dry run" "$out"
+
+echo
+echo "=== a ticket another session owns goes only to that session ==="
+SID_P="dddddddd-4444-4444-8444-444444444444"
+SID_Q="eeeeeeee-5555-4555-8555-555555555555"
+export DESK_FOLLOW_FILE="$ROOT/own-follow.json" DESK_FOLLOW_STATE_FILE="$ROOT/own-follow-state.json"
+sessions << EOF
+$SID_P papa-session true
+$SID_Q quebec-session true
+EOF
+"$CLI" add --session "$SID_P" OWN-1 SHR-3 > /dev/null
+"$CLI" add --session "$SID_Q" QQ-2 SHR-3 > /dev/null
+# Q's child links to P's key, and P's key links back to it, so each is one
+# hop from the other's scope.
+{
+	issue OWN-1 "In Progress" "" "[$(link QQ-21)]"
+	issue QQ-2 "In Progress"
+	issue QQ-21 "To Do" QQ-2 "[$(link OWN-1)]"
+	issue SHR-3 "To Do"
+} | headless > "$FIX/scope-result.json"
+echo '{"issues":{"nodes":[]}}' > "$FIX/changes-result.json"
+prs_none
+"$RUN" follow > /dev/null 2>&1
+assert_eq "a link to another session's key stays out of scope" "false" "$(jq --arg s "$SID_Q" '.queues[$s].scope | index("OWN-1") != null' "$DESK_FOLLOW_STATE_FILE")"
+assert_eq "so does a link to another session's child" "false" "$(jq --arg s "$SID_P" '.queues[$s].scope | index("QQ-21") != null' "$DESK_FOLLOW_STATE_FILE")"
+assert_eq "a key both sessions own is in both scopes" "true true" "$(jq -r --arg p "$SID_P" --arg q "$SID_Q" '[.queues[$p, $q].scope | index("SHR-3") != null] | join(" ")' "$DESK_FOLLOW_STATE_FILE")"
+{
+	issue OWN-1 "In Progress" "" "[$(link QQ-21)]" "[$(cmt 951 "Dev One" "Plan changed for QQ-2 too.")]"
+	issue SHR-3 "To Do" "" "[]" "[$(cmt 952 "Dev Two" "Shared news.")]"
+} | rest > "$FIX/changes-result.json"
+: > "$FOLLOW_TEST_SENT"
+"$RUN" follow > /dev/null 2>&1
+msg_p="$(jq -r 'select(.to == "papa-session") | .message' "$FOLLOW_TEST_SENT")"
+msg_q="$(jq -r 'select(.to == "quebec-session") | .message' "$FOLLOW_TEST_SENT")"
+assert_contains "the owner gets its ticket's news" 'new comment by Dev One: "Plan changed for QQ-2 too."' "$msg_p"
+assert_not_contains "a session it only links to, or that it mentions, does not" "Plan changed" "$msg_q"
+assert_contains "a shared key's news goes to one owner" 'new comment by Dev Two: "Shared news."' "$msg_p"
+assert_contains "and to the other" 'new comment by Dev Two: "Shared news."' "$msg_q"
 
 echo
 echo "=== summary: $pass passed, $fail failed ==="

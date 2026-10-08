@@ -89,11 +89,30 @@ def scope_maps:
 		 then .children[$i.parent] = ((.children[$i.parent] // []) + [$i.key] | unique) else . end)
 		| .links[$i.key] = ([$i.links[].key] | unique));
 
-def scope_of($e; $maps):
+# A session's own tickets: its keys and their children. Its related keys
+# and links are not its own.
+def own_of($e; $maps):
+	(($e.keys // []) + [($e.keys // [])[] as $k | $maps.children[$k] // [] | .[]]) | unique;
+
+# What the other followed sessions own, as {keys, own}: keys alone too, so
+# a ticket the children map has not seen yet still counts by its parent.
+def claimed_elsewhere($sid; $maps):
+	[$entries | to_entries[] | select(.key != $sid) | .value] as $others
+	| {keys: ([$others[] | (.keys // [])[]] | unique),
+	   own: ([$others[] | own_of(.; $maps)[]] | unique)};
+
+def is_claimed($claimed; $key; $parent):
+	($claimed.own | index($key)) != null
+	or ($parent != null and ($claimed.keys | index($parent)) != null);
+
+# A link one hop out can land on another followed session's own ticket;
+# that one is left to the session it belongs to.
+def scope_of($e; $maps; $claimed):
 	tracked($e) as $t
-	| ([($e.keys // [])[] as $k | $maps.children[$k] // [] | .[]]) as $kids
-	| ((($e.keys // []) + $kids) | unique) as $roots
-	| ($t + $kids + [$roots[] as $r | $maps.links[$r] // [] | .[]]) | unique;
+	| own_of($e; $maps) as $roots
+	| ($t + $roots
+	   + [$roots[] as $r | $maps.links[$r] // [] | .[] | . as $l | select(($claimed.own | index($l)) == null)])
+	| unique;
 
 # --- ticket changes -----------------------------------------------------------
 
@@ -288,15 +307,17 @@ def new_pr_snapshots:
 # --- attribution and queues --------------------------------------------------
 
 # How a ticket relates to a session's own keys, for the change line: "" for
-# a tracked ticket, null for one unrelated to the session.
-def relation($e; $maps; $issue):
+# a tracked ticket, null for one unrelated to the session. A ticket another
+# followed session owns reaches this one only when this one owns it too, or
+# lists it among its related keys.
+def relation($e; $maps; $issue; $claimed):
 	tracked($e) as $t
+	| own_of($e; $maps) as $roots
 	| if ($t | index($issue.key)) != null then ""
 	  elif $issue.parent != null and (($e.keys // []) | index($issue.parent)) != null then "child of \($issue.parent)"
+	  elif ($roots | index($issue.key)) == null and is_claimed($claimed; $issue.key; $issue.parent) then null
 	  else
-	    ([($e.keys // [])[] as $k | $maps.children[$k] // [] | .[]]) as $kids
-	    | ((($e.keys // []) + $kids) | unique) as $roots
-	    | ([$roots[] as $r
+	    ([$roots[] as $r
 	        | select((($maps.links[$r] // []) | index($issue.key)) != null
 	                 or ((($issue.links // []) | map(.key)) | index($r)) != null)
 	        | $r] | first) as $via
@@ -319,9 +340,10 @@ scope_maps as $maps
 | ($state.queues // {}) as $queues
 | (reduce ($entries | to_entries[]) as $ent ({};
 	$ent.key as $sid | $ent.value as $e
-	| scope_of($e; $maps) as $scope
+	| claimed_elsewhere($sid; $maps) as $claimed
+	| scope_of($e; $maps; $claimed) as $scope
 	| ([ $tev[] | . as $ev
-	     | relation($e; $maps; ($tix[$ev.key] // {key: $ev.key})) as $rel
+	     | relation($e; $maps; ($tix[$ev.key] // {key: $ev.key}); $claimed) as $rel
 	     | select($rel != null)
 	     | {at: ($ev.at // $now), ref: $ev.key, title: $ev.title, context: $rel, what: $ev.what, skip: $ev.skip} ]
 	   + [ $pev[] | . as $ev
