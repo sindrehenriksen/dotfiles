@@ -145,6 +145,8 @@ local function undo_seq(buf)
 end
 
 local function remember_taken(s, item, pre)
+	s.took_into = s.took_into or {}
+	s.took_into[s.notes_buf] = true
 	local pend = pending_taken[s.notes_buf] or { repo = s.repo, ids = {} }
 	pending_taken[s.notes_buf] = pend
 	pend.ids[item.id] = { item = item, base = s.base, seq = undo_seq(s.notes_buf), pre = pre }
@@ -538,6 +540,37 @@ local function settle_declines(s)
 	return false, "kept the review split: it has unsaved declines"
 end
 
+-- The ends that save (`:wq` in the split, the overview's `Q`, `<leader>gq`)
+-- write the notes the review took into too: a take lives only in the notes
+-- buffer until that is written, so quitting nvim after ending the review
+-- would lose it. Pending takes are recorded first, since a write from an
+-- autocmd need not run BufWritePost.
+local function write_taken_notes(s)
+	local wrote = {}
+	for b in pairs(s.took_into or {}) do
+		if vim.api.nvim_buf_is_loaded(b) and vim.bo[b].modified then
+			local name = vim.fn.fnamemodify(vim.api.nvim_buf_get_name(b), ":t")
+			M.flush_taken(b)
+			local ok, err = pcall(vim.api.nvim_buf_call, b, function()
+				vim.cmd("silent write")
+			end)
+			if ok then
+				wrote[#wrote + 1] = name
+			else
+				vim.notify(string.format("desk: couldn't save %s: %s", name, (tostring(err):gsub("^Vim:", ""))), vim.log.levels.WARN)
+			end
+		end
+	end
+	table.sort(wrote)
+	if #wrote > 0 then
+		-- After the windows close, whose redraw would hide it.
+		local msg = "desk: saved " .. table.concat(wrote, " and ") .. " with your takes"
+		vim.schedule(function()
+			vim.notify(msg, vim.log.levels.INFO)
+		end)
+	end
+end
+
 -- ---------------------------------------------------------------------------
 -- A stale review: the proposal ref moves while a review is open when a pass
 -- lands or a session stages with desk-propose, and the split then still
@@ -715,6 +748,9 @@ function M.move_review(from_buf, file)
 	local ns = sessions[b]
 	if ns and back.buf ~= b then
 		ns.return_to = back
+	end
+	if ns and s and s.took_into then
+		ns.took_into = vim.tbl_extend("keep", ns.took_into or {}, s.took_into)
 	end
 	return ok, why
 end
@@ -1081,7 +1117,7 @@ function M.open_review(notes_buf)
 		return false, "no proposal yet"
 	end
 	local existing = sessions[notes_buf]
-	local carried
+	local carried, carried_took
 	if existing and vim.api.nvim_buf_is_valid(existing.review_buf) then
 		if existing.sha == p.sha then
 			local win = vim.fn.bufwinid(existing.review_buf)
@@ -1116,7 +1152,7 @@ function M.open_review(notes_buf)
 			vim.notify("desk: " .. M.STALE_RELOADED, vim.log.levels.INFO)
 			return true
 		end
-		carried = existing.return_to
+		carried, carried_took = existing.return_to, existing.took_into
 		close_session(existing, true)
 	end
 
@@ -1174,6 +1210,7 @@ function M.open_review(notes_buf)
 		base = base,
 		takes = {},
 		return_to = carried,
+		took_into = carried_took,
 	}
 	sessions[notes_buf] = s
 	M.recount_saved(s)
@@ -1212,11 +1249,31 @@ function M.open_review(notes_buf)
 			local ok, n_or_err = M.save_review(s)
 			if not ok then
 				vim.notify("desk: " .. tostring(n_or_err), vim.log.levels.WARN)
-			elseif n_or_err > 0 then
-				vim.notify("desk: declined " .. n_or_err .. " suggestion(s)", vim.log.levels.INFO)
+			else
+				if n_or_err > 0 then
+					vim.notify("desk: declined " .. n_or_err .. " suggestion(s)", vim.log.levels.INFO)
+				end
+				-- `:wq` is this save and a quit in one command: the quit
+				-- (QuitPre, below) finds the mark before the next tick clears
+				-- it, which a `:q` typed later never does.
+				s.saving_quit = true
+				vim.schedule(function()
+					s.saving_quit = nil
+				end)
 			end
 			M.refresh_overview(s)
 			M.refresh_status_line(notes_buf, true)
+		end,
+	})
+	vim.api.nvim_create_autocmd("QuitPre", {
+		group = group,
+		buffer = review_buf,
+		nested = true, -- the notes' own write autocmds run
+		callback = function()
+			if s.saving_quit and sessions[notes_buf] == s then
+				s.saving_quit = nil
+				write_taken_notes(s)
+			end
 		end,
 	})
 	vim.api.nvim_create_autocmd({ "WinEnter", "FocusGained" }, {
@@ -1968,6 +2025,7 @@ function M.close_review(s)
 	if not ok then
 		return false, why
 	end
+	write_taken_notes(s)
 	local info = vim.fn.getqflist({ title = 0, context = 0 })
 	local ctx = type(info.context) == "table" and info.context or {}
 	if info.title == M.OVERVIEW_TITLE and (ctx.desk_review_buf == s.review_buf or not session_for_review_buf(ctx.desk_review_buf or -1)) then

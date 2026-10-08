@@ -2151,6 +2151,128 @@ do
 	vim.notify, review.confirm = orig_notify, orig_confirm
 end
 
+print("\n=== ending the review with :wq, Q or ␣gq writes the notes it took into; :q does not ===")
+do
+	local said = {}
+	local orig_notify = vim.notify
+	vim.notify = function(m)
+		said[#said + 1] = m
+	end
+	local function tick()
+		vim.wait(30, function()
+			return false
+		end)
+	end
+	local function leader(keys)
+		vim.cmd("normal 1" .. vim.g.mapleader .. keys)
+	end
+	local function setup(take)
+		local r = new_repo(BASE)
+		build(r, "2026-10-01", {
+			item("n1"),
+			item("a1", { kind = "add", target = { under = "Section A" }, after = "  added", source = "", headline = "add A" }),
+		})
+		local nb = open_notes(r)
+		review.attach(nb)
+		assert_true("review opens", review.open_review(nb))
+		local rb = review_buf_of(nb)
+		local rw = vim.fn.bufwinid(rb)
+		if take ~= false then
+			go_to(rw, rb, "NEWS n1")
+			assert_true("take", review.take(rb))
+		end
+		said = {}
+		return r, nb, rb, rw
+	end
+	local function on_disk(r, file)
+		return vim.fn.readfile(r .. "/" .. (file or "notes.md"))
+	end
+	local function taken(r, headline)
+		return ledger.taken_by_id(ledger.read(r))[id_by_headline(r, headline)] ~= nil
+	end
+	local ends = {
+		{ "␣gq in the split", function(_, rb)
+			vim.api.nvim_set_current_win(vim.fn.bufwinid(rb))
+			leader("gq")
+		end },
+		{ "␣gq in the notes", function(nb)
+			vim.api.nvim_set_current_win(vim.fn.bufwinid(nb))
+			leader("gq")
+		end },
+		{ "Q in the overview", function(nb)
+			review.overview(nb)
+			vim.api.nvim_set_current_win(vim.fn.getqflist({ winid = 0 }).winid)
+			vim.cmd("normal Q")
+		end },
+		{ ":wq in the split", function(_, rb)
+			vim.api.nvim_set_current_win(vim.fn.bufwinid(rb))
+			vim.cmd("wq")
+		end },
+	}
+	for _, e in ipairs(ends) do
+		local desc, act = e[1], e[2]
+		local r, nb, rb = setup()
+		act(nb, rb)
+		tick()
+		assert_true(desc .. ": the review ended", not vim.api.nvim_buf_is_valid(rb))
+		assert_true(desc .. ": the take is on disk", vim.tbl_contains(on_disk(r), "NEWS n1"))
+		assert_eq(desc .. ": the notes are saved", false, vim.bo[nb].modified)
+		assert_true(desc .. ": the take is recorded", taken(r, "headline n1"))
+		assert_true(desc .. ": and it says so", vim.tbl_contains(said, "desk: saved notes.md with your takes"))
+	end
+
+	local r, nb = setup()
+	vim.api.nvim_set_current_win(vim.fn.bufwinid(review_buf_of(nb)))
+	vim.cmd("quit")
+	tick()
+	assert_true(":q leaves the take unsaved", vim.bo[nb].modified and vim.tbl_contains(lines_of(nb), "NEWS n1"))
+	assert_eq(":q writes nothing", BASE, on_disk(r))
+
+	local r2, nb2, rb2 = setup()
+	vim.api.nvim_set_current_win(vim.fn.bufwinid(rb2))
+	vim.cmd("write")
+	tick()
+	vim.cmd("quit")
+	tick()
+	assert_eq(":w, then :q later, writes no notes either", BASE, on_disk(r2))
+	assert_true("the notes keep the take, unsaved", vim.bo[nb2].modified)
+
+	local r3, nb3, rb3 = setup(false)
+	vim.api.nvim_buf_set_lines(nb3, 1, 2, false, { "  mine" })
+	vim.api.nvim_set_current_win(vim.fn.bufwinid(rb3))
+	leader("gq")
+	tick()
+	assert_eq("with nothing taken, ␣gq writes nothing", BASE, on_disk(r3))
+	assert_true("and leaves the user's own edit unsaved", vim.bo[nb3].modified)
+	assert_true("and says nothing about saving", not vim.tbl_contains(said, "desk: saved notes.md with your takes"))
+
+	-- A review that moved to the other file writes both.
+	local r4 = new_repo(BASE)
+	build(r4, "2026-10-01", {
+		item("n1"),
+		item("rd", { file = "reading.md", kind = "new", after = "READ paper", headline = "read paper" }),
+	})
+	local nb4 = open_notes(r4)
+	review.attach(nb4)
+	assert_true("review opens", review.open_review(nb4))
+	local rb4 = review_buf_of(nb4)
+	go_to(vim.fn.bufwinid(rb4), rb4, "NEWS n1")
+	assert_true("take in notes.md", review.take(rb4))
+	leader("gR")
+	local rrb = review_buf_of(nb4)
+	assert_true("moved to reading.md", rrb ~= nil and vim.api.nvim_buf_get_name(rrb):match("reading.md$") ~= nil)
+	go_to(vim.fn.bufwinid(rrb), rrb, "READ paper")
+	assert_true("take in reading.md", review.take(rrb))
+	said = {}
+	leader("gq")
+	tick()
+	assert_true("notes.md is written", vim.tbl_contains(on_disk(r4), "NEWS n1"))
+	assert_true("and reading.md", vim.tbl_contains(on_disk(r4, "reading.md"), "READ paper"))
+	assert_true("both takes recorded", taken(r4, "headline n1") and taken(r4, "read paper"))
+	assert_true("said in one line (" .. table.concat(said, " | ") .. ")", vim.tbl_contains(said, "desk: saved notes.md and reading.md with your takes"))
+	vim.notify = orig_notify
+end
+
 print(string.format("\n=== summary: %d passed, %d failed ===", pass, fail))
 if fail > 0 then
 	os.exit(1)
