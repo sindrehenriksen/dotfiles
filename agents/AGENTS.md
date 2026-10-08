@@ -240,6 +240,8 @@ When the system framework suggests saving a memory, route the content to the rig
 - Don't overuse em dashes. They're fine for the occasional genuine parenthetical aside or dramatic break, but reach for a colon, comma, parentheses, or a new sentence where one reads as well or better — especially in list lead-ins (use a colon). The complaint is overuse, not any use.
 - A page that shows a shape (a mockup, a proposal, a diagram) is a plain HTML file, not a hosted artifact. While exploring it is scratch, thrown away after; once it carries a decision it lives where the work does, attached to the ticket or committed beside the doc. Publish a hosted copy only when asked, for viewing somewhere the file can't reach such as a phone, and label it a view of the file rather than the source.
 
+- **Instructions, prompts and skills don't refer to the owner as he, him or his, or by name.** Say "the user", "the owner" where it reads better, or rephrase so no reference is needed ("ask before posting", not "ask him before posting").
+
 ## Pull Request Descriptions
 
 Use the `pr-description` skill — it has the full guidelines.
