@@ -913,7 +913,10 @@ do
 	counts("at open: this review's own, live and recorded", 3, 3)
 	assert_true("the top bar fits in 120 columns with two-digit counts", vim.fn.strchars("99 left (99 saved) · " .. review.KEY_HINT) <= 120)
 	assert_true("the top bar names the window below, not above", review.KEY_HINT:match("C%-n down") and not review.KEY_HINT:match("C%-t"))
-	assert_true("and the folds", review.KEY_HINT:match("zo/zc/zR/zM fold"))
+	assert_true("and the folds", review.KEY_HINT:match("zo/zc fold"))
+	for _, h in ipairs({ review.KEY_HINT, review.NOTES_KEY_HINT, review.NOTES_IDLE_HINT }) do
+		assert_true("the commit key in every bar: " .. h, h:match("␣gc commit") ~= nil)
+	end
 	assert_true("the notes bar names the window above, not below", review.NOTES_KEY_HINT:match("C%-t up") and not review.NOTES_KEY_HINT:match("C%-n"))
 
 	go_to(rw, rb, "  added A")
@@ -1458,6 +1461,30 @@ do
 		return false
 	end)
 	assert_eq(":q in the notes window: the window left showing them has their own values", { false, false, false }, opts(vim.fn.bufwinid(nb2)))
+end
+
+print("\n=== the commit key works from the review split: saves its declines, then commits ===")
+do
+	local r = new_repo(BASE)
+	build(r, "2026-10-01", {
+		item("n1"),
+		item("a1", { kind = "add", target = { under = "Section A" }, after = "  added A", source = "", headline = "add A" }),
+	})
+	local nb = open_notes(r)
+	review.attach(nb)
+	assert_true("review opens", review.open_review(nb))
+	local rb = review_buf_of(nb)
+	local rw = vim.fn.bufwinid(rb)
+	go_to(rw, rb, "NEWS n1")
+	vim.cmd("normal dp")
+	go_to(rw, rb, "  added A")
+	review.decline(rb)
+	vim.cmd("normal 1" .. vim.g.mapleader .. "gc")
+	assert_eq("HEAD has the take", "NEWS n1", head_lines(r)[1])
+	assert_eq("the decline is recorded", { id_by_headline(r, "add A") }, declined_ids(r))
+	assert_eq("both buffers read as saved", { false, false }, { vim.bo[nb].modified, vim.bo[rb].modified })
+	assert_eq("the message says what it took", "Take 1 suggestion", select(2, git.run(r, { "log", "-1", "--format=%s" })):gsub("%s+$", ""))
+	assert_eq("the review stays open", rw, vim.fn.bufwinid(rb))
 end
 
 print("\n=== the commit key's message: the takes and the sections edited ===")

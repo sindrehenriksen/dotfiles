@@ -756,13 +756,13 @@ end
 -- The bars put their keys on the left and their count or status line on
 -- the right, so the two windows of a review read the same way and the
 -- table in the desk guide doesn't have to be open beside them. The review
--- split's keys, kept to about 120 columns with the count. Each bar names
--- only the window key that leaves it.
-M.KEY_HINT = "n/N next · dp take · ␣gA one · ␣gD decline · u undo · zo/zc/zR/zM fold · C-n down · ␣go list"
+-- split's keys, kept to about 120 columns with the count, which is why
+-- zR/zM are left out. Each bar names only the window key that leaves it.
+M.KEY_HINT = "n/N next · dp take · ␣gA one · ␣gD decline · u undo · zo/zc fold · ␣go list · ␣gc commit · C-n down"
 -- The notes window's keys while a review is open.
-M.NOTES_KEY_HINT = "n/N next · do take · ␣gA one · ␣gD decline · u undo · C-t up"
+M.NOTES_KEY_HINT = "n/N next · do take · ␣gA one · ␣gD decline · u undo · ␣gc commit · C-t up"
 -- And with no review open, the desk keys still being learned.
-M.NOTES_IDLE_HINT = "␣gR review · ␣gx open/jump · ␣go list"
+M.NOTES_IDLE_HINT = "␣gR review · ␣gx open/jump · ␣go list · ␣gc commit"
 
 --- The review key: opens the merged view in a split above the notes window,
 --- and focuses it (or focuses the one already open for this proposal).
@@ -978,6 +978,9 @@ function M.open_review(notes_buf)
 	vim.keymap.set("n", "<leader>go", function()
 		M.overview(notes_buf)
 	end, { buffer = review_buf, desc = "Overview: remaining suggestions" })
+	vim.keymap.set("n", "<leader>gc", function()
+		report(M.commit_from_review(review_buf))
+	end, { buffer = review_buf, desc = "Save the declines, then commit your notes" })
 	map_next_change(review_buf)
 	map_next_change(notes_buf)
 	for lhs, verb in pairs({ ["<leader>gA"] = "take", ["<leader>gD"] = "decline" }) do
@@ -2087,6 +2090,28 @@ function M.commit(bufnr)
 	local taken = proposal.sync_taken(repo)
 	M.refresh_status_line(bufnr, true)
 	return true, { taken = #taken }
+end
+
+--- The commit key in the review split: saves the split (its declines), then
+--- commits the notes as the key there does, so the user can commit from
+--- where they work.
+function M.commit_from_review(review_buf)
+	local s = session_for_review_buf(review_buf)
+	if not s then
+		return false, "not a desk review buffer"
+	end
+	if vim.bo[review_buf].modified then
+		local ok, n_or_err = M.save_review(s)
+		if not ok then
+			return false, n_or_err
+		end
+		if n_or_err > 0 then
+			vim.notify("desk: declined " .. n_or_err .. " suggestion(s)", vim.log.levels.INFO)
+		end
+	end
+	local ok, res = M.commit(s.notes_buf)
+	M.refresh_overview(s)
+	return ok, res
 end
 
 -- ---------------------------------------------------------------------------
