@@ -597,9 +597,27 @@ do
 	vim.api.nvim_win_set_cursor(rw2, { k, 0 })
 	vim.cmd("diffupdate")
 	review.take(rb2)
+	assert_true("the take carries the edit into the notes", line_of(nb2, "  - read RFC (skim)") ~= nil)
+	assert_true("not the text as proposed", line_of(nb2, "  - read RFC") == nil)
 	vim.cmd("write")
 	assert_eq("saving the split does not decline a suggestion the user took edited", {}, declined_ids(r2))
 	assert_eq("it is recorded taken at that save", { "read rfc" }, taken_headlines(r2))
+
+	-- the same for an edit of an existing line
+	local r5 = new_repo(BASE)
+	build(r5, "2026-10-01", { item("e1", { kind = "edit", target = { at = "  existing" }, before = "  existing", after = "  existing, revised", source = "notes", headline = "revise" }) })
+	local nb5 = open_notes(r5)
+	review.attach(nb5)
+	assert_true("review opens", review.open_review(nb5))
+	local rb5 = review_buf_of(nb5)
+	local rw5 = vim.fn.bufwinid(rb5)
+	local k5 = line_of(rb5, "  existing, revised")
+	vim.api.nvim_buf_set_text(rb5, k5 - 1, #"  existing, revised", k5 - 1, #"  existing, revised", { " twice" })
+	vim.api.nvim_set_current_win(rw5)
+	vim.api.nvim_win_set_cursor(rw5, { k5, 0 })
+	vim.cmd("diffupdate")
+	review.take(rb5)
+	assert_eq("an edited edit lands as edited, in place", { "Section A", "  existing, revised twice", "Section B", "  other" }, lines_of(nb5))
 
 	-- take then undo, then save: not taken
 	local r3 = new_repo(BASE)

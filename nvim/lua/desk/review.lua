@@ -1826,7 +1826,12 @@ local function take_item(s, item)
 	local before = snippet.split_lines(item.before)
 	local after = snippet.split_lines(item.after)
 	local changed = false
-	local first = mark_range(s, item)
+	-- The suggestion as the split shows it now, so an edit made there first
+	-- is what lands.
+	local first, _, shown = mark_range(s, item)
+	if shown and #shown > 0 then
+		after = shown
+	end
 	local start = #before > 0 and anchored_start(s, item, notes)
 	if #before > 0 and not start then
 		return false
