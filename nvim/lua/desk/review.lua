@@ -647,13 +647,13 @@ function M.confirm(msg, choices)
 	return vim.fn.confirm(msg, choices, 3)
 end
 
--- The review split's winbar: the live count, then the keys in one line, so
--- the table in the desk guide doesn't have to be open beside it. Kept to
--- about 120 columns with the count, which is why plain diff motion (]c/[c)
--- is left out. Each bar names only the window key that leaves it.
+-- The bars put their keys on the left and their count or status line on
+-- the right, so the two windows of a review read the same way and the
+-- table in the desk guide doesn't have to be open beside them. The review
+-- split's keys, kept to about 120 columns with the count. Each bar names
+-- only the window key that leaves it.
 M.KEY_HINT = "]c/[c next · dp take · ␣gA one · ␣gD decline · u undo · zo/zc/zR/zM fold · C-n down · ␣go list"
--- The notes window's keys while a review is open, right-aligned after its
--- status line. `u` there is plain undo, which is right in that buffer.
+-- The notes window's keys while a review is open.
 M.NOTES_KEY_HINT = "do take · u undo · C-t up"
 -- And with no review open, the desk keys still being learned.
 M.NOTES_IDLE_HINT = "␣gR review · ␣gx open/jump · ␣go list"
@@ -1831,8 +1831,8 @@ local function bar_text(text)
 end
 
 --- The bars over a notes buffer's windows and, while a review is open, over
---- its split: the status line plus the notes window's keys below, the count
---- and the review keys above. `recount` after a save or a commit, which
+--- its split: the notes window's keys and the status line below, the review
+--- keys and the count above. `recount` after a save or a commit, which
 --- moves the recorded count.
 function M.refresh_status_line(bufnr, recount)
 	if not vim.api.nvim_buf_is_valid(bufnr) then
@@ -1843,14 +1843,14 @@ function M.refresh_status_line(bufnr, recount)
 		M.recount_saved(s)
 	end
 	local left = s and M.left(s)
-	local line = bar_text(M.status_line(bufnr, left)) .. "%=" .. (s and M.NOTES_KEY_HINT or M.NOTES_IDLE_HINT)
+	local line = (s and M.NOTES_KEY_HINT or M.NOTES_IDLE_HINT) .. "%=" .. bar_text(M.status_line(bufnr, left))
 	for _, win in ipairs(vim.fn.win_findbuf(bufnr)) do
 		vim.wo[win].winbar = line
 	end
 	if s then
 		local rw = vim.fn.bufwinid(s.review_buf)
 		if rw ~= -1 then
-			vim.wo[rw].winbar = bar_text(status.live_count(left, s.saved)) .. " · " .. M.KEY_HINT
+			vim.wo[rw].winbar = M.KEY_HINT .. "%=" .. bar_text(status.live_count(left, s.saved))
 		end
 	end
 end

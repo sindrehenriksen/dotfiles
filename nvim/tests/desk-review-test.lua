@@ -152,7 +152,7 @@ local review_win = vim.fn.bufwinid(rb)
 assert_true("both windows are in diff mode", vim.wo[review_win].diff and vim.wo[notes_win].diff)
 assert_true("review is above the notes window", vim.fn.win_screenpos(review_win)[1] < vim.fn.win_screenpos(notes_win)[1])
 assert_eq("the cursor is in the review window", review_win, vim.api.nvim_get_current_win())
-assert_eq("the review winbar shows the count and the keys", "2 left (2 saved) · " .. review.KEY_HINT, vim.wo[review_win].winbar)
+assert_eq("the review winbar shows the keys, then the count on the right", review.KEY_HINT .. "%=2 left (2 saved)", vim.wo[review_win].winbar)
 assert_true("the keys include the review-side take", review.KEY_HINT:match("dp take") ~= nil)
 assert_true("the notes winbar is still the status line, not the keys", vim.wo[notes_win].winbar ~= review.KEY_HINT)
 vim.api.nvim_set_current_win(review_win)
@@ -791,13 +791,13 @@ do
 	assert_eq("the cursor stays in the list", qw, vim.api.nvim_get_current_win())
 	assert_eq("the list drops it", 2, #vim.fn.getqflist())
 	assert_eq("the split's cursor is on it", line_of(rb, "  added under B"), vim.api.nvim_win_get_cursor(rw)[1])
-	assert_true("the count moves", vim.wo[rw].winbar:match("^2 left %(3 saved%)") ~= nil)
+	assert_true("the count moves", vim.wo[rw].winbar:match("%%=2 left %(3 saved%)$") ~= nil)
 	on("drop more", "x")
 	assert_true("x declines it: the split keeps the line", line_of(rb, "  more") ~= nil)
 	assert_true("and the notes too", line_of(nb, "  more") ~= nil)
 	assert_eq("the cursor stays in the list", qw, vim.api.nvim_get_current_win())
 	assert_eq("the list drops it", 1, #vim.fn.getqflist())
-	assert_true("the count moves", vim.wo[rw].winbar:match("^1 left %(3 saved%)") ~= nil)
+	assert_true("the count moves", vim.wo[rw].winbar:match("%%=1 left %(3 saved%)$") ~= nil)
 
 	vim.api.nvim_set_current_win(rw)
 	vim.cmd("normal u")
@@ -841,11 +841,11 @@ do
 	local function counts(desc, n, saved)
 		local text = string.format("%d left (%d saved)", n, saved)
 		local notes_bar, review_bar = bars()
-		assert_eq(desc .. ": the notes bar says " .. text .. ", then its keys", text .. "%=" .. review.NOTES_KEY_HINT, notes_bar)
-		assert_eq(desc .. ": the review bar starts with the same text", text .. " · " .. review.KEY_HINT, review_bar)
+		assert_eq(desc .. ": the notes bar has its keys, then " .. text .. " on the right", review.NOTES_KEY_HINT .. "%=" .. text, notes_bar)
+		assert_eq(desc .. ": the review bar has its keys, then the same text on the right", review.KEY_HINT .. "%=" .. text, review_bar)
 	end
 	assert_true("before a review: the recorded count, both files", vim.wo[win].winbar:match("%(4 untaken%)") ~= nil)
-	assert_true("then the keys still being learned, right-aligned", vim.wo[win].winbar:match("%%=" .. vim.pesc(review.NOTES_IDLE_HINT) .. "$") ~= nil)
+	assert_true("the keys still being learned on the left, the status on the right", vim.wo[win].winbar:match("^" .. vim.pesc(review.NOTES_IDLE_HINT) .. "%%=") ~= nil)
 	assert_true("review opens", review.open_review(nb))
 	local rb = review_buf_of(nb)
 	local rw = vim.fn.bufwinid(rb)
@@ -863,7 +863,7 @@ do
 	vim.wait(20, function()
 		return false
 	end)
-	assert_true("moving between the windows keeps the notes bar", vim.wo[win].winbar:match("^2 left %(3 saved%)") ~= nil)
+	assert_true("moving between the windows keeps the notes bar", vim.wo[win].winbar:match("%%=2 left %(3 saved%)$") ~= nil)
 	vim.cmd("normal u")
 	counts("u brings it back", 3, 3)
 
@@ -886,7 +886,7 @@ do
 	counts("a save of the split records them all", 0, 0)
 	vim.cmd("wq")
 	assert_true("after the review, the recorded count again: the takes were recorded at the save", vim.wo[win].winbar:match("%(1 untaken%)") ~= nil)
-	assert_true("and the keys for outside a review", vim.wo[win].winbar:match("%%=" .. vim.pesc(review.NOTES_IDLE_HINT) .. "$") ~= nil)
+	assert_true("and the keys for outside a review", vim.wo[win].winbar:match("^" .. vim.pesc(review.NOTES_IDLE_HINT) .. "%%=") ~= nil)
 end
 
 print("\n=== a removal is taken from the review split: ]c lands below its filler, where dp takes it ===")
@@ -1131,7 +1131,7 @@ do
 		assert_eq(desc .. ": showing the notes", nb, vim.api.nvim_win_get_buf(wins[1]))
 		assert_true(desc .. ": diff off", not vim.wo[wins[1]].diff)
 		assert_eq(desc .. ": no review colours", "", vim.wo[wins[1]].winhighlight)
-		assert_true(desc .. ": the status line with the keys for outside a review", vim.wo[wins[1]].winbar:match("%%=" .. vim.pesc(review.NOTES_IDLE_HINT) .. "$") ~= nil)
+		assert_true(desc .. ": the status line with the keys for outside a review", vim.wo[wins[1]].winbar:match("^" .. vim.pesc(review.NOTES_IDLE_HINT) .. "%%=") ~= nil)
 		assert_true(desc .. ": no review buffer remains", review_buf_of(nb) == nil)
 	end
 	local orig = review.confirm
