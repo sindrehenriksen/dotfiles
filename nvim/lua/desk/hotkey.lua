@@ -92,8 +92,9 @@ end
 
 --- The first (file-order) 1-indexed line whose own text names `token` as a
 --- section head — i.e. `token` appears in the buffer as more than a
---- passing mention. Deliberately not "some OTHER line": with two sections
---- both headed by the same session name, "other than the cursor's own
+--- passing mention: the line heads a section (desk.block.is_heading), so a
+--- bullet that merely opens with the name is no head. Deliberately not
+--- "some OTHER line": with two sections both headed by the same session name, "other than the cursor's own
 --- line" alternates depending on which one the cursor happens to be on,
 --- so following always lands wherever the cursor WASN'T — pressing from
 --- inside either section bounces to the other and back, forever. Always
@@ -104,7 +105,7 @@ end
 --- there is nowhere left to jump, so it resolves externally instead.
 function M.find_section_head_line(lines, token)
 	for i, line in ipairs(lines) do
-		if line_names_token(line, token) then
+		if block.is_heading(lines, i) and line_names_token(line, token) then
 			return i
 		end
 	end

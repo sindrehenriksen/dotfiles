@@ -73,6 +73,18 @@ function M.block_containing(lines, idx)
 	return start, M.block_end(lines, start)
 end
 
+--- Whether line `i` of `lines` heads a section: a column-0 line that is not
+--- a bullet, or is one with indented lines under it (a session's section).
+--- A column-0 bullet with nothing under it belongs to the heading above it.
+function M.is_heading(lines, i)
+	local l = lines[i]
+	if not (l and l:match("^%S")) then
+		return false
+	end
+	local bullet = l:match("^[-*+]%s") or l:match("^%d+[.)]%s")
+	return not bullet or (lines[i + 1] ~= nil and lines[i + 1]:match("^%s+%S") ~= nil)
+end
+
 --- The first line index (1-indexed) whose content equals `quote` exactly
 --- (plain comparison, never a pattern), or nil if it's too short to trust
 --- or doesn't appear. Ambiguity (more than one exact match) resolves to the

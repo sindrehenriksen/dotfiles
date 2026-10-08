@@ -2778,18 +2778,9 @@ local function body_item(text)
 	return line
 end
 
--- The section heading at or above `row` of `lines`, or nil at the top: the
--- nearest column-0 line that is not a bullet, or is one with indented lines
--- under it (a session's section). A column-0 bullet with nothing under it
--- belongs to the heading above it.
-local function is_heading(lines, i)
-	local l = lines[i]
-	if not (l and l:match("^%S")) then
-		return false
-	end
-	local bullet = l:match("^[-*+]%s") or l:match("^%d+[.)]%s")
-	return not bullet or (lines[i + 1] ~= nil and lines[i + 1]:match("^%s+%S") ~= nil)
-end
+-- The section heading at or above `row` of `lines`, or nil at the top
+-- (desk.block.is_heading).
+local is_heading = block.is_heading
 
 local function section_head(lines, row)
 	for i = math.min(row, #lines), 1, -1 do

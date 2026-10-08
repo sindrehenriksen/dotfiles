@@ -477,6 +477,30 @@ do
 end
 
 print()
+print("=== a bullet that mentions a session first is no section head ===")
+do
+	local lines = { "Today", "- alpha-fix merged, waiting on deploy", "", "Later", "  - alpha-fix nested", "", "alpha-fix", "- notes on it" }
+	assert_eq("the line heading a block is found, not an earlier bullet", 7, hotkey.find_section_head_line(lines, "alpha-fix"))
+	assert_eq("a bullet with lines under it heads its section", 1, hotkey.find_section_head_line({ "- beta-fix", "  - detail" }, "beta-fix"))
+	assert_eq("a lone bullet heads nothing", nil, hotkey.find_section_head_line({ "Today", "- beta-fix merged" }, "beta-fix"))
+
+	-- From inside its own section the token resolves to the session rather
+	-- than jumping up to the bullet that mentions it.
+	local buf = new_buf(lines)
+	local win = vim.api.nvim_get_current_win()
+	vim.api.nvim_win_set_buf(win, buf)
+	vim.api.nvim_win_set_cursor(win, { 7, 0 })
+	local rec = new_recorder()
+	local entry = { id = "sess-3", name = "alpha-fix", live = true, tty = "ttys004", cwd = "/tmp/x" }
+	hotkey.run(buf, win, config, stub_deps(rec, { reader_resolve = { entry, nil }, focus_tty = { true } }))
+	wait_for("resolve then focus complete", function()
+		return #rec.calls >= 2
+	end)
+	assert_eq("the cursor stayed in its section", 7, vim.api.nvim_win_get_cursor(win)[1])
+	assert_eq("the session is focused", { "focus_tty", "ttys004" }, rec.calls[2])
+end
+
+print()
 print("=== a tab helper that never returns is killed and reported, not waited on ===")
 do
 	local dir = vim.fn.tempname()
