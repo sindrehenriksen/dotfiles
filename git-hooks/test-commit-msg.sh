@@ -41,7 +41,7 @@ test_reflow() {
 # to ~93% of -w and BSD fmt fills to the width, so pinning exact line breaks
 # makes a case that only passes on the platform it was written on.
 test_rewrap() {
-    local name="$1" input="$2"
+    local name="$1" input="$2" compact="${3:-}"
     total=$((total + 1))
     local tmp
     tmp=$(mktemp)
@@ -62,6 +62,10 @@ test_rewrap() {
         fail=$((fail + 1))
     elif [ "$lines" -lt 2 ]; then
         echo "FAIL [$name]: body did not wrap"
+        fail=$((fail + 1))
+    elif [ -n "$compact" ] && printf '%s\n' "$actual" | tail -n +3 | grep -q '^$'; then
+        echo "FAIL [$name]: a blank line inside the body:"
+        printf '%s\n' "$actual" | sed 's/^/  /'
         fail=$((fail + 1))
     elif [ "$(printf '%s\n' "$input" | tr -s '[:space:]' '\n')" \
          != "$(printf '%s\n' "$actual" | tr -s '[:space:]' '\n')" ]; then
@@ -120,8 +124,44 @@ test_reflow "two bullets stay separate" \
 "Short title
 
 - bullet one
+- bullet two"
+
+test_reflow "a blank line already between bullets is kept" \
+"Short title
+
+- bullet one
+
+- bullet two" \
+"Short title
+
+- bullet one
 
 - bullet two"
+
+test_reflow "labelled lists stay compact" \
+"Short title
+
+Taken:
+- one
+- two
+
+Edited:
+- three" \
+"Short title
+
+Taken:
+- one
+- two
+
+Edited:
+- three"
+
+test_rewrap "long adjacent bullets wrap each on its own, no blank between" \
+"Short title
+
+- a first bullet long enough that it has to wrap past the seventy two column limit
+- a second bullet also long enough that it has to wrap past the seventy two column limit" \
+compact
 
 test_reflow "indented continuation preserved" \
 "Short title
@@ -141,7 +181,6 @@ test_reflow "numbered list bullets stay separate" \
 "Short title
 
 1. first item
-
 2. second item"
 
 # --- BSD fmt double-space fix (a2ca3dc) ---
@@ -210,7 +249,6 @@ Claude-Session: https://claude.ai/code/session_01SWWZ7hbheeGQfnc25rACWJ" \
 "Short title
 
 - bullet one
-
 - bullet two
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
@@ -295,6 +333,20 @@ $SCISSORS_TAIL" \
 
 Body line one continues here.
 # Please enter the commit message for your changes.
+$SCISSORS_TAIL"
+
+test_reflow "a list above the scissors stays compact, the diff verbatim" \
+"Short title
+
+Changes:
+- one
+- two
+$SCISSORS_TAIL" \
+"Short title
+
+Changes:
+- one
+- two
 $SCISSORS_TAIL"
 
 test_reflow "custom core.commentChar is respected" \

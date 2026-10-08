@@ -23,13 +23,15 @@ msg_file="$1"
 # takes the character of the scissors line, else of the last non-blank
 # line if that is one of auto's candidates, else #.
 #
-# Within a run, an awk preprocessor inserts a blank line before each
-# bullet (-/*/+ or N.) so fmt sees each bullet as its own paragraph —
-# otherwise fmt joins adjacent same-indent bullets into one paragraph and
-# can splice them as "- foo. - bar" mid-line. cat -s squeezes the
-# synthetic blanks back. The sed filter collapses the double-space that
-# BSD fmt (macOS) inserts after sentence-ending punctuation when joining
-# lines.
+# Within a run, an awk preprocessor puts a break before each bullet
+# (-/*/+ or N.) that follows a non-blank line, so fmt sees each bullet as
+# its own paragraph — otherwise fmt joins adjacent same-indent bullets
+# into one paragraph and can splice them as "- foo. - bar" mid-line. The
+# break is a sentinel line between blank lines, which a postprocessor
+# removes with both blanks, so a list keeps one line per item and no
+# blank lines between items. The sed filter collapses the double-space
+# that BSD fmt (macOS) inserts after sentence-ending punctuation when
+# joining lines.
 #
 # A trailer block (Co-Authored-By:, etc.) at the end of the last run
 # must not go through fmt at all: fmt doesn't know trailers can't be
@@ -44,10 +46,22 @@ comment_char=$(git config --get core.commentString 2>/dev/null) \
     || comment_char=$(git config --get core.commentChar 2>/dev/null) \
     || comment_char='#'
 
+break_sentinel="@@commit-msg-bullet-break@@"
+
 reflow() {
-    awk 'prev != "" && /^[[:space:]]*([-*+]|[0-9]+\.) / { print "" } { print; prev = $0 }' "$1" \
+    awk -v sent="$break_sentinel" 'prev != "" && /^[[:space:]]*([-*+]|[0-9]+\.) / { print ""; print sent; print "" } { print; prev = $0 }' "$1" \
         | fmt -w 72 \
         | sed -E 's/([.!?]) {2,}/\1 /g' \
+        | awk -v sent="$break_sentinel" '
+            { n++; l[n] = $0 }
+            END {
+                for (i = 1; i <= n; i++) if (l[i] == sent) {
+                    drop[i] = 1
+                    if (i > 1 && l[i - 1] == "") drop[i - 1] = 1
+                    if (i < n && l[i + 1] == "") drop[i + 1] = 1
+                }
+                for (i = 1; i <= n; i++) if (!drop[i]) print l[i]
+            }' \
         | cat -s
 }
 
