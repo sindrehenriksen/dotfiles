@@ -80,9 +80,72 @@ desk_follow_resolve_session() {
 
 _desk_follow_valid_key() { [[ "$1" =~ ^[A-Z][A-Z0-9]+-[0-9]+$ ]]; }
 
+# desk_follow_intro_text <entry json>: what a session is told when it is
+# made a followed session: the tickets, and to load the desk-follow skill,
+# including what its "Before compacting" section has a handoff carry. The
+# standalone intro and the lead of a first update both use it.
+desk_follow_intro_text() {
+	jq -r '
+		"This session is now a followed session. It follows "
+		+ ([(if (.keys | length) > 0 then "\(.keys | join(", ")) (with their children and linked tickets)" else empty end),
+		    (if ((.related // []) | length) > 0 then "\(.related | join(", ")) (only as themselves)" else empty end)] | join(", and "))
+		+ ". A background follow pass sends it updates on them as [desk-follow] messages. Load the desk-follow skill now if it is not loaded: it says how to take an update in and when to involve the user. On /handoff or before compacting, carry what its \"Before compacting\" section lists."' <<< "$1"
+}
+
+# desk_follow_cli_intro <session id> <entry json>: tells a session it was
+# just made a followed session, from outside it. The same restricted,
+# pinned send the pass uses (desk_follow_send), to the session's name, only
+# while it is live and the name addresses it alone. Otherwise, or when the
+# send fails outright, the intro waits in the entry (`intro_due_at`) and
+# the pass puts it at the head of the session's first update. A send that
+# ran but went unconfirmed is not queued: it may have landed, and an intro
+# twice is worse than none.
+desk_follow_cli_intro() {
+	local sid="$1" entry="$2" pass="" pass_config="" hit name live dup back msg_file work result verdict
+	desk_resolve_config
+	if [ -n "$DESK_CONFIG" ] && [ -f "$DESK_CONFIG" ]; then
+		pass="$(jq -r '.passes | to_entries[] | select(.value.kind == "follow" or .value.kind == "watch") | .key' "$DESK_CONFIG" | head -n1)"
+		[ -z "$pass" ] || pass_config="$(jq -c --arg p "$pass" '.passes[$p]' "$DESK_CONFIG")"
+	fi
+	hit="$(_desk_follow_reader resolve "$sid" 2> /dev/null)" || hit=""
+	name="$(jq -r '.name // empty' <<< "$hit" 2> /dev/null)"
+	live="$(jq -r '.live // false' <<< "$hit" 2> /dev/null)"
+	dup="$(jq -r '.duplicate_pids // false' <<< "$hit" 2> /dev/null)"
+	back=""
+	[ -z "$name" ] || back="$(_desk_follow_reader resolve "$name" 2> /dev/null | jq -r '.id // empty' 2> /dev/null)"
+	if [ -n "$pass_config" ] && [ "$live" = "true" ] && [ "$dup" != "true" ] && [ "$back" = "$sid" ]; then
+		_desk_follow_load_send_libs
+		work="$(desk_scratch_dir "$pass-intro")"
+		msg_file="$work/intro.txt"
+		printf '%s Update for %s: you are now a followed session. Not from the user.\n\n%s\n' \
+			"$DESK_FOLLOW_MARKER" "$(jq -r '.label' <<< "$entry")" "$(desk_follow_intro_text "$entry")" > "$msg_file"
+		result="$(desk_follow_send "$pass" "$(jq -c '.send // {}' <<< "$pass_config")" "$name" "$msg_file" "$work")"
+		rm -rf "$work"
+		verdict="${result%%$'\t'*}"
+		case "$verdict" in
+			confirmed) echo "told $name it is a followed session"; return 0 ;;
+			unconfirmed) echo "told $name it is a followed session (delivery not confirmed, not resent)"; return 0 ;;
+		esac
+	fi
+	local entries
+	entries="$(desk_follow_entries | jq -c --arg sid "$sid" --argjson now "$(desk_now)" '.[$sid].intro_due_at = $now')"
+	_desk_follow_write_list "$entries"
+	echo "the session could not be told now; the intro goes with its first update"
+}
+
+_desk_follow_load_send_libs() {
+	local f
+	for f in lock timeout model-call tool-results steps; do
+		# shellcheck disable=SC1090
+		source "$DESK_LIB_DIR/$f.sh"
+	done
+}
+
 # desk_follow_cli_add <session id> <label or ""> <keys csv> <related csv>
+# From outside the session (its id is not $CLAUDE_CODE_SESSION_ID), a new
+# follow or new keys also send the session its intro.
 desk_follow_cli_add() {
-	local sid="$1" label="$2" keys="$3" related="$4" k entries
+	local sid="$1" label="$2" keys="$3" related="$4" k entries before after
 	for k in ${keys//,/ } ${related//,/ }; do
 		_desk_follow_valid_key "$k" || { echo "desk-follow: '$k' is not a ticket key (like ABC-123)" >&2; return 2; }
 	done
@@ -92,6 +155,7 @@ desk_follow_cli_add() {
 		[ -n "$label" ] || label="${sid:0:8}"
 	fi
 	entries="$(desk_follow_entries)"
+	before="$(jq -c --arg sid "$sid" '.[$sid] // {} | [(.keys // []), (.related // [])]' <<< "$entries")"
 	entries="$(jq -c --arg sid "$sid" --arg label "$label" --arg keys "$keys" --arg related "$related" \
 		--argjson now "$(desk_now)" '
 		def csv: split(",") | map(select(. != ""));
@@ -99,8 +163,17 @@ desk_follow_cli_add() {
 			| .label = $label
 			| .keys = ((.keys + ($keys | csv)) | unique)
 			| .related = ((.related + ($related | csv)) - .keys | unique))' <<< "$entries")"
+	after="$(jq -c --arg sid "$sid" '.[$sid] | [.keys, .related]' <<< "$entries")"
+	# Inside the target session itself the skill is loaded already, and an
+	# intro still waiting is moot.
+	if [ "$sid" = "${CLAUDE_CODE_SESSION_ID:-}" ]; then
+		entries="$(jq -c --arg sid "$sid" '.[$sid] |= del(.intro_due_at)' <<< "$entries")"
+	fi
 	_desk_follow_write_list "$entries"
 	jq -r --arg sid "$sid" '.[$sid] | "following \(.keys + .related | join(", ")) for \(.label)"' <<< "$entries"
+	if [ "$before" != "$after" ] && [ "$sid" != "${CLAUDE_CODE_SESSION_ID:-}" ]; then
+		desk_follow_cli_intro "$sid" "$(jq -c --arg sid "$sid" '.[$sid]' <<< "$entries")"
+	fi
 }
 
 # desk_follow_cli_remove <session id> [keys csv]: without keys, the whole
@@ -428,10 +501,10 @@ desk_follow_note_cost() {
 # `also` holds the current names of the other followed sessions that have
 # its ticket (desk_follow_also_names).
 desk_follow_message() {
-	local entry="$1" queue="$2" name="$3" preamble_file="$4" max="$5" tz="$6" preamble=""
+	local entry="$1" queue="$2" name="$3" preamble_file="$4" max="$5" tz="$6" intro="${7:-}" preamble=""
 	[ -f "$preamble_file" ] && preamble="$(cat "$preamble_file")"
 	TZ="${tz:-${TZ:-UTC}}" jq -jn --argjson e "$entry" --argjson q "$queue" --arg name "$name" \
-		--arg marker "$DESK_FOLLOW_MARKER" --arg preamble "$preamble" --argjson max "$max" '
+		--arg marker "$DESK_FOLLOW_MARKER" --arg preamble "$preamble" --arg lead "$intro" --argjson max "$max" '
 		def when: strflocaltime("%a %d %b %H:%M");
 		($q.changes // []) as $c
 		| ([$c[].ref] | unique) as $refs
@@ -442,7 +515,7 @@ desk_follow_message() {
 		| ("\($marker) Update for \($e.label): \($c | length) change\(if ($c | length) == 1 then "" else "s" end) on \($refs | .[0:6] | join(", "))\(if ($refs | length) > 6 then " and more" else "" end). Not from the user.") as $head
 		| ($preamble | sub("\\s+$"; "")) as $pre
 		| ("Changes since \(if $q.since then ($q.since | when) else "following started" end), oldest first:") as $intro
-		| ($head + "\n\n" + (if $pre != "" then $pre + "\n\n" else "" end) + $intro + "\n") as $top
+		| ($head + "\n\n" + (if $lead != "" then $lead + "\n\n" else "" end) + (if $pre != "" then $pre + "\n\n" else "" end) + $intro + "\n") as $top
 		# Lines are kept whole, oldest first, while they fit; the rest are
 		# named by ticket only.
 		| (reduce $lines[] as $l ({text: "", n: 0, full: false};
@@ -643,7 +716,8 @@ desk_follow_main() {
 	state="$(cat "$DESK_FOLLOW_STATE_FILE" 2> /dev/null)"
 	jq -e 'type == "object"' > /dev/null 2>&1 <<< "$state" || state='{}'
 	# The follow list changed: drop queues for sessions no longer followed.
-	state="$(jq -c --argjson e "$entries" '.queues = ((.queues // {}) | with_entries(select(.key as $k | $e | has($k))))' <<< "$state")"
+	state="$(jq -c --argjson e "$entries" '.queues = ((.queues // {}) | with_entries(select(.key as $k | $e | has($k))))
+		| .intro_done = ((.intro_done // {}) | with_entries(select(.key as $k | $e | has($k))))' <<< "$state")"
 
 	# Windows: since the last fetch that came back, overlapping by five
 	# minutes; the first run of a source records snapshots and sends nothing.
@@ -758,7 +832,15 @@ desk_follow_main() {
 		fi
 		local msg_file="$work/message-${sid:0:8}.txt"
 		queue="$(desk_follow_also_names "$queue" "$entries")"
-		desk_follow_message "$entry" "$queue" "$name" "$preamble_file" "$max_chars" "$tz" > "$msg_file"
+		# An intro still owed (the session was made a followed session while
+		# it was not running) leads the first update, once.
+		local due lead="" mark_intro='.'
+		due="$(jq -r '.intro_due_at // empty' <<< "$entry")"
+		if [ -n "$due" ] && [ "$due" -gt "$(jq -r --arg s "$sid" '.intro_done[$s] // 0' <<< "$new_state")" ]; then
+			lead="$(desk_follow_intro_text "$entry")"
+			mark_intro=".intro_done[\"$sid\"] = $due"
+		fi
+		desk_follow_message "$entry" "$queue" "$name" "$preamble_file" "$max_chars" "$tz" "$lead" > "$msg_file"
 		if [ "$dry_run" = "true" ]; then
 			printf '=== would send to %s (%s change(s)) ===\n' "$name" "$n"
 			cat "$msg_file"
@@ -779,14 +861,14 @@ desk_follow_main() {
 			new_state="$(jq -c --arg s "$sid" --arg name "$name" --argjson now "$now" --argjson n "$n" '
 				.queues[$s].changes = [] | .queues[$s].dropped = 0 | .queues[$s].skipped = {}
 				| .queues[$s] |= del(.queued_since, .unconfirmed_sends, .failed_sends, .retry_at)
-				| .last_sent[$s] = {at: $now, name: $name, changes: $n, confirmed: false}' <<< "$new_state")"
+				| .last_sent[$s] = {at: $now, name: $name, changes: $n, confirmed: false}' <<< "$new_state" | jq -c "$mark_intro")"
 		elif [ "$verdict" = "confirmed" ]; then
 			sent=$((sent + 1))
 			desk_log "$pass" "follow: $label: sent $n change(s) to $name"
 			new_state="$(jq -c --arg s "$sid" --arg name "$name" --argjson now "$now" --argjson n "$n" '
 				.queues[$s].changes = [] | .queues[$s].dropped = 0 | .queues[$s].skipped = {}
 				| .queues[$s] |= del(.queued_since, .unconfirmed_sends, .failed_sends, .retry_at)
-				| .last_sent[$s] = {at: $now, name: $name, changes: $n}' <<< "$new_state")"
+				| .last_sent[$s] = {at: $now, name: $name, changes: $n}' <<< "$new_state" | jq -c "$mark_intro")"
 		elif [ "$verdict" = "unconfirmed" ]; then
 			held=$((held + 1))
 			desk_log "$pass" "follow: $label: the send to $name ran but was not confirmed — $n change(s) stay queued for one more try (result: $detail)"

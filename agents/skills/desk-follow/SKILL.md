@@ -14,6 +14,7 @@ The mechanism is in `~/dotfiles/docs/desk.md`, under "The follow pass". This ski
 
 - `command -v desk-follow` must succeed. `desk-follow run` also needs the instance's config: `$DESK_CONFIG`, or, when that is unset (as it often is in a Bash tool), the machine-local link `${XDG_CONFIG_HOME:-~/.config}/desk/config.json`, with a pass of kind `follow`. Adding, removing and listing need neither. If the command or the config is missing, the follow pass is not set up on this machine. Say so instead of improvising.
 - **This session's id is `$CLAUDE_CODE_SESSION_ID`**, which Claude Code sets in the Bash tool's environment. A subagent's Bash sees its parent session's id, which is the right session to follow from. `desk-follow` uses that id when `--session` is not given. To follow tickets in a *different* session, pass `--session <its name, or its id>`. The name is resolved through the reader (`session-status.sh resolve`).
+- **Adding a follow to a different session tells it.** When `add` names a session other than this one, the command also sends that session a short intro message: it is now a followed session, which tickets, to load this skill, and that a handoff carries what "Before compacting" lists. The add prints a second line saying so, or that the intro goes with the session's first update when it is not running. Say that in plain words. Adding from inside the session sends nothing, and neither does adding keys that are already followed.
 - Which tickets: take the keys the user names. If they say "this epic" or "these", use the keys this conversation has been about, and name them back in your reply. If that is not clear, ask once.
 
 ## What each ask means
@@ -41,7 +42,7 @@ All of these change only that local file: no repo, no ticket, nothing anyone els
 
 ## When a `[desk-follow]` message arrives
 
-It comes from the follow pass, not from the user, and its own preamble says how to handle it: take the update in, and start the reply with `[needs-you]` only when the bar it sets is met. Don't answer it with SendMessage. The sender has already exited, and the reply in this session is the whole channel. A `[desk-watch]` message is the same thing under its older name.
+It comes from the follow pass, not from the user, and its own preamble says how to handle it: take the update in, and start the reply with `[needs-you]` only when the bar it sets is met. Don't answer it with SendMessage. The sender has already exited, and the reply in this session is the whole channel. A `[desk-watch]` message is the same thing under its older name. A message that says this session is now a followed session is the intro from a follow added by another session, or leads a first update: load this skill if it isn't loaded, and reply with one quiet line.
 
 ## Before compacting
 

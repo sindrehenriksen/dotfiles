@@ -653,5 +653,85 @@ assert_contains "a PR on a shared key names the other session" \
 assert_not_contains "a session is never told it follows its own ticket" "also followed by quebec-renamed" "$msg_q"
 
 echo
+echo "=== a session made a followed session from outside is told, once ==="
+export DESK_FOLLOW_FILE="$STATE/intro-follow.json" DESK_FOLLOW_STATE_FILE="$STATE/intro-follow-state.json"
+rm -f "$DESK_FOLLOW_FILE" "$DESK_FOLLOW_STATE_FILE"
+SID_I="dddddddd-4444-4444-8444-444444444444"
+sessions << EOF
+$SID_A alpha-session true
+$SID_B beta-session true
+$SID_I india-session true
+EOF
+: > "$FOLLOW_TEST_SENT"
+out="$(CLAUDE_CODE_SESSION_ID="$SID_B" "$CLI" add --session "$SID_A" INT-1 --related INT-9)"
+assert_contains "the add reports the follow and that the session was told" "told alpha-session it is a followed session" "$out"
+assert_eq "exactly one message went out, to the target" "alpha-session" "$(jq -r '.to' "$FOLLOW_TEST_SENT")"
+intro="$(jq -r '.message' "$FOLLOW_TEST_SENT")"
+assert_eq "it carries the follow marker" "[desk-follow]" "$(head -n1 <<< "$intro" | cut -d' ' -f1)"
+assert_contains "it says the session is now followed" "now a followed session" "$intro"
+assert_contains "it names the tracked ticket" "INT-1" "$intro"
+assert_contains "and the related one" "INT-9 (only as themselves)" "$intro"
+assert_contains "it points at the skill" "desk-follow skill" "$intro"
+assert_contains "and at what a handoff carries" '"Before compacting"' "$intro"
+assert_eq "nothing is left queued" "null" "$(jq -c --arg s "$SID_A" '.entries[$s].intro_due_at' "$DESK_FOLLOW_FILE")"
+
+: > "$FOLLOW_TEST_SENT"
+CLAUDE_CODE_SESSION_ID="$SID_B" "$CLI" add --session "$SID_A" INT-1 > /dev/null
+assert_eq "adding the same keys again sends nothing" "0" "$(wc -l < "$FOLLOW_TEST_SENT" | tr -d ' ')"
+out="$(CLAUDE_CODE_SESSION_ID="$SID_B" "$CLI" add --session "$SID_A" INT-2)"
+assert_eq "adding a new key sends again" "1" "$(wc -l < "$FOLLOW_TEST_SENT" | tr -d ' ')"
+assert_contains "naming the new key too" "INT-1, INT-2" "$(jq -r '.message' "$FOLLOW_TEST_SENT")"
+
+: > "$FOLLOW_TEST_SENT"
+out="$(CLAUDE_CODE_SESSION_ID="$SID_A" "$CLI" add INT-3)"
+assert_eq "a session following its own tickets is sent nothing" "0" "$(wc -l < "$FOLLOW_TEST_SENT" | tr -d ' ')"
+assert_not_contains "and the add says nothing of telling it" "told" "$out"
+out="$("$CLI" remove --session "$SID_A" INT-3)"
+assert_eq "removing keys sends nothing" "0" "$(wc -l < "$FOLLOW_TEST_SENT" | tr -d ' ')"
+
+: > "$FOLLOW_TEST_SENT"
+out="$(FAKE_SEND_TO=somebody-else CLAUDE_CODE_SESSION_ID="$SID_B" "$CLI" add --session "$SID_I" INT-5)"
+assert_contains "a send the pinned path refuses is queued instead" "goes with its first update" "$out"
+assert_eq "the intro waits in the entry" "true" "$(jq --arg s "$SID_I" '.entries[$s].intro_due_at != null' "$DESK_FOLLOW_FILE")"
+
+echo
+echo "=== an intro for a session that is not running leads its first update, once ==="
+sessions << EOF
+$SID_A alpha-session true
+$SID_B beta-session true
+$SID_I india-session false
+EOF
+"$CLI" remove --session "$SID_I" > /dev/null
+: > "$FOLLOW_TEST_SENT"
+out="$(CLAUDE_CODE_SESSION_ID="$SID_B" "$CLI" add --session "$SID_I" INT-5)"
+assert_contains "a session that is not running is not messaged" "goes with its first update" "$out"
+assert_eq "no send was attempted" "0" "$(wc -l < "$FOLLOW_TEST_SENT" | tr -d ' ')"
+"$CLI" remove --session "$SID_A" > /dev/null
+{ issue INT-5 "To Do"; } | headless > "$FIX/scope-result.json"
+echo '{"issues":{"nodes":[]}}' > "$FIX/changes-result.json"
+echo '[]' > "$FIX/prs.json"
+"$RUN" follow > /dev/null 2>&1
+assert_eq "the baseline run sends nothing" "0" "$(wc -l < "$FOLLOW_TEST_SENT" | tr -d ' ')"
+sessions << EOF
+$SID_I india-session true
+EOF
+jq '.last_run.at -= 3600 | .last_jira_ok -= 3600 | .last_gh_ok -= 3600 | .scope.refreshed_at -= 600' "$DESK_FOLLOW_STATE_FILE" > "$ROOT/s" && mv "$ROOT/s" "$DESK_FOLLOW_STATE_FILE"
+{ issue INT-5 "To Do" "" "[]" "[$(cmt 971 "Dev One" "First news.")]"; } | rest > "$FIX/changes-result.json"
+"$RUN" follow --scheduled > /dev/null 2>&1
+assert_eq "the first update goes out" "1" "$(wc -l < "$FOLLOW_TEST_SENT" | tr -d ' ')"
+msg="$(jq -r '.message' "$FOLLOW_TEST_SENT")"
+assert_contains "and carries the intro" "now a followed session" "$msg"
+assert_contains "ahead of the changes" "First news." "$msg"
+assert_eq "the intro comes before the standing preamble and the changes" "now a followed session" "$(grep -n -o -e 'now a followed session' -e 'STANDING PREAMBLE' -e 'First news' <<< "$msg" | head -n1 | cut -d: -f2-)"
+assert_eq "the intro is marked delivered" "true" "$(jq --arg s "$SID_I" '.intro_done[$s] > 0' "$DESK_FOLLOW_STATE_FILE")"
+: > "$FOLLOW_TEST_SENT"
+jq '.last_run.at -= 3600 | .last_jira_ok -= 3600 | .last_gh_ok -= 3600' "$DESK_FOLLOW_STATE_FILE" > "$ROOT/s" && mv "$ROOT/s" "$DESK_FOLLOW_STATE_FILE"
+{ issue INT-5 "To Do" "" "[]" "[$(cmt 972 "Dev One" "Second news.")]"; } | rest > "$FIX/changes-result.json"
+"$RUN" follow --scheduled > /dev/null 2>&1
+msg="$(jq -r '.message' "$FOLLOW_TEST_SENT")"
+assert_contains "the next update goes out" "Second news." "$msg"
+assert_not_contains "without the intro again" "now a followed session" "$msg"
+
+echo
 echo "=== summary: $pass passed, $fail failed ==="
 [ "$fail" -eq 0 ]
