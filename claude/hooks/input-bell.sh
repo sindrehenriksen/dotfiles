@@ -3,12 +3,12 @@
 # prompt, a question, a plan awaiting approval, or a finished turn that
 # ends waiting on him. A plain finish stays quiet (Claude Code's own tab
 # title shows it); an idle turn rings only when its last assistant text
-# starts with `[needs-you]` or its last line is a direct question outside
-# code blocks and quotes. The text comes from the transcript tail (they
-# reach tens of MB), the turn found by matching `prompt_id`; a turn that
-# cannot be found stays quiet. Ghostty's default `bell-features` includes `title`, so the bell
-# prepends a marker to that tab's title until it is focused; Claude's own
-# title is never touched.
+# has a line starting with `[needs-you]`, or its last line is a direct
+# question, either outside code blocks and quotes. The text comes from
+# the transcript tail (they reach tens of MB), the turn found by matching
+# `prompt_id`; a turn that cannot be found stays quiet. Ghostty's default
+# `bell-features` includes `title`, so the bell prepends a marker to that
+# tab's title until it is focused; Claude's own title is never touched.
 #
 # Mid-turn: on every `PreToolUse` the hook scans the
 # transcript bytes appended since its last call for an assistant text with
@@ -64,6 +64,16 @@ sid_safe="${sid//[^A-Za-z0-9_-]/}"
 state_file=""
 [ -n "$sid_safe" ] && state_file="$STATE_DIR/input-bell-$sid_safe"
 
+# jq: true when a text has a line starting with `[needs-you]` outside code
+# fences (a quoted line starts with `>`, so it never matches). Shared by
+# the mid-turn and idle checks so both read the marker the same way.
+MARKED_JQ='def marked: split("\n")
+    | reduce .[] as $l ({f: false, hit: false};
+        if ($l | test("^\\s*(```|~~~)")) then .f |= not
+        elif .f then .
+        elif ($l | test("^\\s*\\[needs-you\\]")) then .hit = true
+        else . end) | .hit;'
+
 # Offset and rung uuids live in the state file: line 1 is the byte offset
 # already scanned, the rest are uuids of assistant records already rung.
 rung_list() { [ -n "$state_file" ] && [ -r "$state_file" ] && tail -n +2 "$state_file" 2>/dev/null | tr '\n' ' '; }
@@ -96,18 +106,12 @@ midturn_verdict() {
     skip=1
     [ "$first" = 1 ] && [ "$start" -gt 0 ] && skip=2
     rung="$(rung_list)"
-    found="$(printf '%s\n' "$body" | tail -n +"$skip" | jq -nrR --arg rung "$rung" '
+    found="$(printf '%s\n' "$body" | tail -n +"$skip" | jq -nrR --arg rung "$rung" "$MARKED_JQ"'
         ($rung | split(" ")) as $done
         | [inputs | fromjson? | select(type == "object" and .type == "assistant")
            | select((.uuid // "") as $u | ($done | index($u)) | not)
            | select([.message.content | if type == "array" then .[] else empty end
-                     | select(.type == "text") | .text
-                     | split("\n")
-                     | reduce .[] as $l ({f: false, hit: false};
-                         if ($l | test("^\\s*(```|~~~)")) then .f |= not
-                         elif .f then .
-                         elif ($l | test("^\\s*\\[needs-you\\]")) then .hit = true
-                         else . end) | .hit] | any)
+                     | select(.type == "text") | .text | marked] | any)
            | .uuid // "x"] | .[]' 2>/dev/null)" || return 0
     new="$(printf '%s\n' "$rung" | tr ' ' '\n' | grep -v '^$'; printf '%s\n' "$found" | grep -v '^$')"
     new="$((start + consumed))
@@ -125,7 +129,7 @@ idle_verdict() {
     [ -n "$path" ] && [ -n "$pid" ] && [ -r "$path" ] || return 0
     size="$(wc -c <"$path" 2>/dev/null | tr -d ' ')" || return 0
     for bytes in 524288 8388608; do
-        v="$(tail -c "$bytes" "$path" 2>/dev/null | jq -nrR --arg pid "$pid" --arg rung "$(rung_list)" '
+        v="$(tail -c "$bytes" "$path" 2>/dev/null | jq -nrR --arg pid "$pid" --arg rung "$(rung_list)" "$MARKED_JQ"'
             ($rung | split(" ")) as $done
             | [inputs | fromjson? | select(type == "object")] as $r
             | ([$r | to_entries[] | select(.value.type == "user" and .value.promptId == $pid) | .key] | last) as $i
@@ -140,7 +144,7 @@ idle_verdict() {
                   | select(.type == "assistant")
                   | .message.content | if type == "array" then .[] else empty end
                   | select(.type == "text") | .text] | last // "") as $t
-                | if ($t | sub("^\\s+"; "") | startswith("[needs-you]")) then "ring"
+                | if ($t | marked) then "ring"
                   else
                     # Last non-empty line, where anything fenced counts as code.
                     (reduce ($t | split("\n")[]) as $l ({f: false, last: null};

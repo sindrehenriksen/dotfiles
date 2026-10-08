@@ -68,6 +68,9 @@ idle_case "question in an unclosed code block is quiet" "" $'Here:\n```\nwhat?'
 idle_case "question in an earlier paragraph is quiet" "" $'Did that work? It did.\n\nAll finished, nothing else to do.'
 idle_case "quoted question is quiet" "" $'He asked:\n\n> Is it done?'
 idle_case "marker mid-text is quiet" "" "Finished. Note [needs-you] is the marker."
+idle_case "marker on a later line rings" "$BELL" $'Done with the refactor.\n\n[needs-you] Pick A or B before I push.'
+idle_case "marker on a later line in a code block is quiet" "" $'Done.\n\n```\n[needs-you] example\n```\nThat is the format.'
+idle_case "marker on a later quoted line is quiet" "" $'Done. The hook rings on:\n\n> [needs-you] Pick one\n\nNothing else.'
 idle_case "peer-origin turn with the marker rings" "$BELL" "[needs-you] stuck" peer
 idle_case "peer-origin plain finish is quiet" "" "Handled it." peer
 
