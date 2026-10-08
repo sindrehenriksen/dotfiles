@@ -61,6 +61,16 @@ cd "$WORK"
 sudo dpkg -i "linux-image-${VERSION}_${VERSION}-1_amd64.deb" \
              "linux-headers-${VERSION}_${VERSION}-1_amd64.deb"
 
+# Installing the headers makes DKMS build the out-of-tree amd_pmc kept for the
+# Ubuntu 7.0 fallback. Here it would shadow the fixed in-tree driver, and it is
+# unsigned, so Secure Boot refuses it and suspend loses amd_pmc altogether.
+if dkms status -m amd_pmc -k "$VERSION" 2>/dev/null | grep -q installed; then
+    sudo dkms remove amd_pmc/0.0.3 -k "$VERSION"
+    sudo update-initramfs -u -k "$VERSION"
+fi
+modinfo -k "$VERSION" amd_pmc | grep -q "kernel/drivers/platform/x86/amd/pmc/" \
+    || { echo "amd_pmc for $VERSION is not the in-tree driver; do not reboot" >&2; exit 1; }
+
 # 5. Sign, or Secure Boot refuses to boot it. sbsign cannot safely write over
 #    the file it is reading, hence the temporary.
 sudo sbsign --key "$MOK_KEY" --cert "$MOK_CRT" \

@@ -231,7 +231,10 @@ And timer/wakealarm wakeups still break the keyboard on some Zen3 models
 
 **DKMS module** (https://github.com/DanielGibson/amd_pmc-ideapad, at
 `~/src/amd_pmc-ideapad/`) is still installed and still needed — but only for
-7.0.x. Check which driver a kernel is using:
+7.0.x. DKMS builds it for every kernel whose headers get installed, mainline
+ones included, where it would shadow the fixed in-tree driver and, being
+unsigned, get refused by Secure Boot. `kernel-mainline-build.sh` removes it and
+refuses to finish otherwise. Check which driver a kernel is using:
 
 ```bash
 modinfo -k <version> amd_pmc | grep filename   # updates/dkms = out-of-tree
