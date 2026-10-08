@@ -288,9 +288,8 @@ In a notes buffer:
 | Key | Action |
 |---|---|
 | `<leader>gR` | Open the review split above your notes and focus it, or focus the one already open. Reopening over a split with unsaved declines asks to save, discard or cancel. |
-| `do` | (notes window, while a review is open) Take the diff hunk under the cursor: every adjacent suggestion in it. |
 | `<leader>gc` | Save the buffer, commit the file, and record suggestions now in `HEAD` as taken. The message says what changed, as in `Take 6 suggestions, edit 3 sections`, with a body listing the taken suggestions' headlines and the sections your own edits touched; a section is the nearest column-0 line at or above a changed line, so a session's name where it heads its notes. Lines a taken suggestion brought in or took out are not your edits; a take you reworded counts as both. |
-| `<leader>go` | Overview: a quickfix list with one headline per remaining diff hunk; `<CR>` jumps to it in the review split, where `dp` takes it, or in your notes window when no review is open. Without leaving the list, `t` or `dp` takes the entry's suggestion and `x` or `gD` declines it, as `<leader>gA` and `<leader>gD` do in the split: recorded on the split's save, undone with `u` there. An entry in the other file needs its review open first, which `<CR>` does. The list's title names these keys. |
+| `<leader>go` | Overview: a quickfix list across the top of the screen with one headline per remaining diff hunk, a suggestion in the other file prefixed with its name. As the cursor moves in the list, the review split shows the entry's suggestion, cursor on it, while you stay in the list. `<CR>` jumps to it in the review split, where `dp` takes it, or in your notes window when no review is open; `Ctrl-O` after the jump goes back to where the split's cursor was before the list moved it. Without leaving the list, `t` or `dp` takes the entry's suggestion and `x` or `gD` declines it, as `<leader>gA` and `<leader>gD` do in the split: recorded on the split's save, undone with `u` there. An entry in the other file needs its review open first, which `<CR>` does. The list's title names these keys. |
 | `<leader>gd` | Declined in the last 14 days (also `:DeskDeclined`); `r` on an entry restores it, so the next pass proposes it again. |
 | `<leader>gx` | The hotkey: act on the token under the cursor. |
 
@@ -298,16 +297,30 @@ In the review split:
 
 | Key | Action |
 |---|---|
+| `n`/`N` | Next or previous suggestion, wrapping from the last to the first and back with a message saying so. While a search is highlighted they are the search's own; `:noh` gives them back. `]c`/`[c` do the same at any time. |
 | `dp` | Take the diff hunk under the cursor into your notes buffer: every adjacent suggestion in it, as `do` from the notes window does. For a suggestion that only removes lines, the cursor goes on the line just above or just below its grey filler; `]c` lands below. |
 | `<leader>gA` | Take just the suggestion under the cursor into your notes buffer. |
 | `<leader>gD` | Decline the suggestion under the cursor. |
 | `u` | Undo the latest take or decline made here or from the overview. A take is undone in your notes buffer, unless you have edited your notes since, when it says so and leaves them alone; anything else is plain undo. |
 | `<leader>go` | The overview. |
+| `<leader>gc` | Save the split's declines, then commit your notes as `<leader>gc` in them does. The review stays open. |
 | `zo`/`zc`, `zR`/`zM` | Open or close the fold of unchanged lines under the cursor; open or close them all. |
 | `:w` | The commit point: records as declined every suggestion whose lines are gone from both the split and your notes, restores any declined this session whose lines are back, and records pending takes. |
 | `:q`, `:wq` | `:q` from either window ends the review and leaves you in your notes; `:wq` in the review split also saves declines. Quitting the split without saving records nothing; quitting your notes window over unsaved declines asks to save, discard or cancel, and cancelling puts your notes back below the split. |
 
-A take is remembered when you make it and recorded on the next save of either buffer, so a suggestion you edit right after taking stays taken. The notes window's winbar shows the status line: each pass's last result, untaken suggestions, closes and lockouts. While a review is open its count is that review's own, live first and recorded after, as in `30 left (34 saved)`: the first is the suggestions in this file neither taken nor declined, counting unsaved takes and declines as done, so it moves as you work; the second is what the ledger and `HEAD` say, which moves on a save or a commit. With no review open it is the recorded count over both files, `proposal pending (34 untaken)`, and the keys you are likeliest to forget sit on the right: `<leader>gR`, `<leader>gx` and `<leader>go`. The review split's winbar starts with the same count, then lists its keys in one line, folds included, and `C-n` for the window below; the notes window's adds its own keys on the right, with `C-t` for the window above.
+In your notes window while a review is open, keys that go when it ends. The suggestions' own lines are grey filler on this side, so a key here acts on the hunk the cursor is in: the one over the cursor line, else the filler just above it, else just below.
+
+| Key | Action |
+|---|---|
+| `n`/`N`, `]c`/`[c` | As in the review split, wrapping around. |
+| `do` | Take the diff hunk: every adjacent suggestion in it. |
+| `<leader>gA` | Take just one suggestion of the hunk, the topmost; pressed again it takes the next. |
+| `<leader>gD` | Decline one suggestion of the hunk, the topmost, which goes from the split; pressed again it declines the next. Recorded on the split's save, as a decline there is. |
+| `u` | Undo the latest `<leader>gA` or `<leader>gD` made here while nothing has changed since, else plain undo, which is how a `do` take is undone. |
+
+Not taking something is either a decline, from either window, or leaving it alone: an untaken suggestion comes back with the next pass.
+
+A take is remembered when you make it and recorded on the next save of either buffer, so a suggestion you edit right after taking stays taken. The notes window's winbar shows the status line: each pass's last result, untaken suggestions, closes and lockouts. While a review is open its count is that review's own, live first and recorded after, as in `30 left (34 saved)`: the first is the suggestions in this file neither taken nor declined, counting unsaved takes and declines as done, so it moves as you work; the second is what the ledger and `HEAD` say, which moves on a save or a commit. With no review open it is the recorded count over both files, `proposal pending (34 untaken)`. Every bar puts its keys on the left and its count or status line on the right, so the two windows read the same way: with no review open, the keys you are likeliest to forget, `<leader>gR`, `<leader>gx`, `<leader>go` and `<leader>gc`; in the review split, its keys in one line, `zo`/`zc` for folds, `<leader>gc` and `C-n` for the window below, then the same count; in the notes window, its own keys, `<leader>gc` and `C-t` for the window above.
 
 ## Scheduling
 
