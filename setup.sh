@@ -21,6 +21,9 @@ sudo apt install fonts-firacode
 # git-delta installs a binary named `delta`; .gitconfig sets it as the pager.
 # if mac
 brew install eza ripgrep fzf tldr git-delta
+# Intel mac: brew has no git-delta bottle and builds Rust and LLVM from source
+# (a day, not minutes). delta's last Intel release is 0.18.2 — take it instead:
+#   mise use -g delta@0.18.2
 # if linux (ubuntu)
 sudo apt install eza ripgrep fzf tldr xclip git-delta
 
