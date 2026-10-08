@@ -230,8 +230,7 @@ end
 local function first_hunk(win)
 	vim.api.nvim_win_call(win, function()
 		vim.cmd("diffupdate")
-		vim.api.nvim_win_set_cursor(win, { 1, 0 })
-		pcall(vim.cmd, "normal! ]c")
+		M.first_change(win)
 	end)
 end
 
@@ -542,6 +541,86 @@ local function set_wrap_opts(win, t)
 	end
 end
 
+-- Whether `lnum` of the current window is where diff motion lands on a
+-- change: a changed line, below a filler, or the last line over a filler
+-- after it.
+local function at_change(lnum)
+	if vim.fn.diff_hlID(lnum, 1) ~= 0 or vim.fn.diff_filler(lnum) > 0 then
+		return true
+	end
+	return lnum == vim.api.nvim_buf_line_count(0) and vim.fn.diff_filler(lnum + 1) > 0
+end
+
+--- Puts the cursor of `win` (the current window) on its first change, even
+--- one on line 1, which plain `]c` from there skips: from an end of the
+--- buffer, one step and one back lands on the first (last) change whether
+--- or not it starts on that very line. Returns whether there is one.
+function M.first_change(win)
+	vim.api.nvim_win_set_cursor(win, { 1, 0 })
+	pcall(vim.cmd, "normal! ]c")
+	pcall(vim.cmd, "normal! [c")
+	return at_change(vim.api.nvim_win_get_cursor(win)[1])
+end
+
+--- `]c` (`forward`) or `[c` in a review window, wrapping around: past the
+--- last change to the first, before the first to the last. Native diff
+--- motion does the moving, so the cursor lands where `dp` or `do` acts.
+function M.next_change(forward)
+	local win = vim.api.nvim_get_current_win()
+	local before = vim.api.nvim_win_get_cursor(win)
+	local key = forward and "]c" or "[c"
+	pcall(vim.cmd, "normal! " .. vim.v.count1 .. key)
+	if not vim.deep_equal(before, vim.api.nvim_win_get_cursor(win)) then
+		return true
+	end
+	local found
+	if forward then
+		found = M.first_change(win)
+	else
+		vim.api.nvim_win_set_cursor(win, { vim.api.nvim_buf_line_count(0), 0 })
+		pcall(vim.cmd, "normal! [c")
+		pcall(vim.cmd, "normal! ]c")
+		found = at_change(vim.api.nvim_win_get_cursor(win)[1])
+	end
+	if not found then
+		vim.api.nvim_win_set_cursor(win, before)
+		vim.notify("desk: no suggestions left here", vim.log.levels.INFO)
+		return false
+	end
+	vim.notify(forward and "desk: wrapped to first" or "desk: wrapped to last", vim.log.levels.INFO)
+	return true
+end
+
+-- `n`/`N` are the same motion, easier to type, while no search is
+-- highlighted; with one highlighted they are the search's own.
+local function map_next_change(buf)
+	for lhs, forward in pairs({ ["]c"] = true, ["[c"] = false }) do
+		vim.keymap.set("n", lhs, function()
+			M.next_change(forward)
+		end, { buffer = buf, desc = forward and "Next suggestion (wraps to the first)" or "Previous suggestion (wraps to the last)" })
+	end
+	for lhs, forward in pairs({ n = true, N = false }) do
+		vim.keymap.set("n", lhs, function()
+			if vim.o.hlsearch and vim.v.hlsearch == 1 then
+				return lhs
+			end
+			return string.format("<Cmd>lua require('desk.review').next_change(%s)<CR>", tostring(forward))
+		end, { buffer = buf, expr = true, desc = "Next/previous suggestion, or the search's match while one is highlighted" })
+	end
+end
+
+-- The keys the notes buffer has only while a review of it is open.
+local NOTES_REVIEW_KEYS = { "do", "]c", "[c", "n", "N", "u", "<leader>gA", "<leader>gD" }
+
+local function unmap_notes_keys(notes_buf)
+	if not vim.api.nvim_buf_is_valid(notes_buf) then
+		return
+	end
+	for _, lhs in ipairs(NOTES_REVIEW_KEYS) do
+		pcall(vim.keymap.del, "n", lhs, { buffer = notes_buf })
+	end
+end
+
 -- Turns diff mode, the review's colours and its soft wrap off in every window
 -- showing the notes as part of the review, and puts the status line back over
 -- them.
@@ -562,6 +641,9 @@ local function tidy_notes_windows(s)
 		if in_review and s.notes_wrap then
 			set_wrap_opts(win, s.notes_wrap)
 		end
+	end
+	if sessions[notes_buf] == nil then
+		unmap_notes_keys(notes_buf)
 	end
 	M.refresh_status_line(notes_buf)
 end
@@ -652,7 +734,7 @@ end
 -- table in the desk guide doesn't have to be open beside them. The review
 -- split's keys, kept to about 120 columns with the count. Each bar names
 -- only the window key that leaves it.
-M.KEY_HINT = "]c/[c next · dp take · ␣gA one · ␣gD decline · u undo · zo/zc/zR/zM fold · C-n down · ␣go list"
+M.KEY_HINT = "n/N next · dp take · ␣gA one · ␣gD decline · u undo · zo/zc/zR/zM fold · C-n down · ␣go list"
 -- The notes window's keys while a review is open.
 M.NOTES_KEY_HINT = "do take · u undo · C-t up"
 -- And with no review open, the desk keys still being learned.
@@ -872,6 +954,8 @@ function M.open_review(notes_buf)
 	vim.keymap.set("n", "<leader>go", function()
 		M.overview(notes_buf)
 	end, { buffer = review_buf, desc = "Overview: remaining suggestions" })
+	map_next_change(review_buf)
+	map_next_change(notes_buf)
 
 	-- Edits by hand move the count too; the keys refresh it themselves.
 	vim.api.nvim_create_autocmd("TextChanged", {

@@ -154,6 +154,7 @@ assert_true("review is above the notes window", vim.fn.win_screenpos(review_win)
 assert_eq("the cursor is in the review window", review_win, vim.api.nvim_get_current_win())
 assert_eq("the review winbar shows the keys, then the count on the right", review.KEY_HINT .. "%=2 left (2 saved)", vim.wo[review_win].winbar)
 assert_true("the keys include the review-side take", review.KEY_HINT:match("dp take") ~= nil)
+assert_true("and the next key, the easy one", review.KEY_HINT:match("^n/N next") ~= nil)
 assert_true("the notes winbar is still the status line, not the keys", vim.wo[notes_win].winbar ~= review.KEY_HINT)
 vim.api.nvim_set_current_win(review_win)
 vim.cmd("normal! u")
@@ -920,6 +921,75 @@ do
 	go_to(rw, rb, "Section A")
 	vim.cmd("normal dp")
 	assert_eq("two lines above it, dp takes nothing", { "Section A", "  existing", "  - stale", "Section B", "  other" }, lines_of(nb))
+end
+
+print("\n=== ]c and [c wrap around in both windows, and say so ===")
+do
+	local r = new_repo({ "Section A", "  existing", "Section B", "  other", "Section C", "  more" })
+	build(r, "2026-10-01", {
+		item("n1"),
+		item("a1", { kind = "add", target = { under = "Section B" }, after = "  added under B", source = "", headline = "add under B" }),
+		item("r1", { kind = "remove", target = { at = "  more" }, before = "  more", after = "", source = "", headline = "drop more" }),
+	})
+	local nb = open_notes(r)
+	review.attach(nb)
+	assert_true("review opens", review.open_review(nb))
+	local rb = review_buf_of(nb)
+	local rw, nw = vim.fn.bufwinid(rb), vim.fn.bufwinid(nb)
+	local said = {}
+	local orig = vim.notify
+	vim.notify = function(m)
+		said[#said + 1] = m
+	end
+	local function press(win, keys)
+		said = {}
+		vim.api.nvim_set_current_win(win)
+		vim.cmd("normal " .. keys)
+		return vim.api.nvim_win_get_cursor(win)[1], said[#said]
+	end
+	local last = vim.api.nvim_buf_line_count(rb)
+	assert_eq("the review opens on the first change, even on line 1", 1, vim.api.nvim_win_get_cursor(rw)[1])
+	assert_eq("]c moves on as usual, silently", { line_of(rb, "  added under B") }, { press(rw, "]c") })
+	assert_eq("then to the removal at the end", { last }, { press(rw, "]c") })
+	assert_eq("]c at the last wraps to the first, and says so", { 1, "desk: wrapped to first" }, { press(rw, "]c") })
+	assert_eq("[c at the first wraps to the last", { last, "desk: wrapped to last" }, { press(rw, "[c") })
+	assert_eq("[c moves back as usual", { line_of(rb, "  added under B") }, { press(rw, "[c") })
+	vim.api.nvim_win_set_cursor(nw, { line_of(nb, "  more"), 0 })
+	assert_eq("in the notes window too: ]c at the last wraps to the first", { 1, "desk: wrapped to first" }, { press(nw, "]c") })
+	assert_eq("and [c at the first to the last", { line_of(nb, "  more"), "desk: wrapped to last" }, { press(nw, "[c") })
+	vim.cmd("nohlsearch")
+	vim.api.nvim_win_set_cursor(rw, { 1, 0 })
+	assert_eq("with no search highlighted, n is the next suggestion", { line_of(rb, "  added under B") }, { press(rw, "n") })
+	assert_eq("and N the previous", { 1 }, { press(rw, "N") })
+	assert_eq("N wraps the same way", { last, "desk: wrapped to last" }, { press(rw, "N") })
+	assert_eq("and n", { 1, "desk: wrapped to first" }, { press(rw, "n") })
+	vim.api.nvim_win_set_cursor(nw, { 1, 0 })
+	assert_eq("n in the notes window too", { line_of(nb, "Section C") }, { press(nw, "n") })
+	vim.fn.setreg("/", "Section")
+	vim.cmd("let v:hlsearch = 1")
+	vim.api.nvim_win_set_cursor(rw, { 1, 0 })
+	assert_eq("with a search highlighted, n is the search's next match", { line_of(rb, "Section A") }, { press(rw, "n") })
+	assert_eq("and N its previous, wrapping as a search does", line_of(rb, "Section C"), (press(rw, "N")))
+	vim.api.nvim_win_set_cursor(nw, { 1, 0 })
+	assert_eq("in the notes window as well", { line_of(nb, "Section B") }, { press(nw, "n") })
+	assert_eq("]c still moves by suggestion meanwhile", { line_of(rb, "  added under B") }, { press(rw, "]c") })
+	vim.cmd("nohlsearch")
+	for _, h in ipairs({ "  added under B", "NEWS n1" }) do
+		go_to(rw, rb, h)
+		review.decline(rb)
+	end
+	vim.api.nvim_win_set_cursor(rw, { vim.api.nvim_buf_line_count(rb), 0 })
+	assert_true("(the removal declined too)", review.decline(rb))
+	vim.cmd("diffupdate")
+	vim.api.nvim_win_set_cursor(rw, { 2, 0 })
+	assert_eq("with nothing left, ]c stays put and says so", { 2, "desk: no suggestions left here" }, { press(rw, "]c") })
+	vim.notify = orig
+	vim.cmd("silent! %bwipeout!")
+	assert_true("after the review the notes buffer has no ]c of desk's", (function()
+		local b = open_notes(r)
+		review.attach(b)
+		return vim.fn.maparg("]c", "n", false, true).buffer ~= 1 and vim.fn.maparg("n", "n", false, true).buffer ~= 1
+	end)())
 end
 
 print("\n=== dp in the review split takes the hunk, recorded like do from the notes side ===")
