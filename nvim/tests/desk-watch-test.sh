@@ -104,6 +104,16 @@ for ((i = 0; i < ${#args[@]}; i++)); do
 done
 emit_use() { jq -cn --arg id "$1" --arg name "$2" --argjson input "$3" '{type:"assistant",message:{content:[{type:"tool_use",id:$id,name:$name,input:$input}]}}'; }
 emit_result() { jq -cn --arg id "$1" --arg t "$2" --argjson e "$3" '{type:"user",message:{content:[{type:"tool_result",tool_use_id:$id,content:$t,is_error:$e}]}}'; }
+# A tool's own result, as Claude Code writes it: one text block.
+emit_text_result() { jq -cn --arg id "$1" --arg t "$2" '{type:"user",message:{content:[{type:"tool_result",tool_use_id:$id,content:[{type:"text",text:$t}]}]}}'; }
+# What SendMessage answers for a peer session it delivered to (Claude Code
+# 2.1.294, captured live): the message's first line quoted, the recipient,
+# then boilerplate naming what may still happen to it.
+delivered() {
+	jq -cn --arg to "$1" --arg first "$2" '{success:true,
+		message:("“" + $first + "” → " + $to + " (another Claude session on this machine; in that session'"'"'s inbox, not yet read by its Claude — that session may hold it (usually a different permission mode) or refuse it, and with no inbox bound here nothing reports back, so never treat silence as agreement)"),
+		msg_id:"1d4d98b4-96d5-475f-81ab-1c910d2da2e6"}'
+}
 if [ "$tools" = "SendMessage" ]; then
 	echo "send $(pwd)" >> "$WATCH_TEST_CALLS"
 	input="$(jq -c '.[0]' pinned-args.json)"
@@ -115,7 +125,11 @@ if [ "$tools" = "SendMessage" ]; then
 	cmd="$(jq -r '.hooks.PreToolUse[0].hooks[0].command' "$settings")"
 	emit_use t1 SendMessage "$input"
 	if jq -cn --argjson i "$input" '{tool_name:"SendMessage", tool_input:$i}' | bash -c "$cmd" > /dev/null 2>&1; then
-		emit_result t1 "${FAKE_SEND_RESULT:-{\"success\":true,\"message\":\"Message delivered.\"}}" false
+		if [ -n "${FAKE_SEND_RESULT:-}" ]; then
+			emit_text_result t1 "$FAKE_SEND_RESULT"
+		else
+			emit_text_result t1 "$(delivered "$(jq -r .to <<< "$input")" "$(jq -r '.message | split("\n")[0]' <<< "$input")")"
+		fi
 	else
 		emit_result t1 "PreToolUse hook denied this call" true
 	fi
@@ -375,10 +389,63 @@ EOF
 FAKE_SEND_TO=some-other-session "$RUN" watch > /dev/null 2>&1
 assert_eq "the model tried another peer" "some-other-session" "$(jq -r .to "$WATCH_TEST_SENT")"
 assert_eq "the deny hook refused it, so the queue stays" "1" "$(jq --arg s "$SID_A" '.queues[$s].changes | length' "$DESK_WATCH_STATE_FILE")"
-FAKE_SEND_RESULT='{"success":true,"message":"Message held for the user'"'"'s approval."}' "$RUN" watch > /dev/null 2>&1
-assert_eq "a held delivery is not a confirmed send" "1" "$(jq --arg s "$SID_A" '.queues[$s].changes | length' "$DESK_WATCH_STATE_FILE")"
-FAKE_SEND_RESULT='{"success":false,"message":"No agent named alpha-renamed is reachable."}' "$RUN" watch > /dev/null 2>&1
+assert_eq "a send that never ran backs off" "true" "$(jq --arg s "$SID_A" '.queues[$s].retry_at > .last_run.at' "$DESK_WATCH_STATE_FILE")"
+FAKE_SEND_RESULT='{"success":false,"message":"No agent named alpha-renamed is reachable."}' "$RUN" watch > "$ROOT/unreach.out" 2>&1
 assert_eq "an unreachable name is not a confirmed send" "1" "$(jq --arg s "$SID_A" '.queues[$s].changes | length' "$DESK_WATCH_STATE_FILE")"
+assert_contains "the log says it failed and when it tries next" "the send to alpha-renamed failed — 1 change(s) stay queued, next try at" "$(cat "$ROOT/unreach.out")"
+assert_eq "a second failure doubles the wait" "true" "$(jq --arg s "$SID_A" '.queues[$s].failed_sends == 2 and (.queues[$s].retry_at - .last_run.at) == (30 * 60 - 60)' "$DESK_WATCH_STATE_FILE")"
+jq '.last_run.at -= 3600' "$DESK_WATCH_STATE_FILE" > "$ROOT/s" && mv "$ROOT/s" "$DESK_WATCH_STATE_FILE"
+: > "$WATCH_TEST_SENT"
+"$RUN" watch --scheduled > "$ROOT/backoff.out" 2>&1
+assert_eq "a scheduled run inside the back-off sends nothing" "0" "$(wc -l < "$WATCH_TEST_SENT" | tr -d ' ')"
+assert_contains "and says until when" "the last send failed — 1 change(s) stay queued until the next try at" "$(cat "$ROOT/backoff.out")"
+
+echo
+echo "=== a send that runs but never confirms is not repeated forever ==="
+held_result='{"success":true,"message":"“[desk-watch] …” → alpha-renamed (another Claude session on this machine; the message was held for that session'"'"'s approval)","msg_id":"m1"}'
+FAKE_SEND_RESULT="$held_result" "$RUN" watch > "$ROOT/held1.out" 2>&1
+assert_eq "a held delivery is not a confirmed send" "1" "$(jq --arg s "$SID_A" '.queues[$s].changes | length' "$DESK_WATCH_STATE_FILE")"
+assert_contains "the log says it ran unconfirmed, with the result" "ran but was not confirmed — 1 change(s) stay queued for one more try (result: {\"success\":true" "$(cat "$ROOT/held1.out")"
+assert_eq "a send that ran clears the back-off" "false" "$(jq --arg s "$SID_A" '.queues[$s] | has("retry_at")' "$DESK_WATCH_STATE_FILE")"
+: > "$WATCH_TEST_SENT"
+FAKE_SEND_RESULT="$held_result" "$RUN" watch > "$ROOT/held2.out" 2>&1
+assert_eq "the second unconfirmed send went out" "1" "$(wc -l < "$WATCH_TEST_SENT" | tr -d ' ')"
+assert_eq "after it, the changes count as sent" "0" "$(jq --arg s "$SID_A" '.queues[$s].changes | length' "$DESK_WATCH_STATE_FILE")"
+assert_eq "marked unconfirmed" "false" "$(jq --arg s "$SID_A" '.last_sent[$s].confirmed' "$DESK_WATCH_STATE_FILE")"
+assert_contains "and the log says so" "treating the 1 change(s) as sent, not sending them again" "$(cat "$ROOT/held2.out")"
+: > "$WATCH_TEST_SENT"
+FAKE_SEND_RESULT="$held_result" "$RUN" watch > /dev/null 2>&1
+assert_eq "the next run sends nothing again" "0" "$(wc -l < "$WATCH_TEST_SENT" | tr -d ' ')"
+
+echo
+echo "=== the verdict, on SendMessage results captured live ==="
+# Claude Code 2.1.294, a send to a live interactive session that showed
+# the message, and a send to a name nobody holds; the earlier wording of
+# the delivered result is from the same probe a day before.
+cat > "$ROOT/real-delivered.jsonl" << 'EOF'
+{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_01TrPtaLPwbLfwBVrrP5NSrS","name":"SendMessage","input":{"to":"desk-send-probe-throwaway","message":"[desk-watch] Watcher update for desk-send-probe-throwaway: 1 change on PR #1. Not from the user.\n\nThis is a delivery probe from the desk watcher's tests, nothing to act on. Reply with one short line, use no tools, and do not message back.\n\nSkipped since the last update, not listed: nothing.","type":"message","recipient":"desk-send-probe-throwaway","recipient_kind":"name","content":"[desk-watch] Watcher update for desk-send-probe-t…"}}]}}
+{"type":"user","message":{"content":[{"tool_use_id":"toolu_01TrPtaLPwbLfwBVrrP5NSrS","type":"tool_result","content":[{"type":"text","text":"{\"success\":true,\"message\":\"“[desk-watch] Watcher update for desk-send-probe-throwaway: 1 change on PR #1. Not from the user.” → desk-send-probe-throwaway (another Claude session on this machine; in that session's inbox, not yet read by its Claude — that session may hold it (usually a different permission mode) or refuse it, and with no inbox bound here nothing reports back, so never treat silence as agreement)\",\"msg_id\":\"1d4d98b4-96d5-475f-81ab-1c910d2da2e6\"}"}]}]}}
+EOF
+jq -c 'select(.type == "assistant") | .message.content[0].input | del(.type, .recipient_kind, .content) | [., del(.recipient)]' "$ROOT/real-delivered.jsonl" > "$ROOT/real-pinned.json"
+verdict() { desk_watch_send_verdict "$1" "$ROOT/real-pinned.json" desk-send-probe-throwaway | cut -f1; }
+assert_eq "a delivery to a live session confirms" "confirmed" "$(verdict "$ROOT/real-delivered.jsonl")"
+sed 's/that session may hold it (usually a different permission mode) or refuse it, and with no inbox bound here nothing reports back, so never treat silence as agreement/a [Cross-session delivery notice] follows if that session holds it (usually a different permission mode) or refuses it/' \
+	"$ROOT/real-delivered.jsonl" > "$ROOT/real-delivered-older.jsonl"
+assert_eq "so does the earlier wording" "confirmed" "$(verdict "$ROOT/real-delivered-older.jsonl")"
+sed 's/so never treat silence as agreement)/so never treat silence as agreement); the message was refused/' "$ROOT/real-delivered.jsonl" > "$ROOT/real-refused.jsonl"
+assert_eq "a success that reports a refusal does not" "unconfirmed" "$(verdict "$ROOT/real-refused.jsonl")"
+sed 's/ → desk-send-probe-throwaway (/ → some-other-session (/' "$ROOT/real-delivered.jsonl" > "$ROOT/real-elsewhere.jsonl"
+assert_eq "nor one naming another recipient" "unconfirmed" "$(verdict "$ROOT/real-elsewhere.jsonl")"
+{
+	head -n1 "$ROOT/real-delivered.jsonl"
+	cat << 'EOF'
+{"type":"user","message":{"content":[{"tool_use_id":"toolu_01TrPtaLPwbLfwBVrrP5NSrS","type":"tool_result","content":[{"type":"text","text":"{\"success\":false,\"message\":\"No agent named 'desk-send-probe-throwaway' is reachable.\\nCheck the spelling, or use the agent ID from a background agent's spawn result.\"}"}]}]}}
+EOF
+} > "$ROOT/real-unreachable.jsonl"
+assert_eq "an unreachable name fails" "failed" "$(verdict "$ROOT/real-unreachable.jsonl")"
+head -n1 "$ROOT/real-delivered.jsonl" > "$ROOT/real-no-result.jsonl"
+assert_eq "a call with no result fails" "failed" "$(verdict "$ROOT/real-no-result.jsonl")"
+assert_contains "the verdict carries the result for the log" "No agent named" "$(desk_watch_send_verdict "$ROOT/real-unreachable.jsonl" "$ROOT/real-pinned.json" desk-send-probe-throwaway | cut -f2)"
 
 # The hook itself, on the settings the runner writes.
 hook="$LIB/deny-unlisted-tool.sh"
@@ -396,6 +463,7 @@ assert_eq "hook: another tool is refused" "2" "$(jq -cn '{tool_name:"ListAgents"
 
 echo
 echo "=== the dry run prints and changes nothing ==="
+issue ABC-2 "To Do" | with_assignee "Dev Five" | rest > "$FIX/changes-result.json"
 before="$(shasum "$DESK_WATCH_STATE_FILE")"
 : > "$CALLS"
 : > "$WATCH_TEST_SENT"

@@ -27,6 +27,9 @@ DESK_WATCH_DIFF_JQ="$DESK_LIB_DIR/watch-diff.jq"
 DESK_WATCH_MARKER="[desk-watch]"
 # The floor on the scheduled interval, in minutes.
 DESK_WATCH_MIN_INTERVAL=15
+# How many sends that ran but went unconfirmed the same queue gets before
+# its changes count as sent.
+DESK_WATCH_MAX_UNCONFIRMED="${DESK_WATCH_MAX_UNCONFIRMED:-2}"
 
 _desk_watch_reader() { "${DESK_READER:-session-status.sh}" "$@"; }
 
@@ -440,18 +443,71 @@ desk_watch_message() {
 		| sub("\\s+$"; "")'
 }
 
+# desk_watch_clock <epoch> <timezone>: HH:MM local, for a log line.
+desk_watch_clock() {
+	TZ="${2:-${TZ:-UTC}}" jq -rn --argjson t "$1" '$t | strflocaltime("%H:%M")'
+}
+
 # --- sending -----------------------------------------------------------------------
+
+# desk_watch_send_verdict <stream file> <pinned args file> <to>
+# Reads a send call's stream and prints one line: the verdict, a tab, and
+# the first line of the tool's result (for the log).
+#   confirmed    the pinned SendMessage call ran, and its result reports a
+#                delivery to <to>.
+#   unconfirmed  it ran and was not refused outright, but the result does
+#                not report a delivery: a message may have reached the
+#                session anyway, so a resend could land twice.
+#   failed       no pinned call ran, or it failed: nothing was delivered.
+# A delivery to a peer session answers {"success": true, "message":
+# "“<the message's first line>” → <to> (another Claude session on this
+# machine; in that session's inbox, … that session may hold it … or refuse
+# it …)", "msg_id": …}. So the words after the recipient are boilerplate
+# naming what *may* happen, and the preview before it is the watcher's own
+# text: neither is read as an outcome. Only a past-tense outcome after the
+# recipient (refused, held, dropped, …) keeps a success from confirming. A
+# hold reported later, as a delivery notice, reaches no headless sender.
+desk_watch_send_verdict() {
+	local stream="$1" pinned="$2" to="$3"
+	jq -rs --slurpfile want "$pinned" --arg to "$to" '
+		def text_of: if (.content | type) == "string" then .content
+			elif (.content | type) == "array" then [.content[] | select(.type == "text") | .text] | join("\n") else "" end;
+		def outcome_words: "\\b(refused|rejected|declined|was held|been held|is held|held for|not delivered|undelivered|dropped|expired|failed)\\b";
+		def classify:
+			(.text | try fromjson catch null) as $r
+			| if .err then "failed"
+			  elif ($r | type) == "object" then
+			    if $r.success == false then "failed"
+			    elif $r.success == true then
+			      (($r.message // "") | tostring | split("” → " + $to)) as $parts
+			      | if ($parts | length) < 2 then "unconfirmed"
+			        elif ($parts | last | test(outcome_words; "i")) then "unconfirmed"
+			        else "confirmed" end
+			    else "unconfirmed" end
+			  elif (.text | test("no agent named|not reachable|refused|denied"; "i")) then "failed"
+			  else "unconfirmed" end;
+		([.[] | select(.type == "user") | .message.content[]? | select(.type == "tool_result")
+		  | {key: .tool_use_id, value: {err: (.is_error == true), text: text_of}}] | from_entries) as $res
+		| [.[] | select(.type == "assistant") | .message.content[]?
+		   | select(.type == "tool_use" and .name == "SendMessage")
+		   | select((.input | del(.summary, .content, .type, .recipient_kind)) as $i | any($want[0][]; . == $i))
+		   | ($res[.id] // {err: true, text: ""}) | {v: classify, text}] as $runs
+		| (if any($runs[]; .v == "confirmed") then "confirmed"
+		   elif any($runs[]; .v == "unconfirmed") then "unconfirmed" else "failed" end) as $v
+		| ([$runs[] | select(.v == $v) | .text] | last // "no SendMessage call to the pinned name ran") as $t
+		| "\($v)\t\($t | gsub("[\\r\\n\\t]+"; " ") | .[0:300])"' "$stream" 2> /dev/null
+}
 
 # desk_watch_send <pass> <send config json> <to> <message file> <work dir>
 # One restricted model call whose only tool is SendMessage, pinned by the
 # deny hook to exactly {to, message} (its transcript-only `summary` aside).
-# Prints "confirmed" only when that exact send ran and its result was not an
-# error or a held/refused delivery; anything else prints "unconfirmed".
+# Prints desk_watch_send_verdict's line; "failed" when the call could not
+# be made at all.
 desk_watch_send() {
 	local pass="$1" send="$2" to="$3" message_file="$4" work="$5"
 	local prompt_rel scratch prompt_file pinned settings hook out
 	prompt_rel="$(jq -r '.prompt // empty' <<< "$send")"
-	[ -n "$prompt_rel" ] || { desk_log "$pass" "watch: no send.prompt configured"; echo unconfirmed; return; }
+	[ -n "$prompt_rel" ] || { desk_log "$pass" "watch: no send.prompt configured"; printf 'failed\tno send.prompt configured\n'; return; }
 	scratch="$(desk_scratch_dir "$pass-send")"
 	pinned="$scratch/pinned-args.json"
 	# The message as written, and with one trailing newline, since a copied
@@ -463,7 +519,7 @@ desk_watch_send() {
 		'($m | sub("\\s+$"; "")) as $t
 		| [($t, $t + "\n") as $msg | {to: $to, message: $msg}, {to: $to, recipient: $to, message: $msg}]' > "$pinned"
 	hook="${DESK_DENY_HOOK_SCRIPT:-$DESK_LIB_DIR/deny-unlisted-tool.sh}"
-	[ -f "$hook" ] || { desk_log "$pass" "watch: deny hook missing ($hook) — not sending"; rm -rf "$scratch"; echo unconfirmed; return; }
+	[ -f "$hook" ] || { desk_log "$pass" "watch: deny hook missing ($hook) — not sending"; rm -rf "$scratch"; printf 'failed\tdeny hook missing\n'; return; }
 	settings="$scratch/deny-hook-settings.json"
 	jq -n --arg cmd "$(desk_shq "$hook") --pinned $(desk_shq "$pinned") --ignore-keys summary,content,type,recipient_kind -- SendMessage" \
 		'{hooks: {PreToolUse: [{hooks: [{type: "command", command: $cmd, timeout: 10}]}]}}' > "$settings"
@@ -483,25 +539,10 @@ desk_watch_send() {
 		--config-dir "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" --out "$out" > /dev/null
 	desk_watch_note_cost "$out"
 	local verdict
-	verdict="$(jq -rs --slurpfile want "$pinned" '
-		def text_of: if (.content | type) == "string" then .content
-			elif (.content | type) == "array" then [.content[] | select(.type == "text") | .text] | join("\n") else "" end;
-		([.[] | select(.type == "user") | .message.content[]? | select(.type == "tool_result")
-		  | {key: .tool_use_id, value: {err: (.is_error == true), text: text_of}}] | from_entries) as $res
-		| [.[] | select(.type == "assistant") | .message.content[]?
-		   | select(.type == "tool_use" and .name == "SendMessage")
-		   | select((.input | del(.summary, .content, .type, .recipient_kind)) as $i | any($want[0][]; . == $i))
-		   | $res[.id] // {err: true, text: ""}
-		   # The tool answers {"success": bool, "message": ...}; a success
-		   # that says the message was held or refused is not a delivery.
-		   | ((.text | try fromjson catch null) // {}) as $r
-		   | select((.err | not)
-		            and ($r.success // true) == true
-		            and ((($r.message // .text) | tostring
-		                 | test("held|approv|refus|not delivered|no inbox|expire|could not|not reachable|no (live )?(agent|session)|not found"; "i")) | not))]
-		| if length > 0 then "confirmed" else "unconfirmed" end' "$out" 2> /dev/null)"
+	verdict="$(desk_watch_send_verdict "$out" "$pinned" "$to")"
 	rm -rf "$scratch"
-	printf '%s\n' "${verdict:-unconfirmed}"
+	[ -n "$verdict" ] || verdict="$(printf 'failed\tthe send call left no readable stream')"
+	printf '%s\n' "$verdict"
 }
 
 # --- the pass ------------------------------------------------------------------------
@@ -672,6 +713,16 @@ desk_watch_main() {
 			held=$((held + 1))
 			continue
 		fi
+		# A send that failed backs off before a scheduled run tries again,
+		# doubling from the interval up to four hours; a manual run always
+		# tries.
+		local retry_at
+		retry_at="$(jq -r --arg s "$sid" '.queues[$s].retry_at // 0' <<< "$new_state")"
+		if [ "$scheduled" = "true" ] && [ "$dry_run" != "true" ] && [ "$now" -lt "$retry_at" ]; then
+			desk_log "$pass" "watch: $label: the last send failed — $n change(s) stay queued until the next try at $(desk_watch_clock "$retry_at" "$tz")"
+			held=$((held + 1))
+			continue
+		fi
 		local msg_file="$work/message-${sid:0:8}.txt"
 		desk_watch_message "$entry" "$queue" "$name" "$preamble_file" "$max_chars" "$tz" > "$msg_file"
 		if [ "$dry_run" = "true" ]; then
@@ -680,17 +731,44 @@ desk_watch_main() {
 			printf '\n'
 			continue
 		fi
-		local verdict
-		verdict="$(desk_watch_send "$pass" "$send" "$name" "$msg_file" "$work")"
-		if [ "$verdict" = "confirmed" ]; then
+		local result_line verdict detail
+		result_line="$(desk_watch_send "$pass" "$send" "$name" "$msg_file" "$work")"
+		verdict="${result_line%%$'\t'*}"
+		detail="${result_line#*$'\t'}"
+		local tries
+		tries="$(jq -r --arg s "$sid" '.queues[$s].unconfirmed_sends // 0' <<< "$new_state")"
+		if [ "$verdict" = "unconfirmed" ] && [ $((tries + 1)) -ge "$DESK_WATCH_MAX_UNCONFIRMED" ]; then
+			# The call ran each time and the session may well have every
+			# copy: sending the same changes again would only repeat them.
+			desk_log "$pass" "watch: $label: the send to $name ran but was not confirmed, ${DESK_WATCH_MAX_UNCONFIRMED} times — treating the $n change(s) as sent, not sending them again (result: $detail)"
+			sent=$((sent + 1))
+			new_state="$(jq -c --arg s "$sid" --arg name "$name" --argjson now "$now" --argjson n "$n" '
+				.queues[$s].changes = [] | .queues[$s].dropped = 0 | .queues[$s].skipped = {}
+				| .queues[$s] |= del(.queued_since, .unconfirmed_sends, .failed_sends, .retry_at)
+				| .last_sent[$s] = {at: $now, name: $name, changes: $n, confirmed: false}' <<< "$new_state")"
+		elif [ "$verdict" = "confirmed" ]; then
 			sent=$((sent + 1))
 			desk_log "$pass" "watch: $label: sent $n change(s) to $name"
 			new_state="$(jq -c --arg s "$sid" --arg name "$name" --argjson now "$now" --argjson n "$n" '
-				.queues[$s].changes = [] | .queues[$s].dropped = 0 | .queues[$s].skipped = {} | del(.queues[$s].queued_since)
+				.queues[$s].changes = [] | .queues[$s].dropped = 0 | .queues[$s].skipped = {}
+				| .queues[$s] |= del(.queued_since, .unconfirmed_sends, .failed_sends, .retry_at)
 				| .last_sent[$s] = {at: $now, name: $name, changes: $n}' <<< "$new_state")"
+		elif [ "$verdict" = "unconfirmed" ]; then
+			held=$((held + 1))
+			desk_log "$pass" "watch: $label: the send to $name ran but was not confirmed — $n change(s) stay queued for one more try (result: $detail)"
+			new_state="$(jq -c --arg s "$sid" '.queues[$s].unconfirmed_sends = ((.queues[$s].unconfirmed_sends // 0) + 1) | .queues[$s] |= del(.failed_sends, .retry_at)' <<< "$new_state")"
 		else
 			held=$((held + 1))
-			desk_log "$pass" "watch: $label: the send to $name was not confirmed — $n change(s) stay queued"
+			local fails wait_min
+			fails="$(jq -r --arg s "$sid" '(.queues[$s].failed_sends // 0) + 1' <<< "$new_state")"
+			wait_min=$((interval * (1 << (fails > 5 ? 4 : fails - 1))))
+			[ "$wait_min" -le 240 ] || wait_min=240
+			# A minute short, as the interval check is, so launchd's own
+			# drift never pushes the retry a whole interval later.
+			retry_at=$((now + wait_min * 60 - 60))
+			desk_log "$pass" "watch: $label: the send to $name failed — $n change(s) stay queued, next try at $(desk_watch_clock "$retry_at" "$tz") (result: $detail)"
+			new_state="$(jq -c --arg s "$sid" --argjson f "$fails" --argjson at "$retry_at" \
+				'.queues[$s].failed_sends = $f | .queues[$s].retry_at = $at' <<< "$new_state")"
 		fi
 	done < <(jq -r 'keys[]' <<< "$entries")
 
