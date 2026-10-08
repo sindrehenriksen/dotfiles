@@ -768,10 +768,21 @@ do
 	vim.api.nvim_set_current_win(qw)
 	vim.api.nvim_win_set_cursor(qw, { idx, 0 })
 	review.qf_jump()
-	assert_true("the jump lands in reading.md", vim.api.nvim_buf_get_name(0):match("reading.md$") ~= nil)
+	assert_eq("the other file's entry keeps focus in the list", qw, vim.api.nvim_get_current_win())
+	local rd_buf = vim.fn.bufnr(r2 .. "/reading.md")
+	assert_true("the review moved to reading.md", rd_buf ~= -1 and vim.fn.bufwinid(rd_buf) ~= -1)
+	assert_true("the title names the switch", review.OVERVIEW_TITLE:match("other file: switch") ~= nil)
+	local texts_after = vim.tbl_map(function(e)
+		return e.text
+	end, vim.fn.getqflist())
+	table.sort(texts_after)
+	assert_eq("the list is rebuilt around the new review", { "notes.md: headline n1", "read other", "read paper" }, texts_after)
+	assert_true("the cursor stays on the entry", vim.fn.getqflist()[vim.fn.line(".")].text:match("^read ") ~= nil)
+	-- <CR> on an entry in the file now under review jumps, as for the current file
+	review.qf_jump()
+	assert_true("an entry in the reviewed file jumps into its review split", vim.api.nvim_get_current_win() ~= qw)
 
 	-- from reading.md: it says what waits in notes.md
-	local rd_buf = vim.api.nvim_get_current_buf()
 	vim.cmd("silent! cclose")
 	local got3 = msgs_during(function()
 		return review.open_review(rd_buf)

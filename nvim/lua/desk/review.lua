@@ -1622,7 +1622,7 @@ end
 
 -- The title is the list's identity too, and the qf window's status line
 -- shows it, so it carries the list's own keys.
-M.OVERVIEW_TITLE = "Desk overview: ⏎ jump · t/dp take · x/gD decline"
+M.OVERVIEW_TITLE = "Desk overview: ⏎ jump (other file: switch) · t/dp take · x/gD decline"
 M.DECLINED_TITLE = "Desk declined recently"
 M.DECLINED_WINDOW_DAYS = 14
 
@@ -1832,7 +1832,8 @@ end
 --- works, to the suggestion's line (so `dp` there takes it); with no review
 --- open, into THE USER'S NOTES window at the line aligned with the hunk. Either
 --- way through the jumplist (`m'` first), so Ctrl-O returns to where the user
---- was in that window.
+--- was in that window. An entry in the other file does not jump: the review
+--- moves there and previews the entry, and focus stays in the list.
 function M.qf_jump()
 	if is_loclist_win(vim.api.nvim_get_current_win()) then
 		vim.cmd(vim.fn.line(".") .. "ll")
@@ -1856,7 +1857,10 @@ function M.qf_jump()
 			return
 		end
 		-- The other file: the review moves there, or with none open it
-		-- opens above, with its own review split above it.
+		-- opens above, with its own review split above it. Focus stays in
+		-- the list, which is rebuilt around the new review, so the user can
+		-- keep going down it; the entry is previewed there.
+		local qwin = vim.api.nvim_get_current_win()
 		local from = ctx.desk_review_buf and session_for_review_buf(ctx.desk_review_buf)
 		local b
 		if from then
@@ -1870,8 +1874,27 @@ function M.qf_jump()
 			b = open_file_buf(repo, file)
 			M.open_review(b)
 		end
-		win = vim.fn.bufwinid(b)
-		item.bufnr = b
+		if vim.api.nvim_win_is_valid(qwin) then
+			vim.api.nvim_set_current_win(qwin)
+		end
+		local ns = sessions[b]
+		if ns then
+			local id = type(item.user_data) == "table" and item.user_data.id
+			local items = overview_items(ns, repo, file)
+			vim.fn.setqflist({}, "r", {
+				title = M.OVERVIEW_TITLE,
+				items = items,
+				context = { desk_review_buf = ns.review_buf, desk_repo = repo },
+			})
+			for i, e in ipairs(items) do
+				if id and e.user_data.id == id then
+					vim.api.nvim_win_set_cursor(qwin, { i, 0 })
+				end
+			end
+		end
+		preview = {}
+		M.qf_preview()
+		return
 	end
 	local lnum
 	win, lnum = entry_target(item)
