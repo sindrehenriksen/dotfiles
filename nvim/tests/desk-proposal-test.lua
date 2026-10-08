@@ -321,6 +321,26 @@ do
 	write(r4, "notes.md", { "Section A", "Section B", "  - ping Kari" })
 	commit_all(r4, "the user removed the first copy")
 	assert_eq("removing the anchored copy takes it although another copy remains", 1, #proposal.sync_taken(r4))
+
+	-- an edit whose new text already sits at another place is still proposed
+	local two = { "alpha", "- status: merged", "", "beta", "- status: in review" }
+	local edit = item("ed", { kind = "edit", target = { at = "- status: in review" }, before = "- status: in review", after = "- status: merged", source = "notes", headline = "beta merged" })
+	local r5 = new_repo(two)
+	local _, st5 = proposal.build(r5, "morning", "2026-10-01", { edit }, FILES)
+	assert_eq("an edit whose text sits in another block is not skipped", 0, st5.skipped)
+	assert_eq("and is open", 1, #proposal.open_items(r5))
+	write(r5, "notes.md", { "alpha", "- status: merged", "", "beta", "- status: in review", "- more" })
+	commit_all(r5, "an unrelated edit")
+	assert_eq("an unrelated commit does not take it", 0, #proposal.sync_taken(r5))
+	write(r5, "notes.md", { "alpha", "- status: merged", "", "beta", "- status: merged", "- more" })
+	commit_all(r5, "the user made the edit")
+	assert_eq("making the edit at its place takes it", 1, #proposal.sync_taken(r5))
+	local r6 = new_repo({ "alpha", "- status: open", "", "beta", "- status: in review" })
+	proposal.build(r6, "morning", "2026-10-01", { edit }, FILES)
+	write(r6, "notes.md", { "alpha", "- status: merged", "", "beta", "- status: in review" })
+	commit_all(r6, "the same text, written in another block")
+	assert_eq("the edit's text written elsewhere does not take it", 0, #proposal.sync_taken(r6))
+	assert_eq("it is still open", 1, #proposal.open_items(r6))
 end
 
 print("\n=== a news URL already taken or declined is never proposed again ===")

@@ -121,6 +121,82 @@ local function removal_done(item, lines, base, before)
 	return not M.contains(lines, before)
 end
 
+-- The rows of `lines` that base rows `first`..`last` became: unchanged rows
+-- map across, changed ones to their hunk's new side, and lines inserted
+-- inside the range or at its edges belong to it. Empty (lo > hi) when the
+-- user deleted them.
+local function mapped_range(base, lines, first, last)
+	local hunks = vim.diff(snippet.join_lines(base, true), snippet.join_lines(lines, true), { result_type = "indices" })
+	local lo, hi = math.huge, -math.huge
+	local function span(a, b)
+		lo, hi = math.min(lo, a), math.max(hi, b)
+	end
+	for r = first, last do
+		local hunk
+		local shift = 0
+		for _, h in ipairs(hunks) do
+			if h[2] > 0 and r >= h[1] and r <= h[1] + h[2] - 1 then
+				hunk = h
+				break
+			end
+			if (h[2] > 0 and h[1] + h[2] - 1 < r) or (h[2] == 0 and h[1] < r) then
+				shift = shift + h[4] - h[2]
+			end
+		end
+		if not hunk then
+			span(r + shift, r + shift)
+		elseif hunk[4] > 0 then
+			span(hunk[3], hunk[3] + hunk[4] - 1)
+		else
+			span(hunk[3] + 1, hunk[3])
+		end
+	end
+	for _, h in ipairs(hunks) do
+		if h[2] == 0 and h[4] > 0 and h[1] >= first - 1 and h[1] <= last then
+			span(h[3], h[3] + h[4] - 1)
+		end
+	end
+	return lo, hi
+end
+
+local function overlaps_within(lines, block_lines, lo, hi)
+	for pos = math.max(1, lo - #block_lines + 1), math.min(hi, #lines - #block_lines + 1) do
+		if snippet.lines_match_at(lines, pos, block_lines) then
+			return true
+		end
+	end
+	return false
+end
+
+-- Whether the edit `item` is made in `lines`: its `after` stands where its
+-- anchored `before` was, not merely somewhere in the file, since short
+-- lines such as a status bullet repeat across sections. With `base` the
+-- anchored occurrence is followed across the user's edits; without it the
+-- anchor is looked up in `lines` and judged within its block. An anchor
+-- that resolves in neither leaves only the file as a whole to look in.
+local function edit_done(item, lines, base, after)
+	local before = snippet.split_lines(item.before)
+	local leave = block.parse_target(item.target)
+	if #before == 0 or not (leave and leave.kind == "at") then
+		return M.contains(lines, after)
+	end
+	if base then
+		local at = block.find_anchor(base, leave)
+		if at and snippet.lines_match_at(base, at + 1, before) then
+			local lo, hi = mapped_range(base, lines, at + 1, at + #before)
+			return overlaps_within(lines, after, lo, hi)
+		end
+	end
+	local at = block.find_anchor(lines, leave)
+	if not at then
+		return M.contains(lines, after)
+	end
+	if snippet.lines_match_at(lines, at + 1, before) then
+		return overlaps_within(lines, after, at + 1, at + #before)
+	end
+	return overlaps_within(lines, after, block.block_containing(lines, at + 1))
+end
+
 --- Whether `item`'s removal of its `before` is done in `lines`: for a move
 --- or merge, its leaving side, which `proposed_in` does not look at.
 function M.removal_done(item, lines, base)
@@ -133,12 +209,12 @@ end
 --- anchor (a move or merge at its landing side, not where its `before`
 --- sits), a removal's anchored occurrence of `before` gone (`base`, the user's text
 --- at the proposal's pass time, pins which occurrence), an edit's `after`
---- present.
+--- standing where that occurrence of its `before` was.
 function M.proposed_in(item, lines, base)
 	local after = snippet.split_lines(item.after)
 	if #after > 0 then
 		if item.kind == "edit" then
-			return M.contains(lines, after)
+			return edit_done(item, lines, base, after)
 		end
 		local _, land = block.parse_target(item.target)
 		local first, last = landing_window(lines, land)
