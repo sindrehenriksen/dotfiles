@@ -619,6 +619,20 @@ do
 	review.take(rb5)
 	assert_eq("an edited edit lands as edited, in place", { "Section A", "  existing, revised twice", "Section B", "  other" }, lines_of(nb5))
 
+	-- edit in the split, then save it without taking: still waiting, not declined
+	local r6 = new_repo(BASE)
+	build(r6, "2026-10-01", { item("a1", { kind = "add", target = { under = "Section A" }, after = "  - read RFC", source = "https://example.invalid/rfc", headline = "read rfc" }) })
+	local nb6 = open_notes(r6)
+	review.attach(nb6)
+	assert_true("review opens", review.open_review(nb6))
+	local rb6 = review_buf_of(nb6)
+	local k6 = line_of(rb6, "  - read RFC")
+	vim.api.nvim_buf_set_text(rb6, k6 - 1, #"  - read RFC", k6 - 1, #"  - read RFC", { " (skim)" })
+	vim.api.nvim_set_current_win(vim.fn.bufwinid(rb6))
+	vim.cmd("write")
+	assert_eq("saving an edited, untaken suggestion does not decline it", {}, declined_ids(r6))
+	assert_eq("nor take it", {}, taken_headlines(r6))
+
 	-- take then undo, then save: not taken
 	local r3 = new_repo(BASE)
 	build(r3, "2026-10-01", { item("n1") })

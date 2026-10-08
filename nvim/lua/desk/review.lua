@@ -325,8 +325,11 @@ function M.save_review(s)
 	local taking = pending_ids(s.notes_buf)
 	local gone = {}
 	for _, item in pairs(s.shown) do
+		local _, _, text = mark_range(s, item)
 		if taking[item.id] then
 			-- taken by decision: edited text is no reason to call it declined
+		elseif text and #text > 0 and not proposal.contains(notes_lines, text) then
+			-- edited in the split and not taken yet: still waiting
 		elseif not proposal.proposed_in(item, review_lines, s.base) and not proposal.proposed_in(item, notes_lines, s.base) then
 			gone[#gone + 1] = item
 		end
