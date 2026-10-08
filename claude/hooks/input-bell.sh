@@ -74,7 +74,7 @@ rung_list() { [ -n "$state_file" ] && [ -r "$state_file" ] && tail -n +2 "$state
 # line that starts with `[needs-you]`, outside code fences, not rung yet.
 midturn_verdict() {
     [ -n "$state_file" ] && [ -n "$tpath" ] && [ -r "$tpath" ] || return 0
-    local size off="" start first=0 chunk body consumed found rung new
+    local size off="" start first=0 skip chunk body consumed found rung new
     size="$(wc -c <"$tpath" 2>/dev/null | tr -d ' ')" || return 0
     [ -n "$size" ] || return 0
     [ -r "$state_file" ] && off="$(head -n 1 "$state_file" 2>/dev/null)"
@@ -90,12 +90,13 @@ midturn_verdict() {
     case "$chunk" in *$'\n'*) ;; *) return 0 ;; esac
     body="${chunk%$'\n'*}"
     consumed=$(( $(printf '%s\n' "$body" | wc -c) ))
-    # A tail read that starts mid-file begins inside a line: drop it.
-    if [ "$first" = 1 ] && [ "$start" -gt 0 ]; then
-        case "$body" in *$'\n'*) body="${body#*$'\n'}" ;; *) body="" ;; esac
-    fi
+    # A tail read that starts mid-file begins inside a line: drop it. Done
+    # with tail, not `${body#*$'\n'}`, which is quadratic in that line's
+    # length and can take seconds on one attachment record.
+    skip=1
+    [ "$first" = 1 ] && [ "$start" -gt 0 ] && skip=2
     rung="$(rung_list)"
-    found="$(printf '%s\n' "$body" | jq -nrR --arg rung "$rung" '
+    found="$(printf '%s\n' "$body" | tail -n +"$skip" | jq -nrR --arg rung "$rung" '
         ($rung | split(" ")) as $done
         | [inputs | fromjson? | select(type == "object" and .type == "assistant")
            | select((.uuid // "") as $u | ($done | index($u)) | not)

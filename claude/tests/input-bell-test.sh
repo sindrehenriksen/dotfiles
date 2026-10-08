@@ -163,6 +163,27 @@ out3="$(mid PreToolUse "$TMP/bigm.jsonl" | "$HOOK")"; t3=$(date +%s%N 2>/dev/nul
 echo "# mid-turn cost: first call $(( (t1 - t0) / 1000000 )) ms, unchanged $(( (t2 - t1) / 1000000 )) ms, one new record $(( (t3 - t2) / 1000000 )) ms"
 [ $(( (t3 - t0) / 1000000 )) -lt 5000 ] && ok "mid: all large-transcript calls inside the timeout" || bad "mid: too slow"
 
+# First call whose 4 MB window starts 200 KB inside one long line (a big
+# attachment record): dropping that partial line must stay cheap.
+SID=longline; STATE="$XDG_STATE_HOME/claude/input-bell-longline"; rm -f "$STATE"
+ll="$TMP/longline.jsonl"
+jq -nc --arg x "$(head -c 300000 /dev/zero | tr '\0' a)" '{type:"attachment", attachment:{text:$x}}' >"$ll"
+jq -nc --arg x "$(head -c 10000 /dev/zero | tr '\0' b)" '{type:"attachment", attachment:{text:$x}}' >"$TMP/rec10k"
+tailsz=$((4194304 - 200000))
+: >"$TMP/tailpart"
+while [ "$(wc -c <"$TMP/tailpart")" -lt $((tailsz - 20000)) ]; do cat "$TMP/rec10k" >>"$TMP/tailpart"; done
+arec ll1 "[needs-you] behind a long line" >>"$TMP/tailpart"
+pad=$((tailsz - $(wc -c <"$TMP/tailpart") - 1))
+{ jq -nc --arg x "$(head -c $((pad - 40)) /dev/zero | tr '\0' c)" '{type:"attachment", attachment:{text:$x}}' | head -c "$pad"; printf '\n'; cat "$TMP/tailpart"; } >>"$ll"
+partial=$(( $(wc -c <"$ll") - 4194304 ))
+partial=$(( $(head -n 1 "$ll" | wc -c) - partial ))
+[ "$partial" -gt 150000 ] && ok "mid: long-line fixture starts the window ${partial} bytes inside a line" || bad "mid: long-line fixture (partial $partial)"
+s0=$(date +%s)
+out="$(mid PreToolUse "$ll" | "$HOOK")"
+el=$(( $(date +%s) - s0 ))
+[ "$out" = "$BELL" ] && ok "mid: first call behind a long partial line rings" || bad "mid: long partial line (got [$out])"
+[ "$el" -lt 3 ] && ok "mid: long partial line costs under 3s (${el}s)" || bad "mid: long partial line took ${el}s"
+
 # The emitted value must decode to exactly BEL.
 decoded="$(printf '%s' '{"hook_event_name":"Notification","notification_type":"permission_prompt"}' | "$HOOK" | jq -r .terminalSequence | od -An -c | tr -d ' ')"
 [ "$decoded" = '\a\n' ] && ok "bell decodes to BEL" || bad "bell decodes to BEL (got [$decoded])"
