@@ -871,6 +871,71 @@ do
 	vim.notify, review.confirm = orig_notify, orig_confirm
 end
 
+print("\n=== the other file open in another nvim: one line, and the review stays ===")
+do
+	local r = new_repo(BASE)
+	build(r, "2026-10-01", {
+		item("n1"),
+		item("rd", { file = "reading.md", kind = "new", after = "READ paper", headline = "read paper" }),
+	})
+	local nb = open_notes(r)
+	review.attach(nb)
+	local home = vim.api.nvim_get_current_win()
+	assert_true("review opens", review.open_review(nb))
+	local rb = review_buf_of(nb)
+	local path = r .. "/reading.md"
+	local swapdir = vim.fn.tempname()
+	vim.fn.mkdir(swapdir, "p")
+	local saved_dir, saved_swap = vim.o.directory, vim.o.swapfile
+	vim.o.directory = swapdir .. "//"
+	vim.o.swapfile = true
+	local function swaps()
+		return vim.fn.glob(swapdir .. "/*reading.md.sw?", false, true)
+	end
+	local function unchanged(desc)
+		assert_eq(desc .. ": the review is as it was", rb, review_buf_of(nb))
+		assert_eq(desc .. ": the notes stay in their window", nb, vim.api.nvim_win_get_buf(home))
+		assert_eq(desc .. ": reading.md is not loaded here", 0, vim.fn.bufloaded(path))
+	end
+	-- A real second nvim holding reading.md, so its swap file is the
+	-- condition a load here would stop on.
+	local job = vim.fn.jobstart({ vim.v.progpath, "--clean", "--embed", "--headless",
+		"--cmd", "set directory=" .. swapdir .. "//", path }, { rpc = true })
+	local pid = vim.fn.jobpid(job)
+	assert_true("the other nvim has its swap file", vim.wait(5000, function()
+		return #swaps() > 0
+	end))
+	local moved, why = review.move_review(nb, "reading.md")
+	assert_eq("the move is refused", false, moved)
+	assert_eq("with one line naming the file and the other nvim's pid",
+		string.format("reading.md is open in another nvim (pid %d); close it there first", pid), why)
+	unchanged("open elsewhere")
+	-- The same swap file once that nvim is gone without cleaning up.
+	vim.uv.kill(pid, "sigkill")
+	vim.fn.jobwait({ job }, 5000)
+	moved, why = review.move_review(nb, "reading.md")
+	assert_eq("a swap file left by an nvim that died is named as such",
+		"reading.md has a swap file from an nvim that is no longer running; recover or delete it first", why)
+	unchanged("left behind")
+	for _, f in ipairs(swaps()) do
+		os.remove(f)
+	end
+	-- A load that fails on E325 anyway (no swap file the check could find).
+	vim.o.swapfile = false
+	local orig_bufload = vim.fn.bufload
+	vim.fn.bufload = function()
+		error("Vim:E325: ATTENTION")
+	end
+	moved, why = review.move_review(nb, "reading.md")
+	vim.fn.bufload = orig_bufload
+	assert_eq("a load that stops on E325 still says so in one line", "reading.md is open in another nvim; close it there first", why)
+	unchanged("E325 on load")
+	vim.o.directory, vim.o.swapfile = saved_dir, saved_swap
+	moved = review.move_review(nb, "reading.md")
+	assert_true("with the other nvim gone the move goes through", moved)
+	vim.fn.delete(swapdir, "rf")
+end
+
 print("\n=== the review key asks before discarding unsaved declines ===")
 do
 	local function setup()

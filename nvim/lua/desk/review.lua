@@ -422,11 +422,89 @@ local function say_elsewhere(repo, file, p)
 	end
 end
 
+-- Another nvim's swap file for `path`, as {pid, running}, or nil: what
+-- makes loading it here stop on E325 (swap file ATTENTION). swapinfo()
+-- gives the pid only while that process runs, 0 once it is gone.
+local function swap_elsewhere(path)
+	if not vim.o.swapfile then
+		return nil
+	end
+	local want = vim.fn.resolve(vim.fn.fnamemodify(path, ":p"))
+	local tail = vim.fn.fnamemodify(path, ":t")
+	-- swapfilelist() mangles a 'directory' entry ending in //, the default,
+	-- so the candidates are globbed here: "%path%to%file.swp" in such a
+	-- directory, ".file.swp" in the others, either as .sw? down to .saa.
+	for _, dir in ipairs(vim.split(vim.o.directory, ",", { trimempty = true })) do
+		dir = dir:gsub("/+$", "")
+		if dir == "." or dir:match("^%./") then
+			dir = vim.fn.fnamemodify(path, ":h") .. dir:sub(2)
+		end
+		dir = vim.fn.expand(dir)
+		local found = vim.fn.glob(dir .. "/*" .. tail .. ".s??", false, true)
+		vim.list_extend(found, vim.fn.glob(dir .. "/." .. tail .. ".s??", false, true))
+		for _, f in ipairs(found) do
+			local info = vim.fn.swapinfo(f)
+			local of = type(info) == "table" and info.fname
+			if of and vim.fn.resolve(vim.fn.fnamemodify(of, ":p")) == want and info.pid ~= vim.fn.getpid() then
+				local pid = (tonumber(info.pid) or 0) > 0 and info.pid or nil
+				return { pid = pid, running = pid ~= nil and vim.uv.kill(pid, 0) == 0 }
+			end
+		end
+	end
+	return nil
+end
+
+local function swap_message(file, other)
+	if other and not other.running then
+		return string.format("%s has a swap file from an nvim that is no longer running; recover or delete it first", file)
+	end
+	local pid = other and other.pid and string.format(" (pid %d)", other.pid) or ""
+	return string.format("%s is open in another nvim%s; close it there first", file, pid)
+end
+
+--- Loads `file` of the notes repo into a buffer, or returns nil, why when it
+--- can't: another nvim has it open, or the load failed. Nothing is left
+--- behind on failure, so the caller can leave everything as it was. The
+--- swap check runs before loading, since a load that meets the swap file
+--- prints the whole ATTENTION text before failing.
+function M.load_file_buf(repo, file)
+	local path = repo .. "/" .. file
+	local existed = vim.fn.bufexists(path) == 1
+	local b = vim.fn.bufadd(path)
+	if vim.api.nvim_buf_is_loaded(b) then
+		return b
+	end
+	local function drop()
+		if not existed and vim.api.nvim_buf_is_valid(b) then
+			pcall(vim.api.nvim_buf_delete, b, { force = true })
+		elseif vim.api.nvim_buf_is_loaded(b) then
+			pcall(vim.api.nvim_buf_delete, b, { force = true, unload = true })
+		end
+	end
+	local other = swap_elsewhere(path)
+	if other then
+		drop()
+		return nil, swap_message(file, other)
+	end
+	local ok, err = pcall(vim.fn.bufload, b)
+	if ok then
+		return b
+	end
+	drop()
+	if tostring(err):match("E325") then
+		return nil, swap_message(file, nil)
+	end
+	return nil, string.format("couldn't open %s: %s", file, (tostring(err):gsub("^Vim:", "")))
+end
+
 --- Opens `file` of the notes repo in a window above the current one (or
---- focuses it) and attaches the review keys. Returns its buffer.
+--- focuses it) and attaches the review keys. Returns its buffer, or nil,
+--- why when it can't be loaded.
 local function open_file_buf(repo, file)
-	local b = vim.fn.bufadd(repo .. "/" .. file)
-	vim.fn.bufload(b)
+	local b, why = M.load_file_buf(repo, file)
+	if not b then
+		return nil, why
+	end
 	local win = vim.fn.bufwinid(b)
 	if win == -1 then
 		vim.cmd("aboveleft split")
@@ -468,10 +546,20 @@ function M.move_review(from_buf, file)
 	if not repo then
 		return false, "not in a git repo"
 	end
+	-- Loaded before anything moves, so a file that can't be opened leaves
+	-- the review as it was.
+	local was_loaded = vim.fn.bufloaded(repo .. "/" .. file) == 1
+	local b, load_why = M.load_file_buf(repo, file)
+	if not b then
+		return false, load_why
+	end
 	local s = live_session(from_buf)
 	if s then
 		local ok, why = settle_declines(s)
 		if not ok then
+			if not was_loaded then
+				pcall(vim.api.nvim_buf_delete, b, { unload = true })
+			end
 			return false, why
 		end
 	end
@@ -486,8 +574,6 @@ function M.move_review(from_buf, file)
 	if s then
 		close_session(s, true)
 	end
-	local b = vim.fn.bufadd(repo .. "/" .. file)
-	vim.fn.bufload(b)
 	if not vim.api.nvim_win_is_valid(win) then
 		win = vim.api.nvim_get_current_win()
 	end
@@ -1871,7 +1957,12 @@ function M.qf_jump()
 			end
 			b = vim.fn.bufnr(repo .. "/" .. file)
 		else
-			b = open_file_buf(repo, file)
+			local why
+			b, why = open_file_buf(repo, file)
+			if not b then
+				vim.notify("desk: " .. tostring(why), vim.log.levels.WARN)
+				return
+			end
 			M.open_review(b)
 		end
 		if vim.api.nvim_win_is_valid(qwin) then
