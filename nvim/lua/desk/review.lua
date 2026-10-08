@@ -1314,25 +1314,40 @@ function M.remaining(s)
 	return out
 end
 
+--- An overview entry's text: the headline, prefixed with its file when
+--- `other` (an entry in another file than the review's). A headline that
+--- already names its file, as a pass may write one, keeps it once.
+function M.entry_text(item, conflict, other)
+	local text = item.headline or item.id
+	local file = item.file
+	if file and file ~= "" then
+		local prefix = file .. ":"
+		if text:sub(1, #prefix) == prefix then
+			text = vim.trim(text:sub(#prefix + 1))
+		end
+	end
+	if conflict then
+		text = string.format("%s (near your edit at line %d)", text, conflict)
+	end
+	if other and file then
+		text = file .. ": " .. text
+	end
+	return text
+end
+
 local function overview_items(s, repo, file)
 	local qf = {}
 	if s then
 		for _, r in ipairs(M.remaining(s)) do
-			local text = r.item.headline or r.item.id
-			if r.conflict then
-				text = string.format("%s (near your edit at line %d)", text, r.conflict)
-			end
+			local text = M.entry_text(r.item, r.conflict, false)
 			qf[#qf + 1] = { bufnr = s.notes_buf, lnum = r.notes_lnum, col = 1, text = text, user_data = { id = r.item.id } }
 		end
 	end
 	for _, o in ipairs(M.pending_elsewhere(repo, file)) do
 		local b = vim.fn.bufadd(repo .. "/" .. o.file)
 		for _, e in ipairs(o.entries) do
-			local text = e.item.headline or e.item.id
-			if e.conflict then
-				text = string.format("%s (near your edit at line %d)", text, e.conflict)
-			end
-			qf[#qf + 1] = { bufnr = b, lnum = e.lnum, col = 1, text = o.file .. ": " .. text, user_data = { file = o.file, id = e.item.id } }
+			local text = M.entry_text(e.item, e.conflict, true)
+			qf[#qf + 1] = { bufnr = b, lnum = e.lnum, col = 1, text = text, user_data = { file = o.file, id = e.item.id } }
 		end
 	end
 	return qf

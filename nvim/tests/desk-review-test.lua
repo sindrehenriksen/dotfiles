@@ -683,7 +683,8 @@ do
 	build(r2, "2026-10-01", {
 		item("n1"),
 		item("rd", { file = "reading.md", kind = "new", after = "READ paper", headline = "read paper" }),
-		item("rd2", { file = "reading.md", kind = "new", after = "READ other", headline = "read other" }),
+		-- a pass may name the file in the headline itself
+		item("rd2", { file = "reading.md", kind = "new", after = "READ other", headline = "reading.md: read other" }),
 	})
 	local nb2 = open_notes(r2)
 	review.attach(nb2)
@@ -691,7 +692,7 @@ do
 		return review.open_review(nb2)
 	end)
 	assert_true("from notes.md it says how many wait in reading.md", got2[1] ~= nil and got2[1]:match("2 more suggestion%(s%) in reading.md") ~= nil)
-	assert_eq("the overview lists both files", { "headline n1", "reading.md: read other", "reading.md: read paper" }, (function()
+	assert_eq("the overview lists both files, a headline naming its file prefixed once", { "headline n1", "reading.md: read other", "reading.md: read paper" }, (function()
 		local t = {}
 		review.overview(nb2)
 		for _, e in ipairs(vim.fn.getqflist()) do
@@ -724,6 +725,13 @@ do
 	end)
 	assert_true("from reading.md it says how many wait in notes.md", #got3 == 0 or got3[1]:match("notes.md") ~= nil)
 	assert_eq("pending_elsewhere agrees", 1, (review.pending_elsewhere(r2, "reading.md"))[1].count)
+	review.overview(vim.fn.bufnr(r2 .. "/reading.md"))
+	local texts = vim.tbl_map(function(e)
+		return e.text
+	end, vim.fn.getqflist())
+	table.sort(texts)
+	assert_eq("in reading.md's own overview its entries carry no file name", { "notes.md: headline n1", "read other", "read paper" }, texts)
+	vim.cmd("cclose")
 end
 
 print("\n=== the review key asks before discarding unsaved declines ===")
