@@ -274,6 +274,27 @@ assert_eq "an end with an unrecorded pid closes the latest run, never an older o
     "prompt_input_exit" "$(read_field stale-then-exit .end_reason)"
 assert_eq "...so the session is ended" "true" "$(read_field stale-then-exit .ended)"
 
+echo "=== an older run that ends after the latest one does not decide ==="
+events older-ends-last "$(start_ev startup 991011)" "$(start_ev resume 991012)" \
+    "$(end_ev other 991012)" "$(end_ev prompt_input_exit 991011)"
+assert_eq "end_reason is the latest run's" "other" "$(read_field older-ends-last .end_reason)"
+assert_eq "...which was not deliberate" "false" "$(read_field older-ends-last .end_deliberate)"
+assert_eq "...so the session is left open" "true" "$(read_field older-ends-last .left_open)"
+
+echo "=== a close the process survived does not end its run ==="
+failed_ev() { jq -cn '{event:"close-failed", time:3}'; }
+events survived "$(start_ev startup 991021)" "$(end_ev closed-by-pass)" "$(failed_ev)"
+assert_eq "not ended by the failed close" "false" "$(read_field survived .ended)"
+assert_eq "close_failed still reported" "true" "$(read_field survived .close_failed)"
+assert_eq "left open: nothing deliberate ended it" "true" "$(read_field survived .left_open)"
+events survived-then-exit "$(start_ev startup 991022)" "$(end_ev closed-by-pass)" "$(failed_ev)" \
+    "$(end_ev prompt_input_exit 991022)"
+assert_eq "the survivor's own end counts" "prompt_input_exit" "$(read_field survived-then-exit .end_reason)"
+assert_eq "...so it is not left open" "false" "$(read_field survived-then-exit .left_open)"
+events survived-then-hup "$(start_ev startup 991023)" "$(end_ev closed-by-pass)" "$(failed_ev)" \
+    "$(end_ev other 991023)"
+assert_eq "a survivor later torn down is left open" "true" "$(read_field survived-then-hup .left_open)"
+
 echo "=== recorder never logged an error ==="
 if [ -s "$TMP/recorder.log" ]; then
     bad "recorder log is empty"

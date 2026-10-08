@@ -220,7 +220,8 @@ assert_eq "sess-d: end_reason survives as closed-by-pass" "closed-by-pass" "$(fi
 assert_eq "sess-d: status ended" "ended" "$(field sess-d .status)"
 assert_eq "sess-d: close_failed false (SIGTERM was never followed by close-failed)" "false" "$(field sess-d .close_failed)"
 
-assert_eq "sess-g: end_reason still closed-by-pass" "closed-by-pass" "$(field sess-g .end_reason)"
+assert_eq "sess-g: a close it survived does not end it" "false null true" \
+    "$(field sess-g '"\(.ended) \(.end_reason) \(.left_open)"')"
 assert_eq "sess-g: close_failed true (the SIGTERM'd session survived)" "true" "$(field sess-g .close_failed)"
 assert_eq "sess-g: close_failed_at is a number" "true" "$(field sess-g '(.close_failed_at | type == "number")')"
 

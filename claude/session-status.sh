@@ -57,8 +57,8 @@
 # must refuse outright rather than trust that choice). close_failed is
 # true once a `close-failed` event (claude/hooks/session-recorder.sh) has
 # been recorded after the session's own last start — a close step's own
-# SIGTERM that the session survived, per its own "end" event (still whatever
-# `close`/a real SessionEnd wrote — this never touches that one).
+# SIGTERM that the session survived. The event log keeps the close's "end"
+# event as written; the reader no longer counts it as ending the run.
 #
 # Two modes:
 #   session-status.sh            one JSON line per session, as above.
@@ -162,8 +162,12 @@ parse_etime_secs() {
 # SessionEnd, or a stray second SessionEnd. Runs a process left open (a
 # SIGKILL, a shutdown, starts that recorded no pid) are never a target for
 # a later process's end, so that end cannot overwrite how the latest run
-# ended. The events alone say the session ended when its latest run is
-# closed; the join below still overrules that with liveness.
+# ended. Each run keeps its own end, and the session's is the latest run's,
+# so an older process exiting last does not stand in for it. A
+# `close-failed` reopens the latest run when the close's own end closed it:
+# the process survived the SIGTERM, so its eventual SessionEnd is the one
+# that counts. The events alone say the session ended when its latest run
+# is closed; the join below still overrules that with liveness.
 #
 # Which ends are deliberate, by the reason the end recorded. Claude Code
 # 2.1.292 reports `prompt_input_exit` for every way of leaving at the
@@ -183,11 +187,16 @@ EVENTS_REDUCE='
     (map(select(.event=="start")) | last) as $s
     | (any(.[]; .event=="start" and .source=="desk-run")) as $any_desk_run
     | (to_entries | map(select(.value.event=="start")) | last | .key) as $lsi
-    | (reduce .[] as $x ({runs: [], end: null};
+    | (reduce .[] as $x ({runs: []};
         if $x.event == "start" then
           ($x.pid // null) as $p
           | .runs |= map(if $p != null and .pid == $p then .closed = true else . end)
-          | .runs += [{pid: $p, closed: false}] | .end = null
+          | .runs += [{pid: $p, closed: false, end: null}]
+        elif $x.event == "close-failed" then
+          ((.runs | length) - 1) as $li
+          | if $li >= 0 and .runs[$li].closed and (.runs[$li].end.reason // "") == "closed-by-pass"
+            then .runs[$li].closed = false | .runs[$li].end = null
+            else . end
         elif $x.event == "end" then
           ((.runs | length) - 1) as $li
           | (if $li < 0 or .runs[$li].closed then null else $li end) as $latest_open
@@ -195,9 +204,9 @@ EVENTS_REDUCE='
              then ((.runs | to_entries | map(select((.value.closed | not) and .value.pid == $x.pid)) | last | .key)
                    // (if $latest_open != null and .runs[$latest_open].pid == null then $latest_open else null end))
              else $latest_open end) as $k
-          | if $k == null then . else .runs[$k].closed = true | .end = $x end
+          | if $k == null then . else .runs[$k].closed = true | .runs[$k].end = $x end
         else . end)) as $r
-    | (if ($r.runs | length) > 0 and ($r.runs | last | .closed) then $r.end else null end) as $e
+    | (if ($r.runs | length) > 0 and ($r.runs | last | .closed) then ($r.runs | last | .end) else null end) as $e
     | (if $lsi == null then null
        else (to_entries | map(select(.key > $lsi and .value.event=="close-failed")) | last | .value)
        end) as $cf
