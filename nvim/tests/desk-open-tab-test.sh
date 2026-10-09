@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # claude/desk-lib/steps.sh's
 # desk_step_open_tab — assembling the Wednesday tab's launch command from
-# its step config (cwd or its older name cwd_outside, restricted, permission_mode, tools,
+# its step config (cwd, restricted, permission_mode, tools,
 # strict_mcp_config/mcp_config, settings, skill, the fixed prompt_text) and
 # handing it to
 # hammerspoon/desk-open-tab.sh, and skipping entirely when a session under
@@ -75,7 +75,7 @@ source "$LIB/steps.sh"
 
 step_json='{
 	"id": "open-tab", "kind": "open_tab",
-	"cwd_outside": "~/dev/example-workspace",
+	"cwd": "~/dev/example-workspace",
 	"permission_mode": "default",
 	"tools": ["Read", "Glob", "Grep", "Write", "Bash"],
 	"strict_mcp_config": true,
@@ -96,7 +96,7 @@ assert_true "the helper was actually invoked" "$([ -f "$ARGV_LOG.command" ] && e
 command_line="$(cat "$ARGV_LOG.command" 2> /dev/null)"
 cwd_arg="$(cat "$ARGV_LOG.cwd" 2> /dev/null)"
 session_arg="$(cat "$ARGV_LOG.session" 2> /dev/null)"
-assert_eq "cwd_outside is expanded to \$HOME" "$HOME/dev/example-workspace" "$cwd_arg"
+assert_eq "cwd is expanded to \$HOME" "$HOME/dev/example-workspace" "$cwd_arg"
 assert_eq "no session id is pinned (a fresh launch, not a resume)" "" "$session_arg"
 assert_eq "it opens in the background, never taking focus" "background" "$(cat "$ARGV_LOG.mode" 2> /dev/null)"
 assert_true "the command starts with the claude binary" "$(grep -qE "^'claude' " <<< "$command_line" && echo true || echo false)"
@@ -201,7 +201,7 @@ echo
 echo "=== restricted: false — the user's default permissions, no isolation flags ==="
 default_perms_step_json='{
 	"id": "open-tab", "kind": "open_tab",
-	"cwd_outside": "~/dev/example-workspace",
+	"cwd": "~/dev/example-workspace",
 	"restricted": false,
 	"permission_mode": "default",
 	"tools": ["Read", "Glob", "Grep", "Write", "Bash"],

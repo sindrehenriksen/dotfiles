@@ -145,7 +145,7 @@ cat > "$INSTANCE/config.json" << CONFIG
         { "id": "Feed", "kind": "fetch", "prompt": "f.md", "tools": ["WebSearch"] },
         { "id": "J", "kind": "judge", "prompt": "j.md", "tools": ["Read"],
           "input_files": ["a.md", "b.md", "feed.json", "open-items.json"] },
-        { "id": "tab", "kind": "open_tab", "cwd_outside": "~", "restricted": false, "prompt_text": "hi" }
+        { "id": "tab", "kind": "open_tab", "cwd": "~", "restricted": false, "prompt_text": "hi" }
       ]
     }
   }

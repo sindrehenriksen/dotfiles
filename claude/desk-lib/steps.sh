@@ -1762,8 +1762,7 @@ desk_fresh_scratch_dir() {
 
 # ---------------------------------------------------------------------------
 # open_tab: interactive (Wednesday), not run headless. This assembles the
-# weekly pass's own launch envelope — `cwd` (`cwd_outside` is its older
-# name), `permission_mode`, `tools`, `strict_mcp_config`/`mcp_config`,
+# weekly pass's own launch envelope — `cwd`, `permission_mode`, `tools`, `strict_mcp_config`/`mcp_config`,
 # `settings`, and `skill` (passed in explicitly via
 # `--append-system-prompt-file`, so the session starts with it rather than
 # waiting to discover it) plus the fixed `prompt_text` — into one shell
@@ -1806,7 +1805,7 @@ desk_step_open_tab() {
 	[ -n "$scheduled_date" ] || scheduled_date="$(date +%F)"
 	local cwd permission_mode tools_csv strict_mcp mcp_config_rel settings_rel skill_rel prompt_text session_name
 	local scratch_root notes_diff_file notes_diff_since restricted
-	cwd="$(jq -r '.cwd // .cwd_outside // empty' <<< "$step_json")"
+	cwd="$(jq -r '.cwd // empty' <<< "$step_json")"
 	cwd="${cwd/#\~/$HOME}"
 	# Default true: every existing caller (the original Wednesday-tab-only
 	# envelope) configures the full isolation envelope and never sets this
