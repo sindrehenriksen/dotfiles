@@ -141,6 +141,29 @@ old_project_dir="$CLAUDE_CONFIG_DIR/projects/$old_project_name"
 mkdir -p "$old_project_dir"
 : > "$old_project_dir/leftover-transcript.jsonl"
 
+# Steps of that old run the user carried on in: J was resumed by hand (a
+# start that is not the runner's), status was opened by the follow-up tab
+# (its marker), K only ever ran headless, and L was resumed but Claude
+# Code's own sweep has since removed its transcript.
+mkdir -p "$CLAUDE_SESSION_STORE"
+old_run="$DESK_RUNS_ROOT/testpass-$old_date"
+project_of() { printf '%s/projects/%s' "$CLAUDE_CONFIG_DIR" "$(cd "$1" && pwd -P | tr -d '\n' | tr -c 'A-Za-z0-9' '-')"; }
+for s in J status K L; do
+	mkdir -p "$old_run/$s"
+	if [ "$s" != L ]; then
+		mkdir -p "$(project_of "$old_run/$s")"
+		: > "$(project_of "$old_run/$s")/sess-$s.jsonl"
+	fi
+done
+jq -cn --arg cwd "$old_run/J" '{event:"start", time:1, source:"desk-run", cwd:$cwd}, {event:"start", time:2, source:"resume", cwd:$cwd}' \
+	> "$CLAUDE_SESSION_STORE/sess-J.jsonl"
+jq -cn --arg cwd "$old_run/K" '{event:"start", time:1, source:"desk-run", cwd:$cwd}' > "$CLAUDE_SESSION_STORE/sess-K.jsonl"
+jq -cn --arg cwd "$old_run/L" '{event:"start", time:2, source:"resume", cwd:$cwd}' > "$CLAUDE_SESSION_STORE/sess-L.jsonl"
+: > "$old_run/status.opened-for-user"
+j_project="$(project_of "$old_run/J")"
+status_project="$(project_of "$old_run/status")"
+k_project="$(project_of "$old_run/K")"
+
 cfg="$ROOT/config.json"
 jq -n --arg repo "$repo" '{
 	notes_repo: $repo,
@@ -162,10 +185,16 @@ rc=$?
 assert_eq "the run succeeds" "0" "$rc"
 
 # --- pruning: the old run and its project folder are both gone -----------
-assert_true "the old run directory (>7 days) was pruned" \
-	"$([ ! -d "$DESK_RUNS_ROOT/testpass-$old_date" ] && echo true || echo false)"
+assert_true "the old run's headless step (>7 days) was pruned" \
+	"$([ ! -d "$old_step_dir" ] && echo true || echo false)"
 assert_true "its config-dir project folder was pruned with it" \
 	"$([ ! -d "$old_project_dir" ] && echo true || echo false)"
+assert_true "a step the user resumed keeps its cwd" "$([ -d "$old_run/J" ] && echo true || echo false)"
+assert_true "and its transcript" "$([ -f "$j_project/sess-J.jsonl" ] && echo true || echo false)"
+assert_true "a step the follow-up tab opened keeps its cwd" "$([ -d "$old_run/status" ] && echo true || echo false)"
+assert_true "and its transcript" "$([ -f "$status_project/sess-status.jsonl" ] && echo true || echo false)"
+assert_true "a step only the runner ran is pruned" "$([ ! -d "$old_run/K" ] && [ ! -d "$k_project" ] && echo true || echo false)"
+assert_true "a resumed step whose transcript is already gone is pruned" "$([ ! -d "$old_run/L" ] && echo true || echo false)"
 
 # --- per-call log sections, split on cwd (each call's own scratch dir) ---
 section_for() { # matches a CWD=...<suffix> line
@@ -237,6 +266,8 @@ assert_true "it passes F's own session id as the session-id arg too" \
 	"$(grep -q "^SID=$f_sid\$" "$OPEN_TAB_LOG" && echo true || echo false)"
 assert_true "it opens in F's own cwd" \
 	"$(grep -qF "CWD=$f_scratch" "$OPEN_TAB_LOG" && echo true || echo false)"
+assert_true "it marks F's step as opened for the user, so the prune leaves it" \
+	"$([ -e "$f_scratch.opened-for-user" ] && echo true || echo false)"
 
 echo
 echo "=== summary: $pass passed, $fail failed ==="

@@ -1492,6 +1492,7 @@ desk_open_follow_up_tab() {
 			return
 		fi
 		if "$helper" "$command" "" "$status_cwd" background > /dev/null 2>&1; then
+			desk_mark_opened_for_user "$status_cwd"
 			desk_log "$pass" "follow-up tab: opened a status session in $status_cwd"
 			desk_write_atomic "$guard_marker" ""
 			echo "ok"
@@ -1515,6 +1516,7 @@ desk_open_follow_up_tab() {
 
 	command="claude --resume $(desk_shq "$id")"
 	if "$helper" "$command" "$id" "$cwd" background > /dev/null 2>&1; then
+		desk_mark_opened_for_user "$cwd"
 		desk_log "$pass" "follow-up tab: opened $follow_up_step ($id) in $cwd"
 		desk_write_atomic "$guard_marker" ""
 		echo "ok"

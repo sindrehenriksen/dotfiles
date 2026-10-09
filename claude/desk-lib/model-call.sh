@@ -66,11 +66,17 @@ desk_pass_scratch_dir() {
 # (--no-session-persistence) call. Best-effort and silent about anything it
 # can't parse: a directory whose name doesn't end in a plain YYYY-MM-DD is
 # left alone rather than guessed at.
+#
+# A step whose session the user carried on in is the user's conversation,
+# not the runner's, and stays, cwd and transcript both, for as long as
+# Claude Code's own retention keeps the transcript: one with a recorded start
+# that is not the runner's own (a resume), or one the follow-up tab opened
+# (desk_mark_opened_for_user).
 desk_prune_old_runs() {
 	local now="${1:-$(desk_now)}"
 	local config_dir="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 	[ -d "$DESK_RUNS_ROOT" ] || return 0
-	local d base date_part date_epoch age_days step_dir
+	local d base date_part date_epoch age_days step_dir kept user_cwds="" loaded="false"
 	for d in "$DESK_RUNS_ROOT"/*; do
 		[ -d "$d" ] || continue
 		base="$(basename "$d")"
@@ -84,12 +90,46 @@ desk_prune_old_runs() {
 		[ -n "$date_epoch" ] || continue
 		age_days=$(( (now - date_epoch) / 86400 ))
 		[ "$age_days" -gt 7 ] || continue
+		if [ "$loaded" = "false" ]; then
+			user_cwds="$(_desk_user_started_cwds)"
+			loaded="true"
+		fi
+		kept="false"
 		for step_dir in "$d"/*; do
 			[ -d "$step_dir" ] || continue
+			if _desk_run_step_is_users "$config_dir" "$step_dir" "$user_cwds"; then
+				kept="true"
+				continue
+			fi
 			desk_cleanup_project_folder "$config_dir" "$step_dir"
+			rm -rf "$step_dir" "$step_dir".* 2> /dev/null
 		done
-		rm -rf "$d" 2> /dev/null
+		[ "$kept" = "true" ] || rm -rf "$d" 2> /dev/null
 	done
+}
+
+# The cwd of every recorded session start not made by the runner, one per line.
+_desk_user_started_cwds() {
+	local store="${CLAUDE_SESSION_STORE:-$HOME/.local/state/claude/session-events}"
+	[ -d "$store" ] || return 0
+	printf '%s\0' "$store"/*.jsonl | xargs -0 jq -r 'select(.event == "start" and .source != "desk-run") | .cwd // empty' 2> /dev/null
+}
+
+# _desk_run_step_is_users <config_dir> <step_dir> <user_cwds>: whether a
+# step's session is the user's and its transcript is still there.
+_desk_run_step_is_users() {
+	local config_dir="$1" step_dir="$2" user_cwds="$3" project real
+	project="$config_dir/projects/$(desk_project_folder_name "$step_dir")"
+	compgen -G "$project/*.jsonl" > /dev/null || return 1
+	real="$(cd "$step_dir" 2> /dev/null && pwd -P)" || real="$step_dir"
+	{ [ -e "$step_dir.opened-for-user" ] || [ -e "$real.opened-for-user" ]; } && return 0
+	grep -qxF -e "$step_dir" -e "$real" <<< "$user_cwds"
+}
+
+# desk_mark_opened_for_user <step_dir>: records that a tab opened the step's
+# session for the user, so desk_prune_old_runs leaves it to them.
+desk_mark_opened_for_user() {
+	: > "$1.opened-for-user" 2> /dev/null
 }
 
 # desk_write_deny_hook_settings <dir> <pinned-args-file-or-""> <scratch-dir-or-""> <tool>...
