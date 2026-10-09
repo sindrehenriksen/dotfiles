@@ -73,6 +73,7 @@ _DESK_TICKET_SEARCH_NORM='
 	    created_epoch: (($f.created // null) | if . == null then null else epoch end),
 	    parent: (if $f.parent then {key: $f.parent.key, summary: ($f.parent.fields.summary // null)} else null end),
 	    labels: (($f.labels // []) | sort),
+	    mention_text: (($f.summary // "") + " " + ($desc // "")),
 	    description: (if $desc == null then null
 	                  elif ($desc | length) > $max then $desc[0:$max] + " …" else $desc end) }
 	| select(.key != null)'
@@ -122,9 +123,9 @@ desk_ticket_search_collect() {
 		| [.[] | select(.created_epoch != null and .created_epoch >= $w.since and .created_epoch < $w.until)
 		   | . as $t
 		   | (if ($self | index($t.assignee)) != null then "assigned"
-		      elif any($self[]; . as $n | (($t.summary + " " + ($t.description // "")) | ascii_downcase | contains($n | ascii_downcase)))
+		      elif any($self[]; . as $n | ($t.mention_text | ascii_downcase | contains($n | ascii_downcase)))
 		      then "mentioned" else null end) as $part
-		   | del(.created_epoch) + (if $part then {user_part: $part} else {} end)] as $kept
+		   | del(.created_epoch, .mention_text) + (if $part then {user_part: $part} else {} end)] as $kept
 		| { window: {since: ($w.since | todate), until: ($w.until | todate)},
 		    tickets: ($kept | sort_by(.created)),
 		    coverage: ("\($returned) returned, \($kept | length) created in the window"

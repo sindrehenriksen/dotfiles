@@ -59,7 +59,7 @@ echo "judge" > "$INST/j.md"
 jq -n --arg repo "$repo" '
 def steps: [
 	{id: "F-new", kind: "fetch", prompt: "f-new.md", tools: ["mcp__tickets__search"], connector: false, timeout: 30,
-	 ticket_search: {jql: "project = ABC AND creator != currentUser()", self: ["Test User"]}},
+	 ticket_search: {jql: "project = ABC AND creator != currentUser()", self: ["Test User"], max_description_chars: 40}},
 	{id: "J", kind: "judge", prompt: "j.md", tools: ["Read"], input_files: ["notes.md", "f-new.json"], timeout: 30}];
 {
 	notes_repo: $repo, timezone: "UTC", files: ["notes.md"],
@@ -77,7 +77,7 @@ issue() { # key created assignee description
 }
 {
 	issue ABC-1 "$(iso $((NOW - 3600)))" "Test User" "Set up the thing."
-	issue ABC-2 "$(iso $((NOW - 1800)))" "" "Ask Test User about the plan."
+	issue ABC-2 "$(iso $((NOW - 1800)))" "" "Context paragraph long enough to pass the cut. Notes: ask Test User about the plan."
 	issue ABC-3 "$(iso $((NOW - 3 * 86400)))" "" "Older than the window."
 } | jq -cs '{issues: ., isLast: true}' > "$ROOT/issues.json"
 
@@ -127,7 +127,7 @@ assert_eq "the pass is ok" "0" "$rc"
 assert_eq "the judge gets the tickets created in the window, not the reply's" '["ABC-1","ABC-2"]' \
 	"$(jq -c '[.tickets[].key]' "$J_SEEN" 2> /dev/null)"
 assert_eq "each with its creator" '["Ada Other","Ada Other"]' "$(jq -c '[.tickets[].creator]' "$J_SEEN" 2> /dev/null)"
-assert_eq "the user's part is marked" '["assigned","mentioned"]' "$(jq -c '[.tickets[].user_part]' "$J_SEEN" 2> /dev/null)"
+assert_eq "the user's part is marked, a mention past the description cut included" '["assigned","mentioned"]' "$(jq -c '[.tickets[].user_part]' "$J_SEEN" 2> /dev/null)"
 assert_eq "coverage counts what came back and what was kept" "3 returned, 2 created in the window" \
 	"$(jq -r '.coverage' "$J_SEEN" 2> /dev/null)"
 assert_eq "the query the call ran was the runner's, in relative minutes" "true" \
