@@ -40,6 +40,7 @@ source "$DESK_RUN_DIR/desk-lib/ticket-cache.sh"
 source "$DESK_RUN_DIR/desk-lib/steps.sh"
 source "$DESK_RUN_DIR/desk-lib/retention.sh"
 source "$DESK_RUN_DIR/desk-lib/ticket-digest.sh"
+source "$DESK_RUN_DIR/desk-lib/ticket-search.sh"
 
 pass="${1:-}"
 if [ -z "$pass" ]; then
@@ -388,6 +389,7 @@ for ((i = 0; i < steps_len; i++)); do
 				desk_log "$pass" "$id: ticket_digest has no jql — no ticket digest"
 				ticket_digest_cfg=""
 			fi
+			ticket_search_cfg="$(desk_ticket_search_config "$step_json")"
 			if desk_fetch_already_done "$pass" "$scheduled_date" "$id"; then
 				desk_fetch_cache_restore "$pass" "$scheduled_date" "$id"
 				result="ok"
@@ -426,7 +428,15 @@ $(git -C "$repo" show "HEAD:$f" 2> /dev/null)"
 					placeholders="$(jq -c --argjson d "$(desk_ticket_digest_window "$id" "$ticket_digest_cfg" \
 						"$gmail_window_start" "$gmail_window_end")" '. + $d' <<< "$placeholders")"
 				fi
+				if [ -n "$ticket_search_cfg" ]; then
+					placeholders="$(jq -c --argjson d "$(desk_ticket_search_window "$id" "$ticket_search_cfg" \
+						"$gmail_window_start" "$gmail_window_end")" '. + $d' <<< "$placeholders")"
+				fi
 				result="$(desk_step_fetch "$pass" "$step_json" "" "$placeholders" "" "" "$scheduled_date")"
+				if [ "$result" = "ok" ] && [ -n "$ticket_search_cfg" ]; then
+					desk_ticket_search_collect "$pass" "$id" "$ticket_search_cfg" \
+						"$(jq -r '(.tools // [])[0] // empty' <<< "$step_json")" || result="failed"
+				fi
 				if [ "$result" = "ok" ] && [ -n "$ticket_digest_cfg" ]; then
 					desk_ticket_digest_collect "$pass" "$id" "$ticket_digest_cfg" \
 						"$(jq -r '(.tools // [])[0] // empty' <<< "$step_json")" || result="failed"

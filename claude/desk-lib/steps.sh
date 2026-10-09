@@ -362,7 +362,13 @@ desk_seed_named_file() {
 				done
 			fi
 			text=""
-			[ -n "$step_id" ] && text="$(desk_extract_final_text "$pass_scratch/${step_id}-stream.jsonl" 2> /dev/null)"
+			# A ticket search step's file is the runner's own reading of
+			# its raw result (desk_ticket_search_collect), not the reply.
+			if [ -n "$step_id" ] && [ -s "$pass_scratch/${step_id}-ticket-search.jsonl" ]; then
+				text="$(cat "$pass_scratch/${step_id}-ticket-search.jsonl")"
+			elif [ -n "$step_id" ]; then
+				text="$(desk_extract_final_text "$pass_scratch/${step_id}-stream.jsonl" 2> /dev/null)"
+			fi
 			if [ -n "$text" ] && jq -e . > /dev/null 2>&1 <<< "$text"; then
 				printf '%s' "$text" > "$dest_dir/$name"
 			else
@@ -643,11 +649,11 @@ desk_step_model_call() {
 		tools_arg="$(jq -r '(.tools // []) | map(select(startswith("mcp__") | not)) | join(",")' <<< "$step_json")"
 		tools_args=(--tools "$tools_arg")
 	fi
-	# A ticket digest's search result is far past Claude Code's output
-	# limit, so it reaches the stream only as a saved file, copied out here
-	# for desk_ticket_digest_collect.
+	# A ticket digest's or ticket search's result can be past Claude Code's
+	# output limit, so it reaches the stream only as a saved file, copied out
+	# here for desk_ticket_digest_collect and desk_ticket_search_collect.
 	local spill_dir=""
-	jq -e '.ticket_digest' > /dev/null 2>&1 <<< "$step_json" && spill_dir="$PASS_SCRATCH/${id}-spill"
+	jq -e '.ticket_digest or .ticket_search' > /dev/null 2>&1 <<< "$step_json" && spill_dir="$PASS_SCRATCH/${id}-spill"
 	local rc
 	desk_call_model \
 		--scratch "$call_scratch" \

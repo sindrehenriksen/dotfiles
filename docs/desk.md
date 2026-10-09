@@ -144,7 +144,7 @@ A judge, close or retention step whose `tools` include `Read` gets it narrowed t
 | Kind | What it does | Kind-specific keys |
 |---|---|---|
 | `commit_push` | Commits the configured files exactly as they are on disk, only when `HEAD` is `main` with no rebase or merge in progress; records suggestions now in `HEAD` as taken; pushes if `push_enabled`. Never pulls, merges, rebases or force-pushes. | none |
-| `fetch` | One model call. A failure flags the pass `partial` instead of stopping it; a later slot the same scheduled date reruns only the fetches that failed, reusing the ones that succeeded. If its id is `ticket_status_step_id`, it gets `{{jql}}` and its `ticket_search_tool` results become the ticket cache. | `ticket_digest` (optional): the step also runs the [ticket digest](#the-ticket-digest)'s query |
+| `fetch` | One model call. A failure flags the pass `partial` instead of stopping it; a later slot the same scheduled date reruns only the fetches that failed, reusing the ones that succeeded. If its id is `ticket_status_step_id`, it gets `{{jql}}` and its `ticket_search_tool` results become the ticket cache. | `ticket_digest` (optional): the step also runs the [ticket digest](#the-ticket-digest)'s query; `ticket_search` (optional): the step runs the [ticket search](#the-ticket-search)'s query, and its `<id>.json` is the runner's reading of the result |
 | `judge` | Seeds its input files, makes one call, validates the reply, caps tiered items and builds the proposal. A reply that is not the items shape fails the pass. | `input_files` (default: all eight names listed below) |
 | `write` | A pinned single-tool write, currently built around one case: removing a label (`pinned_label`) from mail threads. It removes the label from exactly the threads the `mail_fetch_step_id` step's digest search returned and that step then opened: a call of that step other than the search named the thread's id in its arguments and got a result that was not an error. A thread judged from its search snippet alone stays unread, and the log names it by subject. The deny hook refuses any call whose arguments are not one of those pinned `{threadId, labelIds}` pairs, and the runner fails the pass if the ids acted on, counting only calls whose result came back without an error, differ from the pinned set. Refuses outright if that fetch failed, its search query was not exactly `{{digest_query}}`, or the search's result was neither a `threads` list nor `{}` (no match). | `pinned_label` (default `UNREAD`); `tools`: exactly one |
 | `capture` | No model call. Adds a line on top of the captures file (`captures_file`) for each recorded session that is live (`running`) or left open, its last run stopped without a deliberate end (`dropped`, the reader's `left_open`; see "How a session ended" under [How it works](#how-it-works)), once per session and kind. A session you named that is already mentioned in your notes is skipped; an unnamed one is labelled `<auto title> · <first 8 chars of its id>`. | none |
@@ -188,6 +188,7 @@ A prompt is plain text with `{{name}}` placeholders, filled in one pass; a place
 | `capped`, `near_misses` | the follow-up summary and status | what the pass held back, each a JSON array, `[]` when empty: items over the caps (`tier`, `headline`, `source`, and for a judge's `file`, `kind`, `after`), and the judge's `near_misses` |
 | `deletion_date`, `days_left` | retention | `YYYY-MM-DD` the transcript can be deleted from (today when already due), and the whole days until then |
 | `ticket_digest_jql`, `ticket_digest_fields` | a fetch step with `ticket_digest` | the digest's query, which the call must run character for character, and the fields to ask for |
+| `ticket_search_jql`, `ticket_search_fields` | a fetch step with `ticket_search` | the ticket search's query, which the call must run character for character, and the fields to ask for |
 
 A close prompt gets only `scratch`, `today`, `session_name` and `session_id`; a retention prompt gets those plus `deletion_date` and `days_left`; a follow-up summary or status prompt gets `pass`, `today`, `run_status`, `items`, `item_count`, `open_note`, `capped`, `near_misses` and `dropped`. The summary runs as a turn of the session it summarises, so it has that conversation and no input files; the status prompt is the first turn of an interactive session, with the user's own permissions, like the follow-up tab itself.
 
@@ -199,7 +200,7 @@ A close prompt gets only `scratch`, `today`, `session_name` and `session_id`; a 
 |---|---|
 | each name in `files` (`notes.md`, `reading.md`) | the committed file, with each line you took from a suggestion suffixed `  <<agent-suggested>>` |
 | `sources.json` | the sources file |
-| `f-private.json`, `<id>.json` (e.g. `f-web.json`) | those fetch replies, `{}` when absent or invalid (`f-` names) |
+| `f-private.json`, `<id>.json` (e.g. `f-web.json`) | those fetch replies, `{}` when absent or invalid (`f-` names); for a step with `ticket_search`, the runner's `{window, tickets, coverage}` instead ([The ticket search](#the-ticket-search)) |
 | `tickets.json` | `[{key, summary, status, previous_status}]` for tickets whose status changed since the last check |
 | `sessions.json` | `[{name, status}]` from the reader |
 | `open-items.json` | suggestions still waiting on you, in the item shape below, with their runner-assigned ids |
@@ -327,6 +328,22 @@ A fetch step with a `ticket_digest` key runs the digest's query beside its own w
 | `max_window_days` | `4` | The window's floor. |
 | `max_entries`, `max_changes` | `25`, `6` | The caps on what the judge gets. |
 | `pr_limit` | `200` | PRs listed per repo; a listing that reaches it is logged as cut short. |
+
+## The ticket search
+
+The ticket search lists the tickets created in the pass's window, for the judge to weigh as new work. A fetch step with a `ticket_search` key gets `{{ticket_search_jql}}` and `{{ticket_search_fields}}`; its prompt tells the call to run that query exactly, paging until no page says more follow, and to leave the result alone. As with the ticket digest, the runner, not the model, reads the result: a result past Claude Code's output limit reaches the stream only as a saved file, which the call cannot open and the runner reads through the call's spill directory. The step's reply is not used.
+
+The query is the configured `jql` with `AND created >= -<minutes>m` added, five minutes wider than the window, so the ticket tracker's own time zone never shifts it; the runner then keeps the tickets created in the window exactly. The window reaches back at most `max_window_days`, and the coverage line says when it was cut. The step's `<id>.json` (`f-tickets.json` for id `F-tickets`) is `{window: {since, until}, tickets, coverage}`: each ticket as `key`, `summary`, `type`, `status`, `creator`, `assignee`, `priority`, `created`, `parent` (`{key, summary}`), `labels` and `description` (cut at `max_description_chars`), with `user_part` `assigned` or `mentioned` when one of the `self` names is its assignee or appears in its summary or description. A ticket is cited as `ticket:<KEY>`.
+
+When the query did not come back whole (no result, one that cannot be read, or a last page saying more follow), the step fails as a source: the pass reads `partial` with the step among its failed sources, the follow-up summary is told, and the judge still gets the file, with no tickets and a `coverage` starting `FAILED:`, so new tickets read as unchecked rather than none.
+
+| Key (under `ticket_search`) | Default | Meaning |
+|---|---|---|
+| `jql` | required | The tickets to list, e.g. `project = ABC AND creator != currentUser()`. |
+| `fields` | `summary`, `status`, `issuetype`, `creator`, `assignee`, `created`, `parent`, `labels`, `priority`, `description` | Passed to the prompt as `{{ticket_search_fields}}`. |
+| `self` | `[]` | The user's names, for `user_part`. |
+| `max_window_days` | `4` | How far back the query reaches at most. |
+| `max_description_chars` | `1500` | Where a description is cut. |
 
 ## Review keys
 

@@ -83,6 +83,7 @@ BASH_SUITES=(
 	nvim/tests/desk-supersede-test.sh
 	nvim/tests/desk-ticket-cache-test.sh
 	nvim/tests/desk-ticket-digest-test.sh
+	nvim/tests/desk-ticket-search-test.sh
 	nvim/tests/desk-timeout-test.sh
 	nvim/tests/desk-url-allowlist-test.sh
 	nvim/tests/desk-validate-test.sh
