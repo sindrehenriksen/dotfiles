@@ -13,6 +13,7 @@ macOS only: tabs open in Ghostty through Hammerspoon, and passes run from launch
 - **Sessions** suggest notes changes the same way, with `desk-propose`; they edit your notes directly only when you ask for that edit.
 - **Follow tickets** by saying "follow this epic" in the session that works on it. The follow pass then sends that session the news, and the session rings the bell (🔔 in its tab title) only when you're needed.
 - **Ending a session:** Ctrl+C twice or `/exit` marks it done. Closing its tab leaves it open, so it is reopened after a restart (ask for "reopen my sessions"). A pass with a `close` step ends a session left idle for days the same way, after staging a note on where it stood, and closes its tab when it can tell which one it is. `␣gx` on a session name in your notes jumps to its tab or resumes it.
+- **Mail**, when the instance has a [mail triage](#mail-triage): automated noise is trashed by fixed rules, and the follow-up tab lists mail that looks finished with and trashes it only when you say yes.
 - **When something looks off:** the bar above your notes shows each pass's last result; the logs are in `~/.local/state/desk/logs/`.
 
 Everything below is reference: how it works, and every setting.
@@ -97,7 +98,7 @@ Any headless `claude -p` started outside desk (a script, a CI-style helper) reco
 | `mail_fetch_step_id` | required | Id of the fetch step that searches mail; its reply becomes `f-private.json` (besides the generic `<id>.json` below). |
 | `passes` | required | Pass name → pass object. |
 | `push_enabled` | `false` | Push the notes repo after committing. Off: status reads `push: disabled`. |
-| `dry_run` | `true` | The write step logs the ids it would act on and makes no call. |
+| `dry_run` | `true` | The write step logs the ids it would act on (digests to mark read, noise to trash) and makes no call; the follow-up tab is told each mail it would trash. |
 | `log_only` | `true` | The close step queues its closure notes and never ends a session. |
 | `close_after_working_days` | `3` | Idle threshold for closing, in Mon–Fri days since your last message in that session. |
 | `keep_open` | `[]` | Session names never closed. |
@@ -111,6 +112,7 @@ Any headless `claude -p` started outside desk (a script, a CI-style helper) reco
 | `digest_gmail_label` | `Digest` | The label in `{{digest_query}}`, as the mail search tool matches it in `label:`. Check it with a search: the Gmail connector's own description says it takes label IDs, but in use it matches the display name. |
 | `gmail_window_lookback_secs` | `172800` | Fetch window on a pass's first run; afterwards the window starts where the last fully successful fetch ended. A retry that reuses an earlier slot's fetch ends where that fetch's window did, so nothing between the two slots is skipped. |
 | `slack_workspace_url` | none | When set, a Slack message found in a fetch's raw calls also allows its rebuilt permalink (`<url>/archives/<channel>/p<ts without the dot>`) as a source, since a Slack result carries no permalink. The channel comes from the call's own `channel_id` argument, the ts from the result (a `Message TS:` line, or a JSON `ts`) or a thread call's `message_ts`. A window bound (`oldest`, `latest`) is never a message. |
+| `follow_up_settings` | none | A settings file (relative to the config's directory) a follow-up tab and its status session start with as `--settings`, on top of your own. A tab that offers to trash mail needs the trash tool on `ask` there: under auto mode an unlisted tool is left to the classifier. A configured file that is missing is logged and left out. |
 
 The five required tool and step-id fields have no defaults on purpose: this repo cannot ship an instance's tool names. An instance without mail or tickets still sets them, to ids no step uses, as the example does.
 
@@ -149,7 +151,7 @@ A judge, close or retention step whose `tools` include `Read` gets it narrowed t
 | `commit_push` | Commits the configured files exactly as they are on disk, only when `HEAD` is `main` with no rebase or merge in progress; records suggestions now in `HEAD` as taken; pushes if `push_enabled`. Never pulls, merges, rebases or force-pushes. | none |
 | `fetch` | One model call. A failure flags the pass `partial` instead of stopping it; a later slot the same scheduled date reruns only the fetches that failed, reusing the ones that succeeded. If its id is `ticket_status_step_id`, it gets `{{jql}}` and its `ticket_search_tool` results become the ticket cache. | `ticket_digest` (optional): the step also runs the [ticket digest](#the-ticket-digest)'s query; `ticket_search` (optional): the step runs the [ticket search](#the-ticket-search)'s query, and its `<id>.json` is the runner's reading of the result |
 | `judge` | Seeds its input files, makes one call, validates the reply, caps tiered items and builds the proposal. A reply that is not the items shape fails the pass. | `input_files` (default: all eight names listed below) |
-| `write` | A pinned single-tool write, built around one case: removing a label (`pinned_label`) from mail threads. It acts on exactly the threads the `mail_fetch_step_id` step's digest search returned and that step then opened (another call named the thread's id and got a result that was not an error); a thread judged from its snippet alone stays unread, and the log names it. The deny hook refuses any call that is not one of those pinned `{threadId, labelIds}` pairs, and the pass fails if the ids acted on (calls that came back without an error) differ from the pinned set. Refuses outright if that fetch failed, its search query was not exactly `{{digest_query}}`, or the result was neither a `threads` list nor `{}`. | `pinned_label` (default `UNREAD`); `tools`: exactly one |
+| `write` | A pinned write on mail threads. It removes a label (`pinned_label`) from exactly the threads the `mail_fetch_step_id` step's digest search returned and that step then opened (another call named the thread's id and got a result that was not an error); a thread judged from its snippet alone stays unread, and the log names it. When the pass has a [mail triage](#mail-triage) and `tools` holds its `trash_tool`, it also trashes exactly the threads the triage sorted as noise. The deny hook refuses any call whose input is not one of that tool's pinned set (`{threadId, labelIds}` per digest, `{threadId}` per noise thread), and the pass fails if the ids a tool acted on (calls that came back without an error) differ from its pinned set. With nothing to act on, no call is made. Refuses outright if the digest fetch failed, its search query was not exactly `{{digest_query}}`, or the result was neither a `threads` list nor `{}`. | `pinned_label` (default `UNREAD`); `tools`: the unlabel tool, plus the triage's trash tool |
 | `capture` | No model call. Adds a line on top of the captures file for each recorded session that is live (`running`) or left open (`dropped`, the reader's `left_open`; see "How a session ended" under [How it works](#how-it-works)), once per session and kind. A named session the notes already mention is skipped; an unnamed one is labelled `<auto title> · <first 8 chars of its id>`. | none |
 | `close` | For each live session idle at least `close_after_working_days` and not in `keep_open`: one call over the end of its transcript, whose closure note goes into the proposal; then, unless `log_only` or past `max_closes`, a fresh re-check that it is still live and idle, and `close-session.sh` ([Closing a session and its tab](#how-it-works)): the close recorded, `SIGTERM`, the tab closed only when identified for certain. The run status says `closed, tab closed` or `closed, tab left (not identified)` per session. A survivor is recorded as a failed close and not retried. | `cap`: transcript lines (default `200`) |
 | `retention` | Warns before Claude Code deletes a transcript the notes still need. Selects every session the committed notes name (by name, id or an 8+ character id prefix) that is not live, not a `desk-run` session and not ended as done (`end_deliberate`, other than a close by a pass, which leaves the work unfinished), whose transcript under `$CLAUDE_CONFIG_DIR/projects` is due for deletion within `retention_warn_days`. Per session, soonest first, one call over the end of its transcript (the call `close` makes) whose item moves the session's entry to the top of the notes, or adds its name there, with where it stood and the deletion date. Items are tier `act`, capped under the pass's `caps` before any call is made. A warning already proposed, taken or declined for the same session and date is not repeated. Nothing writes to a session, since a write would reset the transcript's clock. | `cap`: transcript lines (default `200`) |
@@ -190,12 +192,14 @@ A prompt is plain text with `{{name}}` placeholders, filled in one pass; a place
 | `sources` | fetch, judge, write | the whole sources file |
 | `jql` | the `ticket_status_step_id` fetch | `key in (...)` over every ticket key the notes mention |
 | `caps` | judge | e.g. `ACT ≤3, worth knowing ≤3, wildcard ≤1` |
-| `thread_ids` | write | the pinned ids, one per line |
+| `thread_ids`, `trash_thread_ids` | write | the pinned digest ids to mark read, and the noise ids to trash, one per line |
+| `mail_triage_query`, `mail_triage_page_size` | a fetch step with `mail_triage` | the listing query, which the call must run character for character, and the page size to ask for |
 | `session_name`, `session_id` | close, retention | the session being closed or warned about |
 | `pass`, `run_status` | the follow-up summary and status | the pass's name, and a paragraph on how its run went: its steps, and whether all ran, which sources failed, or where it stopped, then a sentence from each step that ran without acting (the write step under `dry_run`, the close step under `log_only` or past `max_closes`, digest threads the write left unread because the fetch never opened them) |
 | `items`, `item_count`, `open_note` | the follow-up summary and status | the pass's own staged items as a JSON array (`file`, `kind`, `headline`, `tier`, `source`, `before`, `after`, and a closure note's `capture_kind`, `would_close` for a session left open), how many, and a line about older items still waiting, or empty |
 | `dropped` | the follow-up summary and status | the items the runner threw out because their URL `source` was in no fetch result, a JSON array (`headline`, `source`, `tier`), `[]` when none were |
 | `capped`, `near_misses` | the follow-up summary and status | what the pass held back, each a JSON array, `[]` when empty: items over the caps (`tier`, `headline`, `source`, and for a judge's `file`, `kind`, `after`), and the judge's `near_misses` |
+| `mail_noise`, `mail_offer` | the follow-up summary and status | the [mail triage](#mail-triage)'s noise as the write step acted on it, `{action, threads: [{from, subject, rule}], held_over_cap}` with `action` `trashed` or `would_trash` (`{}` when it trashed nothing), and the mail the judge offers for trashing, `[{thread_id, from, subject, date, why}]` (`[]` when none) |
 | `deletion_date`, `days_left` | retention | `YYYY-MM-DD` the transcript can be deleted from (today when already due), and the whole days until then |
 | `ticket_digest_jql`, `ticket_digest_fields` | a fetch step with `ticket_digest` | the digest's query, which the call must run character for character, and the fields to ask for |
 | `ticket_search_jql`, `ticket_search_fields` | a fetch step with `ticket_search` | the ticket search's query, which the call must run character for character, and the fields to ask for |
@@ -215,12 +219,13 @@ A close prompt gets only `scratch`, `today`, `session_name` and `session_id`, an
 | `sessions.json` | `[{name, status}]` from the reader |
 | `open-items.json` | suggestions still waiting on you, in the item shape below, with their runner-assigned ids |
 | `ticket-digest.json` | the [ticket digest](#the-ticket-digest), `{}` when its step failed |
+| `inbox.json` | the [mail triage](#mail-triage)'s candidates, `{coverage, threads}`, `{}` when the pass has none or its listing failed |
 | `declined.json` | the 50 suggestions you most recently declined, same shape; a declined suggestion is also blocked by content (file, kind, target, normalised before/after), so a regenerated copy under a new id is dropped even without a URL source |
 | an object `{name, path, sections}` in `input_files` | the file at `path` (relative to the config's directory), seeded as `name`, a plain file name. With `sections`, a list of Markdown heading texts, only those sections: each from its heading to the next at its level or above, in the file's order. A missing file, or a heading not found, is logged and left out. |
 
 A close or retention call's cwd holds `session.json` (its reader entry), `transcript-tail.jsonl` and the captures file (`notes.md` by default).
 
-**The reply** of a judge, close or retention call is its final message: one JSON object `{"items": [...]}` (a bare array is accepted too), nothing else. A judge's object may also carry `near_misses`, `[{"headline", "why_not"}]`: candidates it judged just below the bar. The runner keeps at most five, as one-line plain text, for the follow-up summary; they are never proposed.
+**The reply** of a judge, close or retention call is its final message: one JSON object `{"items": [...]}` (a bare array is accepted too), nothing else. A judge's object may also carry `near_misses`, `[{"headline", "why_not"}]`: candidates it judged just below the bar. The runner keeps at most five, as one-line plain text, for the follow-up summary; they are never proposed. It may carry `mail_cleanup`, `[{"thread_id", "why"}]`: threads from `inbox.json` it judges no longer useful, which are only offered ([Mail triage](#mail-triage)).
 
 | Field | Meaning |
 |---|---|
@@ -361,6 +366,27 @@ When the query did not come back whole (no result, one that cannot be read, or a
 | `max_window_days` | `4` | How far back the query reaches at most. |
 | `max_description_chars` | `1500` | Where a description is cut. |
 
+## Mail triage
+
+A fetch step with a `mail_triage` key lists the mailbox with one query, and the runner sorts every thread it lists, by rules, with no model deciding:
+
+- **Noise**: every message in the thread matches one of the `noise` rules, the same rule throughout. The write step trashes these, up to `max_trash` a pass in listing order, newest first; the rest wait for the next pass. Each one is logged with its sender, subject and rule, and the follow-up tab is told every one, as trashed or, under `dry_run`, as what would be.
+- **Protected**, never trashed or offered, whatever a rule says: a starred thread; an invitation (`invitation_subject`) whose event is today or later or names no date, since it may still want a reply; a thread the listing showed only part of (`messageCount` above the messages it carried); and, among the rest, one where a person wrote (a sender neither in `self` nor matching `automated_senders`) and the newest message is not the user's.
+- **Candidates**: what is left of the inbox (threads without the `INBOX` label are only ever noise or left alone). The judge reads them as `inbox.json` and may list the ones it judges no longer useful in its reply's `mail_cleanup`; the runner keeps those naming a candidate, at most `max_offer`, and the follow-up tab offers to trash them. Nothing in the pass trashes them: the tab's session does, on the user's yes, which is why its `follow_up_settings` keep the trash tool on `ask`.
+
+An event's date is read from the subject after its last ` @ `, in either `Fri 9 Oct 2026` or `Oct 9, 2026` order; with several, the latest counts, and an event is past only when that date is before today. Results count only from calls whose query is exactly the configured one, read by the runner ([runner-read results](#runner-read-results)), so a page too large for the call is still sorted, though the call cannot page past it. A listing cut short (its last page names another) is sorted as far as it got and the run status says so; one that did not come back fails the step as a source, and nothing is trashed.
+
+| Key (under `mail_triage`) | Default | Meaning |
+|---|---|---|
+| `query` | required | The listing, e.g. `in:inbox OR label:"Digest"`. Its prompt runs it exactly, paging to the end. |
+| `page_size` | `20` | `{{mail_triage_page_size}}`. Small enough that a page fits in the call's output, so it can see the next page's token. |
+| `trash_tool` | the Gmail connector's `trash_thread` | The write step trashes with it only when it is among that step's `tools`. |
+| `self` | `[]` | The user's addresses, matched exactly, case-insensitively. |
+| `automated_senders` | no-reply, notification and mailer-daemon addresses | Regexes, case-insensitive, for senders that are not a person. |
+| `invitation_subject` | `^(updated )?invitation( with note)?:` | Regex, case-insensitive. |
+| `noise` | `[]` | Rules, `{name, from, subject, read, past_event}`: `from` and `subject` regexes (case-insensitive) on each message's sender address and subject, `read: true` for a thread with nothing unread, `past_event: true` for an event before today. Every condition given must hold, and a rule needs `from` or `subject`. |
+| `max_trash`, `max_offer` | `100`, `25` | Per pass. |
+
 ## Review keys
 
 In a notes buffer:
@@ -443,7 +469,7 @@ The list holds one Perl regex per line (`#` comments), matched case-insensitivel
 
 ## Dry-running a new instance
 
-The defaults are the safe side of every outward-facing switch: `dry_run` (no write call), `log_only` (no session ended) and `push_enabled` off. Fetch and judge calls are real model calls even then, `follow_up_step` makes one more for its summary turn, and it and `open_tab` open real tabs.
+The defaults are the safe side of every outward-facing switch: `dry_run` (no write call, so no mail marked read or trashed), `log_only` (no session ended) and `push_enabled` off. Fetch and judge calls are real model calls even then, `follow_up_step` makes one more for its summary turn, and it and `open_tab` open real tabs.
 
 - **Offline**, to check the config and prompts: point `DESK_CLAUDE_BIN` at a stub that prints a stream-json result, `DESK_OPEN_TAB_BIN` and `DESK_FOCUS_TAB_BIN` at stubs, and `DESK_STATE_DIR` and `CLAUDE_SESSION_STORE` at a temp directory, then `DESK_CONFIG=… desk-run <pass>`. `nvim/tests/desk-example-instance-test.sh` is a worked version, and checks that every placeholder a prompt uses is one the runner fills.
 - **Live, without side effects**, against a copy: clone the notes repo to a temp path, point `notes_repo` at the clone in a copy of the config, and run each pass by hand with `DESK_STATE_DIR` set to a temp directory so the real status file, ledger and caches stay untouched. Read the log and `status.json`, then `<leader>gR` in the clone.

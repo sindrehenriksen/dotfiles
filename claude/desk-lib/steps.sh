@@ -342,6 +342,14 @@ desk_seed_named_file() {
 			if [ -s "$digest_file" ]; then cp -f "$digest_file" "$dest_dir/ticket-digest.json"
 			else echo '{}' > "$dest_dir/ticket-digest.json"; fi
 			;;
+		inbox.json)
+			# The mail triage's candidates (desk-lib/mail-triage.sh).
+			local triage
+			triage="$(desk_mail_triage_file "$(jq -r '.pass_scratch // empty' <<< "$ctx_json")" \
+				"$(jq -c '.pass_config // {}' <<< "$ctx_json")")"
+			if [ -n "$triage" ]; then desk_mail_triage_judge_file "$triage" "$dest_dir/inbox.json"
+			else echo '{}' > "$dest_dir/inbox.json"; fi
+			;;
 		*.json)
 			# A fetch step's reply is seeded as <lowercased step id>.json.
 			# The mail step additionally answers to f-private.json (its id
@@ -649,11 +657,11 @@ desk_step_model_call() {
 		tools_arg="$(jq -r '(.tools // []) | map(select(startswith("mcp__") | not)) | join(",")' <<< "$step_json")"
 		tools_args=(--tools "$tools_arg")
 	fi
-	# A ticket digest's or ticket search's result can be past Claude Code's
-	# output limit, so it reaches the stream only as a saved file, copied out
-	# here for desk_ticket_digest_collect and desk_ticket_search_collect.
+	# A ticket digest's, ticket search's or mail triage's result can be past
+	# Claude Code's output limit, so it reaches the stream only as a saved
+	# file, copied out here for the runner's own reading of it.
 	local spill_dir=""
-	jq -e '.ticket_digest or .ticket_search' > /dev/null 2>&1 <<< "$step_json" && spill_dir="$PASS_SCRATCH/${id}-spill"
+	jq -e '.ticket_digest or .ticket_search or .mail_triage' > /dev/null 2>&1 <<< "$step_json" && spill_dir="$PASS_SCRATCH/${id}-spill"
 	local rc
 	desk_call_model \
 		--scratch "$call_scratch" \
@@ -1517,7 +1525,7 @@ desk_open_follow_up_tab() {
 		desk_log "$pass" "follow-up tab: no plain-language summary added — opening on the step's own reply"
 	fi
 
-	command="claude --resume $(desk_shq "$id")"
+	command="claude --resume $(desk_shq "$id")$(desk_follow_up_settings_arg "$pass")"
 	if "$helper" "$command" "$id" "$cwd" background > /dev/null 2>&1; then
 		desk_mark_opened_for_user "$cwd"
 		desk_log "$pass" "follow-up tab: opened $follow_up_step ($id) in $cwd"
@@ -1540,9 +1548,12 @@ desk_follow_up_run_status() {
 	# Each step as "<id> (<what it does>)", so a reply can name it in words.
 	steps="$(jq -r --arg p "$pass" '
 		.ticket_status_step_id as $t | .mail_fetch_step_id as $m
+		| any(.passes[$p].steps[]?; .kind == "fetch" and .mail_triage) as $triage
 		| [.passes[$p].steps[]? | .id + " (" + (
 			if .id == $t then "ticket status check"
 			elif .id == $m then "mail and chat fetch"
+			elif .mail_triage then "mailbox listing for mail triage"
+			elif .kind == "write" and $triage then "mail triage: marking the fetched digests read and trashing automated mail"
 			else {commit_push: "commit of the notes", fetch: "fetch", judge: "judge, which proposes the suggestions",
 				write: "marking the fetched mail read", capture: "session capture", close: "closing idle sessions",
 				retention: "transcript deletion warnings", open_tab: "tab"}[.kind] // .kind end) + ")"]
@@ -1582,8 +1593,27 @@ desk_follow_up_status_command() {
 	local placeholders
 	placeholders="$(desk_follow_up_placeholders "$pass" "$scheduled_date" "$repo")"
 	desk_render_prompt "$prompt_path" "$placeholders" > "$dir/prompt.txt" || return 1
-	printf 'claude -n %s -- "$(cat %s)"' \
-		"$(desk_shq "desk-$pass-$scheduled_date-status")" "$(desk_shq "$dir/prompt.txt")"
+	printf 'claude -n %s%s -- "$(cat %s)"' \
+		"$(desk_shq "desk-$pass-$scheduled_date-status")" "$(desk_follow_up_settings_arg "$pass")" \
+		"$(desk_shq "$dir/prompt.txt")"
+}
+
+# desk_follow_up_settings_arg <pass>: ` --settings <file>` for a follow-up
+# tab when the config names `follow_up_settings` (relative to it), so the
+# tab's permission rules can sit on top of the user's own: a tab that offers
+# to trash mail keeps the trash tool on ask, which auto mode would otherwise
+# leave to its classifier. Empty when none is configured; a configured file
+# that is missing is logged and left out rather than keeping the tab shut.
+desk_follow_up_settings_arg() {
+	local rel path
+	rel="$(jq -r '.follow_up_settings // empty' "$DESK_CONFIG" 2> /dev/null)"
+	[ -n "$rel" ] || return 0
+	path="$(desk_prompt_path "$rel")"
+	if [ ! -f "$path" ]; then
+		desk_log "$1" "follow-up tab: follow_up_settings not found ($path) — opening without it"
+		return 0
+	fi
+	printf ' --settings %s' "$(desk_shq "$path")"
 }
 
 # desk_follow_up_placeholders <pass> <scheduled_date> [<repo>]
@@ -1603,8 +1633,15 @@ desk_follow_up_placeholders() {
 	fi
 	# What the pass held back: items over the caps, and candidates the judge
 	# put just below the bar. Both are `[]` when there were none.
-	local capped='[]' near='[]' dropped='[]'
+	local capped='[]' near='[]' dropped='[]' mail_noise='{}' mail_offer='[]'
 	if [ -n "${PASS_SCRATCH:-}" ]; then
+		# The mail triage's noise as the write step acted on it (or, dry,
+		# would have), and what the judge offers for the user to trash.
+		mail_noise="$(cat "$PASS_SCRATCH/mail-noise.json" 2> /dev/null)"
+		jq -e 'type == "object"' > /dev/null 2>&1 <<< "$mail_noise" || mail_noise='{}'
+		mail_offer="$(cat "$PASS_SCRATCH/mail-offer.json" 2> /dev/null)"
+		jq -e 'type == "array"' > /dev/null 2>&1 <<< "$mail_offer" || mail_offer='[]'
+
 		capped="$(cat "$PASS_SCRATCH/capped.json" 2> /dev/null)"
 		jq -e 'type == "array"' > /dev/null 2>&1 <<< "$capped" || capped='[]'
 		near="$(cat "$PASS_SCRATCH/near-misses.json" 2> /dev/null)"
@@ -1614,6 +1651,7 @@ desk_follow_up_placeholders() {
 	fi
 	jq -c --arg prefix "$pass-$scheduled_date-" --arg today "$(date +%F)" --arg pass "$pass" \
 		--argjson capped "$capped" --argjson near "$near" --argjson dropped "$dropped" \
+		--argjson mail_noise "$mail_noise" --argjson mail_offer "$mail_offer" \
 		--arg run_status "$(desk_follow_up_run_status "$pass")" '
 		[.items[] | select(.id | startswith($prefix))] as $mine
 		| ((.items | length) - ($mine | length)) as $older
@@ -1629,7 +1667,9 @@ desk_follow_up_placeholders() {
 				else "" end),
 			capped: ($capped | tojson),
 			near_misses: ($near | tojson),
-			dropped: ($dropped | tojson)
+			dropped: ($dropped | tojson),
+			mail_noise: ($mail_noise | tojson),
+			mail_offer: ($mail_offer | tojson)
 		}' <<< "$open"
 }
 

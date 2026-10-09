@@ -296,7 +296,8 @@ assert_eq "a status session, then a later J the same day: still one tab" "1" "$(
 
 echo
 echo "=== what the pass held back reaches the summary prompt ==="
-held_lists() { awk '/^```json$/{getline; print}' "$PROMPT_COPY" | tail -2 | tr '\n' ' '; }
+# The prompt's JSON blocks: items, dropped, capped, near misses, then the mail triage's two.
+held_lists() { awk '/^```json$/{getline; print}' "$PROMPT_COPY" | sed -n '3,4p' | tr '\n' ' '; }
 PASS_SCRATCH="$ROOT/held-back-scratch"
 mkdir -p "$PASS_SCRATCH"
 seed_judge_session morning 2026-11-02 "aaaaaaaa-0000-4000-8000-000000000011" > /dev/null

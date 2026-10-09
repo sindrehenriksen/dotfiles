@@ -18,7 +18,9 @@
 # allowed tool call is still denied unless its own tool_input deep-equals
 # one array entry exactly (jq object equality, so key order never
 # matters) — never trusting the model to only ask for the ids it was told
-# about.
+# about. A call with more than one tool pins each separately: <file> is
+# then an object from tool name to that tool's array, and a tool missing
+# from it may make no call at all.
 #
 # `--ignore-keys <k1,k2>`: with `--pinned`, these keys are dropped from
 # tool_input before the comparison, for a field the tool takes that has no
@@ -108,7 +110,8 @@ if [ -n "$pinned_file" ]; then
 	fi
 	tool_input="$(printf '%s' "$input" | jq -c --arg ign "$ignore_keys" \
 		'(.tool_input // {}) | if $ign == "" then . else delpaths([$ign | split(",")[] | [.]]) end' 2>/dev/null)"
-	if ! jq -e --argjson want "$tool_input" 'any(.[]?; . == $want)' "$pinned_file" > /dev/null 2>&1; then
+	if ! jq -e --argjson want "$tool_input" --arg tool "$tool_name" \
+		'(if type == "object" then (.[$tool] // []) else . end) | any(.[]?; . == $want)' "$pinned_file" > /dev/null 2>&1; then
 		echo "desk deny-hook: '$tool_name' tool_input isn't one of the pinned set ($pinned_file)" >&2
 		exit 2
 	fi

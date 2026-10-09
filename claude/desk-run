@@ -41,6 +41,7 @@ source "$DESK_RUN_DIR/desk-lib/steps.sh"
 source "$DESK_RUN_DIR/desk-lib/retention.sh"
 source "$DESK_RUN_DIR/desk-lib/ticket-digest.sh"
 source "$DESK_RUN_DIR/desk-lib/ticket-search.sh"
+source "$DESK_RUN_DIR/desk-lib/mail-triage.sh"
 
 pass="${1:-}"
 if [ -z "$pass" ]; then
@@ -337,10 +338,10 @@ old_ticket_cache="$(cat "$DESK_TICKET_CACHE" 2> /dev/null)"
 jq -e . > /dev/null 2>&1 <<< "$old_ticket_cache" || old_ticket_cache='{}'
 pass_ctx="$(jq -n --arg repo "$repo" --arg sources_path "$sources_path" --arg pass_scratch "$PASS_SCRATCH" \
 	--arg scheduled_date "$scheduled_date" --argjson old_ticket_cache "$old_ticket_cache" \
-	--arg mail_fetch_step_id "$mail_fetch_step_id" '{
+	--arg mail_fetch_step_id "$mail_fetch_step_id" --argjson pass_config "$pass_config" '{
 		repo: $repo, sources_path: $sources_path, pass_scratch: $pass_scratch,
 		scheduled_date: $scheduled_date, old_ticket_cache: $old_ticket_cache,
-		mail_fetch_step_id: $mail_fetch_step_id
+		mail_fetch_step_id: $mail_fetch_step_id, pass_config: $pass_config
 	}')"
 
 overall_result="ok"
@@ -389,6 +390,7 @@ for ((i = 0; i < steps_len; i++)); do
 				ticket_digest_cfg=""
 			fi
 			ticket_search_cfg="$(desk_ticket_search_config "$step_json")"
+			mail_triage_cfg="$(desk_mail_triage_config "$step_json")"
 			if desk_fetch_already_done "$pass" "$scheduled_date" "$id"; then
 				desk_fetch_cache_restore "$pass" "$scheduled_date" "$id"
 				result="ok"
@@ -431,7 +433,14 @@ $(git -C "$repo" show "HEAD:$f" 2> /dev/null)"
 					placeholders="$(jq -c --argjson d "$(desk_ticket_search_window "$id" "$ticket_search_cfg" \
 						"$gmail_window_start" "$gmail_window_end")" '. + $d' <<< "$placeholders")"
 				fi
+				if [ -n "$mail_triage_cfg" ]; then
+					placeholders="$(jq -c --argjson d "$(desk_mail_triage_placeholders "$mail_triage_cfg")" '. + $d' <<< "$placeholders")"
+				fi
 				result="$(desk_step_fetch "$pass" "$step_json" "" "$placeholders" "" "" "$scheduled_date")"
+				if [ "$result" = "ok" ] && [ -n "$mail_triage_cfg" ]; then
+					desk_mail_triage_collect "$pass" "$id" "$mail_triage_cfg" \
+						"$mail_search_tool" "$today" || result="failed"
+				fi
 				if [ "$result" = "ok" ] && [ -n "$ticket_search_cfg" ]; then
 					desk_ticket_search_collect "$pass" "$id" "$ticket_search_cfg" \
 						"$(jq -r '(.tools // [])[0] // empty' <<< "$step_json")" || result="failed"
@@ -522,6 +531,16 @@ $(jq -r '(.entries // [])[] | .url // empty' "$PASS_SCRATCH/ticket-digest.json" 
 					capped="$(desk_apply_caps "$validated_json" "$caps_json")"
 					desk_record_capped "$(jq -c '.overflow' <<< "$capped")"
 					desk_near_misses "$final_text" > "$PASS_SCRATCH/near-misses.json"
+					# Mail the judge reads as no longer useful is only offered
+					# to the user in the follow-up tab, and only where it names
+					# a thread the triage handed it.
+					triage_file="$(desk_mail_triage_file "$PASS_SCRATCH" "$pass_config")"
+					if [ -n "$triage_file" ]; then
+						triage_step="$(jq -c '[.steps[] | select(.kind == "fetch" and .mail_triage)][0]' <<< "$pass_config")"
+						desk_mail_triage_offer "$final_text" "$triage_file" \
+							"$(desk_mail_triage_config "$triage_step" | jq -r '.max_offer')" > "$PASS_SCRATCH/mail-offer.json"
+						desk_log "$pass" "judge $id: offers $(jq 'length' "$PASS_SCRATCH/mail-offer.json") mail thread(s) as no longer useful"
+					fi
 					kept_json="$(jq -c '.kept' <<< "$capped")"
 					# This judge call's own overflow-by-tier — status.json's
 					# `proposal.overflow` (nvim/lua/desk/status.lua's own
@@ -621,10 +640,59 @@ $(jq -r '(.entries // [])[] | .url // empty' "$PASS_SCRATCH/ticket-digest.json" 
 				done < <(jq -r '.[] | .id + "\t" + .subject' <<< "$ids_subjects")
 
 				pinned_label="$(jq -r '.pinned_label // "UNREAD"' <<< "$step_json")"
-				pinned_args_json="$(jq -c --arg l "$pinned_label" \
+				digest_pins="$(jq -c --arg l "$pinned_label" \
 					'[.[] | {threadId: .id, labelIds: [$l]}]' <<< "$ids_subjects")"
 				thread_ids_text="$(jq -r '.[].id' <<< "$ids_subjects")"
-				placeholders="$(jq -c --arg t "$thread_ids_text" '. + {thread_ids: $t}' <<< "$common_placeholders")"
+
+				# The mail triage's noise, trashed here: exactly the threads
+				# its listing sorted as noise by the instance's rules
+				# (desk-lib/mail-triage.sh), never a model's choice. Only when
+				# this step holds the triage's trash tool, and only from a
+				# listing this pass made.
+				trash_tool="" trash_json="[]" noise_held=0
+				triage_step="$(jq -c '[.steps[] | select(.kind == "fetch" and .mail_triage)][0] // empty' <<< "$pass_config")"
+				if [ -n "$triage_step" ]; then
+					trash_tool="$(desk_mail_triage_config "$triage_step" | jq -r '.trash_tool // empty')"
+					triage_file="$(desk_mail_triage_file "$PASS_SCRATCH" "$pass_config")"
+					if ! jq -e --arg t "$trash_tool" '(.tools // []) | index($t) != null' > /dev/null 2>&1 <<< "$step_json"; then
+						desk_log "$pass" "$id: $trash_tool is not among its tools — trashing nothing"
+						trash_tool=""
+					elif [ -z "$triage_file" ]; then
+						desk_log "$pass" "$id: no mail triage listing this pass — trashing nothing"
+					else
+						trash_json="$(jq -c '.noise' "$triage_file")"
+						noise_held="$(jq -r '.noise_held // 0' "$triage_file")"
+					fi
+				fi
+				n_trash="$(jq 'length' <<< "$trash_json")"
+				while IFS=$'\t' read -r tid from subj rule; do
+					[ -n "$tid" ] || continue
+					desk_log "$pass" "$id: would trash $tid ($rule) from $from: $subj"
+				done < <(jq -r '.[] | [.id, .from, .subject, .rule] | @tsv' <<< "$trash_json")
+				unlabel_tool="$(jq -r --arg t "$trash_tool" '[(.tools // [])[] | select(. != $t)][0] // empty' <<< "$step_json")"
+				if [ -n "$trash_tool" ]; then
+					# Pinned per tool, so neither tool can be called with the
+					# other's arguments (deny-unlisted-tool.sh).
+					pinned_args_json="$(jq -cn --arg u "$unlabel_tool" --arg t "$trash_tool" \
+						--argjson d "$digest_pins" --argjson n "$trash_json" \
+						'{($u): $d, ($t): [$n[] | {threadId: .id}]}')"
+				else
+					pinned_args_json="$digest_pins"
+				fi
+				trash_ids_text="$(jq -r '.[].id' <<< "$trash_json")"
+				placeholders="$(jq -c --arg t "$thread_ids_text" --arg x "$trash_ids_text" \
+					'. + {thread_ids: $t, trash_thread_ids: $x}' <<< "$common_placeholders")"
+				# What the follow-up tab is told about the noise: every thread,
+				# by sender, subject and rule, so a dry run shows exactly what
+				# a live one would trash.
+				noise_by_rule="$(jq -r 'group_by(.rule) | map("\(length) \(.[0].rule)") | join(", ")' <<< "$trash_json")"
+				write_mail_noise() { # action
+					jq -cn --arg a "$1" --argjson n "$trash_json" --argjson held "$noise_held" \
+						'{action: $a, threads: [$n[] | {from, subject, rule}], held_over_cap: $held}' \
+						> "$PASS_SCRATCH/mail-noise.json"
+				}
+				held_note=""
+				[ "$noise_held" -eq 0 ] || held_note=" $noise_held more matched the rules past the limit per pass and wait for the next pass."
 
 				# NOT `.dry_run // true`: jq's `//` treats a real `false`
 				# as falsy too, so that spelling would silently ignore an
@@ -648,35 +716,53 @@ $(jq -r '(.entries // [])[] | .url // empty' "$PASS_SCRATCH/ticket-digest.json" 
 					desk_log "$pass" "$id: refusing — the digest query never matched, so an empty pinned set can't be trusted as \"genuinely nothing to unlabel\""
 					result="failed"
 				elif [ "$dry_run" = "true" ]; then
-					desk_log "$pass" "$id: dry_run — logged $n_ids id(s), no model call made"
-					[ "$n_ids" -eq 0 ] || desk_run_note "$id ran dry-run, so it marked nothing read: it would mark $n_ids digest thread(s) read."
+					desk_log "$pass" "$id: dry_run — logged $n_ids id(s) to mark read and $n_trash to trash, no model call made"
+					if [ "$n_trash" -gt 0 ]; then
+						write_mail_noise would_trash
+						desk_run_note "$id ran dry-run, so it changed no mail: it would mark $n_ids digest thread(s) read and trash $n_trash automated mail(s) by the triage rules ($noise_by_rule), each listed in the mail triage list.$held_note"
+					elif [ "$n_ids" -gt 0 ]; then
+						desk_run_note "$id ran dry-run, so it marked nothing read: it would mark $n_ids digest thread(s) read."
+					fi
+					result="ok"
+				elif [ "$n_ids" -eq 0 ] && [ "$n_trash" -eq 0 ]; then
+					desk_log "$pass" "$id: nothing to mark read or trash — no model call made"
 					result="ok"
 				else
 					result="$(desk_step_write "$pass" "$step_json" "$pinned_args_json" "$placeholders" "$scheduled_date")"
 					# A count mismatch fails loudly:
 					# the deny hook's own --pinned only ever stops W from
-					# unlabelling something OUTSIDE the pinned set — it
-					# can't tell "unlabelled all of them" from "unlabelled
-					# only some, or none" (the model called the tool fewer
-					# times than there were ids to act on, or not at all).
-					# This is the other half: compare what the call's own
-					# tool_use arguments actually named against the full
+					# touching something OUTSIDE the pinned set — it can't
+					# tell "acted on all of them" from "only some, or none"
+					# (the model called a tool fewer times than there were
+					# ids to act on, or not at all). This is the other half:
+					# per tool, compare what the call's own tool_use
+					# arguments actually named against that tool's full
 					# pinned set, after the fact, and fail loudly on any
-					# mismatch — never silently treat "acted on some" as
-					# "acted on all". A call counts only when its result
-					# came back and was not an error.
+					# mismatch. A call counts only when its result came back
+					# and was not an error.
 					if [ "$result" = "ok" ]; then
-						write_tool="$(jq -r '(.tools // [])[0] // empty' <<< "$step_json")"
 						succeeded_ids="$(jq -cs '[.[] | select(.is_error != true) | .tool_use_id]' \
 							"$PASS_SCRATCH/${id}-tool-results.jsonl" 2> /dev/null)"
 						[ -n "$succeeded_ids" ] || succeeded_ids='[]'
-						actual_ids_text="$(jq -r --arg t "$write_tool" --argjson ok "$succeeded_ids" \
-							'select(.name == $t) | select(.id as $u | $ok | index($u)) | .input.threadId // empty' \
-							"$PASS_SCRATCH/${id}-tool-uses.jsonl" 2> /dev/null | sort -u)"
-						pinned_ids_text="$(jq -r '.[].id' <<< "$ids_subjects" | sort -u)"
-						if [ "$actual_ids_text" != "$pinned_ids_text" ]; then
+						acted_on() { # tool
+							jq -r --arg t "$1" --argjson ok "$succeeded_ids" \
+								'select(.name == $t) | select(.id as $u | $ok | index($u)) | .input.threadId // empty' \
+								"$PASS_SCRATCH/${id}-tool-uses.jsonl" 2> /dev/null | sort -u
+						}
+						if [ "$(acted_on "$unlabel_tool")" != "$(jq -r '.[].id' <<< "$ids_subjects" | sort -u)" ]; then
 							desk_log "$pass" "$id: unlabelled thread ids don't match the pinned set (W count mismatch) — failing the pass"
 							result="failed"
+						fi
+						if [ -n "$trash_tool" ]; then
+							trashed_ids="$(acted_on "$trash_tool")"
+							if [ "$trashed_ids" != "$(sort -u <<< "$trash_ids_text" | sed '/^$/d')" ]; then
+								desk_log "$pass" "$id: trashed thread ids don't match the pinned set (W count mismatch) — failing the pass"
+								desk_run_note "$id did not trash exactly the mail its triage rules matched, so the pass failed: $(sed '/^$/d' <<< "$trashed_ids" | wc -l | tr -d ' ') of $n_trash trashed."
+								result="failed"
+							elif [ "$n_trash" -gt 0 ]; then
+								write_mail_noise trashed
+								desk_run_note "$id trashed $n_trash automated mail(s) by the triage rules ($noise_by_rule).$held_note"
+							fi
 						fi
 					fi
 				fi
