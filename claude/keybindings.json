@@ -6,7 +6,8 @@
       "context": "Global",
       "bindings": {
         "ctrl+shift+b": "app:toggleBrief",
-        "ctrl+shift+o": "app:toggleTeammatePreview"
+        "ctrl+shift+o": "app:toggleTeammatePreview",
+        "ctrl+r": null
       }
     },
     {
