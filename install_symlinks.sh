@@ -78,10 +78,6 @@ if [[ "$(uname)" == "Darwin" ]]; then
     mkdir -p ~/.local/bin
     link ~/dotfiles/claude/desk-run ~/.local/bin/desk-run
     link ~/dotfiles/claude/desk-follow ~/.local/bin/desk-follow
-    # desk-follow's older name: its links dangle once the rename lands.
-    for old in ~/.local/bin/desk-watch ~/.agents/skills/desk-watch ~/.claude/skills/desk-watch ~/.claude-work/skills/desk-watch; do
-        if [ -L "$old" ] && [ ! -e "$old" ]; then rm "$old"; fi
-    done
     link ~/dotfiles/claude/desk-propose ~/.local/bin/desk-propose
     link ~/dotfiles/claude/session-status.sh ~/.local/bin/session-status.sh
     link ~/dotfiles/hammerspoon/desk-open-tab.sh ~/.local/bin/desk-open-tab.sh
