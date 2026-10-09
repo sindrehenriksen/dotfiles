@@ -21,6 +21,8 @@
 -- leave/removal anchor keeps its own distinct nil (bad anchor vs. content
 -- conflict) via resolve_leave, below. A move or merge whose leaving side is
 -- gone is deferred instead: its text is what the user deleted or reworded.
+-- An item whose anchor is only in the user's uncommitted text never gets
+-- here: desk.proposal holds it back until that line is committed.
 local block = require("desk.block")
 local snippet = require("desk.snippet")
 

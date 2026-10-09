@@ -117,6 +117,33 @@ case "$out" in "staged: 1 new, "*) ok "an edit that only adds a blank line is st
 assert_eq "...and the proposal has the blank line between the sections" "Weekly|  - posts drafted||Other|  - other thing" \
 	"$(git -C "$repo2" show refs/desk/proposal:notes.md 2> /dev/null | paste -sd'|' -)"
 
+echo "=== an item anchored on an uncommitted line waits for the commit ==="
+repo3="$ROOT/notes3"
+desk_test_assert_repo_under_root "$repo3" "$ROOT"
+mkdir -p "$repo3"
+git -C "$repo3" init -q -b main
+git -C "$repo3" config user.email test@example.invalid
+git -C "$repo3" config user.name "Desk Test"
+printf 'Weekly\n  - posts drafted\n' > "$repo3/notes.md"
+: > "$repo3/reading.md"
+: > "$repo3/.desk-notes"
+git -C "$repo3" add -A
+git -C "$repo3" commit -q -m initial
+printf 'Weekly\n  - posts drafted\nMonday\n  - call planned\n' > "$repo3/notes.md"
+jq -n --arg r "$repo3" '{notes_repo: $r, files: ["notes.md", "reading.md"]}' > "$ROOT/config3.json"
+jq -n '[{id: "plan", file: "notes.md", kind: "add", target: {under: "Monday"}, before: "",
+	after: "  - agenda sent", headline: "Agenda sent", source: "notes"},
+	{id: "lost", file: "notes.md", kind: "add", target: {under: "Tuesday"}, before: "",
+	after: "  - nothing yet", headline: "Nothing yet", source: "notes"}]' > "$ROOT/wait.json"
+out="$(DESK_CONFIG="$ROOT/config3.json" "$PROPOSE" --date 2026-10-07 "$ROOT/wait.json")"
+assert_eq "it stages" "0" "$?"
+case "$out" in *"0 deferred (anchor not found), 1 waiting for you to commit a line;"*) ok "...the summary counts it apart from anchor not found" ;;
+	*) bad "...the summary counts it apart from anchor not found (got [$out])" ;; esac
+case "$out" in *'waits for you to commit "Monday" in notes.md: Agenda sent (session-2026-10-07-1-plan)'*) ok "...and names the line it waits on" ;;
+	*) bad "...and names the line it waits on (got [$out])" ;; esac
+assert_eq "...which is not landed on top, unlike an anchor found nowhere" "  - nothing yet|Weekly|  - posts drafted" \
+	"$(git -C "$repo3" show refs/desk/proposal:notes.md 2> /dev/null | paste -sd'|' -)"
+
 echo "=== config and usage ==="
 DESK_CONFIG="" DESK_CONFIG_DEFAULT="$ROOT/none.json" "$PROPOSE" "$ROOT/items.json" > /dev/null 2>&1
 assert_eq "no config is a config error" "2" "$?"

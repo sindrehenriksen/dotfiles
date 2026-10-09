@@ -16,7 +16,10 @@
 # <pass>-<date>-<n>-<id>; --pass defaults to "session" and --date to today.
 # A session sets each item's `source` to `session:<its session id>`, gives
 # each item its own headline, and prefers an `edit` of a stale line to an
-# `add` beneath it. It shows the user the items before staging them.
+# `add` beneath it. It shows the user the items before staging them. An
+# item anchored on a line the user has not committed yet waits, deferred,
+# until they commit it; the output names that line for the session to pass
+# on.
 #
 # Every item is checked before anything is staged, and one that does not
 # fit the shape fails the whole call, naming it, so the session can fix it
@@ -137,4 +140,7 @@ if ! jq -e '.sha' > /dev/null 2>&1 <<< "$out"; then
 	echo "desk-propose: staging failed: $out" >&2
 	exit 1
 fi
-jq -r '"staged: \(.stats.new) new, \(.stats.superseded) replacing open ones, \(.stats.skipped) skipped (declined or already in the notes), \(.stats.carried) still waiting from before, \(.stats.deferred) deferred (anchor not found); proposal \(.sha[0:12])"' <<< "$out"
+jq -r '
+	"staged: \(.stats.new) new, \(.stats.superseded) replacing open ones, \(.stats.skipped) skipped (declined or already in the notes), \(.stats.carried) still waiting from before, \(.stats.deferred) deferred (anchor not found), \(.stats.waiting | length) waiting for you to commit a line; proposal \(.sha[0:12])",
+	(.stats.waiting[] | "  waits for you to commit \(.line | tojson) in \(.file): \(.headline) (\(.id))\(if .new then "" else ", staged earlier" end)")
+' <<< "$out"

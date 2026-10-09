@@ -22,11 +22,11 @@ local function bad(desc)
 	print("FAIL - " .. desc)
 end
 local function assert_eq(desc, expected, actual)
-	local e, a = vim.json.encode(expected), vim.json.encode(actual)
-	if e == a then
+	-- deep_equal, not the encoded strings: a table's key order is not fixed.
+	if vim.deep_equal(expected, actual) then
 		ok(desc)
 	else
-		bad(string.format("%s (expected %s, got %s)", desc, e, a))
+		bad(string.format("%s (expected %s, got %s)", desc, vim.json.encode(expected), vim.json.encode(actual)))
 	end
 end
 local function assert_true(desc, v)
@@ -499,6 +499,61 @@ do
 	write(r, "notes.md", tip_lines(r, "notes.md"))
 	commit_all(r, "take both")
 	assert_eq("taking them records both as taken", 2, #proposal.sync_taken(r))
+end
+
+print("\n=== an anchor only the user's uncommitted text has waits for the commit, then lands ===")
+do
+	local committed = { "Section A", "- a1", "", "Section B", "- b1" }
+	local working = { "Section A", "- a1", "- a2 draft", "", "Section B", "- b1", "", "Section C", "- c1" }
+	local r = new_repo(committed)
+	write(r, "notes.md", working)
+	local _, st = proposal.build(r, "morning", "2026-10-01", {
+		item("add", { kind = "add", target = { under = "Section C" }, after = "- c2", source = "" }),
+		item("lnk", { kind = "link", target = { after = "- a2 draft" }, after = "- [a link](https://example.invalid/l)" }),
+		item("ed", { kind = "edit", target = { at = "- a2 draft" }, before = "- a2 draft", after = "- a2 done", source = "" }),
+		item("rm", { kind = "remove", target = { at = "- c1" }, before = "- c1", after = "", source = "" }),
+		item("mv", { kind = "move", target = { { at = "- b1" }, { under = "Section C" } }, before = "- b1", after = "- b1", source = "" }),
+		item("gone", { kind = "add", target = { under = "Section Z" }, after = "- z1", source = "" }),
+	}, FILES)
+	local deferred, waits = {}, {}
+	for _, it in ipairs(proposal.read(r).items) do
+		local name = it.headline:match("headline (.*)")
+		deferred[name] = it.deferred == true
+		waits[name] = it.waits_for
+	end
+	assert_eq("every one but the gone anchor is staged deferred",
+		{ add = true, lnk = true, ed = true, rm = true, mv = true, gone = false }, deferred)
+	assert_eq("each names the uncommitted line it waits on",
+		{ add = "Section C", lnk = "- a2 draft", ed = "- a2 draft", rm = "- c1", mv = "Section C" }, waits)
+	assert_eq("only the anchor found nowhere lands on top", { "- z1", "Section A", "- a1", "", "Section B", "- b1" }, tip_lines(r, "notes.md"))
+	assert_eq("the build counts them apart from deferrals", { 0, 5 }, { st.deferred, #(st.waiting or {}) })
+	local line_for_add
+	for _, w in ipairs(st.waiting or {}) do
+		if w.headline == "headline add" then
+			line_for_add = w.line
+		end
+	end
+	assert_eq("...naming the line for each", "Section C", line_for_add)
+	assert_eq("none of the waiting ones is open", { "headline gone" }, vim.tbl_map(function(it)
+		return it.headline
+	end, proposal.open_items(r)))
+	assert_eq("the remove was not taken for done", 0, #proposal.sync_taken(r))
+
+	commit_all(r, "the user commits the draft")
+	local _, st2 = proposal.build(r, "morning", "2026-10-02", {}, FILES)
+	assert_eq("once committed, they land", { 0, 0 }, { st2.deferred, #(st2.waiting or {}) })
+	assert_eq("...where they were anchored", {
+		"Section A", "- a1", "- a2 done", "- [a link](https://example.invalid/l)", "", "Section B", "", "Section C", "- c2", "- b1",
+	}, vim.tbl_filter(function(l)
+		return l ~= "- z1"
+	end, tip_lines(r, "notes.md")))
+	local leftover = {}
+	for _, it in ipairs(proposal.read(r).items) do
+		if it.waits_for ~= nil or it.deferred then
+			leftover[#leftover + 1] = it.id
+		end
+	end
+	assert_eq("...and none still carries deferred or waits_for", {}, leftover)
 end
 
 print(string.format("\n=== summary: %d passed, %d failed ===", pass, fail))

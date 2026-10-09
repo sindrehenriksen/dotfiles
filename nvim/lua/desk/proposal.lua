@@ -490,9 +490,56 @@ local function supersedes(n, e)
 	return false
 end
 
+local insert_kind = { new = true, add = true, link = true, move = true, merge = true }
+
+-- The line `item` waits for the user to commit: one its `before` or its
+-- landing anchor needs that the user's working copy of the file (`work`)
+-- has and `head` lacks. Placed against HEAD it would land on top, or a
+-- removal would read as done, so it is deferred until the line is
+-- committed. nil when it needs nothing HEAD lacks, or the working copy
+-- lacks it too (an anchor found nowhere is handled as before).
+local function waits_for(item, head, work)
+	if not work then
+		return nil
+	end
+	local before = snippet.split_lines(item.before or "")
+	if in_place_kind[item.kind] and #before > 0 and not M.contains(head, before) and M.contains(work, before) then
+		for _, l in ipairs(before) do
+			if not vim.tbl_contains(head, l) then
+				return l
+			end
+		end
+		return before[1]
+	end
+	local _, land = block.parse_target(item.target)
+	if
+		insert_kind[item.kind]
+		and land
+		and (land.kind == "under" or land.kind == "after")
+		and not block.find_line(head, land.quote)
+		and block.find_line(work, land.quote)
+	then
+		return land.quote
+	end
+	return nil
+end
+
+local function working_lines(repo, file)
+	local fd = io.open(repo .. "/" .. file, "r")
+	if not fd then
+		return nil
+	end
+	local text = fd:read("*a")
+	fd:close()
+	return (snippet.split_lines(text))
+end
+
 --- Builds the pass's proposal commit and moves refs/desk/proposal to it.
 --- `new_items` are validated, un-namespaced items from this pass; `files`
---- the configured files. Returns the new sha and a stats table, or nil, err.
+--- the configured files. Returns the new sha and a stats table, or nil, err:
+--- `deferred` counts items left out for a conflict or an anchor gone,
+--- `waiting` lists those left out until the user commits a line
+--- (`{id, file, headline, line, new}`), which they carry as `waits_for`.
 function M.build(repo, pass, scheduled_date, new_items, files)
 	local head = head_sha(repo)
 	if not head then
@@ -507,9 +554,13 @@ function M.build(repo, pass, scheduled_date, new_items, files)
 	local stats = {}
 	local sha, err = git.cas_retry(repo, M.REF, function(old_sha)
 		local prev = old_sha and M.read(repo, old_sha) or { items = {} }
-		local head_lines = {}
+		local head_lines, work_lines = {}, {}
 		for _, f in ipairs(files) do
 			head_lines[f] = M.lines_at(repo, head, f)
+			work_lines[f] = working_lines(repo, f)
+		end
+		local function waiting_on(item)
+			return item.file and head_lines[item.file] and waits_for(item, head_lines[item.file], work_lines[item.file])
 		end
 
 		-- An item's `after` with the blank lines at its edges fitted to where
@@ -545,6 +596,7 @@ function M.build(repo, pass, scheduled_date, new_items, files)
 			end
 			item = vim.deepcopy(item)
 			item.deferred = nil
+			item.waits_for = nil
 			carried_ids[item.id] = true
 			carried[#carried + 1] = item
 		end
@@ -572,7 +624,10 @@ function M.build(repo, pass, scheduled_date, new_items, files)
 			local blocked = ledger.any_url_in(declined.sources, item)
 				or ledger.any_url_in(taken_sources, item)
 				or declined.keys[ledger.content_key(item)]
-			local known = item.file and head_lines[item.file] and M.proposed_in(item, head_lines[item.file])
+			local known = item.file
+				and head_lines[item.file]
+				and not waiting_on(item)
+				and M.proposed_in(item, head_lines[item.file])
 			if not blocked and not known then
 				fresh[#fresh + 1] = item
 			end
@@ -618,9 +673,21 @@ function M.build(repo, pass, scheduled_date, new_items, files)
 		-- Apply per file onto HEAD.
 		local blobs = {}
 		local by_file = {}
+		local fresh_ids = {}
+		for _, item in ipairs(fresh) do
+			fresh_ids[item.id] = true
+		end
+		local waiting = {}
 		for _, item in ipairs(items) do
-			by_file[item.file] = by_file[item.file] or {}
-			table.insert(by_file[item.file], item)
+			local line = waiting_on(item)
+			if line then
+				item.deferred = true
+				item.waits_for = line
+				waiting[#waiting + 1] = { id = item.id, file = item.file, headline = item.headline, line = line, new = fresh_ids[item.id] == true }
+			else
+				by_file[item.file] = by_file[item.file] or {}
+				table.insert(by_file[item.file], item)
+			end
 		end
 		local applied_n, deferred_n = 0, 0
 		for _, f in ipairs(files) do
@@ -666,7 +733,16 @@ function M.build(repo, pass, scheduled_date, new_items, files)
 		if not c_ok then
 			return nil, "commit-tree failed"
 		end
-		stats = { new = #fresh, carried = #kept, applied = applied_n, deferred = deferred_n, restored = restored_ids, superseded = superseded, skipped = #named - #fresh }
+		stats = {
+			new = #fresh,
+			carried = #kept,
+			applied = applied_n,
+			deferred = deferred_n,
+			waiting = waiting,
+			restored = restored_ids,
+			superseded = superseded,
+			skipped = #named - #fresh,
+		}
 		return vim.trim(commit)
 	end)
 	if not sha then
