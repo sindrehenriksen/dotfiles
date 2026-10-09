@@ -70,22 +70,28 @@ desk_strip_agent_marks() {
 # newline-separated (desk_allowed_urls's output). `before` is the user's text as the
 # agent quoted it and must keep matching the user's file, so it is never altered
 # (beyond the scratch-copy agent mark). The URLs on the user's own line are the user's:
-# `after` may keep any URL `before` already carries, and only URLs the agent
-# adds (in `after` or the headline) are checked against the allowed set.
+# an edit, move or merge may keep in `after` any URL its `before` carries, and only
+# URLs the agent adds (in `after` or the headline) are checked against the
+# allowed set. `before` is the model's own claim, so it counts only when it
+# sits verbatim, as whole lines, in the item's file as committed in $3 (the
+# notes repo); without $3, or for any other kind, the allowed set is all
+# there is.
 # A blank line `after` ends with is kept, newlines and all, since it can
 # be the point of an item (desk.apply fits it to where it lands); every
 # command substitution here would otherwise drop it. A lone final newline
 # only ends the text, and goes as before.
 desk_sanitize_item_text() {
-	local item_json="$1" allowed_urls="$2"
+	local item_json="$1" allowed_urls="$2" repo="${3:-}"
 	local before after headline after_tail
 	before="$(jq -r '.before // ""' <<< "$item_json")"
 	after="$(jq -r '.after // ""' <<< "$item_json")"
 	after_tail="$(jq -r '.after // "" | if test("[^\n]") then (capture("(?<t>\n*)$").t | length) else 0 end' <<< "$item_json")"
 	headline="$(jq -r '.headline // ""' <<< "$item_json")"
 	before="$(desk_strip_agent_marks "$before")"
-	local own_urls after_allowed
-	own_urls="$(grep -oE 'https?://[^[:space:]"'"'"'<>)]+' <<< "$before" 2> /dev/null | sort -u)"
+	local own_urls="" after_allowed
+	if desk_before_is_committed "$item_json" "$before" "$repo"; then
+		own_urls="$(grep -oE 'https?://[^[:space:]"'"'"'<>)]+' <<< "$before" 2> /dev/null | sort -u)"
+	fi
 	after_allowed="$allowed_urls"
 	[ -z "$own_urls" ] || after_allowed="$allowed_urls"$'\n'"$own_urls"
 	local field val allow
@@ -105,6 +111,20 @@ desk_sanitize_item_text() {
 	done
 	jq -c --arg b "$before" --arg a "$after" --arg h "$headline" \
 		'.before = $b | .after = $a | .headline = $h' <<< "$item_json"
+}
+
+# desk_before_is_committed <item-json> <before> <repo>: true when the item
+# rewrites existing lines (edit, move, merge) and <before> is a run of whole
+# lines of the item's file at <repo>'s HEAD.
+desk_before_is_committed() {
+	local item_json="$1" before="$2" repo="$3" file content
+	[ -n "$repo" ] && [ -n "$before" ] || return 1
+	jq -e '.kind == "edit" or .kind == "move" or .kind == "merge"' > /dev/null 2>&1 <<< "$item_json" || return 1
+	file="$(jq -r '.file // empty' <<< "$item_json")"
+	[ -n "$file" ] || return 1
+	content="$(git -C "$repo" show "HEAD:$file" 2> /dev/null)" || return 1
+	while [[ "$before" == *$'\n' ]]; do before="${before%$'\n'}"; done
+	[[ $'\n'"$content"$'\n' == *$'\n'"$before"$'\n'* ]]
 }
 
 # Also validates the item's own `source` field: a bare non-URL source
@@ -150,12 +170,14 @@ desk_validate_also_sources() {
 # ---------------------------------------------------------------------------
 # The full validation pass for a set of proposal-shaped items: drops an item whose URL source isn't verifiably from this call's
 # own raw results, then sanitizes every remaining item's text. $2 = the
-# allowed-URL set (desk_allowed_urls's output, newline-separated).
+# allowed-URL set (desk_allowed_urls's output, newline-separated). $3 = the
+# notes repo, whose committed files decide which URLs a `before` may lend
+# to `after` (desk_sanitize_item_text).
 # Caps are a separate step (desk_apply_caps below) since a close call's items
 # are never capped, only tiered items are.
 # ---------------------------------------------------------------------------
 desk_validate_items() {
-	local items_json="$1" allowed_urls="$2"
+	local items_json="$1" allowed_urls="$2" repo="${3:-}"
 	local n out dropped=0
 	out="[]"
 	n="$(jq 'length' <<< "$items_json" 2> /dev/null || echo 0)"
@@ -171,7 +193,7 @@ desk_validate_items() {
 		item="$(desk_validate_also_sources "$item" "$allowed_urls")"
 		after_n="$(jq -r '(.also_sources // []) | length' <<< "$item")"
 		dropped=$((dropped + before_n - after_n))
-		item="$(desk_sanitize_item_text "$item" "$allowed_urls")"
+		item="$(desk_sanitize_item_text "$item" "$allowed_urls" "$repo")"
 		out="$(jq -c --argjson it "$item" '. + [$it]' <<< "$out")"
 	done
 	[ "$dropped" -eq 0 ] || echo "desk: dropped $dropped invalid also_sources URL(s)" >&2

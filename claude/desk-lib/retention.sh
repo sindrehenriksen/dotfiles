@@ -303,7 +303,7 @@ desk_step_retention() {
 		echo "ok"
 		return
 	fi
-	items="$(desk_validate_items "$items" "")"
+	items="$(desk_validate_items "$items" "" "$repo")"
 	local items_file sha
 	items_file="$PASS_SCRATCH/$step_id-items.json"
 	jq -n --argjson items "$items" '{items: $items}' > "$items_file"

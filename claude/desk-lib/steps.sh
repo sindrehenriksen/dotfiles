@@ -999,7 +999,7 @@ desk_step_capture_sessions() {
 		return
 	fi
 
-	items_json="$(desk_validate_items "$items_json" "")"
+	items_json="$(desk_validate_items "$items_json" "" "$repo")"
 
 	local items_file sha
 	items_file="$PASS_SCRATCH/capture-items.json"
@@ -1073,7 +1073,7 @@ desk_session_capture_call() {
 		return 1
 	fi
 	items_json="$(desk_verify_and_strip_turn_citations "$items_json" "$tail_copy")"
-	items_json="$(desk_validate_items "$items_json" "")"
+	items_json="$(desk_validate_items "$items_json" "" "$repo")"
 	if [ "$(jq 'length' <<< "$items_json")" -eq 0 ]; then
 		desk_log "$pass" "$label: no valid capture item (invalid citation, or none returned)"
 		return 1

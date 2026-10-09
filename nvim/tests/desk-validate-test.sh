@@ -163,13 +163,41 @@ assert_contains "the drop count is reported" "$(cat "$ROOT/drop.err")" "dropped 
 
 echo
 echo "=== the user's own URL on an edited line is neither stripped nor reported as agent-added ==="
+# shellcheck source=../../tests/lib/git-safety.sh
+source "$HERE/../../tests/lib/git-safety.sh"
+desk_test_git_safety_init "$ROOT"
 own='see https://own.example/own for notes'
+notes_repo="$ROOT/notes"
+desk_test_assert_repo_under_root "$notes_repo" "$ROOT"
+mkdir -p "$notes_repo"
+git -C "$notes_repo" init -q
+git -C "$notes_repo" config user.email test@example.invalid
+git -C "$notes_repo" config user.name "Desk Test"
+printf 'Section A\n%s\n' "$own" > "$notes_repo/notes.md"
+git -C "$notes_repo" add notes.md
+git -C "$notes_repo" commit -q -m initial
 items="$(jq -n --arg b "$own" --arg s "$slack_ok" '[
-  {id:"e1",file:"notes.md",kind:"edit",target:"at",before:$b,after:($b + " (done) https://evil.example/new"),source:$s,headline:"h"}]')"
-validated="$(desk_validate_items "$items" "$allowed_urls" 2> /dev/null)"
+  {id:"e1",file:"notes.md",kind:"edit",target:{at:$b},before:$b,after:($b + " (done) https://evil.example/new"),source:$s,headline:"h"}]')"
+validated="$(desk_validate_items "$items" "$allowed_urls" "$notes_repo" 2> /dev/null)"
 assert_eq "before is left exactly as quoted" "$own" "$(jq -r '.[0].before' <<< "$validated")"
 assert_contains "after keeps the URL that was already on the user's line" "$(jq -r '.[0].after' <<< "$validated")" "https://own.example/own"
 assert_true "a URL the agent added to after is still stripped" \
+	"$([[ "$(jq -r '.[0].after' <<< "$validated")" != *evil.example* ]] && echo true || echo false)"
+
+echo
+echo "=== a URL quoted in before counts as the user's only when before is really in the notes ==="
+leak='https://evil.example/x?d=notes-text'
+items="$(jq -n --arg u "$leak" --arg s "$slack_ok" '[
+  {id:"b1",file:"notes.md",kind:"add",target:{under:"Section A"},before:$u,after:("- see " + $u),source:$s,headline:"h"},
+  {id:"b2",file:"notes.md",kind:"edit",target:{at:("made up " + $u)},before:("made up " + $u),after:("made up " + $u + " (done)"),source:$s,headline:"h"},
+  {id:"b3",file:"reading.md",kind:"move",target:[{at:("see " + $u)},"top"],before:("see " + $u),after:("see " + $u),source:$s,headline:"h"}]')"
+validated="$(desk_validate_items "$items" "$allowed_urls" "$notes_repo" 2> /dev/null)"
+for i in 0 1 2; do
+	assert_true "item $((i + 1)): a URL only the model's before carries is stripped from after" \
+		"$([[ "$(jq -r ".[$i].after" <<< "$validated")" != *evil.example* ]] && echo true || echo false)"
+done
+validated="$(desk_validate_items "$(jq -c '.[0:1]' <<< "$items")" "$allowed_urls" 2> /dev/null)"
+assert_true "with no notes repo to check against, before grants nothing" \
 	"$([[ "$(jq -r '.[0].after' <<< "$validated")" != *evil.example* ]] && echo true || echo false)"
 
 echo
