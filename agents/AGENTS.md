@@ -37,13 +37,13 @@ understood" but "does this detail change what gets decided".
   Decision records, strategy and discovery docs, user-facing copy,
   instruction files and skills are read later as settled fact, so say
   which of them a change touched when you make it rather than in a
-  closing summary, and ask for a real read. Automated review leans the
+  closing summary, and ask for a real read. Where no PR will put it in
+  front of the owner (a dotfiles commit, say), quote a short change in
+  the reply instead of pointing at the file. Automated review leans the
   other way: a docs-or-copy diff is exactly the shape a low-risk
   heuristic waves through. Technical reference — how a tool's
   internals behave, a command's help text — is not that kind: say it
-  changed, and don't ask for a read. Where no PR will put it in front
-  of the owner (a dotfiles commit, say), quote a short change in the
-  reply instead of pointing at the file.
+  changed, and don't ask for a read.
 - A finding is not automatically new work, and handing one over
   unresolved is the expensive shape. It costs the owner a context
   switch into something they were not working on, and that cost lands
