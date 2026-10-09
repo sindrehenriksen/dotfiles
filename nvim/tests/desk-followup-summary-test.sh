@@ -320,7 +320,7 @@ desk_open_follow_up_tab morning 2026-11-03 J "$repo" > /dev/null 2>&1
 assert_eq "the capped item and the near miss are both handed over" \
 	'[{"tier":"act","headline":"capped headline","source":"notes"}] [{"headline":"near headline","why_not":"routine"}] ' "$(held_lists)"
 assert_true "the prompt asks for one line each, and nothing for an empty list" \
-	"$(grep -qF 'Say nothing at all about a list that is empty.' "$PROMPT_COPY" && echo true || echo false)"
+	"$(grep -qF 'Say nothing about a list that is empty.' "$PROMPT_COPY" && echo true || echo false)"
 unset PASS_SCRATCH
 
 echo
