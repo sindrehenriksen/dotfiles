@@ -125,6 +125,13 @@ So every binding in `hammerspoon/init.lua`, which is written in Dvorak letters, 
 | `b` `z` | `n` `/` |
 | `,` `.` `o` `e` | `w` `e` `s` `d` |
 
+## Claude Code's vim mode
+
+Its vim keys cannot be remapped (`claude/keybindings.json` reaches only Claude Code's own actions), and two of them do not do what vim would:
+
+- **There is no redo.** `u` undoes and nothing redoes. `Ctrl+R` was the global history search, which is a trap in normal mode, so it is unbound; history search is still on `/`.
+- **`/` in normal mode opens history search**, not the slash-command menu, so typing a command while you think you are inserting lands there. `i` then `/` gets the menu. No setting changes it.
+
 ## Parity
 
 A change on one machine should be mirrored on the other, unless there is a reason not to and that reason is written down here. Divergences that are deliberate today:
