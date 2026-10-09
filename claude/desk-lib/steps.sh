@@ -249,6 +249,53 @@ desk_write_declined_items() {
 	[ -s "$out" ] || printf '[]' > "$out"
 }
 
+# desk_seed_path_file <entry_json> <dest_dir>
+# An `input_files` entry that is an object, {name, path, sections?}: the
+# file at `path` (relative to the config's directory, like a prompt),
+# seeded as `name`. With `sections`, only those Markdown sections are kept,
+# each matched by its heading's exact text at any level and running to the
+# next heading at that level or above, in the file's own order; a heading
+# inside a fenced block is not one. A missing file, or a section not found,
+# is logged and the call goes ahead without it, as for an unknown name.
+desk_seed_path_file() {
+	local entry="$1" dest_dir="$2" name rel src
+	name="$(jq -r '.name // empty' <<< "$entry" 2> /dev/null)"
+	rel="$(jq -r '.path // empty' <<< "$entry" 2> /dev/null)"
+	if [ -z "$name" ] || [ -z "$rel" ] || [[ "$name" == */* ]] || [ "$name" = . ] || [ "$name" = .. ]; then
+		desk_log - "desk_seed_path_file: an input needs a plain file name and a path: $entry (skipped)"
+		return
+	fi
+	src="$(desk_prompt_path "$rel")"
+	if [ ! -f "$src" ] || [ ! -r "$src" ]; then
+		desk_log - "desk_seed_path_file: $name: no readable file at $src (skipped)"
+		return
+	fi
+	if ! jq -e 'has("sections")' > /dev/null 2>&1 <<< "$entry"; then
+		cp -f "$src" "$dest_dir/$name"
+		return
+	fi
+	local sections=() missing
+	mapfile -t sections < <(jq -r '.sections[]? | strings' <<< "$entry")
+	missing="$(perl -e '
+		my $file = shift;
+		my %want = map { $_ => 1 } @ARGV;
+		my (%seen, $level, $fence);
+		open my $fh, "<", $file or exit 1;
+		while (my $line = <$fh>) {
+			if ($line =~ /^\s{0,3}(```|~~~)/) { $fence = !$fence; }
+			elsif (!$fence && $line =~ /^\s{0,3}(#{1,6})[ \t]+(.*?)(?:[ \t]+#+)?[ \t]*$/) {
+				my ($l, $text) = (length $1, $2);
+				undef $level if defined $level && $l <= $level;
+				if (!defined $level && $want{$text}) { $level = $l; $seen{$text} = 1; }
+			}
+			print STDOUT $line if defined $level;
+		}
+		print STDERR "$_\n" for grep { !$seen{$_} } @ARGV;
+	' "$src" "${sections[@]}" 2>&1 > "$dest_dir/$name")"
+	[ -n "$missing" ] && desk_log - "desk_seed_path_file: $name: no section headed $(paste -sd '|' - <<< "$missing") in $src"
+	[ -s "$dest_dir/$name" ] || rm -f "$dest_dir/$name"
+}
+
 # desk_seed_named_file <name> <dest_dir> <ctx_json>
 # Writes one named scratch-dir input file
 # into $2. `ctx_json` carries whatever the producer needs: `repo`,
@@ -651,7 +698,8 @@ desk_step_ticket_status() { desk_step_model_call "$@"; }
 # via the step's own `input_files` (falling back to that full pinned list
 # when a step doesn't declare one, so an as-yet-unconfigured private config
 # still gets everything J's own prompt expects) and produced one by one via
-# desk_seed_named_file, never re-derived per file kind here. `pass_ctx_json`
+# desk_seed_named_file (an object entry, any file the instance names, via
+# desk_seed_path_file), never re-derived per file kind here. `pass_ctx_json`
 # is desk-run's own per-pass context (repo/sources_path/pass_scratch/
 # old_ticket_cache); this adds `files` (this call's own file list) to it
 # before handing it to each producer.
@@ -673,10 +721,15 @@ desk_step_judge() {
 		$files + ["sources.json", "f-private.json", "f-web.json",
 		"tickets.json", "sessions.json", "open-items.json", "declined.json"]
 	)' <<< "$step_json")"
-	local n name i
+	local n name i entry
 	n="$(jq 'length' <<< "$input_files_json" 2> /dev/null || echo 0)"
 	for ((i = 0; i < n; i++)); do
-		name="$(jq -r ".[$i]" <<< "$input_files_json")"
+		entry="$(jq -c ".[$i]" <<< "$input_files_json")"
+		if jq -e 'type == "object"' > /dev/null 2>&1 <<< "$entry"; then
+			desk_seed_path_file "$entry" "$seed"
+			continue
+		fi
+		name="$(jq -r '.' <<< "$entry")"
 		desk_seed_named_file "$name" "$seed" "$ctx"
 	done
 

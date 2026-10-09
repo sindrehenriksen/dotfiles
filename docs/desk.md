@@ -205,6 +205,7 @@ A close prompt gets only `scratch`, `today`, `session_name` and `session_id`; a 
 | `open-items.json` | suggestions still waiting on you, in the item shape below, with their runner-assigned ids |
 | `ticket-digest.json` | the [ticket digest](#the-ticket-digest), `{}` when its step failed |
 | `declined.json` | the 50 suggestions you most recently declined, same shape; a declined suggestion is also blocked by content (file, kind, target, normalised before/after), so a regenerated copy under a new id is dropped even without a URL source |
+| an object `{name, path, sections}` in `input_files` | the file at `path` (relative to the config's directory, like a prompt), seeded as `name`, a plain file name. With `sections`, a list of Markdown heading texts, only those sections: each from its heading to the next at its level or above, in the file's order. A missing file, or a heading not found, is logged and left out. |
 
 A close or retention call's cwd holds `session.json` (its reader entry), `transcript-tail.jsonl` and the captures file (`notes.md` by default).
 

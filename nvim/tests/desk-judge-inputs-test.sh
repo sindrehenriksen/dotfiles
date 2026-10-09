@@ -8,7 +8,8 @@
 # is seeded from HEAD with an accepted ledger item's own line marked;
 # sources.json, f-private.json, f-web.json, tickets.json, sessions.json and
 # open-items.json are all produced from their own real sources (the ledger,
-# a fetch step's own raw stream, the ticket-cache diff, session-status.sh).
+# a fetch step's own raw stream, the ticket-cache diff, session-status.sh);
+# an object entry seeds an instance file, whole or as some of its sections.
 # No live model call, session-status.sh faked, nothing pushed anywhere.
 set -u
 
@@ -42,7 +43,7 @@ cat > "$FAKEBIN/claude" <<FAKE
 # built) — capture every file J's own prompt says it can expect there,
 # for this test's own inspection, since that scratch dir is gone (rm -rf'd)
 # by the time desk_step_judge itself returns.
-for f in prompt.txt notes.md sources.json f-private.json f-web.json tickets.json sessions.json open-items.json declined.json; do
+for f in prompt.txt notes.md sources.json f-private.json f-web.json tickets.json sessions.json open-items.json declined.json context.md whole.md gone.md; do
 	cp -f "\$f" "$CAPTURE/\$f" 2>/dev/null
 done
 echo '{"type":"assistant","message":{"content":[{"type":"text","text":"{\"items\":[]}"}]}}'
@@ -180,10 +181,38 @@ pass_ctx="$(jq -n --arg repo "$repo" --arg sources_path "$sources_path" --arg pa
 	}')"
 placeholders="$(jq -n --arg caps "ACT ≤3, worth knowing ≤3, wildcard ≤1" \
 	'{mode: "WEEKLY", today: "2026-09-27", caps: $caps}')"
-step_json="$(jq -n --arg prompt "$prompt_file" \
-	'{id: "J", kind: "judge", prompt: $prompt, tools: ["Read"], connector: false, timeout: 30}')"
+# --- an instance file the judge gets by path: two of its sections, and whole ---
+mkdir -p "$ROOT/ctx"
+cat > "$ROOT/ctx/context.md" << 'EOF'
+# Title
+intro line
+## Mandate
+mandate line
+### Detail
+detail line
+## People
+people line
+## Priorities
+**Current focus:** focus line
+```
+# fenced, not a heading
+## People
+```
+priority tail
+## Strategy
+strategy line
+EOF
 
-result="$(desk_step_judge "testpass" "$step_json" "$repo" "$placeholders" "$pass_ctx" notes.md reading.md)"
+step_json="$(jq -n --arg prompt "$prompt_file" \
+	'{id: "J", kind: "judge", prompt: $prompt, tools: ["Read"], connector: false, timeout: 30,
+	  input_files: ["notes.md", "reading.md", "sources.json", "f-private.json", "f-web.json",
+		"tickets.json", "sessions.json", "open-items.json", "declined.json",
+		{name: "context.md", path: "ctx/context.md", sections: ["Priorities", "Mandate", "Absent heading"]},
+		{name: "whole.md", path: "ctx/context.md"},
+		{name: "gone.md", path: "ctx/missing.md"},
+		{name: "../escape.md", path: "ctx/context.md"}]}')"
+
+result="$(desk_step_judge "testpass" "$step_json" "$repo" "$placeholders" "$pass_ctx" notes.md reading.md 2> "$ROOT/judge.err")"
 assert_true "the call reports ok" "$([ "$result" = "ok" ] && echo true || echo false)"
 
 echo
@@ -242,6 +271,27 @@ assert_true "the declined suggestion is listed" \
 	"$(jq -e '[.[] | select(.headline == "turned down")] | length == 1' > /dev/null 2>&1 "$CAPTURE/declined.json" && echo true || echo false)"
 assert_true "a still-open suggestion is not" \
 	"$(jq -e '[.[] | select(.headline == "still open")] | length == 0' > /dev/null 2>&1 "$CAPTURE/declined.json" && echo true || echo false)"
+
+echo
+echo "=== an instance file by path: whole, or only the sections named ==="
+ctx_out="$(cat "$CAPTURE/context.md" 2> /dev/null)"
+assert_true "both sections are kept, with the subsection under one" \
+	"$(grep -qx 'mandate line' <<< "$ctx_out" && grep -qx 'detail line' <<< "$ctx_out" \
+		&& grep -qx '\*\*Current focus:\*\* focus line' <<< "$ctx_out" && echo true || echo false)"
+assert_true "a fenced heading does not end its section" \
+	"$(grep -qx 'priority tail' <<< "$ctx_out" && grep -qx '# fenced, not a heading' <<< "$ctx_out" && echo true || echo false)"
+assert_true "the other sections are left out" \
+	"$(grep -qE '^(intro|people|strategy) line$' <<< "$ctx_out" && echo false || echo true)"
+assert_true "the sections keep the file's order" \
+	"$([ "$(grep -n -m1 '^## ' <<< "$ctx_out")" = "1:## Mandate" ] && echo true || echo false)"
+assert_true "a section not found is logged" \
+	"$(grep -q 'context.md: no section headed Absent heading' "$ROOT/judge.err" && echo true || echo false)"
+assert_true "without sections, the whole file is seeded" \
+	"$(cmp -s "$ROOT/ctx/context.md" "$CAPTURE/whole.md" && echo true || echo false)"
+assert_true "a missing file is logged and not seeded" \
+	"$([ ! -e "$CAPTURE/gone.md" ] && grep -q 'gone.md: no readable file' "$ROOT/judge.err" && echo true || echo false)"
+assert_true "a name with a path in it is refused" \
+	"$([ ! -e "$PASS_SCRATCH/escape.md" ] && grep -q 'needs a plain file name' "$ROOT/judge.err" && echo true || echo false)"
 
 echo
 echo "=== summary: $pass passed, $fail failed ==="
