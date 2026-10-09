@@ -217,11 +217,10 @@ rm -rf "$STATE"
 PASS_SCRATCH="$(mktemp -d)"
 long_ago=$(( $(desk_now) - 20 * 86400 ))
 desk_status_set_result "testpass" "ok" "" "[]" "" > /dev/null
-# desk_step_close's away-days check reads desk_status_last_ok_run, which
-# (status.sh) is the durable `last_ok_run` field, not `last_run` itself —
-# both are backdated here since `last_run` is what a real "ok" result
-# would have carried forward into it.
-jq --argjson t "$long_ago" '.passes.testpass.last_run = $t | .passes.testpass.last_ok_run = $t' \
+# desk_step_close's away-days check reads the last run that finished,
+# whatever its result (status.sh's `last_done_run`); every field a real run
+# that long ago would have left is backdated here.
+jq --argjson t "$long_ago" '.passes.testpass |= (.last_run = $t | .last_ok_run = $t | .last_done_run = $t)' \
 	"$DESK_STATUS_FILE" > "$DESK_STATUS_FILE.tmp" && mv "$DESK_STATUS_FILE.tmp" "$DESK_STATUS_FILE"
 pid3="$(spawn_throwaway)"
 jq -n --argjson pid "$pid3" \
@@ -234,6 +233,27 @@ assert_eq "the step reports ok" "ok" "$result"
 assert_true "nothing was signaled after a long away gap" "$(kill -0 "$pid3" 2> /dev/null && echo true || echo false)"
 assert_true "session-recorder was never called" "$([ ! -s "$RECORDER_LOG" ] && echo true || echo false)"
 kill "$pid3" 2> /dev/null
+rm -rf "$PASS_SCRATCH"
+
+echo
+echo "=== away_days: passes that finished partial since the last ok one are not an absence ==="
+rm -rf "$STATE"
+: > "$RECORDER_LOG"
+PASS_SCRATCH="$(mktemp -d)"
+desk_status_set_result "testpass" "ok" "" "[]" "" > /dev/null
+jq --argjson t "$long_ago" '.passes.testpass |= (.last_run = $t | .last_ok_run = $t)' \
+	"$DESK_STATUS_FILE" > "$DESK_STATUS_FILE.tmp" && mv "$DESK_STATUS_FILE.tmp" "$DESK_STATUS_FILE"
+desk_status_set_running "testpass" > /dev/null
+desk_status_set_result "testpass" "partial" "" '["F-web"]' "" > /dev/null
+pid3b="$(spawn_throwaway)"
+jq -n --argjson pid "$pid3b" \
+	'{id:"sess-3b", name:"d-session", live:true, has_start_event:true, last_activity:0, pid:$pid, transcript_path:""}' \
+	> "$SESSION_STATUS_FIXTURE"
+write_items_reply ""
+result="$(desk_step_close "testpass" "$step_json" "$no_log_only_config" "$repo" "2026-09-28" "${files[@]}")"
+assert_eq "the step reports ok" "ok" "$result"
+assert_true "the idle session was closed" "$(grep -q 'close sess-3b' "$RECORDER_LOG" && echo true || echo false)"
+kill "$pid3b" 2> /dev/null
 rm -rf "$PASS_SCRATCH"
 
 echo

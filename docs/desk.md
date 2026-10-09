@@ -97,7 +97,7 @@ Once the recorder hooks are live, any headless `claude -p` session started outsi
 | `close_after_working_days` | `3` | Idle threshold for closing, in Mon–Fri days since your last message in that session. |
 | `keep_open` | `[]` | Session names never closed. |
 | `max_closes` | `3` | Real closes per pass. |
-| `away_days` | `5` | A pass more than this many days after the pass's last ok run closes nothing. |
+| `away_days` | `5` | A pass more than this many days after the pass last ran to its end, ok, partial or failed, closes nothing. |
 | `follow_up_summary_prompt` | `claude/desk-lib/follow-up-summary.md` | The prompt for a follow-up tab's plain-language turn (`follow_up_step`), relative to the config's directory. |
 | `follow_up_status_prompt` | `claude/desk-lib/follow-up-status.md` | The first turn of the status session a follow-up tab opens when there is no session to resume. |
 | `retention_warn_days` | `14` | How many days before Claude Code deletes a transcript the `retention` step warns about it. |

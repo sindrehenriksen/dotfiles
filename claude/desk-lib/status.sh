@@ -75,9 +75,11 @@ desk_status_set_running() {
 	desk_status_update '
 		(.passes[$pass].last_ok_run // null) as $prev_ok
 		| (.passes[$pass].last_fetch_ok // null) as $prev_fetch_ok
+		| (.passes[$pass].last_done_run // null) as $prev_done
 		| .passes[$pass] = { last_run: $now, result: "running", stopped_at: null, failed_sources: [] }
 		| (if $prev_ok != null then .passes[$pass].last_ok_run = $prev_ok else . end)
 		| (if $prev_fetch_ok != null then .passes[$pass].last_fetch_ok = $prev_fetch_ok else . end)
+		| (if $prev_done != null then .passes[$pass].last_done_run = $prev_done else . end)
 	' --arg pass "$pass" --argjson now "$now"
 }
 
@@ -94,6 +96,7 @@ desk_status_set_result() {
 		| .passes[$pass].failed_sources = $failed_sources
 		| (if $scheduled_date == "" then . else .passes[$pass].scheduled_date = $scheduled_date end)
 		| (if $result == "ok" then .passes[$pass].last_ok_run = .passes[$pass].last_run else . end)
+		| .passes[$pass].last_done_run = .passes[$pass].last_run
 	' --arg pass "$pass" --arg result "$result" --arg stopped_at "$stopped_at" \
 		--argjson failed_sources "$failed_sources" --arg scheduled_date "$scheduled_date"
 }
@@ -122,6 +125,14 @@ desk_status_last_ok_run() {
 # anything since last_fetch_ok. Only desk_status_set_fetch_ok (called by
 # desk-run itself, only when at least one fetch step actually ran this
 # pass and none failed) ever moves this forward.
+# The epoch of $1's last run that reached its end, whatever its result
+# (falling back to last_ok_run for a status file from before this field), or
+# "" if none has: the close step's measure of how long the machine has gone
+# without a pass, which a source failing every day must not stretch.
+desk_status_last_done_run() {
+	jq -r --arg p "$1" '.passes[$p] | .last_done_run // .last_ok_run // empty' <<< "$(desk_status_read)"
+}
+
 desk_status_last_fetch_ok() {
 	local pass="$1"
 	jq -r --arg p "$pass" '.passes[$p].last_fetch_ok // empty' <<< "$(desk_status_read)"

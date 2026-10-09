@@ -1084,8 +1084,8 @@ desk_session_capture_call() {
 # desk_step_close <pass> <step_json> <config_json> <repo> <file>...
 # The composite close step.
 # Skips every candidate (closes nothing) on the first pass after more than
-# `away_days` days away, a safety valve against a close storm
-# on first wake. Otherwise, per candidate, in order: the per-session call;
+# `away_days` days away (since the pass last ran to its end, whatever its
+# result), a safety valve against a close storm on first wake. Otherwise, per candidate, in order: the per-session call;
 # its reply's turn citations verified/stripped and its text sanitized
 # (desk-lib/validate.sh); if a closure-note item survives, staged into the
 # ledger/proposal (capture_kind "would_close" under `log_only`, "closed"
@@ -1117,11 +1117,11 @@ desk_step_close() {
 	# "log_only": false and always come back "true".
 	log_only="$(jq -r 'if .log_only == null then true else .log_only end' <<< "$config_json")"
 
-	local last_ok now away_gap
+	local last_done now away_gap
 	now="$(desk_now)"
-	last_ok="$(desk_status_last_ok_run "$pass")"
-	if [ -n "$last_ok" ]; then
-		away_gap=$(( (now - last_ok) / 86400 ))
+	last_done="$(desk_status_last_done_run "$pass")"
+	if [ -n "$last_done" ]; then
+		away_gap=$(( (now - last_done) / 86400 ))
 		if [ "$away_gap" -gt "$away_days" ]; then
 			desk_log "$pass" "close: first pass after ${away_gap}d away (> ${away_days}d) — closing nothing this pass"
 			echo "ok"
