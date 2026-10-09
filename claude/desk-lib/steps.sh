@@ -786,10 +786,10 @@ desk_step_commit_push_kind() {
 }
 
 # ---------------------------------------------------------------------------
-# close: session selection is generic/config-driven. Ordering: capture written
-# to the proposal; only once at least the name is in it, `close` (session-recorder.sh) records it; SIGTERM; liveness
-# re-checked, a survivor recorded as a failed close — so SIGTERM is never
-# sent to a session nothing durable ever recorded wanting to close.
+# close: session selection is generic/config-driven. Ordering: the closure
+# note staged in the proposal first; only then close-session.sh records the
+# close, sends SIGTERM and re-checks, a survivor recorded as a failed close
+# — so no session is ended that nothing durable recorded wanting to close.
 # ---------------------------------------------------------------------------
 
 # Every session-status.sh entry that's a `close` candidate right now:
@@ -834,24 +834,6 @@ desk_close_candidates() {
 		fi
 	done
 	printf '%s' "$out"
-}
-
-# SIGTERMs $2 (a pid) and re-checks liveness after a short grace period.
-# Prints "closed" or "failed" (a survivor). Never `/exit`-into-a-tab
-#: this only ever signals the process directly.
-desk_close_session() {
-	local pid="$1" grace="${2:-5}"
-	kill -TERM "$pid" 2> /dev/null
-	local waited=0
-	while desk_pid_alive "$pid" && [ "$waited" -lt "$grace" ]; do
-		sleep 1
-		waited=$((waited + 1))
-	done
-	if desk_pid_alive "$pid"; then
-		echo "failed"
-	else
-		echo "closed"
-	fi
 }
 
 # ---------------------------------------------------------------------------
@@ -1097,12 +1079,11 @@ desk_session_capture_call() {
 # ledger/proposal (capture_kind "would_close" under `log_only`, "closed"
 # otherwise) — only once that staging succeeds does this re-check the
 # session is still live and idle, then (unless `log_only`, default true)
-# tell session-recorder.sh to record the close, SIGTERM, and re-check
-# liveness, counting a survivor as a failed close rather than retrying —
-# and telling session-recorder.sh that too (its own `close-failed` event,
-# surfaced by session-status.sh), since the "close" event already recorded
-# stays exactly as it was and would otherwise be the only record, silently
-# wrong about what actually happened.
+# end it through close-session.sh ($DESK_CLOSE_SESSION_BIN), the same path
+# a session takes when closed by hand: the close recorded, SIGTERM, a
+# survivor recorded as a failed close and never retried, and the tab closed
+# only when identified for certain. Each close says in the run status
+# whether its tab went.
 # `max_closes` (K) bounds real closes only; `log_only` queues every
 # would-close candidate regardless, so the dry-run week
 # sees the whole list. Prints "ok" once every candidate is processed (each
@@ -1265,19 +1246,42 @@ desk_step_close() {
 			continue
 		fi
 
-		"$DESK_SESSION_RECORDER_BIN" close "$id" 2> /dev/null
-		local close_result
-		close_result="$(desk_close_session "$pid" "$DESK_KILL_GRACE_SECS")"
-		if [ "$close_result" = "closed" ]; then
-			closes_this_pass=$((closes_this_pass + 1))
-			desk_status_bump closes
-			desk_status_note_closed "$name"
-			desk_log "$pass" "close: session $name closed"
-		else
-			desk_status_bump failed_closes
-			"$DESK_SESSION_RECORDER_BIN" close-failed "$id" 2> /dev/null
-			desk_log "$pass" "close: session $name survived SIGTERM — recorded as a failed close"
-		fi
+		# The session ends the way close-session.sh ends any session from
+		# outside it: the close recorded as deliberate, SIGTERM, the
+		# survivor and reader re-checks, and its Ghostty tab closed only when
+		# it could be told apart for certain. That script also refuses on its
+		# own grounds (a pid that is not a claude process, keep_open, two
+		# processes), which leave the session as it is.
+		local close_line close_status close_detail tab_outcome
+		close_line="$(DESK_SESSION_RECORDER_BIN="$DESK_SESSION_RECORDER_BIN" \
+			CLOSE_SESSION_GRACE_SECS="$DESK_KILL_GRACE_SECS" \
+			"${DESK_CLOSE_SESSION_BIN:-$DESK_LIB_DIR/../close-session.sh}" "$id" < /dev/null 2> /dev/null | tail -n 1)"
+		close_status="$(cut -f1 <<< "$close_line")"
+		close_detail="$(cut -f4- <<< "$close_line")"
+		case "$close_status" in
+			closed)
+				case "$close_detail" in
+					"tab closed") tab_outcome="closed, tab closed" ;;
+					*"timed out"* | *"not closed"*) tab_outcome="closed, tab left (closing it failed)" ;;
+					*) tab_outcome="closed, tab left (not identified)" ;;
+				esac
+				closes_this_pass=$((closes_this_pass + 1))
+				desk_status_bump closes
+				desk_status_note_closed "$name"
+				desk_log "$pass" "close: session $name $tab_outcome — $close_detail"
+				desk_run_note "$(jq -r '.id' <<< "$step_json") ended the idle session $name: $tab_outcome."
+				;;
+			refused)
+				desk_log "$pass" "close: session $name — close-session.sh refused: $close_detail; not signaled"
+				;;
+			*)
+				# close-session.sh has recorded a survivor as a failed close
+				# itself; a session it could not see end is counted the same.
+				desk_status_bump failed_closes
+				desk_log "$pass" "close: session $name — the close failed: ${close_detail:-close-session.sh gave no result}"
+				desk_run_note "$(jq -r '.id' <<< "$step_json") could not end the idle session $name: ${close_detail:-no result}."
+				;;
+		esac
 	done
 	local step_id
 	step_id="$(jq -r '.id' <<< "$step_json")"

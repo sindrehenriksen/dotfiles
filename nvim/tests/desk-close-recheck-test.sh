@@ -56,6 +56,19 @@ FAKE
 chmod +x "$FAKEBIN/session-recorder-fake.sh"
 export DESK_SESSION_RECORDER_BIN="$FAKEBIN/session-recorder-fake.sh"
 
+# The close itself is close-session.sh's, tested on its own and through
+# desk-close-test.sh; this stand-in records the close and signals the pid the
+# fixture names, so these cases stay about the re-check before it.
+cat > "$FAKEBIN/close-session-fake.sh" <<'FAKE'
+#!/usr/bin/env bash
+pid="$(session-status.sh | jq -rs --arg id "$1" '[.[] | select(.id == $id) | .pid][0] // empty')"
+"$DESK_SESSION_RECORDER_BIN" close "$1"
+kill -TERM "$pid" 2> /dev/null
+printf 'closed\t%s\t-\ttab left open: the session has no terminal\n' "$1"
+FAKE
+chmod +x "$FAKEBIN/close-session-fake.sh"
+export DESK_CLOSE_SESSION_BIN="$FAKEBIN/close-session-fake.sh"
+
 FAKE_CLAUDE_ITEMS_FILE="$ROOT/fake-claude-items.json"
 cat > "$FAKEBIN/claude" <<'FAKE'
 #!/usr/bin/env bash
