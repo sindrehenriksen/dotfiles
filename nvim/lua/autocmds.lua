@@ -13,6 +13,10 @@ autocmd("FileChangedShellPost", {
 	end,
 })
 
+-- A file that changed on disk under unsaved edits opens as a merge instead
+-- of the keep-or-load prompt.
+require("diskmerge").setup()
+
 -- Return to last edit position when opening files
 autocmd("BufReadPost", {
 	callback = function()

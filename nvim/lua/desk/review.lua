@@ -88,6 +88,13 @@ local function live_session(bufnr)
 	end
 end
 
+--- The review split's buffer while a review is open on `notes_buf`, else
+--- nil. The disk merge (nvim/lua/diskmerge.lua) waits for it to go.
+function M.open_review_buf(notes_buf)
+	local s = live_session(notes_buf)
+	return s and s.review_buf
+end
+
 local function report(ok, err_or_result)
 	if not ok then
 		vim.notify("desk: " .. tostring(err_or_result), vim.log.levels.WARN)

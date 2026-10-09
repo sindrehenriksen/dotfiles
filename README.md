@@ -50,6 +50,8 @@ One Ghostty window per role, tabs for project switching. Splits are available (`
 
 Lua config under `nvim/lua/`: `options.lua`, `keymaps.lua`, `autocmds.lua`, `plugins/*.lua`. Leader is `<space>`. Native LSP configured via `vim.lsp.config()` / `vim.lsp.enable()` (Neovim 0.11 API). Language servers installed via mason.nvim. Formatting via conform.nvim, linting via nvim-lint, completion via blink.cmp. File picker: telescope.nvim with fzf-native. Git: gitsigns + diffview. File browser: oil.nvim (open with `-`). LaTeX: vimtex. Inline AI completions: copilot.vim. Keymap discovery: which-key.
 
+**A file changed on disk.** Focusing nvim or entering a buffer checks for it (`autocmds.lua`). An unmodified buffer reloads and says so. One with unsaved edits opens the disk version in a read-only diff split above it instead of nvim's keep-or-load prompt (`nvim/lua/diskmerge.lua`), the cursor staying in your buffer: `n`/`N` move between differences (the search's own while one is highlighted), `do` takes a hunk from disk into your buffer, `dp` in the split does the same, `:w` saves the merged buffer without the changed-since-reading prompt, and `q` closes the split, leaving your buffer as merged. The bar above the split names the keys. A buffer not on screen gets its merge when it is shown, a desk review open on it ends first ([docs/desk.md](docs/desk.md#review-keys)), and a deleted file or one whose content did not change (only its timestamp) gets nvim's own handling.
+
 `vim-slime` is installed (target=neovim) but not actively used — candidate for removal.
 
 ## AI agents

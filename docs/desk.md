@@ -403,6 +403,8 @@ In your notes window while a review is open, keys that go when it ends. The sugg
 
 Not taking something is either a decline, from either window, or leaving it alone: an untaken suggestion comes back with the next pass. A take is remembered when you make it and recorded on the next save of either buffer, or when the review ends through `:wq`, `Q` or `<leader>gq`, so a suggestion you edit right after taking stays taken.
 
+When the notes file changes on disk while you have unsaved edits in it and a review is open, the disk merge (README, Neovim) waits: it says so in one line and opens once the review ends, so the notes window is never in two diffs at once.
+
 A `move` or `merge` shows as two hunks, its removal at the old place and its landing at the new one, and is only ever taken or declined whole: every take key on either hunk takes both places and says so (`took the whole move: removed here, added under Section C`), and the decline keys decline both. One already taken in one place gets the other place on its next take, and declining it removes just its landing, leaving your notes as they are.
 
 A pass, or a session staging with `desk-propose`, can replace the proposal while a review is open. Entering either review window or the overview notices, and so does every take or decline. With nothing unsaved in the split, the review is rebuilt in its own windows, the cursor on the line it was on, and says so; a take or decline that noticed does nothing that once, so you look and press again. With unsaved declines the split stays as it is, says the proposal changed, and refuses to take or decline until `<leader>gR` has them saved or discarded and reloads it. A new proposal that shows the same suggestions as the same text is taken over silently.
