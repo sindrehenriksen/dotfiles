@@ -663,7 +663,9 @@ desk_follow_main() {
 		case "$1" in
 			--dry-run) dry_run="true"; shift ;;
 			--scheduled) scheduled="true"; shift ;;
-			--lookback-minutes) lookback="${2:-}"; shift 2 ;;
+			--lookback-minutes)
+				[ $# -ge 2 ] || { desk_log "$pass" "follow: --lookback-minutes takes whole minutes"; return 2; }
+				lookback="$2"; shift 2 ;;
 			*) desk_log "$pass" "follow: unknown option $1"; return 2 ;;
 		esac
 	done

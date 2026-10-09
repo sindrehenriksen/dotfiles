@@ -248,6 +248,15 @@ out="$("$CLI" list)"
 assert_contains "list names each follow with its liveness" "alpha-session  (aaaaaaaa, live)" "$out"
 assert_contains "list shows tracked and related keys" "tracks: ABC-1, ABC-2; related: XYZ-9" "$out"
 assert_eq "list --json is the machine-readable seam" "2" "$("$CLI" list --json | jq length)"
+# A missing option value is a usage error, never a loop: the alarm kills a
+# hung call, which then exits 142 instead of 2.
+for args in "add --label" "add --session" "run --lookback-minutes"; do
+	# shellcheck disable=SC2086
+	CLAUDE_CODE_SESSION_ID="$SID_A" perl -e 'alarm 5; exec @ARGV' "$CLI" $args > /dev/null 2>&1; rc=$?
+	assert_eq "desk-follow $args with no value is a usage error" "2" "$rc"
+done
+perl -e 'alarm 5; exec @ARGV' "$RUN" follow --lookback-minutes > /dev/null 2>&1; rc=$?
+assert_eq "desk-run follow --lookback-minutes with no value is refused" "2" "$rc"
 
 echo
 echo "=== the interval floor ==="

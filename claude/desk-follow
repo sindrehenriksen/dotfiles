@@ -39,15 +39,15 @@ json=""
 run_args=()
 while [ $# -gt 0 ]; do
 	case "$1" in
-		--session) session="${2:-}"; shift 2 ;;
-		--label) label="${2:-}"; shift 2 ;;
+		--session) [ $# -ge 2 ] || usage; session="$2"; shift 2 ;;
+		--label) [ $# -ge 2 ] || usage; label="$2"; shift 2 ;;
 		--related)
 			shift
 			while [ $# -gt 0 ] && [[ "$1" != --* ]]; do related+=("$(tr '[:lower:]' '[:upper:]' <<< "$1")"); shift; done
 			;;
 		--json) json="--json"; shift ;;
 		--dry-run) run_args+=("$1"); shift ;;
-		--lookback-minutes) run_args+=("$1" "${2:-}"); shift 2 ;;
+		--lookback-minutes) [ $# -ge 2 ] || usage; run_args+=("$1" "$2"); shift 2 ;;
 		--*) echo "desk-follow: unknown option $1" >&2; usage ;;
 		*) keys+=("$(tr '[:lower:]' '[:upper:]' <<< "$1")"); shift ;;
 	esac
