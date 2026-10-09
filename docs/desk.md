@@ -103,8 +103,6 @@ Any headless `claude -p` started outside desk (a script, a CI-style helper) reco
 | `keep_open` | `[]` | Session names never closed. |
 | `max_closes` | `3` | Real closes per pass. |
 | `away_days` | `5` | A pass more than this many days after the pass last ran to its end, ok, partial or failed, closes nothing. |
-| `follow_up_summary_prompt` | `claude/desk-lib/follow-up-summary.md` | The prompt for a follow-up tab's plain-language turn (`follow_up_step`), relative to the config's directory. |
-| `follow_up_status_prompt` | `claude/desk-lib/follow-up-status.md` | The first turn of the status session a follow-up tab opens when there is no session to resume. |
 | `retention_warn_days` | `14` | How many days before Claude Code deletes a transcript the `retention` step warns about it. |
 | `caps.<name>` | none | `{act, worth_knowing, wildcard}`: how many tiered items a judge may keep. Which entry a pass uses is its `caps` key; absent, `weekly` for a pass named `weekly` and `daily` for every other. |
 | `default_max_budget_usd` | `$DESK_DEFAULT_MAX_BUDGET_USD`, `2` | Spend cap for a model call whose step has no `max_budget_usd`. |
@@ -126,7 +124,7 @@ The five required tool and step-id fields have no defaults on purpose: this repo
 | `weekdays_only` | Boolean. `true`: when the slot's scheduled date is a Saturday or Sunday, every step but `commit_push` is skipped. Absent: `true` for a pass named `morning`, `false` otherwise. |
 | `caps` | Name of the top-level `caps` entry this pass's judge uses. Absent: `weekly` for a pass named `weekly`, else `daily`. |
 | `kind` | `"follow"` makes the pass the follow pass, which takes none of the keys here: its own are in [The follow pass](#the-follow-pass). Absent for every other pass. |
-| `follow_up_step` | A step id. After the pass, whatever its result, the most recent `visible` call of that step opens in a background tab with `claude --resume` (a live session is left in its tab), once per scheduled date and never for a weekend slot of a `weekdays_only` pass. First the session is resumed headless, with no tools, no MCP servers and `--restricted`, for one plain-language turn to the user (`follow_up_summary_prompt`); if that turn fails or replies in JSON, the tab opens on the step's own reply and the log says so. When no call of the step ran or its session cannot be found, the tab opens a fresh interactive `claude` named `desk-<pass>-<date>-status`, whose first turn (`follow_up_status_prompt`) reports the run. |
+| `follow_up_step` | A step id. After the pass, whatever its result, the most recent `visible` call of that step opens in a background tab with `claude --resume` (a live session is left in its tab), once per scheduled date and never for a weekend slot of a `weekdays_only` pass. First the session is resumed headless, with no tools, no MCP servers and `--restricted`, for one plain-language turn to the user; if that turn fails or replies in JSON, the tab opens on the step's own reply and the log says so. When no call of the step ran or its session cannot be found, the tab opens a fresh interactive `claude` named `desk-<pass>-<date>-status`, whose first turn reports the run. |
 
 The pass names `morning` and `weekly` only supply the defaults of `weekdays_only` and `caps`; nothing else about a pass depends on its name.
 

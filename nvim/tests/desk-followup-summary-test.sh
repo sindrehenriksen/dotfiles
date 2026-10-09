@@ -177,17 +177,6 @@ assert_eq "the tab opened" "claude --resume '$sid'" "$(cat "$OPEN_TAB_LOG")"
 assert_true "every placeholder was filled" "$(grep -qE '\{\{[a-z_]+\}\}' "$PROMPT_COPY" && echo false || echo true)"
 
 echo
-echo "=== an instance prompt replaces the generic one ==="
-printf 'Instance summary prompt. Items: {{items}}\n' > "$ROOT/instance/summary.md"
-echo '{"follow_up_summary_prompt": "summary.md"}' > "$DESK_CONFIG"
-: > "$OPEN_TAB_LOG"
-sid2="22222222-2222-4222-8222-222222222222"
-seed_judge_session morning 2026-10-08 "$sid2" > /dev/null
-desk_open_follow_up_tab morning 2026-10-08 J "$repo" > /dev/null 2>&1
-assert_true "the instance prompt was used" "$(grep -qF 'Instance summary prompt' "$PROMPT_COPY" && echo true || echo false)"
-echo '{}' > "$DESK_CONFIG"
-
-echo
 echo "=== a failed summary still opens the tab, and says so ==="
 : > "$OPEN_TAB_LOG"
 sid3="33333333-3333-4333-8333-333333333333"

@@ -1302,8 +1302,7 @@ desk_run_note() {
 # machine-format reply. The session (a reader entry: id, cwd) is resumed
 # headless from its own cwd under the same id, with no tools at all, no MCP
 # servers and --restricted, so the turn can only write its reply. The prompt
-# is `follow_up_summary_prompt` from the config (relative to it), else this
-# repo's generic one beside this file; it is handed how the run went and this
+# is the generic one beside this file; it is handed how the run went and this
 # pass's items as the runner staged them (desk_follow_up_placeholders).
 # Prints "ok", or "failed" when the call failed or its reply is empty or
 # still JSON.
@@ -1317,13 +1316,7 @@ desk_follow_up_summary() {
 		return
 	fi
 
-	local prompt_rel prompt_path
-	prompt_rel="$(jq -r '.follow_up_summary_prompt // empty' "$DESK_CONFIG" 2> /dev/null)"
-	if [ -n "$prompt_rel" ]; then
-		prompt_path="$(desk_prompt_path "$prompt_rel")"
-	else
-		prompt_path="$DESK_LIB_DIR/follow-up-summary.md"
-	fi
+	local prompt_path="$DESK_LIB_DIR/follow-up-summary.md"
 	if [ ! -f "$prompt_path" ]; then
 		desk_log "$pass" "follow-up summary: prompt not found ($prompt_path)"
 		echo "failed"
@@ -1571,20 +1564,13 @@ desk_follow_up_run_status() {
 # pass left no session to resume: an interactive `claude`, named
 # desk-<pass>-<date>-status and recorded as the user's own session (no
 # DESK_HEADLESS: it is interactive, so a restart reopens it), whose first
-# turn is the status prompt (`follow_up_status_prompt` from the config,
-# else the generic one beside this file) rendered with the run's status and
+# turn is the status prompt (the generic one beside this file) rendered with the run's status and
 # this pass's staged items, if any. The rendered prompt is written to
 # <dir>/prompt.txt and read by the command itself, since the tab helper
 # passes the command on as a one-line Lua string.
 desk_follow_up_status_command() {
 	local pass="$1" scheduled_date="$2" dir="$3" repo="${4:-}"
-	local prompt_rel prompt_path
-	prompt_rel="$(jq -r '.follow_up_status_prompt // empty' "$DESK_CONFIG" 2> /dev/null)"
-	if [ -n "$prompt_rel" ]; then
-		prompt_path="$(desk_prompt_path "$prompt_rel")"
-	else
-		prompt_path="$DESK_LIB_DIR/follow-up-status.md"
-	fi
+	local prompt_path="$DESK_LIB_DIR/follow-up-status.md"
 	if [ ! -f "$prompt_path" ]; then
 		desk_log "$pass" "follow-up tab: status prompt not found ($prompt_path)"
 		return 1
