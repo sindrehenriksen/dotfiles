@@ -133,22 +133,13 @@ end
 function M.default_deps()
 	local reader = require("desk.reader")
 
-	-- `env_vars` is tried in order: the name shared with the runner first,
-	-- then the older nvim-only alias.
-	local function shell_dep(env_vars, default_cmd)
+	local function shell_dep(env_var, default_cmd)
 		return function(...)
 			local args = { ... }
 			local cb = args[#args]
 			args[#args] = nil
-			local cmd
-			for _, env_var in ipairs(env_vars) do
-				local v = vim.env[env_var]
-				if v and v ~= "" then
-					cmd = v
-					break
-				end
-			end
-			cmd = cmd or default_cmd
+			local v = vim.env[env_var]
+			local cmd = (v and v ~= "") and v or default_cmd
 			local argv = { cmd }
 			for _, a in ipairs(args) do
 				argv[#argv + 1] = a
@@ -174,9 +165,9 @@ function M.default_deps()
 		reader_resolve = function(token, cb)
 			reader.resolve(token, cb)
 		end,
-		focus_tty = shell_dep({ "DESK_FOCUS_TAB_BIN", "DESK_FOCUS_TAB" }, "desk-focus-tab.sh"),
-		open_tab = shell_dep({ "DESK_OPEN_TAB_BIN", "DESK_OPEN_TAB" }, "desk-open-tab.sh"),
-		open_url = shell_dep({ "DESK_OPEN_URL" }, "open"),
+		focus_tty = shell_dep("DESK_FOCUS_TAB_BIN", "desk-focus-tab.sh"),
+		open_tab = shell_dep("DESK_OPEN_TAB_BIN", "desk-open-tab.sh"),
+		open_url = shell_dep("DESK_OPEN_URL", "open"),
 		follow_link = function(bufnr, win)
 			return require("mdlink").follow_at(bufnr, win)
 		end,

@@ -116,7 +116,7 @@ while [ $# -gt 0 ]; do
 done
 
 READER="${DESK_READER:-session-status.sh}"
-OPENER="${DESK_OPEN_TAB_BIN:-${DESK_OPEN_TAB:-desk-open-tab.sh}}"
+OPENER="${DESK_OPEN_TAB_BIN:-desk-open-tab.sh}"
 STORE_DIR="${CLAUDE_SESSION_STORE:-$HOME/.local/state/claude/session-events}"
 CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 # Above desk-open-tab.sh's own limit on hs (6s and a kill), so that one

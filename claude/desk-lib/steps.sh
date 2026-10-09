@@ -1484,7 +1484,7 @@ desk_open_follow_up_tab() {
 		cwd="$(jq -r '.cwd // empty' <<< "$best")"
 	fi
 
-	local helper="${DESK_OPEN_TAB_BIN:-${DESK_OPEN_TAB:-desk-open-tab.sh}}"
+	local helper="${DESK_OPEN_TAB_BIN:-desk-open-tab.sh}"
 	local command
 	if [ -z "$id" ] || [ -z "$cwd" ]; then
 		# No session of this pass to resume: no model call ran (a failure
@@ -1891,7 +1891,7 @@ desk_step_open_tab() {
 	# "startup"), which is what lets a restart reopen it and a capture
 	# list it. A --restricted tab loads no hooks and records nothing.
 
-	local helper="${DESK_OPEN_TAB_BIN:-${DESK_OPEN_TAB:-desk-open-tab.sh}}"
+	local helper="${DESK_OPEN_TAB_BIN:-desk-open-tab.sh}"
 	if "$helper" "$command" "" "$cwd" background > /dev/null 2>&1; then
 		echo "ok"
 	else

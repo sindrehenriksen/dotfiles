@@ -485,10 +485,6 @@ do
 		return got
 	end
 	assert_eq("DESK_OPEN_TAB_BIN is used", "by-bin", called_after("DESK_OPEN_TAB_BIN", "by-bin"))
-	assert_eq("the older DESK_OPEN_TAB still works", "by-alias", called_after("DESK_OPEN_TAB", "by-alias"))
-	vim.env.DESK_OPEN_TAB = stub("alias-loses")
-	assert_eq("the shared name wins when both are set", "by-bin2", called_after("DESK_OPEN_TAB_BIN", "by-bin2"))
-	vim.env.DESK_OPEN_TAB = nil
 end
 
 print()
