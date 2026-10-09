@@ -576,25 +576,6 @@ assert_not_contains "a ticket only the scope query returned is not" "ABC-11" "$o
 [ -f "$ROOT/fresh-state.json" ] && bad "the dry run wrote state" || ok "the dry run wrote no state"
 
 echo
-echo "=== the older names still work ==="
-MIG="$ROOT/migrate-state"
-mkdir -p "$MIG"
-printf '{"entries":{"%s":{"label":"old","keys":["ABC-1"],"related":[]}}}\n' "$SID_A" > "$MIG/watch.json"
-printf '{"last_run":{"at":1}}\n' > "$MIG/watch-state.json"
-out="$(env -u DESK_FOLLOW_FILE -u DESK_FOLLOW_STATE_FILE DESK_STATE_DIR="$MIG" "$CLI" list 2>&1)"
-assert_contains "a follow list at the old path is read" "old  (aaaaaaaa" "$out"
-assert_eq "and moved to the new one" "yes no" "$([ -f "$MIG/follow.json" ] && echo yes || echo no) $([ -f "$MIG/watch.json" ] && echo yes || echo no)"
-assert_eq "the state moves too, unchanged" '{"last_run":{"at":1}}' "$(jq -c . "$MIG/follow-state.json" 2> /dev/null)"
-printf '{"entries":{}}\n' > "$MIG/watch.json"
-env -u DESK_FOLLOW_FILE -u DESK_FOLLOW_STATE_FILE DESK_STATE_DIR="$MIG" "$CLI" list > /dev/null 2>&1
-assert_eq "an old file never overwrites a new one" "old" "$(jq -r --arg s "$SID_A" '.entries[$s].label' "$MIG/follow.json")"
-out="$(env -u DESK_FOLLOW_FILE DESK_WATCH_FILE="$MIG/follow.json" DESK_STATE_DIR="$ROOT/elsewhere" "$CLI" list 2>&1)"
-assert_contains "the older override is still read" "old  (aaaaaaaa" "$out"
-jq '.passes.follow.kind = "watch"' "$INST/config.json" > "$ROOT/c" && cp "$ROOT/c" "$INST/config.json"
-out="$("$CLI" run --dry-run 2>&1)"
-assert_contains "a pass of the older kind \"watch\" still runs as the follow pass" "follow: dry run" "$out"
-
-echo
 echo "=== a ticket another session owns goes only to that session ==="
 SID_P="dddddddd-4444-4444-8444-444444444444"
 SID_Q="eeeeeeee-5555-4555-8555-555555555555"

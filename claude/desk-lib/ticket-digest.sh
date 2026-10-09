@@ -31,7 +31,7 @@ DESK_TICKET_DIGEST_STATE_FILE="${DESK_TICKET_DIGEST_STATE_FILE:-$DESK_STATE_DIR/
 desk_ticket_digest_config() {
 	jq -c --argjson c "$2" '
 		.ticket_digest // empty
-		| ([($c.passes // {})[] | select(.kind == "follow" or .kind == "watch")] | first // {}) as $f
+		| ([($c.passes // {})[] | select(.kind == "follow")] | first // {}) as $f
 		| { jql: (.jql // null),
 		    github_repos: (.github_repos // $f.github_repos // []),
 		    skip: { bot_authors: (($f.skip.bot_authors // []) + (.skip.bot_authors // [])),

@@ -79,10 +79,9 @@ if [ -z "$pass_config" ]; then
 	exit 2
 fi
 
-# A pass of kind "follow" (docs/desk.md, "The follow pass"; "watch" is its
-# older name) runs on its own path: no once-a-day guard, no shared lock, no
+# A pass of kind "follow" (docs/desk.md, "The follow pass") runs on its own path: no once-a-day guard, no shared lock, no
 # notes repo or status file.
-if [[ "$(jq -r '.kind // empty' <<< "$pass_config")" =~ ^(follow|watch)$ ]]; then
+if [[ "$(jq -r '.kind // empty' <<< "$pass_config")" == "follow" ]]; then
 	source "$DESK_RUN_DIR/desk-lib/follow.sh"
 	export DESK_CONFIG
 	export CLAUDE_CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"

@@ -11,7 +11,7 @@
 # its Bash tool's environment, so a session can register itself. `remove`
 # without keys stops the whole follow; with keys, drops only those.
 # `run` runs the follow pass now (`desk-run <pass>`, the pass of kind
-# "follow" in $DESK_CONFIG, or "watch", its older name), outside its
+# "follow" in $DESK_CONFIG), outside its
 # schedule. With $DESK_CONFIG unset, `run` uses ${XDG_CONFIG_HOME:-~/.config}/desk/config.json if it exists.
 set -u
 
@@ -77,7 +77,7 @@ case "$cmd" in
 		desk_resolve_config
 		[ -n "$DESK_CONFIG" ] && [ -f "$DESK_CONFIG" ] || { echo "desk-follow: \$DESK_CONFIG is not set or missing, and there is no ${XDG_CONFIG_HOME:-$HOME/.config}/desk/config.json" >&2; exit 2; }
 		export DESK_CONFIG
-		pass="$(jq -r '.passes | to_entries[] | select(.value.kind == "follow" or .value.kind == "watch") | .key' "$DESK_CONFIG" | head -n1)"
+		pass="$(jq -r '.passes | to_entries[] | select(.value.kind == "follow") | .key' "$DESK_CONFIG" | head -n1)"
 		[ -n "$pass" ] || { echo "desk-follow: no pass of kind \"follow\" in $DESK_CONFIG" >&2; exit 2; }
 		exec "$DESK_FOLLOW_DIR/desk-run" "$pass" "${run_args[@]+"${run_args[@]}"}"
 		;;

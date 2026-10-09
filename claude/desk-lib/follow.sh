@@ -17,21 +17,8 @@
 # second follow run (the schedule and a manual one) waits briefly or skips.
 set -u
 
-# This pass was called the watch pass, its files watch.json and
-# watch-state.json, and its overrides DESK_WATCH_FILE and
-# DESK_WATCH_STATE_FILE, which still apply. A file still at its old default
-# path moves to the new default the first time it is looked for, so the
-# sessions already followed and their snapshots carry over.
-desk_follow_default_path() { # override, older override, new default, old default
-	if [ -n "$1" ]; then printf '%s\n' "$1"; return; fi
-	if [ -n "$2" ]; then printf '%s\n' "$2"; return; fi
-	[ -e "$3" ] || [ ! -e "$4" ] || mv -n "$4" "$3" 2> /dev/null || true
-	printf '%s\n' "$3"
-}
-DESK_FOLLOW_FILE="$(desk_follow_default_path "${DESK_FOLLOW_FILE:-}" "${DESK_WATCH_FILE:-}" \
-	"$DESK_STATE_DIR/follow.json" "$DESK_STATE_DIR/watch.json")"
-DESK_FOLLOW_STATE_FILE="$(desk_follow_default_path "${DESK_FOLLOW_STATE_FILE:-}" "${DESK_WATCH_STATE_FILE:-}" \
-	"$DESK_STATE_DIR/follow-state.json" "$DESK_STATE_DIR/watch-state.json")"
+DESK_FOLLOW_FILE="${DESK_FOLLOW_FILE:-$DESK_STATE_DIR/follow.json}"
+DESK_FOLLOW_STATE_FILE="${DESK_FOLLOW_STATE_FILE:-$DESK_STATE_DIR/follow-state.json}"
 DESK_GH_BIN="${DESK_GH_BIN:-gh}"
 DESK_FOLLOW_DIFF_JQ="$DESK_LIB_DIR/follow-diff.jq"
 
@@ -104,7 +91,7 @@ desk_follow_cli_intro() {
 	local sid="$1" entry="$2" pass="" pass_config="" hit name live dup back msg_file work result verdict
 	desk_resolve_config
 	if [ -n "$DESK_CONFIG" ] && [ -f "$DESK_CONFIG" ]; then
-		pass="$(jq -r '.passes | to_entries[] | select(.value.kind == "follow" or .value.kind == "watch") | .key' "$DESK_CONFIG" | head -n1)"
+		pass="$(jq -r '.passes | to_entries[] | select(.value.kind == "follow") | .key' "$DESK_CONFIG" | head -n1)"
 		[ -z "$pass" ] || pass_config="$(jq -c --arg p "$pass" '.passes[$p]' "$DESK_CONFIG")"
 	fi
 	hit="$(_desk_follow_reader resolve "$sid" 2> /dev/null)" || hit=""
