@@ -5,6 +5,14 @@ autocmd({ "FocusGained", "BufEnter" }, {
 	command = "checktime",
 })
 
+-- Say so when a reload happened: autoread does it silently, and a file an
+-- agent edited reads the same as one nobody touched.
+autocmd("FileChangedShellPost", {
+	callback = function(args)
+		vim.notify(vim.fn.fnamemodify(args.file, ":t") .. " changed on disk and was reloaded", vim.log.levels.INFO)
+	end,
+})
+
 -- Return to last edit position when opening files
 autocmd("BufReadPost", {
 	callback = function()
