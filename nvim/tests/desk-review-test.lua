@@ -2371,6 +2371,19 @@ do
 	vim.notify = orig_notify
 end
 
+print("\n=== the bar: a proposal staged while the notes sit open shows on returning to nvim ===")
+do
+	local r = new_repo(BASE)
+	local nb = open_notes(r)
+	review.attach(nb)
+	local win = vim.fn.bufwinid(nb)
+	assert_true("nothing staged yet: no count", vim.wo[win].winbar:match("untaken") == nil)
+	build(r, "2026-10-01", { item("n1"), item("n2") })
+	assert_true("staged from outside: the bar has not moved yet", vim.wo[win].winbar:match("untaken") == nil)
+	vim.api.nvim_exec_autocmds("FocusGained", {})
+	assert_true("focus back in nvim: the new count", vim.wo[win].winbar:match("%(2 untaken%)") ~= nil)
+end
+
 print(string.format("\n=== summary: %d passed, %d failed ===", pass, fail))
 if fail > 0 then
 	os.exit(1)

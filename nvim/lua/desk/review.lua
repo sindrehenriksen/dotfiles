@@ -3155,6 +3155,27 @@ M.KEYMAPS = {
 	{ mode = "n", lhs = "<leader>gA", desc = "Take just the suggestion under the cursor (while a review is open)" },
 }
 
+local focus_autocmd_installed = false
+
+-- A pass or a session's desk-propose changes the proposal while the notes sit
+-- open, and nothing in this nvim sees it happen; coming back to nvim is the
+-- cue to recount every notes buffer on screen.
+local function install_focus_autocmd()
+	if focus_autocmd_installed then
+		return
+	end
+	focus_autocmd_installed = true
+	vim.api.nvim_create_autocmd("FocusGained", {
+		callback = function()
+			for _, b in ipairs(vim.api.nvim_list_bufs()) do
+				if vim.b[b].desk_attached and #vim.fn.win_findbuf(b) > 0 then
+					M.refresh_status_line(b)
+				end
+			end
+		end,
+	})
+end
+
 local qf_autocmd_installed = false
 
 local function install_qf_autocmd()
@@ -3220,6 +3241,7 @@ function M.attach(bufnr)
 	end
 	vim.b[bufnr].desk_attached = true
 	install_qf_autocmd()
+	install_focus_autocmd()
 
 	local map = function(lhs, fn, desc)
 		vim.keymap.set("n", lhs, fn, { buffer = bufnr, desc = desc })
