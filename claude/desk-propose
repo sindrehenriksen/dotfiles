@@ -104,6 +104,13 @@ problems="$(jq -r --argjson files "$files_json" '
 		] end)
 	| .[] | "item \($i + 1) (\($it.id? // "no id")): \(.)"
 ' <<< "$items_json" 2> /dev/null)" || die "could not check $items_path" 1
+n=0
+while IFS= read -r item; do
+	n=$((n + 1))
+	jq -e 'type == "object"' > /dev/null 2>&1 <<< "$item" || continue
+	at_problem="$(desk_item_at_problem "$item")"
+	[ -z "$at_problem" ] || problems+="${problems:+$'\n'}item $n ($(jq -r '.id // "no id"' <<< "$item")): $at_problem"
+done < <(jq -c '.[]' <<< "$items_json")
 if [ -n "$problems" ]; then
 	printf '%s\n' "$problems" >&2
 	echo "desk-propose: nothing staged" >&2

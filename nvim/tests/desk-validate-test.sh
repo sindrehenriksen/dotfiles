@@ -201,6 +201,18 @@ assert_true "with no notes repo to check against, before grants nothing" \
 	"$([[ "$(jq -r '.[0].after' <<< "$validated")" != *evil.example* ]] && echo true || echo false)"
 
 echo
+echo "=== an at too short to quote, or not before's first line, drops the item, named ==="
+items='[
+  {"id":"a1","file":"notes.md","kind":"edit","target":{"at":"ok"},"before":"ok","after":"fine","source":"notes","headline":"too short"},
+  {"id":"a2","file":"notes.md","kind":"remove","target":{"at":"Section B"},"before":"Section A","after":"","source":"notes","headline":"elsewhere"},
+  {"id":"a3","file":"notes.md","kind":"move","target":[{"at":"Section A"},"top"],"before":"Section A\n  x","after":"Section A\n  x","source":"notes","headline":"fine"}
+]'
+validated="$(desk_validate_items "$items" "" 2> "$ROOT/at.err")"
+assert_eq "only the item whose at is before's first line is kept" '["a3"]' "$(jq -c '[.[].id]' <<< "$validated")"
+assert_contains "the short one is named" "$(cat "$ROOT/at.err")" "a1 (too short)"
+assert_contains "the mismatched one is named" "$(cat "$ROOT/at.err")" "a2 (elsewhere)"
+
+echo
 echo "=== desk_apply_caps: overflow is held back for the follow-up summary, never proposed ==="
 five_act='[
   {"id":"a1","tier":"act","headline":"one","source":"notes"},

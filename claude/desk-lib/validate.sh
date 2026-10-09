@@ -127,6 +127,25 @@ desk_before_is_committed() {
 	[[ $'\n'"$content"$'\n' == *$'\n'"$before"$'\n'* ]]
 }
 
+# desk_item_at_problem <item-json>: why the item's quoted `at` line (an
+# edit's or removal's target, a move's or merge's first) cannot stand, or
+# nothing when it can or there is none. A quoted line is matched as a whole
+# line of the notes, so it must be at least three characters, and it must be
+# the first line of `before`, since that is where the lines it names start.
+desk_item_at_problem() {
+	jq -r --arg mark "${DESK_AGENT_MARK:-  <<agent-suggested>>}" '
+		def unmark: split($mark) | join("");
+		(.target | if type == "array" then .[0] else . end | if type == "object" then .at else null end) as $at
+		| if $at == null then empty
+		  elif ($at | type) != "string" then "its at must be a line of text"
+		  else ($at | unmark) as $a
+		  | ((.before // "") | if type == "string" then . else "" end | unmark | split("\n") | .[0] // "") as $first
+		  | if ($a | length) < 3 then "its at line \($a | tojson) is shorter than three characters"
+		    elif $a != $first then "its at line \($a | tojson) is not the first line of before (\($first | tojson))"
+		    else empty end
+		  end' <<< "$1" 2> /dev/null
+}
+
 # Also validates the item's own `source` field: a bare non-URL source
 # (e.g. "notes", "ticket:TICKET-1", "session:<id>") always passes; a URL
 # source must be one of $2. An item whose URL source isn't allowed is
@@ -185,6 +204,12 @@ desk_validate_items() {
 	for ((i = 0; i < n; i++)); do
 		local item before_n after_n
 		item="$(jq -c ".[$i]" <<< "$items_json")"
+		local at_problem
+		at_problem="$(desk_item_at_problem "$item")"
+		if [ -n "$at_problem" ]; then
+			echo "desk: dropped item $(jq -r '"\(.id // "?") (\(.headline // "no headline"))"' <<< "$item"): $at_problem" >&2
+			continue
+		fi
 		if ! desk_source_allowed "$item" "$allowed_urls"; then
 			desk_record_dropped "$item"
 			continue

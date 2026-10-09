@@ -217,7 +217,7 @@ A close or retention call's cwd holds `session.json` (its reader entry), `transc
 | `id` | unique within the reply; the runner rewrites it to `<pass>-<scheduled date>-<n>-<id>` |
 | `file` | one of `files` |
 | `kind` | `new`, `add`, `link` (insert); `edit`, `remove` (in place); `move`, `merge` (remove in one place, insert in another) |
-| `target` | `"top"`, `{"under": line}` (end of the block that line heads), `{"after": line}` (end of the block containing it), or `{"at": line}`, the first line of `before`, for `edit` and `remove`; `move` and `merge` take `[{"at": …}, <landing anchor>]`. A quoted line is a whole line, matched exactly, at least three characters; an `at` line shorter than that, or blank, is found by its `before` lines instead. |
+| `target` | `"top"`, `{"under": line}` (end of the block that line heads), `{"after": line}` (end of the block containing it), or `{"at": line}`, the first line of `before`, for `edit` and `remove`; `move` and `merge` take `[{"at": …}, <landing anchor>]`. A quoted line is a whole line, matched exactly, at least three characters, and an `at` is the first line of `before`: `desk-propose` refuses an item whose `at` is shorter or is another line, and a pass drops it, naming it in the log. An `at` that is shorter and still reaches the proposal is found by its `before` lines instead. |
 | `before` | the exact existing lines for in-place and moving kinds, else `""` |
 | `after` | the new text, `""` for `remove` |
 | `source` | a URL from the fetch results, or a non-URL tag such as `notes` or `ticket:ABC-1` |

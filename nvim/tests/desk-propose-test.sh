@@ -81,6 +81,16 @@ assert_eq "...and the proposal did not move" "$before_sha" "$(git -C "$repo" rev
 jq -n '[{id: "e", file: "notes.md", kind: "edit", target: {at: "Weekly"}, before: "", after: "x", headline: "h", source: "notes"}]' > "$ROOT/bad2.json"
 "$PROPOSE" "$ROOT/bad2.json" > /dev/null 2> "$ROOT/err"
 assert_eq "an edit without the lines it replaces is refused" "1" "$?"
+jq -n '[{id: "short", file: "notes.md", kind: "edit", target: {at: "ok"}, before: "ok\n  - detail", after: "x", headline: "h", source: "notes"},
+	{id: "off", file: "notes.md", kind: "move", target: [{at: "Weekly"}, "top"], before: "Other\n  - other thing", after: "x", headline: "h", source: "notes"},
+	{id: "fine", file: "notes.md", kind: "remove", target: {at: "Weekly"}, before: "Weekly", after: "", headline: "h", source: "notes"}]' > "$ROOT/bad3.json"
+err="$("$PROPOSE" "$ROOT/bad3.json" 2>&1 > /dev/null)"
+assert_eq "an at too short to quote, or not before's first line, is refused" "1" "$?"
+for want in "item 1 (short): its at line \"ok\" is shorter than three characters" \
+	"item 2 (off): its at line \"Weekly\" is not the first line of before (\"Other\")"; do
+	case "$err" in *"$want"*) ok "...naming: $want" ;; *) bad "...naming: $want (got [$err])" ;; esac
+done
+case "$err" in *"(fine)"*) bad "...an at that is before's first line passes (got [$err])" ;; *) ok "...an at that is before's first line passes" ;; esac
 
 echo "=== --dry-run checks and prints, staging nothing ==="
 out="$("$PROPOSE" --dry-run "$ROOT/items2.json")"
