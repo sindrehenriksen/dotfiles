@@ -41,7 +41,9 @@ understood" but "does this detail change what gets decided".
   other way: a docs-or-copy diff is exactly the shape a low-risk
   heuristic waves through. Technical reference — how a tool's
   internals behave, a command's help text — is not that kind: say it
-  changed, and don't ask for a read.
+  changed, and don't ask for a read. Where no PR will put it in front
+  of the owner (a dotfiles commit, say), quote a short change in the
+  reply instead of pointing at the file.
 - A finding is not automatically new work, and handing one over
   unresolved is the expensive shape. It costs the owner a context
   switch into something they were not working on, and that cost lands
