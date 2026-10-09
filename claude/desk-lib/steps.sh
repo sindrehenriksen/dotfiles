@@ -176,7 +176,7 @@ desk_write_marked_head_copy() {
 		return
 	fi
 	while IFS= read -r line; do
-		if [ -n "$line" ] && grep -qxF "$line" <<< "$marked_lines" 2> /dev/null; then
+		if [ -n "$line" ] && grep -qxF -- "$line" <<< "$marked_lines" 2> /dev/null; then
 			printf '%s%s\n' "$line" "$DESK_AGENT_MARK"
 		else
 			printf '%s\n' "$line"

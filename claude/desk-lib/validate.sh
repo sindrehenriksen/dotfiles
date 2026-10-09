@@ -139,7 +139,7 @@ desk_source_allowed() {
 	if [[ "$source" != http://* ]] && [[ "$source" != https://* ]]; then
 		return 0
 	fi
-	grep -qxF "$source" <<< "$allowed_urls" 2> /dev/null
+	grep -qxF -- "$source" <<< "$allowed_urls" 2> /dev/null
 }
 
 # Validates `also_sources` (one story arriving from several fetchers: the
@@ -160,7 +160,7 @@ desk_validate_also_sources() {
 	while IFS= read -r u; do
 		[ -n "$u" ] || continue
 		[ "$u" != "$source" ] || continue
-		grep -qxF "$u" <<< "$allowed_urls" 2> /dev/null || continue
+		grep -qxF -- "$u" <<< "$allowed_urls" 2> /dev/null || continue
 		jq -e --arg u "$u" 'index($u) != null' > /dev/null 2>&1 <<< "$kept" && continue
 		kept="$(jq -c --arg u "$u" '. + [$u]' <<< "$kept")"
 	done < <(jq -r 'if (.also_sources | type) == "array" then .also_sources[] | strings else empty end' <<< "$item_json")
@@ -237,7 +237,7 @@ desk_verify_and_strip_turn_citations() {
 			local cite
 			while IFS= read -r cite; do
 				[ -n "$cite" ] || continue
-				grep -qxF "$cite" <<< "$valid_prefixes" 2> /dev/null || ok="false"
+				grep -qxF -- "$cite" <<< "$valid_prefixes" 2> /dev/null || ok="false"
 			done <<< "$citations"
 		fi
 		before="$(sed -E "$_DESK_TURN_MARK_SED" <<< "$before")"

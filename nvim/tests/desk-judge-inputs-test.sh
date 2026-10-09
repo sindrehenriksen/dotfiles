@@ -112,10 +112,10 @@ git -C "$repo" commit -q -m initial
 # A suggestion the user took: proposed, then its text lands in HEAD.
 acc_items="$ROOT/acc-items.json"
 cat > "$acc_items" <<'EOF'
-{"items":[{"id":"acc1","file":"notes.md","kind":"new","target":"top","before":"","after":"accepted line","source":"test","headline":"already accepted"}]}
+{"items":[{"id":"acc1","file":"notes.md","kind":"new","target":"top","before":"","after":"- accepted line","source":"test","headline":"already accepted"}]}
 EOF
 nvim -l "$CLI" proposal-build "$repo" morning 2026-10-01 "$acc_items" notes.md reading.md > /dev/null
-printf 'accepted line\nSection A\n  detail\n' > "$repo/notes.md"
+printf -- '- accepted line\nSection A\n  detail\n' > "$repo/notes.md"
 git -C "$repo" add notes.md
 git -C "$repo" commit -q -m "the user took it"
 nvim -l "$CLI" taken-sync "$repo" > /dev/null
@@ -227,8 +227,8 @@ assert_true "scratch (auto-injected, a real absolute path)" \
 echo
 echo "=== notes.md: HEAD content, the accepted line marked, the rest untouched ==="
 notes_out="$(cat "$CAPTURE/notes.md" 2> /dev/null)"
-assert_true "the accepted line is marked" \
-	"$(grep -qF "accepted line${DESK_AGENT_MARK}" <<< "$notes_out" && echo true || echo false)"
+assert_true "the accepted line, a bullet, is marked" \
+	"$(grep -qxF -- "- accepted line${DESK_AGENT_MARK}" <<< "$notes_out" && echo true || echo false)"
 assert_true "an ordinary line is not marked" \
 	"$(grep -qx '  detail' <<< "$notes_out" && echo true || echo false)"
 
