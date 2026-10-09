@@ -5,10 +5,12 @@
 -- Every verb is a thin JSON-in/JSON-out wrapper around an existing module
 -- function, never new git-plumbing logic of its own.
 --
--- `nvim -l` runs this file under nvim's embedded Lua without loading any
--- config or 'runtimepath', so this module's own directory is added to
--- package.path by hand before requiring anything else here.
+-- `nvim -l` loads no config, but 'runtimepath' still holds the config
+-- directory, whose `lua/` nvim searches before package.path. So this
+-- module's own nvim/ goes first on both, or a checkout other than the
+-- installed one (a worktree) would run the installed modules.
 local here = debug.getinfo(1, "S").source:sub(2):match("^(.*)/[^/]+$") or "."
+vim.opt.rtp:prepend(here .. "/../..")
 package.path = here .. "/../?.lua;" .. here .. "/../?/init.lua;" .. package.path
 
 local block = require("desk.block")
