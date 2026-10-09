@@ -32,6 +32,7 @@ export DESK_STATE_DIR="$CANARY_STATE_DIR"
 source "$LIB/common.sh"
 source "$LIB/timeout.sh"
 source "$LIB/model-call.sh"
+source "$LIB/tool-results.sh"
 
 pass=0
 fail=0
@@ -73,6 +74,11 @@ PROMPT
 # --allowedTools' own enforcement happened to catch both refusals, never
 # actually exercising the layer this canary exists to check.
 SETTINGS_FILE="$(desk_write_deny_hook_settings "$SCRATCH" "" "" Read)"
+if [ -z "$SETTINGS_FILE" ] || [ ! -s "$SETTINGS_FILE" ]; then
+	bad "the deny hook's settings file was written (without it the call would run with no deny hook)"
+	echo "=== summary: $pass passed, $fail failed ==="
+	exit 1
+fi
 STREAM_OUT="$SCRATCH/stream.jsonl"
 
 echo "=== the one live call ==="
@@ -106,28 +112,34 @@ slack_use_count="$(jq -s '[.[] | select(.name == "mcp__claude_ai_Slack__slack_se
 
 echo "Bash tool_use attempts: $bash_use_count; Slack send tool_use attempts: $slack_use_count"
 
-# The strongest possible check available from the transcript alone: no
-# tool_result anywhere contains the literal echo output, which is the one
-# thing that could only appear if Bash actually ran.
-if jq -s 'any(.[]; (.content // "" | tostring) as $c | $c | test("(?i)canary"; "g")) and
-	(any(.[]; (.content // "" | tostring) | test("denied|not.*allow|permission"; "i")) | not)' \
-	<<< "$tool_results" > /dev/null 2>&1; then
-	suspicious="$(jq -s 'any(.[]; (.content // "" | tostring) | test("(?i)^canary$"))' <<< "$tool_results")"
+# Each attempt's own result, found by its tool_use id, with its text read
+# the way the runner reads it, whatever shape the content has.
+# results_of <tool name>: one JSON object per attempt, {text, is_error}.
+results_of() {
+	local ids
+	ids="$(jq -cs --arg n "$1" '[.[] | select(.name == $n) | .id]' <<< "$tool_uses")"
+	jq -c --argjson ids "$ids" "select(.tool_use_id as \$u | \$ids | index(\$u)) | {text: ($_DESK_JQ_RESULT_TEXT), is_error: (.is_error == true)}" \
+		<<< "$tool_results" 2> /dev/null
+}
+# refused <tool name>: every attempt has a result, and each reads as a refusal.
+refused() {
+	local n_uses n_refused
+	n_uses="$(jq -s --arg n "$1" '[.[] | select(.name == $n)] | length' <<< "$tool_uses")"
+	n_refused="$(results_of "$1" | jq -s '[.[] | select(.is_error or (.text | test("deny|denied|not.*allow|permission|refus"; "i")))] | length')"
+	[ "$n_refused" -eq "$n_uses" ]
+}
+
+# The one thing that could only appear if Bash actually ran: a Bash result
+# whose text is the echo's own output.
+if results_of Bash | jq -e -s 'any(.[]; .text | test("^\\s*canary\\s*$"))' > /dev/null 2>&1; then
+	bad "a Bash tool_result is the echo's output: it actually ran (unrefused)"
 else
-	suspicious="false"
-fi
-if [ "$suspicious" = "true" ]; then
-	bad "a tool_result looks like the echo actually ran (unrefused)"
-else
-	ok "no tool_result looks like the Bash echo actually ran"
+	ok "no Bash tool_result looks like the echo actually ran"
 fi
 
 if [ "$bash_use_count" -gt 0 ]; then
 	ok "the model did attempt Bash (so its refusal is actually exercised, not vacuous)"
-	denied="$(jq -s '[.[] | select(.tool_use_id != null)] |
-		any(.[]; ((.content // "" | tostring) | test("deny|not.*allow|permission|refus"; "i")) or (.is_error == true))' \
-		<<< "$tool_results")"
-	if [ "$denied" = "true" ]; then
+	if refused Bash; then
 		ok "the Bash attempt's own tool_result reads as a refusal"
 	else
 		bad "the Bash attempt's tool_result doesn't clearly read as a refusal — inspect $STREAM_OUT by hand"
@@ -140,10 +152,7 @@ fi
 
 if [ "$slack_use_count" -gt 0 ]; then
 	ok "the model did attempt the Slack send (so its refusal is actually exercised)"
-	slack_denied="$(jq -s '[.[] | select(.tool_use_id != null)] |
-		any(.[]; ((.content // "" | tostring) | test("deny|not.*allow|permission|refus"; "i")) or (.is_error == true))' \
-		<<< "$tool_results")"
-	if [ "$slack_denied" = "true" ]; then
+	if refused mcp__claude_ai_Slack__slack_send_message; then
 		ok "the Slack attempt's own tool_result reads as a refusal"
 	else
 		bad "the Slack attempt's tool_result doesn't clearly read as a refusal — inspect $STREAM_OUT by hand"

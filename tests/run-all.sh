@@ -2,8 +2,10 @@
 # Runs every test suite in this repo, by explicit name: nvim/tests/*.sh,
 # nvim/tests/*.lua (headless, via `nvim -u minimal_init.lua -l <file>`),
 # claude/tests/*.sh, git-hooks/test-*.sh. Deliberately never
-# nvim/tests/desk-run-canary.sh — it drives a live model call under
-# DESK_CANARY_LIVE and is run by hand, never by an automated runner.
+# nvim/tests/desk-run-canary.sh or desk-run-canary-restricted.sh — each
+# drives a live model call under DESK_CANARY_LIVE and is run by hand, never
+# by an automated runner. desk-run-canary-selftest.sh runs the first
+# against a fake `claude`, offline.
 #
 # Wraps the whole run in the config guard (tests/lib/git-safety.sh):
 # snapshots `git config --local --list` for each repo in $DESK_GUARD_REPOS
@@ -69,6 +71,7 @@ BASH_SUITES=(
 	nvim/tests/desk-push-test.sh
 	nvim/tests/desk-render-prompt-test.sh
 	nvim/tests/desk-run-at-load-test.sh
+	nvim/tests/desk-run-canary-selftest.sh
 	nvim/tests/desk-run-morning-integration-test.sh
 	nvim/tests/desk-run-test.sh
 	nvim/tests/desk-runner-lock-test.sh
