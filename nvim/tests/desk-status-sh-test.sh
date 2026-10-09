@@ -67,5 +67,16 @@ desk_status_set_result "neverok" "failed" "F-test" "[]" "2026-01-05"
 assert_eq "desk_status_last_ok_run is empty" "" "$(desk_status_last_ok_run "neverok")"
 
 echo
+echo "=== a running record left by a dead run is marked failed, however recent ==="
+desk_status_update '.passes.crashy = {last_run: $t, result: "running"}' --argjson t $(($(date +%s) - 1200))
+log="$(desk_status_mark_stale_running crashy 2>&1)"
+assert_eq "a run that died 20 minutes ago reads failed" "failed" "$(jq -r '.passes.crashy.result' "$DESK_STATUS_FILE")"
+assert_true "and the log says it never finished" "$([[ "$log" == *"never finished"* ]] && echo true || echo false)"
+desk_status_update '.passes.calm = {last_run: 1, result: "ok"}'
+log="$(desk_status_mark_stale_running calm 2>&1)"
+assert_eq "a finished record is left alone" "ok" "$(jq -r '.passes.calm.result' "$DESK_STATUS_FILE")"
+assert_eq "and nothing is logged" "" "$log"
+
+echo
 echo "=== summary: $pass passed, $fail failed ==="
 [ "$fail" -eq 0 ]

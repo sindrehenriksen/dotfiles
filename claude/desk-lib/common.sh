@@ -40,12 +40,10 @@ DESK_LOG_DIR="${DESK_LOG_DIR:-$DESK_STATE_DIR/logs}"
 # claude/desk-lib/model-call.sh's desk_pass_scratch_dir/desk_prune_old_runs.
 DESK_RUNS_ROOT="${DESK_RUNS_ROOT:-$DESK_STATE_DIR/runs}"
 
-# How long a lock wait gives up after, and how long a "running"
-# status entry can go stale before the next run treats it as a crash.
+# How long a lock wait gives up after, and how often it polls.
 # Both are overridable so a test never waits the real default.
 DESK_LOCK_MAX_WAIT_SECS="${DESK_LOCK_MAX_WAIT_SECS:-1800}"
 DESK_LOCK_POLL_SECS="${DESK_LOCK_POLL_SECS:-5}"
-DESK_STALE_RUNNING_MINUTES="${DESK_STALE_RUNNING_MINUTES:-60}"
 DESK_KILL_GRACE_SECS="${DESK_KILL_GRACE_SECS:-5}"
 # How long a waiter tolerates a lock dir with no meta.json yet before
 # treating it as a crash rather than another acquirer mid-publish (lock.sh's

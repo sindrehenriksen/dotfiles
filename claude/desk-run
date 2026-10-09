@@ -149,9 +149,8 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# A previous invocation that never finished shows as failed rather than
-# silently vanishing under this one's fresh "running" (a "running" entry older
-# than the stale threshold shows as failed).
+# A previous invocation that never finished shows as failed, and is logged,
+# rather than silently vanishing under this one's fresh "running".
 desk_status_mark_stale_running "$pass"
 
 # The guard is keyed on (pass, the slot's scheduled date), not the date

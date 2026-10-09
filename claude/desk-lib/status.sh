@@ -45,20 +45,20 @@ desk_status_update() {
 	desk_write_atomic "$DESK_STATUS_FILE" "$new"
 }
 
-# Marks a previous "running" entry for $1 as failed if it's stale (started, never
-# finished, older than N minutes) — called before a fresh
-# run marks itself running, so a crash from an earlier invocation is never
-# silently overwritten by the next one without ever having been reported.
+# Marks a previous "running" entry for $1 as failed, and logs it — called
+# under the shared runner lock before a fresh run marks itself running, so a
+# crash from an earlier invocation is never silently overwritten by the next
+# one without ever having been reported. Only a run holding that lock writes
+# "running", and a live holder's lock is never broken, so a "running" record
+# seen here is a dead run's, whatever its age.
 desk_status_mark_stale_running() {
-	local pass="$1" now
-	now="$(desk_now)"
+	local pass="$1" started
+	started="$(jq -r --arg p "$pass" '.passes[$p] | select(.result == "running") | .last_run // 0' <<< "$(desk_status_read)")"
+	[ -n "$started" ] || return 0
+	desk_log "$pass" "the run started at $(date -r "$started" '+%F %T' 2> /dev/null || date -d "@$started" '+%F %T') never finished — marked failed"
 	desk_status_update '
-		(.passes[$pass] // {}) as $p
-		| if ($p.result == "running") and (($now - ($p.last_run // $now)) > ($mins * 60))
-		  then .passes[$pass].result = "failed" | .passes[$pass].stopped_at = "stale (previous run never finished)"
-		  else .
-		  end
-	' --arg pass "$pass" --argjson now "$now" --argjson mins "$DESK_STALE_RUNNING_MINUTES"
+		.passes[$pass].result = "failed" | .passes[$pass].stopped_at = "stale (previous run never finished)"
+	' --arg pass "$pass"
 }
 
 desk_status_set_running() {
