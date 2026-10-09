@@ -416,15 +416,26 @@ desk_fetch_already_done() {
 # match is against what the CACHED call's own tool_use actually asked for,
 # never against a value re-derived after the fact from a different clock
 # read (see desk_fetch_cache_digest_query below, and desk-run's own use of
-# it).
+# it). $5 is the end of the window the call covered: a retry that reuses
+# this entry has covered only that far, whatever its own window end is
+# (desk_fetch_cache_window_end).
 desk_fetch_cache_save() {
-	local pass="$1" scheduled_date="$2" id="$3" digest_query="${4:-}"
+	local pass="$1" scheduled_date="$2" id="$3" digest_query="${4:-}" window_end="${5:-}"
 	local dir
 	dir="$(desk_fetch_cache_dir "$pass" "$scheduled_date" "$id")"
 	mkdir -p "$dir" 2> /dev/null
 	cp -f "$PASS_SCRATCH/$id"-*.jsonl "$dir/" 2> /dev/null
 	printf '%s' "$digest_query" > "$dir/digest_query"
+	printf '%s' "$window_end" > "$dir/window_end"
 	: > "$dir/done"
+}
+
+# The window end a cached source's call covered (desk_fetch_cache_save's
+# $5), or "" when the entry recorded none.
+desk_fetch_cache_window_end() {
+	local dir
+	dir="$(desk_fetch_cache_dir "$1" "$2" "$3")"
+	cat "$dir/window_end" 2> /dev/null
 }
 
 # The inverse of desk_fetch_cache_save: copies a previously cached source's

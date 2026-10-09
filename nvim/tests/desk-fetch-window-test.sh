@@ -113,6 +113,10 @@ jq -n --arg repo "$repo" --arg prompt "$prompt" '{
 			{ id: "commit-push", kind: "commit_push" },
 			{ id: "F-private", kind: "fetch", prompt: $prompt, tools: ["mcp__claude_ai_Gmail__search_threads"], connector: true, timeout: 30 },
 			{ id: "W", kind: "write", prompt: $prompt, tools: ["mcp__claude_ai_Gmail__unlabel_thread"], connector: true, pinned_label: "UNREAD", timeout: 30 }
+		] },
+		retrygap: { steps: [
+			{ id: "F-fresh", kind: "fetch", prompt: $prompt, tools: ["Read"], connector: false, timeout: 30 },
+			{ id: "F-cached", kind: "fetch", prompt: $prompt, tools: ["Read"], connector: false, timeout: 30 }
 		] }
 	}
 }' > "$cfg"
@@ -181,6 +185,33 @@ assert_true "W's own match found the cached thread (proving digest_query tracked
 	"$(grep -q 'would unlabel cached-thread-1' "$ROOT/cachehit.out" && echo true || echo false)"
 assert_true "never logged as a query mismatch" \
 	"$(grep -q 'digest search query doesn.t match' "$ROOT/cachehit.out" && echo false || echo true)"
+
+echo
+echo "=== a retry that reuses a cached fetch moves the window only as far as that fetch covered ==="
+# The earlier slot fetched F-cached through its own window end, then failed
+# elsewhere; this slot runs F-fresh through now. Mail between the two ends
+# was never fetched by F-cached, so the next window starts at its end.
+retry_date="$(date +%F)"
+earlier_end=$(($(date +%s) - 5400))
+cached_dir="$STATE/fetch-cache/retrygap-$retry_date-F-cached"
+mkdir -p "$cached_dir"
+: > "$cached_dir/done"
+printf '%s' "$earlier_end" > "$cached_dir/window_end"
+DESK_CONFIG="$cfg" "$DESK_RUN" retrygap > "$ROOT/retrygap.out" 2>&1
+assert_eq "the retry finishes ok" "ok" "$(jq -r '.passes.retrygap.result' "$DESK_STATUS_FILE")"
+assert_true "F-cached was reused, not re-run" \
+	"$(grep -q 'F-cached: already fetched today (cached)' "$ROOT/retrygap.out" && echo true || echo false)"
+assert_eq "last_fetch_ok is the cached fetch's own window end, not this run's" \
+	"$earlier_end" "$(jq -r '.passes.retrygap.last_fetch_ok' "$DESK_STATUS_FILE")"
+
+echo
+echo "=== a cached fetch with no recorded window end leaves the window where it was ==="
+jq --argjson s 1700000000 '.passes.retrygap.last_fetch_ok = $s' "$DESK_STATUS_FILE" > "$ROOT/st.json" && mv "$ROOT/st.json" "$DESK_STATUS_FILE"
+jq '.passes.retrygap.result = "partial"' "$DESK_STATUS_FILE" > "$ROOT/st.json" && mv "$ROOT/st.json" "$DESK_STATUS_FILE"
+mkdir -p "$cached_dir"
+: > "$cached_dir/done"
+DESK_CONFIG="$cfg" "$DESK_RUN" retrygap > "$ROOT/retrygap2.out" 2>&1
+assert_eq "last_fetch_ok is unchanged" "1700000000" "$(jq -r '.passes.retrygap.last_fetch_ok' "$DESK_STATUS_FILE")"
 
 echo
 echo "=== summary: $pass passed, $fail failed ==="

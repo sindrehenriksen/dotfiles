@@ -356,6 +356,10 @@ failed_sources=()
 # set_fetch_ok only ever advances the window when this is true, so a
 # weekend commit-only run of a weekdays_only pass never moves it.
 any_fetch_step_ran="false"
+# How far every fetch this pass used has covered: this run's window end,
+# lowered to a reused cache entry's own. The next window starts here, so a
+# retry that reuses an earlier slot's fetch leaves no gap behind it.
+fetch_covered_through="$gmail_window_end"
 # The judge branch below fills this in from its own {kept, overflow}
 # result; a pass with no judge step this run (a close-only pass, a
 # commit_push-only pass) reports no overflow, matching status.lua's own
@@ -401,6 +405,11 @@ for ((i = 0; i < steps_len; i++)); do
 					cached_digest_query="$(desk_fetch_cache_digest_query "$pass" "$scheduled_date" "$id")"
 					[ -n "$cached_digest_query" ] && digest_query="$cached_digest_query"
 				fi
+				# An entry that recorded no window end covered an unknown
+				# stretch, so the window stays where it started.
+				cached_end="$(desk_fetch_cache_window_end "$pass" "$scheduled_date" "$id")"
+				[[ "$cached_end" =~ ^[0-9]+$ ]] || cached_end="$gmail_window_start"
+				[ "$cached_end" -lt "$fetch_covered_through" ] && fetch_covered_through="$cached_end"
 			else
 				placeholders="$common_placeholders"
 				if [ "$id" = "$ticket_status_step_id" ]; then
@@ -423,7 +432,7 @@ $(git -C "$repo" show "HEAD:$f" 2> /dev/null)"
 						"$(jq -r '(.tools // [])[0] // empty' <<< "$step_json")" || result="failed"
 				fi
 				if [ "$result" = "ok" ]; then
-					desk_fetch_cache_save "$pass" "$scheduled_date" "$id" "$digest_query"
+					desk_fetch_cache_save "$pass" "$scheduled_date" "$id" "$digest_query" "$gmail_window_end"
 				fi
 			fi
 			if [ -n "$ticket_digest_cfg" ] && [ "$result" = "ok" ]; then
@@ -699,12 +708,13 @@ elif [ "$overall_result" != "failed" ]; then
 	# use.
 	desk_fetch_cache_clear "$pass"
 	# Every fetch step this pass actually ran (if any) succeeded: the
-	# window is now covered through gmail_window_end (captured before any
-	# step ran), so the next run's own window picks up exactly where this
-	# one left off rather than re-covering (or gapping) any of it. Never
-	# set at all when no fetch step ran this pass (a weekend commit-only
-	# invocation) — last_fetch_ok stays wherever it last legitimately was.
-	[ "$any_fetch_step_ran" = "true" ] && desk_status_set_fetch_ok "$pass" "$gmail_window_end"
+	# window is now covered through fetch_covered_through (gmail_window_end,
+	# or an earlier end a reused cache entry covered), so the next run's own
+	# window picks up exactly where this one left off rather than gapping
+	# any of it. Never set at all when no fetch step ran this pass (a
+	# weekend commit-only invocation) — last_fetch_ok stays wherever it last
+	# legitimately was.
+	[ "$any_fetch_step_ran" = "true" ] && desk_status_set_fetch_ok "$pass" "$fetch_covered_through"
 	desk_ticket_digest_commit
 fi
 
