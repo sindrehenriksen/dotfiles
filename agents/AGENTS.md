@@ -39,7 +39,9 @@ understood" but "does this detail change what gets decided".
   which of them a change touched when you make it rather than in a
   closing summary, and ask for a real read. Automated review leans the
   other way: a docs-or-copy diff is exactly the shape a low-risk
-  heuristic waves through.
+  heuristic waves through. Technical reference — how a tool's
+  internals behave, a command's help text — is not that kind: say it
+  changed, and don't ask for a read.
 - A finding is not automatically new work, and handing one over
   unresolved is the expensive shape. It costs the owner a context
   switch into something they were not working on, and that cost lands
