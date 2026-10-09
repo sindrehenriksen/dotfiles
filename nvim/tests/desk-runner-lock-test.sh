@@ -43,6 +43,7 @@ cwd="\$(basename "\$PWD")"
 echo "\$cwd start \$(date +%s)" >> "$LOG"
 case "\$cwd" in
 	morning-*) sleep 3 ;;
+	slow-*) sleep 6 ;;
 esac
 echo '{"type":"assistant","message":{"content":[{"type":"text","text":"{}"}]}}'
 echo '{"type":"result","subtype":"success"}'
@@ -94,7 +95,9 @@ jq -n --arg repo "$repo" --arg prompt "$prompt" '{
 	files: ["notes.md", "reading.md"],
 	passes: {
 		morning: { steps: [ { id: "F", kind: "fetch", prompt: $prompt, tools: ["Read"], connector: false, timeout: 30 } ] },
-		evening: { steps: [ { id: "F", kind: "fetch", prompt: $prompt, tools: ["Read"], connector: false, timeout: 30 } ] }
+		evening: { steps: [ { id: "F", kind: "fetch", prompt: $prompt, tools: ["Read"], connector: false, timeout: 30 } ] },
+		slow: { steps: [ { id: "F", kind: "fetch", prompt: $prompt, tools: ["Read"], connector: false, timeout: 30 } ] },
+		late: { steps: [ { id: "F", kind: "fetch", prompt: $prompt, tools: ["Read"], connector: false, timeout: 30 } ] }
 	}
 }' > "$cfg"
 
@@ -117,6 +120,20 @@ assert_true "morning's own call recorded an end time" "$([ -n "$morning_end" ] &
 assert_true "evening's own call recorded a start time" "$([ -n "$sixteen_start" ] && echo true || echo false)"
 assert_true "evening's call never started before morning's finished (serialized, not concurrent)" \
 	"$([ "$sixteen_start" -ge "$morning_end" ] && echo true || echo false)"
+
+echo
+echo "=== a run that gives up on the lock leaves status.json to the lock holder ==="
+DESK_CONFIG="$cfg" "$DESK_RUN" slow > "$ROOT/slow.out" 2>&1 &
+slow_bg=$!
+for _ in $(seq 1 50); do grep -q '^slow-F-.* start ' "$LOG" && break; sleep 0.2; done
+status_before="$(cat "$DESK_STATUS_FILE")"
+DESK_LOCK_MAX_WAIT_SECS=1 DESK_CONFIG="$cfg" "$DESK_RUN" late > "$ROOT/late.out" 2>&1
+assert_eq "the late run gives up" "1" "$?"
+assert_true "the slow run still held the lock then" "$(kill -0 "$slow_bg" 2> /dev/null && echo true || echo false)"
+assert_eq "the late run did not write status.json under the holder" "$status_before" "$(cat "$DESK_STATUS_FILE")"
+wait "$slow_bg"
+assert_eq "the holder counts the lockout once it finishes" "1" "$(jq -r '.lockouts // 0' "$DESK_STATUS_FILE")"
+assert_eq "and its own result is kept" "ok" "$(jq -r '.passes.slow.result' "$DESK_STATUS_FILE")"
 
 echo
 echo "=== summary: $pass passed, $fail failed ==="

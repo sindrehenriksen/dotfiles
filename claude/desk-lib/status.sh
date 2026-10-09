@@ -137,6 +137,26 @@ desk_status_set_fetch_ok() {
 	desk_status_update '.passes[$pass].last_fetch_ok = $epoch' --arg pass "$pass" --argjson epoch "$epoch"
 }
 
+# A run that gave up waiting for the lock does not hold it, so it must not
+# rewrite status.json under the holder's feet: it appends a line to this
+# file instead, and whoever holds the lock folds the lines into `lockouts`
+# (desk_status_fold_lockouts).
+DESK_LOCKOUTS_PENDING_FILE="${DESK_LOCKOUTS_PENDING_FILE:-$DESK_STATUS_FILE.lockouts}"
+
+desk_status_note_lockout() {
+	printf '%s\n' "$1" >> "$DESK_LOCKOUTS_PENDING_FILE" 2> /dev/null
+}
+
+# Under the lock: adds the lockouts noted since the last fold to the count.
+desk_status_fold_lockouts() {
+	local taken="$DESK_LOCKOUTS_PENDING_FILE.$$" n
+	mv -f "$DESK_LOCKOUTS_PENDING_FILE" "$taken" 2> /dev/null || return 0
+	n="$(wc -l < "$taken" | tr -d ' ')"
+	rm -f "$taken"
+	[ "${n:-0}" -gt 0 ] && desk_status_bump lockouts "$n"
+	return 0
+}
+
 desk_status_bump() {
 	local field="$1" by="${2:-1}"
 	desk_status_update '.[$field] = ((.[$field] // 0) + $by)' --arg field "$field" --argjson by "$by"

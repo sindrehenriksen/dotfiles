@@ -138,7 +138,7 @@ is_weekend="false"
 lockdir="$(desk_lock_acquire "$pass")"
 if [ -z "$lockdir" ]; then
 	desk_log "$pass" "gave up waiting for the lock"
-	desk_status_bump lockouts
+	desk_status_note_lockout "$pass"
 	exit 1
 fi
 
@@ -152,6 +152,7 @@ trap cleanup EXIT
 # A previous invocation that never finished shows as failed, and is logged,
 # rather than silently vanishing under this one's fresh "running".
 desk_status_mark_stale_running "$pass"
+desk_status_fold_lockouts
 
 # The guard is keyed on (pass, the slot's scheduled date), not the date
 # desk-run happens to run on: a
@@ -732,6 +733,7 @@ elif [ "$overall_result" != "failed" ]; then
 	desk_ticket_digest_commit
 fi
 
+desk_status_fold_lockouts
 desk_status_set_result "$pass" "$overall_result" "$stopped_at" "$failed_sources_json" "$scheduled_date"
 
 # Visible run sessions: opens once the pass is done, whatever its own
