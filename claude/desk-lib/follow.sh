@@ -426,14 +426,18 @@ desk_follow_gh() {
 	esac
 }
 
-# desk_follow_fetch_prs <pass> <pass_config> <state> <keys json> <since epoch> <with_comments true|false> <out> [<limit>]
+# desk_follow_fetch_prs <pass> <pass_config> <state> <keys json> <since epoch> <with_comments true|false> <out> [<limit>] [oldest_first]
 # Every PR in the configured repos updated since <since> whose title or
 # branch carries one of <keys> (every PR when <keys> is null), normalized,
 # as one JSON array in <out>; returns non-zero (and writes null) when a
-# listing fails. <limit> is per repo, default 100.
+# listing fails. <limit> is per repo, default 100. With `oldest_first`
+# each listing runs oldest update first, and one that reaches the limit is
+# logged and sets DESK_FOLLOW_PRS_REACHED to the newest update it got to
+# (the earliest across repos): the window is covered only that far.
 desk_follow_fetch_prs() {
-	local pass="$1" pass_config="$2" state="$3" keys="$4" since="$5" with_comments="$6" out="$7" limit="${8:-100}"
-	local repos since_iso all='[]' repo listed
+	local pass="$1" pass_config="$2" state="$3" keys="$4" since="$5" with_comments="$6" out="$7" limit="${8:-100}" order="${9:-}"
+	local repos since_iso all='[]' repo listed search reached
+	DESK_FOLLOW_PRS_REACHED=""
 	echo null > "$out"
 	mapfile -t repos < <(jq -r '(.github_repos // [])[]' <<< "$pass_config")
 	if [ "${#repos[@]}" -eq 0 ]; then
@@ -441,11 +445,20 @@ desk_follow_fetch_prs() {
 		return 0
 	fi
 	since_iso="$(date -u -r "$since" +%Y-%m-%dT%H:%M:%SZ 2> /dev/null || date -u -d "@$since" +%Y-%m-%dT%H:%M:%SZ)"
+	search="updated:>=$since_iso"
+	[ "$order" = "oldest_first" ] && search="$search sort:updated-asc"
 	for repo in "${repos[@]}"; do
-		listed="$(desk_follow_gh pr list --repo "$repo" --state all --limit "$limit" --search "updated:>=$since_iso" \
+		listed="$(desk_follow_gh pr list --repo "$repo" --state all --limit "$limit" --search "$search" \
 			--json number,title,headRefName,state,isDraft,updatedAt,createdAt,reviewDecision,headRefOid,labels,url,body,statusCheckRollup,author 2> /dev/null)" \
 			|| { desk_log "$pass" "follow: gh pr list failed for $repo"; return 1; }
 		jq -e 'type == "array"' > /dev/null 2>&1 <<< "$listed" || { desk_log "$pass" "follow: gh pr list for $repo was not a list"; return 1; }
+		if [ "$order" = "oldest_first" ] && jq -e --argjson l "$limit" 'length >= $l' > /dev/null 2>&1 <<< "$listed"; then
+			reached="$(jq -r '[.[].updatedAt | fromdateiso8601] | max' <<< "$listed" 2> /dev/null)"
+			desk_log "$pass" "follow: $repo reached the $limit-PR limit; the window moves only to its newest update listed, and the next run carries on from there"
+			if [[ "$reached" =~ ^[0-9]+$ ]] && { [ -z "$DESK_FOLLOW_PRS_REACHED" ] || [ "$reached" -lt "$DESK_FOLLOW_PRS_REACHED" ]; }; then
+				DESK_FOLLOW_PRS_REACHED="$reached"
+			fi
+		fi
 		listed="$(jq -c --arg repo "$repo" --argjson keys "$keys" '
 			def pass_c: IN("SUCCESS", "NEUTRAL", "SKIPPED");
 			def fail_c: IN("FAILURE", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "ERROR", "STARTUP_FAILURE");
@@ -764,7 +777,10 @@ desk_follow_main() {
 		+ [($s // [])[] | .key, (.links[] | .key)] + [($c // [])[] | .key] | unique' <<< "$state")"
 	local with_comments="true"
 	[ "$baseline_gh" = "true" ] && with_comments="false"
-	desk_follow_fetch_prs "$pass" "$pass_config" "$state" "$all_scope" "$gh_since" "$with_comments" "$work/prs.json" || gh_ok="false"
+	desk_follow_fetch_prs "$pass" "$pass_config" "$state" "$all_scope" "$gh_since" "$with_comments" "$work/prs.json" "" oldest_first \
+		|| gh_ok="false"
+	local gh_through="$now"
+	[ -n "${DESK_FOLLOW_PRS_REACHED:-}" ] && gh_through="$DESK_FOLLOW_PRS_REACHED"
 
 	local new_state
 	jq -n --argjson entries "$entries" --slurpfile state <(printf '%s\n' "$state") \
@@ -783,11 +799,11 @@ desk_follow_main() {
 		return 1
 	fi
 	new_state="$(jq -c --argjson k "$keys_sig" --argjson now "$now" --arg jira_ok "$jira_ok" --arg gh_ok "$gh_ok" \
-		--arg lookback "$lookback" '
+		--argjson gh_through "$gh_through" --arg lookback "$lookback" '
 		.scope.keys_sig = (if .scope.refreshed_at == $now then $k else .scope.keys_sig end)
 		| if $lookback != "" then . else
 		    (if $jira_ok == "true" then .last_jira_ok = $now else . end)
-		    | (if $gh_ok == "true" then .last_gh_ok = $now else . end)
+		    | (if $gh_ok == "true" then .last_gh_ok = $gh_through else . end)
 		  end' <<< "$new_state")"
 
 	# Delivery: one message per followed session with anything queued, to

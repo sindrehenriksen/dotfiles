@@ -742,5 +742,20 @@ assert_contains "the next update goes out" "Second news." "$msg"
 assert_not_contains "without the intro again" "now a followed session" "$msg"
 
 echo
+echo "=== a PR listing that reaches the limit moves the window only as far as it got ==="
+jq '.last_run.at -= 3600 | .last_jira_ok -= 3600 | .last_gh_ok -= 86400' "$DESK_FOLLOW_STATE_FILE" > "$ROOT/s" && mv "$ROOT/s" "$DESK_FOLLOW_STATE_FILE"
+echo '{"issues":{"nodes":[]}}' > "$FIX/changes-result.json"
+jq -n '[range(100) | . as $i | {number: (500 + $i), title: "Unrelated change", headRefName: "misc", state: "OPEN", isDraft: false,
+	updatedAt: ((("2026-10-07T07:00:00Z" | fromdateiso8601) + 60 * $i) | todateiso8601), createdAt: "2026-10-01T08:00:00Z",
+	reviewDecision: "", headRefOid: "h", labels: [], url: "https://example.test/pr/x", body: "", statusCheckRollup: []}]' > "$FIX/prs.json"
+: > "$CALLS"
+out="$("$RUN" follow 2>&1)"
+assert_contains "the listing asks for the oldest updates first" "sort:updated-asc" "$(grep '^gh pr list' "$CALLS")"
+assert_contains "reaching the limit is logged" "reached the 100-PR limit" "$out"
+assert_eq "the next window starts at the newest update listed" \
+	"$(jq -n '"2026-10-07T08:39:00Z" | fromdateiso8601')" "$(jq -r '.last_gh_ok' "$DESK_FOLLOW_STATE_FILE")"
+echo '[]' > "$FIX/prs.json"
+
+echo
 echo "=== summary: $pass passed, $fail failed ==="
 [ "$fail" -eq 0 ]
