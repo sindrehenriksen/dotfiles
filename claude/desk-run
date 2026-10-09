@@ -566,15 +566,23 @@ $(jq -r '(.entries // [])[] | .url // empty' "$PASS_SCRATCH/ticket-digest.json" 
 					'[.[] | select(.input.query == $q)] | .[0] // empty' <<< "$pairs")"
 				ids_subjects="[]"
 				query_mismatch="false"
+				unreadable="false"
 				if [ -n "$matching_pair" ]; then
 					result_text="$(jq -r '.text' <<< "$matching_pair")"
-					if jq -e . > /dev/null 2>&1 <<< "$result_text"; then
+					# A `threads` array, or `{}`, the connector's own answer
+					# for no match. Anything else could be any number of
+					# threads, so it pins nothing and refuses below, as a
+					# query that never matched does.
+					if jq -e '(type == "object") and ((.threads | type) == "array" or . == {})' > /dev/null 2>&1 <<< "$result_text"; then
 						# The subject sits on the thread or, in the connector's
 						# shape, on each of its messages; the id stands in when
 						# neither has one.
 						ids_subjects="$(jq -c '[(.threads // [])[] | {id, subject: (
 							first((.subject, .snippet, (.messages // [] | .[] | .subject?)) | select(type == "string" and . != ""))
 							// .id)}]' <<< "$result_text")"
+					else
+						unreadable="true"
+						desk_log "$pass" "$id: $mail_fetch_step_id's digest search result has no threads list — no ids pinned"
 					fi
 				else
 					query_mismatch="true"
@@ -612,7 +620,10 @@ $(jq -r '(.entries // [])[] | .url // empty' "$PASS_SCRATCH/ticket-digest.json" 
 				# as falsy too, so that spelling would silently ignore an
 				# explicit `"dry_run": false` and always come back "true".
 				dry_run="$(jq -r 'if .dry_run == null then true else .dry_run end' <<< "$config")"
-				if [ "$query_mismatch" = "true" ]; then
+				if [ "$unreadable" = "true" ]; then
+					desk_log "$pass" "$id: refusing — the digest search result could not be read, so an empty pinned set can't be trusted as \"genuinely nothing to unlabel\""
+					result="failed"
+				elif [ "$query_mismatch" = "true" ]; then
 					# An empty pinned set here means "the query never
 					# matched anything to check", never "the query matched
 					# and genuinely found nothing" — the two look identical
@@ -642,11 +653,15 @@ $(jq -r '(.entries // [])[] | .url // empty' "$PASS_SCRATCH/ticket-digest.json" 
 					# tool_use arguments actually named against the full
 					# pinned set, after the fact, and fail loudly on any
 					# mismatch — never silently treat "acted on some" as
-					# "acted on all".
+					# "acted on all". A call counts only when its result
+					# came back and was not an error.
 					if [ "$result" = "ok" ]; then
 						write_tool="$(jq -r '(.tools // [])[0] // empty' <<< "$step_json")"
-						actual_ids_text="$(jq -r --arg t "$write_tool" \
-							'select(.name == $t) | .input.threadId // empty' \
+						succeeded_ids="$(jq -cs '[.[] | select(.is_error != true) | .tool_use_id]' \
+							"$PASS_SCRATCH/${id}-tool-results.jsonl" 2> /dev/null)"
+						[ -n "$succeeded_ids" ] || succeeded_ids='[]'
+						actual_ids_text="$(jq -r --arg t "$write_tool" --argjson ok "$succeeded_ids" \
+							'select(.name == $t) | select(.id as $u | $ok | index($u)) | .input.threadId // empty' \
 							"$PASS_SCRATCH/${id}-tool-uses.jsonl" 2> /dev/null | sort -u)"
 						pinned_ids_text="$(jq -r '.[].id' <<< "$ids_subjects" | sort -u)"
 						if [ "$actual_ids_text" != "$pinned_ids_text" ]; then

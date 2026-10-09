@@ -57,6 +57,19 @@ case "$cwd" in
 				echo '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"u1","content":[{"type":"text","text":"{\"threads\":[{\"id\":\"thread-1\",\"messages\":[{\"subject\":\"Nested Digest One\"}]},{\"id\":\"thread-3\",\"messages\":[{\"subject\":\"Digest Three\"}]}]}"}]}]}}'
 				opened="thread-1"
 				;;
+			*/notjson-*)
+				echo '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"u1","content":[{"type":"text","text":"Something went wrong, try again"}]}]}}'
+				opened=""
+				;;
+			*/othershape-*)
+				echo '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"u1","content":[{"type":"text","text":"{\"messages\":[{\"id\":\"thread-1\",\"subject\":\"Daily Digest 1\"}]}"}]}]}}'
+				opened="thread-1"
+				;;
+			*/empty-*)
+				# The connector's own shape for zero matches.
+				echo '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"u1","content":[{"type":"text","text":"{}"}]}]}}'
+				opened=""
+				;;
 			*)
 				echo '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"u1","content":[{"type":"text","text":"{\"threads\":[{\"id\":\"thread-1\",\"subject\":\"Daily Digest 1\"},{\"id\":\"thread-2\",\"subject\":\"Daily Digest 2\"}]}"}]}]}}'
 				opened="thread-1 thread-2"
@@ -70,17 +83,21 @@ case "$cwd" in
 		;;
 	*-W-*)
 		# Full pins both thread-1 and thread-2; partial pins only thread-1
-		# (the mismatch case: the pass name itself carries which).
+		# (the mismatch case: the pass name itself carries which);
+		# errored calls for both, and the call for thread-2 comes back an
+		# error.
 		case "$cwd" in
-			*/full-*) ids='["thread-1","thread-2"]' ;;
+			*/full-* | */errored-*) ids='["thread-1","thread-2"]' ;;
 			*/partial-* | */unopened-*) ids='["thread-1"]' ;;
 			*) ids='[]' ;;
 		esac
-		jq -nc --argjson ids "$ids" '
-			$ids[] | {type:"tool_use", id:("u-" + .), name:"mcp__claude_ai_Gmail__unlabel_thread", input:{threadId:., labelIds:["UNREAD"]}}
-		' | while IFS= read -r line; do
-			printf '{"type":"assistant","message":{"content":[%s]}}\n' "$line"
-		done
+		failing=""
+		case "$cwd" in */errored-*) failing="thread-2" ;; esac
+		jq -nc --argjson ids "$ids" --arg failing "$failing" '
+			$ids[]
+			| {type:"assistant",message:{content:[{type:"tool_use", id:("u-" + .), name:"mcp__claude_ai_Gmail__unlabel_thread", input:{threadId:., labelIds:["UNREAD"]}}]}},
+			  {type:"user",message:{content:[{type:"tool_result", tool_use_id:("u-" + .), is_error:(. == $failing),
+			    content:[{type:"text",text:(if . == $failing then "rate limited" else "{}" end)}]}]}}'
 		echo '{"type":"result","subtype":"success"}'
 		;;
 	*)
@@ -146,7 +163,8 @@ def w_steps: {
 	mail_fetch_step_id: "F-private",
 	files: ["notes.md", "reading.md"],
 	dry_run: false,
-	passes: { full: w_steps, partial: w_steps, mismatch: w_steps, unopened: w_steps }
+	passes: { full: w_steps, partial: w_steps, mismatch: w_steps, unopened: w_steps,
+		notjson: w_steps, othershape: w_steps, empty: w_steps, errored: w_steps }
 }' > "$cfg"
 
 echo "=== W unlabels every pinned id: the pass succeeds ==="
@@ -188,6 +206,28 @@ assert_true "the unopened one is logged by its subject as left unread" \
 	"$(grep -q 'leaving thread-3 (Digest Three) unread' "$ROOT/unopened.out" && echo true || echo false)"
 assert_true "no thread is logged as (unknown)" \
 	"$(grep -q '(unknown)' "$ROOT/unopened.out" && echo false || echo true)"
+
+for case_name in notjson othershape; do
+	echo
+	echo "=== the digest search came back $case_name: refused, never read as nothing to unlabel ==="
+	DESK_CONFIG="$cfg" "$DESK_RUN" "$case_name" > "$ROOT/$case_name.out" 2>&1
+	assert_eq "the pass exits non-zero" "1" "$?"
+	assert_eq "status names W as where it stopped" "W" "$(jq -r ".passes.$case_name.stopped_at" "$DESK_STATUS_FILE")"
+	assert_true "the log says the result could not be read" \
+		"$(grep -q 'no threads list' "$ROOT/$case_name.out" && echo true || echo false)"
+done
+
+echo
+echo "=== the digest search found nothing ({}): the pass is ok ==="
+DESK_CONFIG="$cfg" "$DESK_RUN" empty > "$ROOT/empty.out" 2>&1
+assert_eq "the pass exits ok" "0" "$?"
+
+echo
+echo "=== W's call for one thread came back an error: the pass fails ==="
+DESK_CONFIG="$cfg" "$DESK_RUN" errored > "$ROOT/errored.out" 2>&1
+assert_eq "the pass exits non-zero" "1" "$?"
+assert_true "the mismatch is named in the log" \
+	"$(grep -q 'W count mismatch' "$ROOT/errored.out" && echo true || echo false)"
 
 echo
 echo "=== summary: $pass passed, $fail failed ==="
