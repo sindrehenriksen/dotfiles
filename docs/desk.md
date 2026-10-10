@@ -61,7 +61,7 @@ The scheduled passes open their tabs in the background (`desk-open-tab.sh … ba
 | Prompts | beside the config, paths relative to its directory | [The prompt contract](#the-prompt-contract) |
 | Sources file | beside the config (`sources_file`) | free-form JSON, handed to prompts verbatim |
 | Notes repo | anywhere, named by `notes_repo` | `notes.md`, `reading.md`, `.desk-notes`, branch `main` |
-| LaunchAgent plists | the instance repo | [Scheduling](#scheduling) |
+| Schedule: LaunchAgent plists, or systemd user units | the instance repo | [Scheduling](#scheduling) |
 | Denylist | the instance repo, untracked here | [The denylist](#the-denylist) |
 
 ## Setting up an instance
@@ -439,7 +439,7 @@ The notes window's bar shows the status line: each pass's last result, untaken s
 
 ## Scheduling
 
-One LaunchAgent plist per pass, each running `desk-run <pass>` with `DESK_CONFIG` and a `PATH` that reaches bash 4+, `jq`, `nvim`, `perl`, `rg`, `claude` and `~/.local/bin`. `claude/desk-example/com.local.desk.morning.plist` is the pattern: launchd expands neither `~` nor `$HOME`, so it runs through `/bin/sh -c`, and it appends the pass's log to `~/.local/state/desk/logs/`. Set `CLAUDE_CONFIG_DIR` there too if your sessions live in a config directory other than `~/.claude`: the capture and close steps read sessions from it. Keep `StartCalendarInterval` equal to the pass's `trigger.start_calendar_interval` (launchd's `Weekday` uses the same 1–7 numbers). Several slots per pass are the retry mechanism: once a scheduled date finishes ok, later slots for it do nothing.
+On macOS, one LaunchAgent plist per pass, each running `desk-run <pass>` with `DESK_CONFIG` and a `PATH` that reaches bash 4+, `jq`, `nvim`, `perl`, `rg`, `claude` and `~/.local/bin`. `claude/desk-example/com.local.desk.morning.plist` is the pattern: launchd expands neither `~` nor `$HOME`, so it runs through `/bin/sh -c`, and it appends the pass's log to `~/.local/state/desk/logs/`. Set `CLAUDE_CONFIG_DIR` there too if your sessions live in a config directory other than `~/.claude`: the capture and close steps read sessions from it. Keep `StartCalendarInterval` equal to the pass's `trigger.start_calendar_interval` (launchd's `Weekday` uses the same 1–7 numbers). Several slots per pass are the retry mechanism: once a scheduled date finishes ok, later slots for it do nothing.
 
 **Missed slots.** launchd runs a slot missed while the Mac slept once it wakes (several coalesce into one run), but not one missed while it was off. `RunAtLoad`, as in the example plist, closes that gap: the job also runs at every login, and the once-a-day guard makes the day's later slots no-ops. A login before the day's first slot belongs to the previous day's last slot, so it runs only if that day never finished; `trigger.same_day_only` makes it a no-op instead. A weekly pass with `RunAtLoad` needs `same_day_only`, or the first login of any day after a missed slot runs it. `RunAtLoad` fires at `launchctl bootstrap` too, so enabling such a job runs its pass straight away.
 
@@ -456,6 +456,24 @@ launchctl bootout gui/$(id -u)/com.local.desk.morning \
 ```
 
 Link a job only once its instance runs cleanly by hand: from then on it runs at every login. Until then, `bootstrap` straight from the instance path tries it for one login session, and one `bootout` undoes it.
+
+**On Linux**, systemd user units take the plist's place: per pass, a `.service` that runs `desk-run <pass>` and a `.timer` that starts it. `claude/desk-example/desk-morning.service` and `desk-morning.timer` are the pattern. The service sets `DESK_CONFIG`, `CLAUDE_CONFIG_DIR` and `PATH` itself, since the user manager's environment is not the login shell's, and appends to the same log. The timer's `OnCalendar` lines mirror `trigger.start_calendar_interval`, a weekday going first by name (`Mon *-*-* 08:30:00`). It is wanted by `graphical-session.target`, so like a LaunchAgent it runs only while you are logged in to the desktop, where the follow-up window opens.
+
+Missed slots work as on macOS but for one case. A slot that falls while the machine is suspended fires on resume, several coalescing into one run. One missed while it was off or logged out fires once when the timer next starts, at the next login (`Persistent=true`), where launchd drops it and leaves `RunAtLoad` to catch up. `OnActiveSec` stands in for `RunAtLoad`: the pass also runs whenever the timer starts, at every login and at `enable --now`, so `same_day_only` matters exactly as it does there. A login after a missed slot can fire both; the second waits on the lock and finds the date done. Neither wakes a suspended machine, and a user timer cannot (`WakeSystem=` takes a system unit): waking for a slot is a system timer at the same times, after which the user timer fires on resume.
+
+A follow pass's timer uses `OnActiveSec` with `OnUnitActiveSec` (`interval_minutes`) instead of `OnCalendar`, and its service runs `desk-run <pass> --scheduled`.
+
+**Loading.** A unit is found in `~/.config/systemd/user`, so link it there from the instance repo and enable the timer:
+
+```sh
+ln -s /path/to/instance/desk-morning.service /path/to/instance/desk-morning.timer ~/.config/systemd/user/
+systemctl --user daemon-reload && systemctl --user enable --now desk-morning.timer
+systemctl --user start desk-morning.service    # run once now
+systemctl --user disable --now desk-morning.timer \
+  && rm ~/.config/systemd/user/desk-morning.service ~/.config/systemd/user/desk-morning.timer
+```
+
+As with a plist, enable a timer only once its instance runs cleanly by hand; until then `systemctl --user start desk-morning.timer` tries it for this login only.
 
 ## The denylist
 

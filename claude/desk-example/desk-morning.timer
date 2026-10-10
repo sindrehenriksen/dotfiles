@@ -1,0 +1,26 @@
+# The morning pass's schedule, the Linux counterpart of the plist's
+# StartCalendarInterval and RunAtLoad. docs/desk.md "Scheduling" has how
+# missed slots differ from launchd.
+[Unit]
+Description=Desk: the morning pass's slots
+# Bound to the desktop session, as a LaunchAgent is to the login: the pass
+# opens its follow-up window there, and stops being scheduled at logout.
+PartOf=graphical-session.target
+
+[Timer]
+# Mirror of the pass's `trigger.start_calendar_interval` in config.json: the
+# runner never reads this file, so the two are kept equal by hand. A weekday
+# goes first, as in `Mon *-*-* 08:30:00`. The later slot only retries; once
+# a scheduled date has finished ok, another firing for it is a no-op.
+OnCalendar=*-*-* 08:30:00
+OnCalendar=*-*-* 10:00:00
+# A slot missed while the machine was off or logged out fires once when the
+# timer next starts.
+Persistent=true
+# RunAtLoad's counterpart: also run whenever the timer starts, at every
+# login and at `systemctl --user enable --now`. The once-a-day guard makes a
+# later slot that day a no-op.
+OnActiveSec=1
+
+[Install]
+WantedBy=graphical-session.target

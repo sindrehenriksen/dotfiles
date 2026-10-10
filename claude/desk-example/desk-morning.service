@@ -1,0 +1,19 @@
+# The morning pass as a systemd user service, started by desk-morning.timer;
+# the Linux counterpart of com.local.desk.morning.plist. Replace the
+# placeholders: the instance's config file, the config directory the user's
+# sessions live in (CLAUDE_CONFIG_DIR: the capture and close steps read
+# sessions from it), and the directory holding the `claude` binary
+# (`dirname "$(command -v claude)"`). The user manager's own PATH is not the
+# login shell's, so PATH must reach bash 4+, jq, nvim, perl, rg and
+# ~/.local/bin here. %h is the home directory; systemd expands neither ~
+# nor $HOME in these lines. The log is the only record of a pass's own
+# progress; status.json holds its outcome.
+[Unit]
+Description=Desk: the morning pass
+
+[Service]
+Type=oneshot
+Environment=DESK_CONFIG=%h/PATH/TO/INSTANCE/config.json
+Environment=CLAUDE_CONFIG_DIR=%h/.claude
+Environment=PATH=%h/.local/bin:CLAUDE_BIN_DIR:/usr/local/bin:/usr/bin:/bin
+ExecStart=/bin/sh -c 'mkdir -p "$HOME/.local/state/desk/logs" && exec desk-run morning >> "$HOME/.local/state/desk/logs/morning.log" 2>&1'

@@ -10,7 +10,8 @@
 # Checked: each pass finishes ok; every rendered prompt is non-empty and has
 # no `{{placeholder}}` the runner left unfilled; the judge's cwd holds every
 # file its `input_files` names; the weekly tab gets its notes-diff; and the
-# plist's schedule matches the config's `trigger` mirror of it.
+# plist's and the systemd timer's schedules match the config's `trigger`
+# mirror of them.
 set -u
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -199,6 +200,30 @@ if command -v plutil > /dev/null 2>&1; then
 		"$(plutil -convert json -o - "$plist" | jq -r '.RunAtLoad')"
 else
 	echo "skipped: no plutil on this machine"
+fi
+
+echo
+echo "=== the systemd timer mirrors the morning trigger ==="
+timer="$EXAMPLE/desk-morning.timer"
+from_timer="$(sed -n 's/^OnCalendar=//p' "$timer" | awk '
+	BEGIN { split("Mon Tue Wed Thu Fri Sat Sun", names, " "); for (i = 1; i <= 7; i++) num[names[i]] = i }
+	{ wd = ""; if (NF == 3) wd = num[$1]; split($NF, t, ":"); printf "%s\t%d\t%d\n", wd, t[1], t[2] }' \
+	| jq -R -s -c 'split("\n") | map(select(length > 0) | split("\t"))
+		| map({hour: (.[1] | tonumber), minute: (.[2] | tonumber)} + (if .[0] == "" then {} else {weekday: (.[0] | tonumber)} end))')"
+assert_eq "OnCalendar equals trigger.start_calendar_interval" \
+	"$(jq -c '.passes.morning.trigger.start_calendar_interval' "$EXAMPLE/config.json")" "$from_timer"
+assert_eq "a slot missed while off fires when the timer next starts" "true" \
+	"$(grep -qx 'Persistent=true' "$timer" && echo true || echo false)"
+assert_eq "it runs when the timer starts, so a login catches up as RunAtLoad does" "true" \
+	"$(grep -q '^OnActiveSec=' "$timer" && echo true || echo false)"
+if command -v systemd-analyze > /dev/null 2>&1; then
+	unit_dir="$(mktemp -d)"
+	cp "$timer" "$EXAMPLE/desk-morning.service" "$unit_dir/"
+	assert_eq "systemd-analyze verify accepts both units" "" \
+		"$(cd "$unit_dir" && systemd-analyze --user verify ./desk-morning.timer ./desk-morning.service 2>&1)"
+	rm -rf "$unit_dir"
+else
+	echo "skipped: no systemd-analyze on this machine"
 fi
 
 echo
