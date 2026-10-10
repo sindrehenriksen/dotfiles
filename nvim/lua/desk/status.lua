@@ -18,11 +18,19 @@
 -- the one place to change.
 local M = {}
 
---- The status file path, overridable (`$DESK_STATUS_FILE`) the same way
---- every other desk path is.
+--- The status file path: `$DESK_STATUS_FILE`, else `status.json` in
+--- `$DESK_STATE_DIR`, else in ~/.local/state/desk, as the runner writes it
+--- (desk.annotate's ticket cache resolves the same way).
 function M.path()
 	local override = vim.env.DESK_STATUS_FILE
-	return vim.fn.expand((override and override ~= "") and override or "~/.local/state/desk/status.json")
+	if override and override ~= "" then
+		return vim.fn.expand(override)
+	end
+	local state_dir = vim.env.DESK_STATE_DIR
+	if state_dir and state_dir ~= "" then
+		return vim.fn.expand(state_dir .. "/status.json")
+	end
+	return vim.fn.expand("~/.local/state/desk/status.json")
 end
 
 --- Reads and parses the status file, or nil if it's absent/invalid — a

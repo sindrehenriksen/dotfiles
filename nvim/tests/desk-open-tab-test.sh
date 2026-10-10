@@ -99,7 +99,8 @@ session_arg="$(cat "$ARGV_LOG.session" 2> /dev/null)"
 assert_eq "cwd is expanded to \$HOME" "$HOME/dev/example-workspace" "$cwd_arg"
 assert_eq "no session id is pinned (a fresh launch, not a resume)" "" "$session_arg"
 assert_eq "it opens in the background, never taking focus" "background" "$(cat "$ARGV_LOG.mode" 2> /dev/null)"
-assert_true "the command starts with the claude binary" "$(grep -qE "^'claude' " <<< "$command_line" && echo true || echo false)"
+assert_true "the command starts with the claude binary, on the pass's own account and instance" \
+	"$(grep -qE "^CLAUDE_CONFIG_DIR='[^']*' DESK_CONFIG='[^']*' DESK_STATE_DIR='[^']*' 'claude' " <<< "$command_line" && echo true || echo false)"
 assert_true "a --restricted tab is never tagged DESK_HEADLESS (its own real hooks never load)" \
 	"$([[ "$command_line" != DESK_HEADLESS=1\ * ]] && echo true || echo false)"
 assert_true "-n names the session, so a later run's live-check can actually find it" \

@@ -1525,7 +1525,7 @@ desk_open_follow_up_tab() {
 		desk_log "$pass" "follow-up tab: no plain-language summary added — opening on the step's own reply"
 	fi
 
-	command="claude --resume $(desk_shq "$id")$(desk_follow_up_settings_arg "$pass")"
+	command="$(desk_tab_env)claude --resume $(desk_shq "$id")$(desk_follow_up_settings_arg "$pass")"
 	if "$helper" "$command" "$id" "$cwd" background > /dev/null 2>&1; then
 		desk_mark_opened_for_user "$cwd"
 		desk_log "$pass" "follow-up tab: opened $follow_up_step ($id) in $cwd"
@@ -1593,9 +1593,19 @@ desk_follow_up_status_command() {
 	local placeholders
 	placeholders="$(desk_follow_up_placeholders "$pass" "$scheduled_date" "$repo")"
 	desk_render_prompt "$prompt_path" "$placeholders" > "$dir/prompt.txt" || return 1
-	printf 'claude -n %s%s -- "$(cat %s)"' \
+	printf '%sclaude -n %s%s -- "$(cat %s)"' "$(desk_tab_env)" \
 		"$(desk_shq "desk-$pass-$scheduled_date-status")" "$(desk_follow_up_settings_arg "$pass")" \
 		"$(desk_shq "$dir/prompt.txt")"
+}
+
+# desk_tab_env: the assignments a tab's command starts with, so the session
+# it opens runs on this pass's account and instance. The tab's login shell
+# would otherwise give it the machine's default ones, which on a machine
+# holding two instances can be the other's (.shellrc's claude and desk
+# switches honor both).
+desk_tab_env() {
+	printf 'CLAUDE_CONFIG_DIR=%s DESK_CONFIG=%s DESK_STATE_DIR=%s ' \
+		"$(desk_shq "${CLAUDE_CONFIG_DIR:-$HOME/.claude}")" "$(desk_shq "$DESK_CONFIG")" "$(desk_shq "$DESK_STATE_DIR")"
 }
 
 # desk_follow_up_settings_arg <pass>: ` --settings <file>` for a follow-up
@@ -1916,6 +1926,7 @@ desk_step_open_tab() {
 	for a in "${argv[@]}"; do
 		command="${command:+$command }$(desk_shq "$a")"
 	done
+	command="$(desk_tab_env)$command"
 	# No DESK_HEADLESS: this is an interactive session the user works in,
 	# so it is recorded as one of theirs (its own hooks fire, source
 	# "startup"), which is what lets a restart reopen it and a capture

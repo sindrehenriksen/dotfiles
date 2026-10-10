@@ -12,7 +12,7 @@ The mechanism is in `~/dotfiles/docs/desk.md`, under "The follow pass". This ski
 
 ## Before the first change
 
-- `command -v desk-follow` must succeed. `desk-follow run` also needs the instance's config, with a pass of kind `follow`: `$DESK_CONFIG`, or, when that is unset (as it often is in a Bash tool), `${XDG_CONFIG_HOME:-~/.config}/desk/config.json`. Adding, removing and listing need neither. If the command or the config is missing, the follow pass is not set up on this machine: say so instead of improvising.
+- `command -v desk-follow` must succeed. `desk-follow run` also needs the instance's config, with a pass of kind `follow`: `$DESK_CONFIG`, which the shell sets to this session's account's instance, or, when that is unset, `${XDG_CONFIG_HOME:-~/.config}/desk/config.json`. The follow list is per instance too, in its state directory (`$DESK_STATE_DIR`). Adding, removing and listing need neither. If the command or the config is missing, the follow pass is not set up on this machine: say so instead of improvising.
 - **This session's id is `$CLAUDE_CODE_SESSION_ID`**, set in the Bash tool's environment; a subagent's Bash sees its parent's, which is the right session to follow from. `desk-follow` uses it when `--session` is not given. To follow tickets in a *different* session, pass `--session <its name, or its id>`.
 - **Adding a follow to a different session tells it**, with a short intro message (see "When a `[desk-follow]` message arrives"). The add prints a second line saying the intro went, or that it goes with the session's first update when the session is not running: pass that on in plain words. Adding from inside the session, or adding keys already followed, sends nothing.
 - Which tickets: take the keys the user names. For "this epic" or "these", use the keys this conversation has been about and name them back in your reply. If that is not clear, ask once.
@@ -21,7 +21,7 @@ The mechanism is in `~/dotfiles/docs/desk.md`, under "The follow pass". This ski
 
 | The user means | Run | What changes |
 |---|---|---|
-| Follow these tickets here | `desk-follow add <KEY>...` | An entry for this session in the machine-local follow list (`~/.local/state/desk/follow.json`). The follow pass picks it up on its next run. |
+| Follow these tickets here | `desk-follow add <KEY>...` | An entry for this session in the machine-local follow list (`follow.json` in the state directory, `~/.local/state/desk` by default). The follow pass picks it up on its next run. |
 | Also follow a ticket, but not its children and links | `desk-follow add --related <KEY>...` | Tracked keys (epics, tasks) bring in their children and the tickets linked to them or to a child, one hop, in any project. Related keys are followed only as themselves. |
 | Stop following one ticket | `desk-follow remove <KEY>...` | Drops just those keys. Removing the last key removes the follow. |
 | Stop following, or the epic is done | `desk-follow remove` | Removes this session's follow and its queued changes. |

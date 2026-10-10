@@ -175,7 +175,7 @@ echo "=== the weekly tab ==="
 # fake reader resolves no session, and the weekly one.
 assert_eq "two tabs were asked for" "2" "$(wc -l < "$TABS_LOG" | tr -d ' ')"
 assert_true "the morning follow-up is an interactive status session" \
-	"$(grep -q "^claude -n 'desk-example-morning-[0-9-]*-status'" "$TABS_LOG" && echo true || echo false)"
+	"$(grep -qE "^CLAUDE_CONFIG_DIR='[^']*' DESK_CONFIG='[^']*' DESK_STATE_DIR='[^']*' claude -n 'desk-example-morning-[0-9-]*-status'" "$TABS_LOG" && echo true || echo false)"
 tab_cmd="$(grep -F weekly-review "$TABS_LOG" | cut -f1)"
 tab_cwd="$(grep -F weekly-review "$TABS_LOG" | cut -f3)"
 assert_true "it opens claude named weekly-review-<date>" \

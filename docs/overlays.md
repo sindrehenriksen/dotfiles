@@ -159,6 +159,7 @@ with no overlay is unaffected. The full set:
 | `~/.shellrc.early` | `.shellrc` sources it if present | *above* the version-manager block, because it may export the variable that block reads on activation |
 | `~/.secrets.env` | `.shellrc`, last line of all | exported credentials, `chmod 600` — template in `secrets/` |
 | `~/.gitconfig.local` | `.gitconfig` includes it | just after `[user]`, so it can override the identity or add conditional includes |
+| `DESK_PERSONAL_CONFIG`, `DESK_WORK_CONFIG`, and their `_STATE_DIR` | `.shellrc`'s desk switch, per account | exported from `~/.shellrc.early`; name a desk instance kept in the overlay's repo, for the account it serves (`docs/desk.md`, "Instances and accounts") |
 | `CLAUDE_PERSONAL_SETTINGS`, `CLAUDE_WORK_SETTINGS` | `.shellrc`'s `claude` wrapper, per account | exported from `~/.shellrc.early`; names a whole extra settings file, passed as `--settings`. The one slot that is a variable rather than a path, because there is no fixed location the agent reads it from |
 
 **There is no per-machine settings file beside the user `settings.json`.** The agent reads a `settings.json` from its config dir, a `.claude/settings.json` from the cwd, and a `.claude/settings.local.json` from the git root — nothing else, so a `settings.local.json` placed in the config dir is never opened and a rule put there is silently lost. That makes the two variables above the only per-machine settings hook, and a repo's own `.claude/settings.local.json` the only per-repo one.

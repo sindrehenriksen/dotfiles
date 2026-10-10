@@ -261,7 +261,7 @@ echo
 echo "=== the follow-up tab: opened once, for F (the pass's own follow_up_step) ==="
 assert_eq "desk-open-tab was called exactly once" "1" "$(grep -c '^CMD=' "$OPEN_TAB_LOG")"
 assert_true "it resumes F's own session id" \
-	"$(grep -q "CMD=claude --resume '$f_sid'" "$OPEN_TAB_LOG" && echo true || echo false)"
+	"$(grep -qE "^CMD=CLAUDE_CONFIG_DIR='[^']*' DESK_CONFIG='[^']*' DESK_STATE_DIR='[^']*' claude --resume '$f_sid'" "$OPEN_TAB_LOG" && echo true || echo false)"
 assert_true "it passes F's own session id as the session-id arg too" \
 	"$(grep -q "^SID=$f_sid\$" "$OPEN_TAB_LOG" && echo true || echo false)"
 assert_true "it opens in F's own cwd" \

@@ -129,7 +129,7 @@ assert_eq "hs was called exactly once" "1" "$(grep -c '^hs$' "$ORDER_LOG")"
 expr="$(cat "$HS_EXPR_LOG")"
 sid="$(jq -r '.id' "$SESSIONS_FIXTURE" | head -1)"
 assert_true "the expression is a DeskOpenTab call resuming F's session id" \
-	"$(case "$expr" in "DeskOpenTab(\"claude --resume '$sid'\", \"$sid\", \""*) echo true ;; *) echo false ;; esac)"
+	"$(case "$expr" in "DeskOpenTab(\"CLAUDE_CONFIG_DIR="*" claude --resume '$sid'\", \"$sid\", \""*) echo true ;; *) echo false ;; esac)"
 assert_true "it asks for a background open, never taking focus" \
 	"$(case "$expr" in *", { background = true })") echo true ;; *) echo false ;; esac)"
 assert_true "it is a plain resume: the user's default permissions, no restricted envelope" \

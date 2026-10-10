@@ -132,7 +132,9 @@ echo sess-not-live > "$run_dir4.session-id"
 result="$(desk_open_follow_up_tab testpass4 "$scheduled_date" J)"
 assert_eq "reports ok" "ok" "$result"
 assert_eq "focus was never attempted (not live)" "0" "$(wc -l < "$FOCUS_TAB_LOG" | tr -d ' ')"
-assert_true "open-tab (resume) was invoked" "$(grep -q "CMD=claude --resume 'sess-not-live'" "$OPEN_TAB_LOG" && echo true || echo false)"
+TAB_ENV="CLAUDE_CONFIG_DIR='$CLAUDE_CONFIG_DIR' DESK_CONFIG='$DESK_CONFIG' DESK_STATE_DIR='$DESK_STATE_DIR' "
+assert_true "open-tab (resume) was invoked, on the pass's own account and instance" \
+	"$(grep -qF "CMD=${TAB_ENV}claude --resume 'sess-not-live'" "$OPEN_TAB_LOG" && echo true || echo false)"
 assert_eq "as a background tab" "MODE=background" "$(grep '^MODE=' "$OPEN_TAB_LOG")"
 assert_true "the guard stamp was written" \
 	"$([ -f "$DESK_GUARD_DIR/followup-testpass4-$scheduled_date" ] && echo true || echo false)"
@@ -153,14 +155,14 @@ assert_eq "reports ok" "ok" "$result"
 assert_true "the same-named stranger is never resumed" \
 	"$(grep -q "sess-stranger" "$OPEN_TAB_LOG" && echo false || echo true)"
 assert_true "a status session opens instead, an interactive claude" \
-	"$(grep -q "^CMD=claude -n 'desk-testpass5-$scheduled_date-status'" "$OPEN_TAB_LOG" && echo true || echo false)"
+	"$(grep -qF "CMD=${TAB_ENV}claude -n 'desk-testpass5-$scheduled_date-status'" "$OPEN_TAB_LOG" && echo true || echo false)"
 rm -f "$DESK_GUARD_DIR/followup-testpass5-$scheduled_date"
 jq -cn --arg name "desk-testpass5-$scheduled_date-J" '
 	{name:$name, id:"sess-ours", cwd:"/our/cwd", last_activity:1, live:false}
 ' >> "$SESSIONS_FIXTURE"
 result="$(desk_open_follow_up_tab testpass5 "$scheduled_date" J)"
 assert_true "the session whose id the runner generated is the one opened" \
-	"$(grep -q "CMD=claude --resume 'sess-ours'" "$OPEN_TAB_LOG" && echo true || echo false)"
+	"$(grep -qF "CMD=${TAB_ENV}claude --resume 'sess-ours'" "$OPEN_TAB_LOG" && echo true || echo false)"
 
 echo
 echo "=== summary: $pass passed, $fail failed ==="

@@ -6,8 +6,10 @@
 # (`dirname "$(command -v claude)"`). The user manager's own PATH is not the
 # login shell's, so PATH must reach bash 4+, jq, nvim, perl, rg and
 # ~/.local/bin here. %h is the home directory; systemd expands neither ~
-# nor $HOME in these lines. The log is the only record of a pass's own
-# progress; status.json holds its outcome.
+# nor $HOME in these lines. An instance that is the second on its machine
+# sets DESK_STATE_DIR here too (docs/desk.md, "Instances and accounts").
+# The log is the only record of a pass's own progress; status.json holds
+# its outcome.
 [Unit]
 Description=Desk: the morning pass
 
@@ -16,4 +18,5 @@ Type=oneshot
 Environment=DESK_CONFIG=%h/PATH/TO/INSTANCE/config.json
 Environment=CLAUDE_CONFIG_DIR=%h/.claude
 Environment=PATH=%h/.local/bin:CLAUDE_BIN_DIR:/usr/local/bin:/usr/bin:/bin
-ExecStart=/bin/sh -c 'mkdir -p "$HOME/.local/state/desk/logs" && exec desk-run morning >> "$HOME/.local/state/desk/logs/morning.log" 2>&1'
+# $$ is a literal $ for the shell: systemd expands $VAR and ${VAR} itself.
+ExecStart=/bin/sh -c 'logs="$${DESK_STATE_DIR:-$$HOME/.local/state/desk}/logs"; mkdir -p "$$logs" && exec desk-run morning >> "$$logs/morning.log" 2>&1'

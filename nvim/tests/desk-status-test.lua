@@ -22,6 +22,20 @@ local function assert_eq(desc, expected, actual)
 	end
 end
 
+print("=== path: $DESK_STATUS_FILE, else $DESK_STATE_DIR, as the runner writes it ===")
+do
+	local old_file, old_state = vim.env.DESK_STATUS_FILE, vim.env.DESK_STATE_DIR
+	vim.env.DESK_STATUS_FILE = "/tmp/desk-status-test/explicit.json"
+	vim.env.DESK_STATE_DIR = "/should-be-ignored"
+	assert_eq("$DESK_STATUS_FILE wins", "/tmp/desk-status-test/explicit.json", status.path())
+	vim.env.DESK_STATUS_FILE = nil
+	vim.env.DESK_STATE_DIR = "/tmp/desk-status-test/state"
+	assert_eq("no $DESK_STATUS_FILE: status.json in $DESK_STATE_DIR", "/tmp/desk-status-test/state/status.json", status.path())
+	vim.env.DESK_STATE_DIR = nil
+	assert_eq("neither: the runner's default", vim.fn.expand("~/.local/state/desk/status.json"), status.path())
+	vim.env.DESK_STATUS_FILE, vim.env.DESK_STATE_DIR = old_file, old_state
+end
+
 print("=== summary: a clean, fully-ok status ===")
 
 assert_eq("no status at all: an empty string, never an error", "", status.summary(nil))

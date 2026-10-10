@@ -110,6 +110,7 @@ BASH_SUITES=(
 	hammerspoon/tests/tabs-live-check-selftest.sh
 	linux/desk/tests/tabs-test.sh
 	git-hooks/test-desk-denylist.sh
+	tests/shellrc-desk-switch-test.sh
 )
 
 LUA_SUITES=(

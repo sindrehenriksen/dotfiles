@@ -173,6 +173,8 @@ __claude-run() {
         extra=$CLAUDE_WORK_SETTINGS
     fi
     [ -n "$extra" ] && set -- --settings "$extra" "$@"
+    local desk_config desk_state desk_mark
+    __desk-instance "$account"
     echo "[claude] using ${account} account" >&2
     # CLAUDE_CODE_NO_FLICKER=1 enables alt-screen rendering so the input stays
     # pinned and scrolling doesn't snap to bottom. Upstream's accepted answer
@@ -180,11 +182,65 @@ __claude-run() {
     CLAUDE_CODE_NO_FLICKER=1 \
         CLAUDE_CONFIG_DIR="$dir" \
         GH_CONFIG_DIR=~/.config/gh-"$account" \
+        DESK_CONFIG="$desk_config" \
+        DESK_STATE_DIR="$desk_state" \
+        __DESK_SWITCHED_CONFIG="$desk_mark" \
         command claude "$@"
 }
-claude()          { __claude-run "${CLAUDE_DEFAULT_ACCOUNT:-${DEFAULT_ACCOUNT:-personal}}" "$@"; }
+# Bare `claude` honors a CLAUDE_CONFIG_DIR that names one of the two config
+# dirs, as bare `gh` honors GH_CONFIG_DIR: a session started from inside a
+# session keeps its account, and so does `CLAUDE_CONFIG_DIR=… claude`, the
+# form a desk pass and reopen-sessions.sh start a tab's session with.
+claude() {
+    local account
+    case "${CLAUDE_CONFIG_DIR%/}" in
+        "$HOME/.claude-work") account=work ;;
+        "$HOME/.claude") account=personal ;;
+        *) account=${CLAUDE_DEFAULT_ACCOUNT:-${DEFAULT_ACCOUNT:-personal}} ;;
+    esac
+    __claude-run "$account" "$@"
+}
 claude-personal() { __claude-run personal "$@"; }
 claude-work()     { __claude-run work "$@"; }
+
+
+#### Desk instance switcher
+# Which desk instance (docs/desk.md) the shell and a Claude session use
+# follows the account, as the config dirs above do. DESK_PERSONAL_CONFIG and
+# DESK_WORK_CONFIG (machine-local, in ~/.shellrc.early) name each account's
+# instance config; DESK_PERSONAL_STATE_DIR and DESK_WORK_STATE_DIR its state
+# directory, the runner's default when unset, so two instances on one machine
+# need one for at least one of them. An account with no instance gets none.
+# The shell takes $DESK_DEFAULT_ACCOUNT's, then the shared $DEFAULT_ACCOUNT's,
+# so nvim reviews that instance; claude-personal, claude-work and claude give
+# their session its account's. A DESK_CONFIG set by hand wins over all of it,
+# along with whatever DESK_STATE_DIR came with it: __DESK_SWITCHED_CONFIG holds
+# the value the switch itself set, which is how the two are told apart.
+__desk-instance() { # account -> sets the caller's desk_config, desk_state, desk_mark
+    if [ -n "${DESK_CONFIG:-}" ] && [ "$DESK_CONFIG" != "${__DESK_SWITCHED_CONFIG:-}" ]; then
+        desk_config=$DESK_CONFIG
+        desk_state=${DESK_STATE_DIR:-}
+        desk_mark=${__DESK_SWITCHED_CONFIG:-}
+        return
+    fi
+    if [ "$1" = work ]; then
+        desk_config=${DESK_WORK_CONFIG:-}
+        desk_state=${DESK_WORK_STATE_DIR:-}
+    else
+        desk_config=${DESK_PERSONAL_CONFIG:-}
+        desk_state=${DESK_PERSONAL_STATE_DIR:-}
+    fi
+    desk_mark=$desk_config
+}
+__desk-export() { if [ -n "$2" ]; then export "$1=$2"; else unset "$1"; fi; }
+__desk-use() { # account -> exports its instance to this shell
+    local desk_config desk_state desk_mark
+    __desk-instance "$1"
+    __desk-export DESK_CONFIG "$desk_config"
+    __desk-export DESK_STATE_DIR "$desk_state"
+    __desk-export __DESK_SWITCHED_CONFIG "$desk_mark"
+}
+__desk-use "${DESK_DEFAULT_ACCOUNT:-${DEFAULT_ACCOUNT:-personal}}"
 
 
 #### gh CLI account switcher

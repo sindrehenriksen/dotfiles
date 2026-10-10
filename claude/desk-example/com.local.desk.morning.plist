@@ -9,13 +9,15 @@
          config directory the user's sessions live in (CLAUDE_CONFIG_DIR: the
          capture and close steps read sessions from it), and the directory holding the `claude` binary (`dirname "$(command -v
          claude)"`). PATH must put a bash 4+ (Homebrew's) ahead of /bin, and
-         reach jq, nvim, perl, rg and ~/.local/bin. The log is the only record
-         of a pass's own progress; status.json holds its outcome. -->
+         reach jq, nvim, perl, rg and ~/.local/bin. An instance that is the
+         second on its machine exports DESK_STATE_DIR here too (docs/desk.md,
+         "Instances and accounts"). The log is the only record of a pass's
+         own progress; status.json holds its outcome. -->
     <key>ProgramArguments</key>
     <array>
         <string>/bin/sh</string>
         <string>-c</string>
-        <string>export DESK_CONFIG="$HOME/PATH/TO/INSTANCE/config.json"; export CLAUDE_CONFIG_DIR="$HOME/.claude"; export PATH="$HOME/.local/bin:CLAUDE_BIN_DIR:/opt/homebrew/bin:/usr/bin:/bin"; mkdir -p "$HOME/.local/state/desk/logs"; exec desk-run morning >> "$HOME/.local/state/desk/logs/morning.log" 2>&amp;1</string>
+        <string>export DESK_CONFIG="$HOME/PATH/TO/INSTANCE/config.json"; export CLAUDE_CONFIG_DIR="$HOME/.claude"; export PATH="$HOME/.local/bin:CLAUDE_BIN_DIR:/opt/homebrew/bin:/usr/bin:/bin"; logs="${DESK_STATE_DIR:-$HOME/.local/state/desk}/logs"; mkdir -p "$logs"; exec desk-run morning >> "$logs/morning.log" 2>&amp;1</string>
     </array>
     <!-- Mirror of the pass's `trigger.start_calendar_interval` in config.json:
          the runner never reads this file, so the two are kept equal by hand.
