@@ -495,6 +495,8 @@ The dotfiles clone refuses to push until `desk.denylist` is set in it, once, loc
 git -C ~/dotfiles config desk.denylist /path/to/instance/denylist.txt
 ```
 
+With more than one private repo whose names must stay out (a second instance, say), add each list with `git config --add desk.denylist <path>`: every configured list is checked.
+
 The list holds one Perl regex per line (`#` comments), matched case-insensitively unless a line turns that off with `(?-i)`, against every commit message and diff being pushed. It keeps the instance's own names (tools, hosts, ticket keys, people) out of this public repo, so it lives in the instance repo and is never tracked here: its contents would be the leak. A missing or empty list refuses too; `none` opts out explicitly. `git-hooks/pre-push` runs the check only when the repo being pushed is this one, since `core.hooksPath` points every repo on the machine at the same hooks. To check a range by hand: `git-hooks/desk-denylist-check.sh <repo> <range> <list-file>`.
 
 ## Dry-running a new instance

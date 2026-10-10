@@ -9,7 +9,8 @@
 #   1. Hook form (no args): chained from git-hooks/pre-push. Reads git's own
 #      pre-push stdin protocol, one line per updated ref — "<local ref>
 #      <local sha> <remote ref> <remote sha>" — and resolves the pattern
-#      list via `git config desk.denylist` in the current repo. One-time
+#      list(s) via `git config --get-all desk.denylist` in the current repo
+#      (each one checked; add more with `git config --add`). One-time
 #      install step for a personal clone: `git config desk.denylist
 #      <path-to-your-private-pattern-list>` (set it locally, never tracked
 #      — the list's own contents would be the leak). Unset: refuses to
@@ -91,7 +92,10 @@ if [ "$#" -gt 0 ]; then
 fi
 
 # --- hook form (no args): chained from git-hooks/pre-push --------------------
-denylist="$(git config --get desk.denylist 2>/dev/null || true)"
+# Several lists may be configured (`git config --add`), one per private repo
+# whose names must stay out; every one of them is checked.
+mapfile -t denylists < <(git config --get-all desk.denylist 2>/dev/null)
+denylist="${denylists[*]:-}"
 if [ -z "$denylist" ]; then
 	# Fails closed: an unconfigured denylist must never read
 	# as "nothing to check, let it through" — that's exactly the state a
@@ -117,7 +121,9 @@ while read -r local_ref local_sha remote_ref remote_sha; do
 	range="$remote_sha..$local_sha"
 	[[ "${remote_sha:-}" =~ $zero_re ]] && range="origin/main..$local_sha"
 
-	desk_denylist_check_range "." "$range" "$denylist" || fail=1
+	for list in "${denylists[@]}"; do
+		desk_denylist_check_range "." "$range" "$list" || fail=1
+	done
 done
 
 exit "$fail"

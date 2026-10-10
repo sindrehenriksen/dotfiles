@@ -198,6 +198,26 @@ git -C "$self_repo" reset -q --hard HEAD~1
 git -C "$self_repo" config --unset desk.denylist
 
 echo
+echo "=== self repo, two lists configured: a match in either refuses ==="
+second_deny="$TMP/second-denylist.txt"
+printf 'invented-secret-marker\n' > "$self_deny"
+printf 'another-invented-marker\n' > "$second_deny"
+git -C "$self_repo" config desk.denylist "$self_deny"
+git -C "$self_repo" config --add desk.denylist "$second_deny"
+before_sha="$(self_remote_main_sha)"
+commit "$self_repo" "matches only the second list" "names another-invented-marker"
+out="$(git -C "$self_repo" push origin main 2>&1)"
+status=$?
+[ "$status" -ne 0 ] && ok "a match in the second list refuses the push" || bad "second list's match was NOT refused"
+assert_eq "remote main did NOT advance" "$before_sha" "$(self_remote_main_sha)"
+git -C "$self_repo" reset -q --hard HEAD~1
+commit "$self_repo" "matches neither list" "nothing listed here"
+out="$(git -C "$self_repo" push origin main 2>&1)"
+status=$?
+assert_eq "a push matching neither list goes through" "0" "$status"
+git -C "$self_repo" config --unset-all desk.denylist
+
+echo
 echo "=== self repo, a brand-new branch (no remote tip) falls back to origin/main..<ref> ==="
 printf 'invented-secret-marker\n' > "$self_deny"
 git -C "$self_repo" config desk.denylist "$self_deny"
