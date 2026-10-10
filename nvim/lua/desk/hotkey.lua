@@ -125,8 +125,11 @@ function M.resume_command(session_id)
 	return "claude --resume " .. session_id
 end
 
+--- The system's URL opener: `open` on macOS, `xdg-open` elsewhere.
+M.URL_OPENER = vim.fn.has("mac") == 1 and "open" or "xdg-open"
+
 --- The real dependencies: shells out to the reader (desk.reader),
---- desk-focus-tab.sh, desk-open-tab.sh, and `open` — each overridable
+--- desk-focus-tab.sh, desk-open-tab.sh, and M.URL_OPENER — each overridable
 --- by an env var so an install can relocate them without a code change,
 --- and so a test can point at a stub instead of a real one. Every call is
 --- async.
@@ -167,7 +170,7 @@ function M.default_deps()
 		end,
 		focus_tty = shell_dep("DESK_FOCUS_TAB_BIN", "desk-focus-tab.sh"),
 		open_tab = shell_dep("DESK_OPEN_TAB_BIN", "desk-open-tab.sh"),
-		open_url = shell_dep("DESK_OPEN_URL", "open"),
+		open_url = shell_dep("DESK_OPEN_URL", M.URL_OPENER),
 		follow_link = function(bufnr, win)
 			return require("mdlink").follow_at(bufnr, win)
 		end,

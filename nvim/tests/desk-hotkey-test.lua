@@ -488,6 +488,40 @@ do
 end
 
 print()
+print("=== without DESK_OPEN_URL, a URL goes to the platform's opener ===")
+do
+	local dir = vim.fn.tempname()
+	vim.fn.mkdir(dir, "p")
+	for _, name in ipairs({ "open", "xdg-open" }) do
+		local fh = io.open(dir .. "/" .. name, "w")
+		fh:write("#!/bin/sh\necho " .. name .. " > " .. dir .. "/called\n")
+		fh:close()
+		vim.fn.system({ "chmod", "+x", dir .. "/" .. name })
+	end
+	local expected = vim.fn.has("mac") == 1 and "open" or "xdg-open"
+	local saved_path, saved_opener = vim.env.PATH, vim.env.DESK_OPEN_URL
+	vim.env.PATH = dir .. ":" .. saved_path
+	vim.env.DESK_OPEN_URL = nil
+	-- Only ever the stub: a real opener would open a browser.
+	if vim.fn.exepath(expected) == dir .. "/" .. expected then
+		local done = false
+		hotkey.default_deps().open_url("https://example.invalid/", function()
+			done = true
+		end)
+		vim.wait(5000, function()
+			return done
+		end, 20)
+	end
+	vim.env.PATH, vim.env.DESK_OPEN_URL = saved_path, saved_opener
+	local fh = io.open(dir .. "/called", "r")
+	local got = fh and vim.trim(fh:read("*a")) or nil
+	if fh then
+		fh:close()
+	end
+	assert_eq("the opener is " .. expected, expected, got)
+end
+
+print()
 print("=== a section headed by a non-ASCII name is found by that name ===")
 do
 	local lines = { "Intro", "Ærlig-økt: the section", "  detail", "See Ærlig-økt for context." }
