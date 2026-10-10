@@ -8,6 +8,8 @@
 set -u
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/platform.sh
+source "$HERE/lib/platform.sh"
 CLOSE="$HERE/../close-session.sh"
 RECORDER="$HERE/../hooks/session-recorder.sh"
 READER="$HERE/../session-status.sh"
@@ -92,18 +94,16 @@ spawn() { # sid [stubborn]
 		'{session_id:$sid, cwd:$cwd, transcript_path:$tp, source:"startup", hook_event_name:"SessionStart"}' > "$tag.start.json"
 	jq -cn --arg sid "$sid" '{session_id:$sid, reason:"other", hook_event_name:"SessionEnd"}' > "$tag.end.json"
 	[ -e "$PROJ_DIR/$sid.jsonl" ] || : > "$PROJ_DIR/$sid.jsonl"
-	script -q /dev/null "$TMP/bin/claude" -c '
+	on_a_terminal "$TMP/bin/claude" -c '
 		if [ "$4" = stubborn ]; then trap "" TERM; else trap "\"\$2\" end < \"\$1.end.json\"; exit 0" TERM; fi
 		"$2" start < "$1.start.json" > /dev/null
 		echo $$ > "$1.pid"
 		while :; do sleep 1 & wait $!; done' _ "$tag" "$RECORDER" "" "$mode" < /dev/null > /dev/null 2>&1 &
 	echo "$!" >> "$TMP/spawned"
 	wait_for "$tag.pid" || { echo "stand-in for $sid never started" >&2; return 1; }
-	local pid lstart lepoch procstart now_ms
+	local pid procstart now_ms
 	pid=$(cat "$tag.pid")
-	lstart=$(ps -o lstart= -p "$pid" | awk '{$1=$1; print}')
-	lepoch=$(date -j -f "%a %b %d %T %Y" "$lstart" +%s)
-	procstart=$(date -u -r "$lepoch" +"%a %b %d %T %Y")
+	procstart=$(proc_start_of "$pid")
 	now_ms=$(($(date +%s) * 1000))
 	jq -n --argjson pid "$pid" --arg sid "$sid" --arg cwd "$PROJ_DIR" --arg procstart "$procstart" --argjson now "$now_ms" \
 		'{pid:$pid, sessionId:$sid, cwd:$cwd, startedAt:$now, procStart:$procstart, nameSource:"none", status:"idle", updatedAt:$now}' \
@@ -136,7 +136,7 @@ jq -cn --arg cwd "$PROJ_DIR" --arg tp "$PROJ_DIR/$s1.jsonl" \
 	'{event:"start", time:1, source:"resume", cwd:$cwd, transcript_path:$tp, boot:"1"}' > "$TMP/store/$s1.jsonl"
 p1=$(spawn "$s1")
 tty1=$(field "$s1" .tty)
-case "$tty1" in tty*) ok "the stand-in is live on a terminal ($tty1)" ;; *) bad "the stand-in is live on a terminal (got [$tty1])" ;; esac
+case "$tty1" in tty* | pts/*) ok "the stand-in is live on a terminal ($tty1)" ;; *) bad "the stand-in is live on a terminal (got [$tty1])" ;; esac
 : > "$TMP/tab.log"
 run_close "$s1"
 assert_eq "it reports closed, tab closed" "closed	tab closed" "$(status)	$(detail)"

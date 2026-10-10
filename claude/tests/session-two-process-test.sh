@@ -9,6 +9,8 @@
 set -u
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/platform.sh
+source "$HERE/lib/platform.sh"
 RECORDER="$HERE/../hooks/session-recorder.sh"
 READER="$HERE/../session-status.sh"
 
@@ -96,15 +98,8 @@ spawn_claude() { # sid end_reason
     echo "$pid" >> "$TMP/spawned"
     printf '%s\n' "$tag" > "$TMP/ctl/$pid.tag"
     sleep 0.15
-    local lstart lepoch procstart now_ms
-    lstart=$(ps -o lstart= -p "$pid" | awk '{$1=$1; print}')
-    if [ -r /proc/stat ]; then
-        lepoch=$(date -d "$lstart" +%s)
-        procstart=$(date -u -d "@$lepoch" +"%a %b %d %T %Y")
-    else
-        lepoch=$(date -j -f "%a %b %d %T %Y" "$lstart" +%s)
-        procstart=$(date -u -r "$lepoch" +"%a %b %d %T %Y")
-    fi
+    local procstart now_ms
+    procstart=$(proc_start_of "$pid")
     now_ms=$(( $(date +%s) * 1000 ))
     jq -n --argjson pid "$pid" --arg sid "$sid" --arg cwd "$PROJ_DIR" --arg procstart "$procstart" \
         --argjson now "$now_ms" \
@@ -220,14 +215,14 @@ assert_eq "a close is deliberate" "true" "$(read_field closed .end_deliberate)"
 assert_eq "a closed session is not left open" "false" "$(read_field closed .left_open)"
 
 echo "=== a start records its process's terminal ==="
-# `script` gives the stand-in a terminal of its own, as a tab gives Claude Code.
+# The stand-in gets a terminal of its own, as a tab gives Claude Code.
 : > "$PROJ_DIR/ttyrec.jsonl"
 jq -cn --arg cwd "$PROJ_DIR" --arg tp "$PROJ_DIR/ttyrec.jsonl" \
     '{session_id:"ttyrec", cwd:$cwd, transcript_path:$tp, source:"startup", hook_event_name:"SessionStart"}' \
     > "$TMP/ttyrec.start.json"
-stand_in_tty=$(script -q /dev/null "$fakebin/claude" -c '"$1" start < "$2" > /dev/null; ps -o tty= -p $$; :' \
-    _ "$RECORDER" "$TMP/ttyrec.start.json" < /dev/null | grep -oE 'tty[[:alnum:]]+' | tail -n 1)
-case "$stand_in_tty" in tty*) ok "the stand-in ran on a terminal ($stand_in_tty)" ;; *) bad "the stand-in ran on a terminal (got [$stand_in_tty])" ;; esac
+stand_in_tty=$(on_a_terminal "$fakebin/claude" -c '"$1" start < "$2" > /dev/null; ps -o tty= -p $$; :' \
+    _ "$RECORDER" "$TMP/ttyrec.start.json" < /dev/null | grep -oE '(tty[[:alnum:]]+|pts/[0-9]+)' | tail -n 1)
+case "$stand_in_tty" in tty* | pts/*) ok "the stand-in ran on a terminal ($stand_in_tty)" ;; *) bad "the stand-in ran on a terminal (got [$stand_in_tty])" ;; esac
 assert_eq "the start event carries that terminal" "$stand_in_tty" \
     "$(jq -rs 'map(select(.event=="start")) | last | .tty' "$STORE_DIR/ttyrec.jsonl")"
 assert_eq "the reader reports it as recorded_tty" "$stand_in_tty" "$(read_field ttyrec .recorded_tty)"

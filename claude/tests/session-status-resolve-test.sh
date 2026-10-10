@@ -7,6 +7,8 @@
 set -u
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/platform.sh
+source "$HERE/lib/platform.sh"
 READER="$HERE/../session-status.sh"
 
 pass=0
@@ -67,15 +69,8 @@ start_live() {  # sid name updated_at_epoch
     local pid=$!
     live_pids+=("$pid")
     sleep 0.15
-    local lstart lepoch procstart
-    lstart=$(ps -o lstart= -p "$pid" | awk '{$1=$1; print}')
-    if [ -r /proc/stat ]; then
-        lepoch=$(date -d "$lstart" +%s)
-        procstart=$(date -u -d "@$lepoch" +"%a %b %d %T %Y")
-    else
-        lepoch=$(date -j -f "%a %b %d %T %Y" "$lstart" +%s)
-        procstart=$(date -u -r "$lepoch" +"%a %b %d %T %Y")
-    fi
+    local procstart
+    procstart=$(proc_start_of "$pid")
     jq -n --arg pid "$pid" --arg sid "$sid" --arg cwd "$PROJ_DIR" \
         --arg procstart "$procstart" --argjson updated "$((updated_epoch * 1000))" \
         --arg name "$name" \

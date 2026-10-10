@@ -7,6 +7,8 @@
 set -u
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/platform.sh
+source "$HERE/lib/platform.sh"
 RECORDER="$HERE/../hooks/session-recorder.sh"
 READER="$HERE/../session-status.sh"
 
@@ -89,15 +91,7 @@ ln -sf /bin/sleep "$fakebin/claude"
 "$fakebin/claude" 60 &
 c_pid=$!
 sleep 0.2
-# ps right-pads this column to a fixed width, so trim as well as squeeze.
-c_lstart=$(ps -o lstart= -p "$c_pid" | awk '{$1=$1; print}')
-if [ -r /proc/stat ]; then
-    c_epoch=$(date -d "$c_lstart" +%s)
-    c_procstart=$(date -u -d "@$c_epoch" +"%a %b %d %T %Y")
-else
-    c_epoch=$(date -j -f "%a %b %d %T %Y" "$c_lstart" +%s)
-    c_procstart=$(date -u -r "$c_epoch" +"%a %b %d %T %Y")
-fi
+c_procstart=$(proc_start_of "$c_pid")
 now_ms=$(( $(date +%s) * 1000 ))
 jq -n --arg pid "$c_pid" --arg sid "sess-c" --arg cwd "$PROJ_DIR" \
     --arg procstart "$c_procstart" --argjson updatedAt "$now_ms" --argjson startedAt "$now_ms" \
@@ -243,6 +237,24 @@ assert_eq "subagent transcript never surfaces as its own session" "" "$(get sess
 assert_eq "sess-w: transcript_path is the one that exists, not the hook's" "$tp_w" "$(field sess-w .transcript_path)"
 assert_eq "sess-x: an existing recorded path outside the scanned config dir stands" "$tp_x" "$(field sess-x .transcript_path)"
 assert_eq "sess-b: an existing recorded path stands" "$tp_b" "$(field sess-b .transcript_path)"
+
+echo "=== procStart in either platform's shape, and a reused pid ==="
+c_pidfile="$CONFIG_DIR/sessions/$c_pid.json"
+cp "$c_pidfile" "$TMP/c-pidfile.json"
+with_procstart() { # procStart -> sess-c's liveness with it
+    jq --arg ps "$1" '.procStart = $ps' "$TMP/c-pidfile.json" > "$c_pidfile"
+    "$READER" | jq -r 'select(.id == "sess-c") | .live'
+}
+assert_eq "a UTC ctime procStart (macOS's shape) that matches the process: live" "true" \
+    "$(with_procstart "$(proc_start_ctime_of "$c_pid")")"
+assert_eq "a ctime procStart years off (a reused pid): not live" "false" \
+    "$(with_procstart "Mon Jan  1 00:00:00 2024")"
+if [ -r /proc/stat ]; then
+    assert_eq "a clock-tick procStart (Linux's shape) that matches: live" "true" "$(with_procstart "$c_procstart")"
+    assert_eq "a clock-tick procStart one tick off (a reused pid): not live" "false" \
+        "$(with_procstart "$((c_procstart + 1))")"
+fi
+cp "$TMP/c-pidfile.json" "$c_pidfile"
 
 echo "=== reader cache actually caches (second run reuses it, doesn't grow) ==="
 cache_files_before=$(find "$CACHE_DIR" -type f | wc -l | tr -d ' ')

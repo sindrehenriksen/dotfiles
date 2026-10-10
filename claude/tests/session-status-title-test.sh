@@ -6,6 +6,8 @@
 set -u
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/platform.sh
+source "$HERE/lib/platform.sh"
 READER="$HERE/../session-status.sh"
 
 pass=0
@@ -52,12 +54,7 @@ start_event s1 "$tp"
 "$TMP/bin/claude" 60 > /dev/null 2>&1 &
 live_pid=$!
 sleep 0.15
-lstart=$(ps -o lstart= -p "$live_pid" | awk '{$1=$1; print}')
-if [ -r /proc/stat ]; then
-	lepoch=$(date -d "$lstart" +%s); procstart=$(date -u -d "@$lepoch" +"%a %b %d %T %Y")
-else
-	lepoch=$(date -j -f "%a %b %d %T %Y" "$lstart" +%s); procstart=$(date -u -r "$lepoch" +"%a %b %d %T %Y")
-fi
+procstart=$(proc_start_of "$live_pid")
 now=$(date +%s)
 jq -n --arg pid "$live_pid" --arg sid s1 --arg cwd "$PROJ" --arg ps "$procstart" --argjson u "$((now * 1000))" \
 	'{pid:($pid|tonumber), sessionId:$sid, cwd:$cwd, startedAt:$u, procStart:$ps, name:"Pid File Name", nameSource:"user", status:"idle", updatedAt:$u}' \
