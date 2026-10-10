@@ -15,7 +15,8 @@ them.
   checked 2026-10-07. "Mainline kernel (self-built)".
 - **About 2026-10-17** — 7.2.0 is still installed as a second fallback behind
   7.2.9. After a quiet week on 7.2.9, remove it:
-  `sudo apt remove linux-image-7.2.0 linux-headers-7.2.0`.
+  `sudo apt remove linux-image-7.2.0 linux-headers-7.2.0`, then free its 40 GB
+  build tree: `rm -rf ~/src/kernel-mainline/linux-7.2 ~/src/kernel-mainline/*7.2.0*`.
 - **On trigger** — Ubuntu ships >=7.1, or 7.2 goes EOL: drop the self-built
   kernel. Both triggers and the teardown are in that same section.
 
@@ -388,8 +389,9 @@ rc6, so 7.2's end of life (the second trigger below) is a few weeks out.
   either). Move to the next mainline with the same script, or take the exit
   above if it is available by then.
 
-Do not delete `~/src/kernel-mainline` casually: an existing tree makes a rebuild
-incremental. It is safe to delete, just slower afterwards.
+Each version builds in its own tree under `~/src/kernel-mainline`, about 40 GB
+apiece, and a new version never reuses an old one. So a version's tree and
+packages can go once that kernel is uninstalled.
 
 ### MOK signing key
 
