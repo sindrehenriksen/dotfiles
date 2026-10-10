@@ -1,0 +1,74 @@
+#!/bin/bash
+# systemd-sleep hook: wakes a suspended machine for a scheduled desk pass, but
+# only when it went to sleep on mains power. A systemd timer's WakeSystem=
+# cannot check for power, and a laptop woken on battery in a bag is worse than
+# a pass that runs late, so this sets the RTC alarm itself, deciding at the
+# moment of suspend.
+#
+# Install (as root): this file to /usr/lib/systemd/system-sleep/desk-wake, and
+# a machine-local /etc/default/desk-wake naming the slot, e.g.
+#   WAKE_AT=16:00          # local time, HH:MM
+#   WAKE_DAYS="1 2 3 4 5"  # ISO weekdays (1 = Monday)
+# Without that file the hook does nothing. The pass itself still runs from its
+# own timer; this only makes sure the machine is awake when the slot comes.
+#
+# The alarm is set relative to the RTC's current reading ("+N"), not as an
+# absolute time, so an RTC that is off (pm_trace overwrites it on resume) still
+# wakes after the right interval. Everything is logged with tag desk-wake:
+#   journalctl -t desk-wake
+set -u
+
+conf=/etc/default/desk-wake
+alarm=/sys/class/rtc/rtc0/wakealarm
+log() { logger -t desk-wake -- "$*"; }
+
+[ -r "$conf" ] || exit 0
+WAKE_AT=
+WAKE_DAYS="1 2 3 4 5"
+# shellcheck source=/dev/null
+. "$conf"
+[ -n "$WAKE_AT" ] && [ -w "$alarm" ] || exit 0
+
+on_mains() {
+    local ps
+    for ps in /sys/class/power_supply/*; do
+        [ "$(cat "$ps/type" 2> /dev/null)" = Mains ] \
+            && [ "$(cat "$ps/online" 2> /dev/null)" = 1 ] && return 0
+    done
+    return 1
+}
+
+# The next WAKE_AT on one of WAKE_DAYS, at least two minutes away, as seconds
+# from now. Two minutes keeps a suspend just before the slot from setting an
+# alarm that fires while the machine is still going down.
+seconds_to_next_slot() {
+    local now day target
+    now=$(date +%s)
+    for day in 0 1 2 3 4 5 6 7; do
+        target=$(date -d "$(date -d "+$day day" +%F) $WAKE_AT" +%s) || return 1
+        [ "$target" -gt $((now + 120)) ] || continue
+        case " $WAKE_DAYS " in
+            *" $(date -d "@$target" +%u) "*) echo $((target - now)); return 0 ;;
+        esac
+    done
+    return 1
+}
+
+case "${1:-}/${2:-}" in
+    pre/suspend | pre/suspend-then-hibernate | pre/hybrid-sleep)
+        echo 0 > "$alarm"
+        if ! on_mains; then
+            log "on battery: no wake alarm set"
+            exit 0
+        fi
+        if secs=$(seconds_to_next_slot); then
+            echo "+$secs" > "$alarm"
+            log "on mains: wake alarm in ${secs}s, for $(date -d "+$secs sec" '+%a %F %R')"
+        fi
+        ;;
+    post/*)
+        log "resumed $(date '+%a %F %T'); alarm cleared"
+        echo 0 > "$alarm"
+        ;;
+esac
+exit 0
