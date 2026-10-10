@@ -14,6 +14,10 @@ PartOf=graphical-session.target
 # a scheduled date has finished ok, another firing for it is a no-op.
 OnCalendar=*-*-* 08:30:00
 OnCalendar=*-*-* 10:00:00
+# systemd's default accuracy lets a slot fire up to a minute late. On a
+# machine woken for the slot with its lid shut, that minute is long enough
+# to be put back to sleep before the pass starts and takes its inhibitor.
+AccuracySec=1s
 # A slot missed while the machine was off or logged out fires once when the
 # timer next starts.
 Persistent=true

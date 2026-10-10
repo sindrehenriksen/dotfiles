@@ -216,6 +216,8 @@ assert_eq "a slot missed while off fires when the timer next starts" "true" \
 	"$(grep -qx 'Persistent=true' "$timer" && echo true || echo false)"
 assert_eq "it runs when the timer starts, so a login catches up as RunAtLoad does" "true" \
 	"$(grep -q '^OnActiveSec=' "$timer" && echo true || echo false)"
+assert_eq "it fires on the second, not up to a minute late" "true" \
+	"$(grep -qx 'AccuracySec=1s' "$timer" && echo true || echo false)"
 if command -v systemd-analyze > /dev/null 2>&1; then
 	unit_dir="$(mktemp -d)"
 	cp "$timer" "$EXAMPLE/desk-morning.service" "$unit_dir/"

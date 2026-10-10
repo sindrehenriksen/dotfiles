@@ -80,6 +80,7 @@ BASH_SUITES=(
 	nvim/tests/desk-retention-test.sh
 	nvim/tests/desk-safe-env-test.sh
 	nvim/tests/desk-scoped-read-test.sh
+	nvim/tests/desk-sleep-inhibit-test.sh
 	nvim/tests/desk-stage-proposal-namespace-test.sh
 	nvim/tests/desk-status-fields-test.sh
 	nvim/tests/desk-status-sh-test.sh

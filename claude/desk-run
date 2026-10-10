@@ -42,6 +42,7 @@ source "$DESK_RUN_DIR/desk-lib/retention.sh"
 source "$DESK_RUN_DIR/desk-lib/ticket-digest.sh"
 source "$DESK_RUN_DIR/desk-lib/ticket-search.sh"
 source "$DESK_RUN_DIR/desk-lib/mail-triage.sh"
+source "$DESK_RUN_DIR/desk-lib/sleep-inhibit.sh"
 
 pass="${1:-}"
 if [ -z "$pass" ]; then
@@ -145,6 +146,7 @@ fi
 
 PASS_SCRATCH=""
 cleanup() {
+	desk_sleep_inhibit_release
 	desk_lock_release
 	[ -n "$PASS_SCRATCH" ] && rm -rf "$PASS_SCRATCH" 2> /dev/null
 }
@@ -187,6 +189,11 @@ if desk_guard_already_ok_today "$pass" "$scheduled_date"; then
 fi
 
 PASS_SCRATCH="$(desk_scratch_dir "$pass-pass")"
+
+# Held from here, where the pass is known to do work, to its end: never
+# while it waits on another pass's lock or finds the date done, so a lid
+# closed then still sleeps the machine (sleep-inhibit.sh).
+desk_sleep_inhibit "$pass" "$PASS_SCRATCH"
 
 # The deny hook every connector/scoped-Read call this pass makes is wired
 # to (model-call.sh's own desk_write_deny_hook_settings) points at THIS
