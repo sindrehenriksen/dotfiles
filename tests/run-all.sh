@@ -108,6 +108,7 @@ BASH_SUITES=(
 	git-hooks/test-commit-msg.sh
 	hammerspoon/tests/hs-timeout-test.sh
 	hammerspoon/tests/tabs-live-check-selftest.sh
+	linux/desk/tests/tabs-test.sh
 	git-hooks/test-desk-denylist.sh
 )
 

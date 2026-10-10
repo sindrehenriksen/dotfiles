@@ -282,7 +282,9 @@ desk_test_state_guard_check() {
 # CLAUDE_CONFIG_DIR), plus refusing stubs for the executables a forgotten
 # override would otherwise let a test actually run for real (DESK_CLAUDE_BIN
 # — a live model call; DESK_OPEN_TAB_BIN/DESK_FOCUS_TAB_BIN/DESK_CLOSE_TAB_BIN/
-# DESK_OPEN_URL — a real tab focused or closed, or a URL opened) and an empty reader for DESK_READER, so
+# DESK_OPEN_URL — a real tab focused or closed, or a URL opened;
+# DESK_GHOSTTY_BIN — a real window, through the Linux tab helpers) and an
+# empty reader for DESK_READER, so
 # a lookup that was never stubbed sees no sessions instead of the user's real ones.
 # Call once, before the first suite/test runs; every value here is still just a default; a suite that
 # sets its own (as most already do) overrides it the ordinary way.
@@ -291,7 +293,7 @@ desk_test_safe_env_init() {
 	mkdir -p "$dest/state" "$dest/claude-config" "$dest/bin"
 
 	local stub
-	for stub in claude desk-open-tab.sh desk-focus-tab.sh desk-close-tab.sh open-url; do
+	for stub in claude desk-open-tab.sh desk-focus-tab.sh desk-close-tab.sh open-url ghostty; do
 		{
 			printf '#!/usr/bin/env bash\n'
 			printf 'echo "refusing stub ($0): this test never overrode the env var pointing at it — refusing to run for real" >&2\n'
@@ -316,6 +318,7 @@ desk_test_safe_env_init() {
 	export DESK_CLAUDE_BIN="$dest/bin/claude"
 	export DESK_OPEN_TAB_BIN="$dest/bin/desk-open-tab.sh"
 	export DESK_OPEN_URL="$dest/bin/open-url"
+	export DESK_GHOSTTY_BIN="$dest/bin/ghostty"
 	# Never the machine-local default config, which names a real instance.
 	export DESK_CONFIG_DEFAULT="$dest/no-desk-config.json"
 }
