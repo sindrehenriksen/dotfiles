@@ -41,6 +41,12 @@ function placeBy(rectFor) {
     }
     if (win.get_maximized())
         win.unmaximize(Meta.MaximizeFlags.BOTH);
+    // Mutter returns a window to its screen after a hotplug only if a user
+    // move landed it there at once, and a Wayland move that also resizes
+    // lands later, when the client acks the size. A plain move first, like a
+    // drag, is what records the new screen.
+    if (monitor !== win.get_monitor())
+        win.move_frame(true, target.x, target.y);
     win.move_resize_frame(true, target.x, target.y, target.width, target.height);
 }
 
