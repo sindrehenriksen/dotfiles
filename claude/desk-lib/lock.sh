@@ -34,7 +34,10 @@ desk_epoch_at() {
 desk_day_before() {
 	local now="$1" off="$2"
 	if desk_is_linux; then
-		date -d "@$now -$off days" '+%F	%u' 2> /dev/null
+		# GNU date takes no offset after an @epoch, so it goes on the local
+		# date, at noon so a DST change never moves the day, and as "N days
+		# ago", since a "-N" after a time reads as a zone.
+		date -d "$(date -d "@$now" +%F) 12:00 $off days ago" '+%F	%u' 2> /dev/null
 	else
 		date -j -r "$now" -v-"${off}"d '+%F	%u' 2> /dev/null
 	fi

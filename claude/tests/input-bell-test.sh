@@ -170,14 +170,14 @@ echo "# mid-turn cost: first call $(( (t1 - t0) / 1000000 )) ms, unchanged $(( (
 # attachment record): dropping that partial line must stay cheap.
 SID=longline; STATE="$XDG_STATE_HOME/claude/input-bell-longline"; rm -f "$STATE"
 ll="$TMP/longline.jsonl"
-jq -nc --arg x "$(head -c 300000 /dev/zero | tr '\0' a)" '{type:"attachment", attachment:{text:$x}}' >"$ll"
+head -c 300000 /dev/zero | tr '\0' a | jq -Rc '{type:"attachment", attachment:{text:.}}' >"$ll"
 jq -nc --arg x "$(head -c 10000 /dev/zero | tr '\0' b)" '{type:"attachment", attachment:{text:$x}}' >"$TMP/rec10k"
 tailsz=$((4194304 - 200000))
 : >"$TMP/tailpart"
 while [ "$(wc -c <"$TMP/tailpart")" -lt $((tailsz - 20000)) ]; do cat "$TMP/rec10k" >>"$TMP/tailpart"; done
 arec ll1 "[needs-you] behind a long line" >>"$TMP/tailpart"
 pad=$((tailsz - $(wc -c <"$TMP/tailpart") - 1))
-{ jq -nc --arg x "$(head -c $((pad - 40)) /dev/zero | tr '\0' c)" '{type:"attachment", attachment:{text:$x}}' | head -c "$pad"; printf '\n'; cat "$TMP/tailpart"; } >>"$ll"
+{ head -c $((pad - 40)) /dev/zero | tr '\0' c | jq -Rc '{type:"attachment", attachment:{text:.}}' | head -c "$pad"; printf '\n'; cat "$TMP/tailpart"; } >>"$ll"
 partial=$(( $(wc -c <"$ll") - 4194304 ))
 partial=$(( $(head -n 1 "$ll" | wc -c) - partial ))
 [ "$partial" -gt 150000 ] && ok "mid: long-line fixture starts the window ${partial} bytes inside a line" || bad "mid: long-line fixture (partial $partial)"

@@ -51,8 +51,12 @@ for t in cat bash env dirname; do ln -sf "$(command -v "$t")" "$NOJQ/$t"; done
 rc=0
 echo '{"tool_name":"Read","tool_input":{"file_path":"/etc/hosts"}}' | PATH="$NOJQ" "$HOOK" Read > /dev/null 2>&1 || rc=$?
 assert_eq "no jq on PATH denies an otherwise allowed tool" "2" "$rc"
+# jq alone, never its directory: on Linux that is /usr/bin, which has realpath too.
+JQONLY="$ROOT/jq-only-bin"
+mkdir -p "$JQONLY"
+ln -sf "$(command -v jq)" "$JQONLY/jq"
 rc=0
-echo '{"tool_name":"Read","tool_input":{"file_path":"/etc/hosts"}}' | PATH="$NOJQ:$(dirname "$(command -v jq)")" "$HOOK" --scratch /etc Read > /dev/null 2>&1 || rc=$?
+echo '{"tool_name":"Read","tool_input":{"file_path":"/etc/hosts"}}' | PATH="$NOJQ:$JQONLY" "$HOOK" --scratch /etc Read > /dev/null 2>&1 || rc=$?
 assert_eq "no realpath on PATH denies a scoped Read" "2" "$rc"
 rc=0
 echo '{"tool_name":"Read","tool_input":{"file_path":"/etc/hosts"}}' | "$HOOK" --scratch /etc Read > /dev/null 2>&1 || rc=$?

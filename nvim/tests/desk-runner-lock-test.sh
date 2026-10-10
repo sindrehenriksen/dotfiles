@@ -94,7 +94,7 @@ jq -n --arg repo "$repo" --arg prompt "$prompt" '{
 	mail_fetch_step_id: "F-private",
 	files: ["notes.md", "reading.md"],
 	passes: {
-		morning: { steps: [ { id: "F", kind: "fetch", prompt: $prompt, tools: ["Read"], connector: false, timeout: 30 } ] },
+		morning: { weekdays_only: false, steps: [ { id: "F", kind: "fetch", prompt: $prompt, tools: ["Read"], connector: false, timeout: 30 } ] },
 		evening: { steps: [ { id: "F", kind: "fetch", prompt: $prompt, tools: ["Read"], connector: false, timeout: 30 } ] },
 		slow: { steps: [ { id: "F", kind: "fetch", prompt: $prompt, tools: ["Read"], connector: false, timeout: 30 } ] },
 		late: { steps: [ { id: "F", kind: "fetch", prompt: $prompt, tools: ["Read"], connector: false, timeout: 30 } ] }

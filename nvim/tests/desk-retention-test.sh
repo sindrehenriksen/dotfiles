@@ -185,7 +185,11 @@ echo "=== the real reader finds the same transcript ==="
 real_tp="$CLAUDE_CONFIG_DIR/projects/-p/abcdef12-0000-0000-0000-000000000000.jsonl"
 printf '%s\n' '{"type":"custom-title","customTitle":"alpha-work","sessionId":"abcdef12-0000-0000-0000-000000000000"}' > "$real_tp"
 set_mtime "$real_tp" $((NOW - 110 * day))
-real_sel="$(PATH="${PATH#"$FAKEBIN:"}" desk_retention_candidates 120 14 "$repo" "${files[@]}")"
+# This checkout's reader, not whichever one is installed on PATH.
+REALBIN="$ROOT/realbin"
+mkdir -p "$REALBIN"
+ln -sf "$HERE/../../claude/session-status.sh" "$REALBIN/session-status.sh"
+real_sel="$(PATH="$REALBIN:${PATH#"$FAKEBIN:"}" desk_retention_candidates 120 14 "$repo" "${files[@]}")"
 assert_true "an unrecorded transcript named in the notes is selected" \
 	"$(jq -e 'map(.id) | index("abcdef12-0000-0000-0000-000000000000") != null' > /dev/null <<< "$real_sel" && echo true || echo false)"
 rm -f "$real_tp"
