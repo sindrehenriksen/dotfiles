@@ -116,6 +116,39 @@ echo '{"tool_name":"Bash","tool_input":{"command":"echo hi"}}' \
 assert_eq "--scratch never restricts a non-Read tool that's on the allowlist" "0" "$rc"
 
 echo
+echo "=== a Bash pattern admits only the commands that fit it ==="
+bash_call() { # <command> <allowed tool>...: the hook's exit code
+	local rc=0
+	jq -cn --arg c "$1" '{tool_name:"Bash",tool_input:{command:$c}}' | "$HOOK" "${@:2}" > /dev/null 2>&1 || rc=$?
+	echo "$rc"
+}
+assert_eq "the prefix itself" "0" "$(bash_call 'gh run list' 'Bash(gh run list:*)')"
+assert_eq "the prefix with arguments" "0" "$(bash_call 'gh run list --limit 5 --json name' 'Bash(gh run list:*)')"
+assert_eq "a trailing ' *' reads as ':*'" "0" "$(bash_call 'gh pr list -s open' 'Bash(gh pr list *)')"
+assert_eq "any of several patterns" "0" "$(bash_call 'gh pr list' 'Bash(gh run list:*)' 'Bash(gh pr list:*)')"
+assert_eq "an exact spec, matched exactly" "0" "$(bash_call 'gh auth status' 'Bash(gh auth status)')"
+assert_eq "an exact spec refuses extra arguments" "2" "$(bash_call 'gh auth status -t' 'Bash(gh auth status)')"
+assert_eq "another command" "2" "$(bash_call 'gh run rerun 1' 'Bash(gh run list:*)')"
+assert_eq "the prefix running on into a longer word" "2" "$(bash_call 'gh run listx' 'Bash(gh run list:*)')"
+assert_eq "a second command after ;" "2" "$(bash_call 'gh run list; rm -rf ~' 'Bash(gh run list:*)')"
+assert_eq "a second command after &&" "2" "$(bash_call 'gh run list && curl x' 'Bash(gh run list:*)')"
+assert_eq "a pipe, even quoted" "2" "$(bash_call "gh run list --jq '.[] | .name'" 'Bash(gh run list:*)')"
+assert_eq "a command substitution" "2" "$(bash_call 'gh run list -b $(id)' 'Bash(gh run list:*)')"
+assert_eq "a backtick" "2" "$(bash_call 'gh run list -b `id`' 'Bash(gh run list:*)')"
+assert_eq "a redirect" "2" "$(bash_call 'gh run list > ~/.bashrc' 'Bash(gh run list:*)')"
+assert_eq "a second line" "2" "$(bash_call $'gh run list\nrm -rf ~' 'Bash(gh run list:*)')"
+assert_eq "a wildcard mid-spec admits nothing" "2" "$(bash_call 'gh x list' 'Bash(gh * list)')"
+rc=0
+echo '{"tool_name":"Bash","tool_input":{}}' | "$HOOK" 'Bash(gh run list:*)' > /dev/null 2>&1 || rc=$?
+assert_eq "a Bash call with no command" "2" "$rc"
+assert_eq "a pattern for another tool admits no Bash" "2" "$(bash_call 'gh run list' 'WebFetch(gh run list:*)')"
+rc=0
+jq -cn '{tool_name:"WebFetch",tool_input:{url:"https://example.com"}}' \
+	| "$HOOK" 'WebFetch(domain:example.com)' > /dev/null 2>&1 || rc=$?
+assert_eq "a pattern the hook cannot check refuses its tool" "2" "$rc"
+assert_eq "control: bare Bash still admits any command" "0" "$(bash_call 'anything; at all' Bash)"
+
+echo
 echo "=== desk_write_deny_hook_settings: a path with a space quotes correctly ==="
 export DESK_STATE_DIR="$ROOT/state"
 # shellcheck source=../../claude/desk-lib/common.sh
@@ -194,6 +227,11 @@ desk_step_write "testpass" "$step_json" "null" '{}' > /dev/null
 argv="$(cat "$ARGV_LOG" 2> /dev/null || true)"
 assert_true "--tools was passed, scoped to this call's own allowlist" \
 	"$(printf '%s' "$argv" | grep -A1 -- '^--tools$' | tail -1 | grep -qx 'mcp__claude_ai_Gmail__unlabel_thread' && echo true || echo false)"
+
+step_json='{"id":"F-x","kind":"fetch","tools":["mcp__example__search","Bash(gh pr list:*)","Bash(gh pr view:*)"],"connector":true,"timeout":30}'
+desk_step_model_call "testpass" "$step_json" x '{}' "" > /dev/null
+assert_eq "a connector call's --tools names a pattern's tool, once" "mcp__example__search,Bash" \
+	"$(grep -A1 -x -- '--tools' "$ARGV_LOG" | tail -1)"
 
 echo
 echo "=== desk_write_deny_hook_settings: a missing hook script fails closed, never writes a broken settings file ==="

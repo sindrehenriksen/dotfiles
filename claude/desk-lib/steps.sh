@@ -78,6 +78,29 @@ desk_step_allowed_tools() {
 	fi
 }
 
+# desk_step_loaded_tools <step_json> <with_mcp: true|false>
+# The --tools value for a model call: the names of the step's `tools`, a
+# pattern such as `Bash(gh run list:*)` reduced to its tool, `Bash`, once
+# each. --tools decides which tools load and reads a pattern as a name no
+# tool has, so it loads nothing; the pattern itself stays in
+# --allowedTools and the deny hook, which restrict the tool it loaded.
+# MCP tools are left out of a restricted call's list, which arrive through
+# --mcp-config instead.
+desk_step_loaded_tools() {
+	local step_json="$1" with_mcp="$2"
+	jq -r --argjson mcp "$with_mcp" '
+		(.tools // []) | map(sub("\\(.*$"; ""))
+		| map(select($mcp or (startswith("mcp__") | not)))
+		| reduce .[] as $t ([]; if any(.[]; . == $t) then . else . + [$t] end)
+		| join(",")
+	' <<< "$step_json"
+}
+
+# Whether any of a step's `tools` is a pattern, `Name(spec)`.
+desk_step_has_tool_pattern() {
+	jq -e '(.tools // []) | any(.[]; test("\\("))' > /dev/null 2>&1 <<< "$1"
+}
+
 # desk_pass_caps_json <pass> <pass_config_json> <config_json>
 # The caps entry a pass's capped items use: the pass's own `caps` key names
 # an entry of the top-level `caps` table; absent, a pass named `weekly` uses
@@ -591,14 +614,14 @@ desk_step_model_call() {
 	local settings_arg="" restricted="true" strict_mcp="false" mcp_config=""
 	if [ "$connector" = "true" ]; then
 		restricted="false"
-		local tools_arr
-		tools_arr="$(jq -r '(.tools // [])[]' <<< "$step_json")"
+		local -a tools_arr
+		mapfile -t tools_arr < <(jq -r '(.tools // [])[]' <<< "$step_json")
 		local pinned_args_file=""
 		if [ -n "$pinned_args_json" ] && [ "$pinned_args_json" != "null" ]; then
 			pinned_args_file="$call_scratch/pinned-args.json"
 			printf '%s' "$pinned_args_json" > "$pinned_args_file"
 		fi
-		if ! settings_arg="$(desk_write_deny_hook_settings "$call_scratch" "$pinned_args_file" "$hook_scratch" $tools_arr)"; then
+		if ! settings_arg="$(desk_write_deny_hook_settings "$call_scratch" "$pinned_args_file" "$hook_scratch" "${tools_arr[@]}")"; then
 			desk_log "$pass" "$id: couldn't write the deny-hook settings — refusing rather than making an unenforced connector call"
 			[ -n "$session_name" ] || rm -rf "$call_scratch"
 			echo "failed"
@@ -625,12 +648,13 @@ desk_step_model_call() {
 		# A restricted call otherwise gets no --settings at all (it needs
 		# none: --allowedTools plus --permission-mode dontAsk already do
 		# the job) — except a judge/close call whose Read is scoped above,
-		# which still gets this hook wired in as that scoping's own second
-		# layer.
-		if [ -n "$hook_scratch" ]; then
-			local tools_arr
-			tools_arr="$(jq -r '(.tools // [])[]' <<< "$step_json")"
-			if ! settings_arg="$(desk_write_deny_hook_settings "$call_scratch" "" "$hook_scratch" $tools_arr)"; then
+		# and a call whose tools include a pattern such as `Bash(gh run
+		# list:*)`, which loads the whole tool: both get this hook wired in
+		# as the pattern's own second layer.
+		if [ -n "$hook_scratch" ] || desk_step_has_tool_pattern "$step_json"; then
+			local -a tools_arr
+			mapfile -t tools_arr < <(jq -r '(.tools // [])[]' <<< "$step_json")
+			if ! settings_arg="$(desk_write_deny_hook_settings "$call_scratch" "" "$hook_scratch" "${tools_arr[@]}")"; then
 				desk_log "$pass" "$id: couldn't write the deny-hook settings — refusing rather than making an unenforced call"
 				[ -n "$session_name" ] || rm -rf "$call_scratch"
 				echo "failed"
@@ -649,13 +673,13 @@ desk_step_model_call() {
 	# by NAME, but a tool that was never loaded is refused before it ever
 	# gets that far. A restricted call gets an explicit --tools too: exactly the step's own
 	# built-in tools (MCP tools arrive through --mcp-config, never --tools),
-	# and an explicit empty value when it needs none.
-	local tools_arg="" tools_args=()
+	# and an explicit empty value when it needs none. Either way --tools
+	# names tools, never patterns (desk_step_loaded_tools).
+	local tools_args=()
 	if [ "$connector" = "true" ]; then
-		tools_args=(--tools "$tools_csv")
+		tools_args=(--tools "$(desk_step_loaded_tools "$step_json" true)")
 	else
-		tools_arg="$(jq -r '(.tools // []) | map(select(startswith("mcp__") | not)) | join(",")' <<< "$step_json")"
-		tools_args=(--tools "$tools_arg")
+		tools_args=(--tools "$(desk_step_loaded_tools "$step_json" false)")
 	fi
 	# A ticket digest's, ticket search's or mail triage's result can be past
 	# Claude Code's output limit, so it reaches the stream only as a saved

@@ -37,6 +37,16 @@
 # alone, the same way --pinned never trusts a connector tool's own
 # claimed args.
 #
+# An allowed tool written as a pattern, `Name(spec)`, admits a call to
+# Name only when its input fits spec, as the same entry does in
+# --allowedTools. Bash is the one tool whose spec is checked here: an exact
+# command, or a prefix ending in `:*` or ` *` that the command equals or
+# continues after a space. A command holding a shell operator or a
+# substitution (`; & | < > ( ) $` or a backtick, a newline), quoted or not,
+# fits no pattern, so a second command can never ride on an allowed one.
+# Any other pattern, a wildcard elsewhere in a Bash spec included, admits
+# nothing: what the hook cannot check it refuses.
+#
 # Fails closed: a hook that exits 1 (or crashes) is only a non-blocking
 # error to Claude Code, so the call would go through. Every path out of this
 # script that is not the one explicit allow at the bottom exits 2, whatever
@@ -84,15 +94,50 @@ if [ -z "$tool_name" ]; then
 	exit 2
 fi
 
+# bash_command_fits <spec> <command>: whether a Bash command fits the spec
+# of a `Bash(spec)` entry (the header has the rule).
+bash_command_fits() {
+	local spec="$1" cmd="$2" prefix
+	case "$cmd" in
+		*[\;\&\|\<\>\(\)\$\`]* | *$'\n'* | *$'\r'*) return 1 ;;
+	esac
+	case "$spec" in
+		*:\*) prefix="${spec%:\*}" ;;
+		*' *') prefix="${spec% \*}" ;;
+		*) prefix="" ;;
+	esac
+	if [ -z "$prefix" ]; then
+		[[ "$spec" != *\** ]] && [ "$cmd" = "$spec" ]
+		return
+	fi
+	[[ "$prefix" != *\** ]] || return 1
+	[ "$cmd" = "$prefix" ] || [[ "$cmd" == "$prefix "* ]]
+}
+
 allowed_name="false"
 for candidate in "$@"; do
 	if [ "$tool_name" = "$candidate" ]; then
 		allowed_name="true"
 		break
 	fi
+	case "$candidate" in
+		"$tool_name("*")") ;;
+		*) continue ;;
+	esac
+	[ "$tool_name" = "Bash" ] || continue
+	spec="${candidate#"$tool_name("}"
+	spec="${spec%)}"
+	# -j and a sentinel, so a trailing newline in the command survives the
+	# command substitution and is judged like any other.
+	command="$(printf '%s' "$input" | jq -j '.tool_input.command // "" | strings'; printf x)"
+	command="${command%x}"
+	if bash_command_fits "$spec" "$command"; then
+		allowed_name="true"
+		break
+	fi
 done
 if [ "$allowed_name" != "true" ]; then
-	echo "desk deny-hook: '$tool_name' is not on this call's allowlist ($*)" >&2
+	echo "desk deny-hook: this '$tool_name' call is not on this call's allowlist ($*)" >&2
 	exit 2
 fi
 

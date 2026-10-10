@@ -24,13 +24,16 @@ FAKEBIN="$ROOT/fakebin"
 mkdir -p "$FAKEBIN"
 ARGV_LOG="$ROOT/argv.log"
 MCP_LOG="$ROOT/mcp-content.log"
+SETTINGS_LOG="$ROOT/settings-content.log"
 cat > "$FAKEBIN/claude" <<FAKE
 #!/usr/bin/env bash
 printf '%s\n' "\$@" > "$ARGV_LOG"
 : > "$MCP_LOG"
+: > "$SETTINGS_LOG"
 prev=""
 for a in "\$@"; do
 	[ "\$prev" = "--mcp-config" ] && [ -f "\$a" ] && cat "\$a" > "$MCP_LOG"
+	[ "\$prev" = "--settings" ] && [ -f "\$a" ] && cat "\$a" > "$SETTINGS_LOG"
 	prev="\$a"
 done
 echo '{"type":"result","subtype":"success"}'
@@ -86,6 +89,22 @@ check F-web '{"id":"F-web","kind":"fetch","tools":["WebSearch"],"connector":fals
 check T '{"id":"T","kind":"fetch","tools":["mcp__example-tickets__search"],"connector":false,"mcp_config":"mcp/t.json","timeout":30}' "" file
 check J '{"id":"J","kind":"judge","tools":["Read"],"connector":false,"timeout":30}' Read empty
 check close '{"id":"close","kind":"close","tools":["Read"],"connector":false,"timeout":30}' Read empty
+
+# A pattern loads its tool by name; the pattern itself restricts it, in the
+# allowlist and in the deny hook a pattern brings with it.
+gh_step='{"id":"F-gh","kind":"fetch","tools":["Bash(gh run list:*)","Bash(gh pr list:*)","WebSearch"],"connector":false,"timeout":30}'
+check F-gh "$gh_step" "Bash,WebSearch" empty
+assert_eq "F-gh: --allowedTools keeps the patterns" "Bash(gh run list:*),Bash(gh pr list:*),WebSearch" "$(value_after --allowedTools)"
+hook_cmd="$(jq -r '.hooks.PreToolUse[0].hooks[0].command // empty' "$SETTINGS_LOG" 2> /dev/null)"
+if [ -n "$hook_cmd" ]; then
+	hook_rc() { local rc=0; jq -cn --arg c "$1" '{tool_name:"Bash",tool_input:{command:$c}}' | bash -c "$hook_cmd" > /dev/null 2>&1 || rc=$?; echo "$rc"; }
+	assert_eq "F-gh: the deny hook admits a command a pattern fits" 0 "$(hook_rc 'gh pr list --state open')"
+	assert_eq "F-gh: and refuses one none fits" 2 "$(hook_rc 'gh pr merge 1')"
+else
+	bad "F-gh: a step with a tool pattern gets the deny hook as --settings"
+fi
+check F-web-again '{"id":"F-web","kind":"fetch","tools":["WebSearch"],"connector":false,"timeout":30}' WebSearch empty
+assert_eq "F-web: no pattern, no Read: no --settings" false "$(has_flag --settings)"
 
 echo
 echo "=== summary: $pass passed, $fail failed ==="

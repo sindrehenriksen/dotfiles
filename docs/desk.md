@@ -149,7 +149,7 @@ Every step has `id` and `kind`. Model steps (`fetch`, `judge`, `write`, `close`,
 | Key | Default | Meaning |
 |---|---|---|
 | `prompt` | none | Prompt file, relative to the config's directory. |
-| `tools` | `[]` | The exact tool list. Passed as `--allowedTools`, and for a connector call also as `--tools` and to the deny hook. |
+| `tools` | `[]` | The exact tool list. Passed as written to `--allowedTools` and to the deny hook, and by name to `--tools`, which decides what loads: a pattern such as `Bash(gh run list:*)` loads `Bash`, and the allowlist and the hook keep it to the pattern. A restricted call gets the hook only when it has a pattern or a scoped `Read`. The hook checks a Bash pattern (an exact command, or a prefix ending in `:*` or ` *`) and refuses any command holding a shell operator or substitution, quoted or not; any other pattern it refuses outright. |
 | `connector` | `false` | `true` loads your user settings so claude.ai connectors are available; a PreToolUse hook (`claude/desk-lib/deny-unlisted-tool.sh`) then refuses every tool not in `tools`, whatever your own allow rules say. `false` runs `--restricted` with `--strict-mcp-config`. |
 | `mcp_config` | empty | Non-connector calls only: an MCP config file (relative to the config's directory) for tools that need a server. |
 | `timeout` | `300` | Seconds; the call's whole process group is killed after it. |
