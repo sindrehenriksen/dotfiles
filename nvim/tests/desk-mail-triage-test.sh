@@ -147,12 +147,12 @@ echo 'judge' > "$ROOT/instance/j.md"
 echo 'mark read: {{thread_ids}} trash: {{trash_thread_ids}}' > "$ROOT/instance/w.md"
 echo '{"permissions":{"ask":["mcp__claude_ai_Gmail__trash_thread"]}}' > "$ROOT/instance/follow-up-settings.json"
 
-cfg() { # dry_run
-	jq -n --arg repo "$repo" --argjson dry "$1" --arg s "$SEARCH" --arg u "$UNLABEL" --arg t "$TRASH" '
+cfg() { # dry_run [offer_outside_inbox]
+	jq -n --arg repo "$repo" --argjson dry "$1" --argjson outside "${2:-false}" --arg s "$SEARCH" --arg u "$UNLABEL" --arg t "$TRASH" '
 	def steps: [
 		{id: "F-private", kind: "fetch", prompt: "f-private.md", tools: [$s, "mcp__claude_ai_Gmail__get_thread"], connector: true, timeout: 30},
 		{id: "F-inbox", kind: "fetch", prompt: "f-inbox.md", tools: [$s], connector: true, timeout: 30,
-		 mail_triage: {query: "in:inbox OR label:digest", self: ["me@corp.example"],
+		 mail_triage: {query: "in:inbox OR label:digest", self: ["me@corp.example"], offer_outside_inbox: $outside,
 		   automated_senders: ["^no-?reply@", "^notifications@", "^digest@"],
 		   noise: [
 		     {name: "calendar reply", subject: "^(accepted|declined):"},
@@ -168,7 +168,7 @@ cfg() { # dry_run
 	  ticket_search_tool: "mcp__example-tickets__search", mail_search_tool: $s,
 	  ticket_status_step_id: "T", mail_fetch_step_id: "F-private",
 	  dry_run: $dry, follow_up_settings: "follow-up-settings.json",
-	  passes: {dry: {steps: steps}, live: {steps: steps}, short: {steps: steps},
+	  passes: {dry: {steps: steps}, live: {steps: steps}, short: {steps: steps}, outside: {steps: steps},
 	    triage_only: {steps: [steps[] | select(.id != "F-private")]}} }' > "$ROOT/instance/config.json"
 }
 
@@ -224,6 +224,21 @@ assert_eq "the trash tool is pinned to the noise" "d1 n1 n2 n4" \
 	"$(jq -r --arg t "$TRASH" '[.[$t][].threadId] | sort | join(" ")' "$W_PINS_COPY")"
 assert_eq "and the unlabel tool to nothing" "0" "$(jq --arg u "$UNLABEL" '.[$u] | length' "$W_PINS_COPY")"
 rm -f "$W_PINS_COPY"
+
+echo
+echo "=== offer_outside_inbox: threads outside the inbox become candidates too ==="
+cfg true true
+rm -f "$J_INBOX_COPY"
+DESK_CONFIG="$ROOT/instance/config.json" "$DESK_RUN" outside > "$ROOT/outside.out" 2>&1
+assert_eq "the pass exits ok" "0" "$?"
+assert_eq "the judge also sees the unread digest outside the inbox; the read one is still noise" "a1 c1 d2" \
+	"$(jq -r '[.threads[].thread_id] | sort | join(" ")' "$J_INBOX_COPY")"
+assert_eq "each says whether it is in the inbox" "false" \
+	"$(jq -r '.threads[] | select(.thread_id == "d2") | .in_inbox' "$J_INBOX_COPY")"
+assert_true "the coverage line says these are the listing, not the inbox" \
+	"$(jq -r '.coverage' "$J_INBOX_COPY" | grep -q 'the rest of the listing, in the inbox or not' && echo true || echo false)"
+assert_true "the protections still hold" \
+	"$(grep -q 'protected invitation 1, partial 1, person 1, starred 1' "$ROOT/outside.out" && echo true || echo false)"
 
 echo
 echo "=== the deny hook: one tool cannot be called with the other's pins ==="

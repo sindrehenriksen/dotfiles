@@ -9,7 +9,8 @@
 #               still want a reply), a thread where a person wrote and the
 #               user's own message is not the newest, or one the listing
 #               showed only part of; never trashed, never offered
-#   candidate   the rest of the inbox, handed to the judge as inbox.json;
+#   candidate   the rest of the inbox (of the whole listing with
+#               `offer_outside_inbox`), handed to the judge as inbox.json;
 #               what it lists as no longer useful is only offered to the
 #               user in the follow-up tab, never trashed by the pass
 #
@@ -34,6 +35,7 @@ desk_mail_triage_config() {
 		        "^calendar-notification@google\\.com$"]),
 		    invitation_subject: (.invitation_subject // "^(updated )?invitation( with note)?:"),
 		    noise: [(.noise // [])[] | select(((.from // "") != "") or ((.subject // "") != ""))],
+		    offer_outside_inbox: (.offer_outside_inbox == true),
 		    max_trash: (.max_trash // 100),
 		    max_offer: (.max_offer // 25) }' <<< "$1" 2> /dev/null
 }
@@ -88,7 +90,7 @@ _DESK_MAIL_TRIAGE_SORT='
 	                elif $t.partial then "partial"
 	                elif $awaiting then "invitation"
 	                elif $rule != null then "noise"
-	                elif ($t.in_inbox | not) then "outside"
+	                elif ($t.in_inbox | not) and ($cfg.offer_outside_inbox | not) then "outside"
 	                elif $person then "person"
 	                else "candidate" end),
 	        rule: $rule,
@@ -125,7 +127,7 @@ desk_mail_triage_collect() {
 	jq -c --argjson cfg "$cfg" '
 		.threads as $t
 		| [$t[] | select(.class == "noise")] as $noise
-		| { query: $cfg.query, complete, pages, listed: ($t | length),
+		| { query: $cfg.query, complete, pages, listed: ($t | length), outside_offered: $cfg.offer_outside_inbox,
 		    noise: [$noise[:$cfg.max_trash][] | {id, from: .messages[-1].from, subject, date: .messages[-1].date, rule}],
 		    noise_held: ([$noise[$cfg.max_trash:][]] | length),
 		    protected: ([$t[] | select(.class | IN("starred", "partial", "invitation", "person")) | .class]
@@ -135,7 +137,7 @@ desk_mail_triage_collect() {
 		        | { thread_id: .id, from: .messages[-1].from,
 		            senders: ([.messages[].from] | unique), subject,
 		            date: .messages[-1].date, messages: (.messages | length), unread,
-		            answered_by_user,
+		            in_inbox, answered_by_user,
 		            snippet: (.messages[-1].snippet | if length > 200 then .[0:200] + " …" else . end) }] }' \
 		<<< "$listing" > "$out"
 	desk_log "$pass" "$id: mail triage: $(jq -r '"\(.listed) thread(s) listed\(if .complete then "" else " (cut short: a last page named another)" end): \(.noise | length) noise\(if .noise_held > 0 then " (+\(.noise_held) over max_trash)" else "" end), \(.candidates | length) for the judge, protected \(.protected | to_entries | map("\(.key) \(.value)") | join(", ") | if . == "" then "none" else . end)"' "$out")"
@@ -160,7 +162,8 @@ desk_mail_triage_file() {
 # inbox.json: the candidates only, with a line on coverage.
 desk_mail_triage_judge_file() {
 	jq '{ coverage: ("\(.listed) thread(s) listed\(if .complete then "" else ", the listing cut short" end); "
-	                 + "\(.noise | length) automated one(s) trashed by rule and the protected ones left out, so these are the rest of the inbox"),
+	                 + "\(.noise | length) automated one(s) trashed by rule and the protected ones left out, so these are the rest of "
+	                 + (if .outside_offered then "the listing, in the inbox or not (in_inbox says which)" else "the inbox" end)),
 	      threads: .candidates }' "$1" > "$2"
 }
 
