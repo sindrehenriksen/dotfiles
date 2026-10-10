@@ -6,7 +6,7 @@ allowed-tools: Bash, Read
 
 # Reopen sessions
 
-`reopen-sessions.sh` (macOS only, linked onto `PATH` by `install_symlinks.sh`) finds the sessions that were still open when the machine last went down, or that stopped since without the user ending them, and resumes the active ones in background tabs. Its header documents the rules; what follows is how to run it for the user.
+`reopen-sessions.sh` (linked onto `PATH` by `install_symlinks.sh`) finds the sessions that were still open when the machine last went down, or that stopped since without the user ending them, and resumes the active ones in background tabs (on Linux, each in a new Ghostty window). Its header documents the rules; what follows is how to run it for the user.
 
 Always call it by that bare name, as in the commands below, never by a path: the permission rule that lets it run without a prompt matches the command as typed.
 
@@ -46,7 +46,7 @@ Exit codes: `0` nothing failed (including nothing to do), `1` at least one sessi
 ## Things to know
 
 - To end a session so it isn't reopened next time, tell the user: Ctrl+C twice or `/exit`. Closing the tab doesn't count; it reads the same as a shutdown.
-- A locked screen makes every open fail with that reason; ask the user to unlock and run the command again.
+- On macOS a locked screen makes every open fail with that reason; ask the user to unlock and run the command again.
 - `older_orphans` counts sessions left open by an earlier boot (weeks-old crashes). They are not listed; `--all-boots` lists them if the user asks.
 - The idle threshold is the desk config's `close_after_working_days` (from `DESK_CONFIG`, else `~/.config/desk/config.json`), otherwise 3; `--idle-days N` overrides it for one run.
 - Never call the tab helper (`desk-open-tab.sh`) yourself to "finish the job": the command is what refuses empty ids, re-checks that a session is not already live, and keeps each open from hanging.

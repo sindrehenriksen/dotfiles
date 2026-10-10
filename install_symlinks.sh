@@ -17,7 +17,7 @@ link() {
 # Skills every account gets. Anything more specific belongs to the repo that
 # owns it, linked by that repo's own installer into the one account it serves —
 # see docs/overlays.md for why each account needs its own skills DIRECTORY.
-generic_skills=(execution browser pr-description ci-debugging handoff team desk-follow central-session dependabot)
+generic_skills=(execution browser pr-description ci-debugging handoff team desk-follow central-session dependabot reopen-sessions)
 
 link ~/dotfiles/.bashrc ~/.bashrc
 link ~/dotfiles/.gitconfig ~/.gitconfig
@@ -62,6 +62,14 @@ for skill in "${generic_skills[@]}"; do
     link ~/dotfiles/agents/skills/"$skill" ~/.claude-work/skills/"$skill"
 done
 
+# Desk, on both platforms. The schedulers, nvim and the tab helpers reach
+# these through PATH, never a repo-relative path. The tab helpers are linked
+# per platform below, under the same names, so callers never ask which.
+mkdir -p ~/.local/bin
+for tool in desk-run desk-follow desk-propose session-status.sh reopen-sessions.sh close-session.sh; do
+    link ~/dotfiles/claude/"$tool" ~/.local/bin/"$tool"
+done
+
 if [[ "$(uname)" == "Darwin" ]]; then
     # macOS: Ghostty config
     mkdir -p ~/Library/Application\ Support/com.mitchellh.ghostty
@@ -71,25 +79,9 @@ if [[ "$(uname)" == "Darwin" ]]; then
     mkdir -p ~/.hammerspoon
     link ~/dotfiles/hammerspoon/init.lua ~/.hammerspoon/init.lua
 
-    # macOS: desk (a symlink at
-    # ~/.local/bin/desk-run, installed onto claude/desk-run — the plists,
-    # nvim and the Hammerspoon tab function all reach these through PATH,
-    # never a repo-relative path).
-    mkdir -p ~/.local/bin
-    link ~/dotfiles/claude/desk-run ~/.local/bin/desk-run
-    link ~/dotfiles/claude/desk-follow ~/.local/bin/desk-follow
-    link ~/dotfiles/claude/desk-propose ~/.local/bin/desk-propose
-    link ~/dotfiles/claude/session-status.sh ~/.local/bin/session-status.sh
-    link ~/dotfiles/hammerspoon/desk-open-tab.sh ~/.local/bin/desk-open-tab.sh
-    link ~/dotfiles/hammerspoon/desk-focus-tab.sh ~/.local/bin/desk-focus-tab.sh
-    link ~/dotfiles/hammerspoon/desk-close-tab.sh ~/.local/bin/desk-close-tab.sh
-    # Reopening sessions after a restart, and the skill that runs it: macOS
-    # only, since it opens Ghostty tabs through Hammerspoon, so the skill is
-    # linked here rather than listed in generic_skills.
-    link ~/dotfiles/claude/reopen-sessions.sh ~/.local/bin/reopen-sessions.sh
-    link ~/dotfiles/claude/close-session.sh ~/.local/bin/close-session.sh
-    for dir in ~/.agents/skills ~/.claude/skills ~/.claude-work/skills; do
-        link ~/dotfiles/agents/skills/reopen-sessions "$dir"/reopen-sessions
+    # macOS: desk's tab helpers, through Hammerspoon.
+    for helper in desk-open-tab.sh desk-focus-tab.sh desk-close-tab.sh; do
+        link ~/dotfiles/hammerspoon/"$helper" ~/.local/bin/"$helper"
     done
 
     # macOS: keyboard remapping at login — see macos/README.md
@@ -112,6 +104,12 @@ else
     link ~/dotfiles/linux/xremap.yml ~/.config/xremap/config.yml
     link ~/dotfiles/linux/xremap.service ~/.config/systemd/user/xremap.service
     link ~/dotfiles/linux/focus-or-launch ~/.local/bin/focus-or-launch
+
+    # Linux: desk's tab helpers, which open Ghostty windows rather than tabs.
+    # See docs/desk.md.
+    for helper in desk-open-tab.sh desk-focus-tab.sh desk-close-tab.sh; do
+        link ~/dotfiles/linux/desk/"$helper" ~/.local/bin/"$helper"
+    done
 
     # Linux: window placement grid. GNOME only loads an extension whose
     # directory name matches its uuid, hence the rename in the link.
