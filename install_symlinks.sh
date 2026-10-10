@@ -17,7 +17,7 @@ link() {
 # Skills every account gets. Anything more specific belongs to the repo that
 # owns it, linked by that repo's own installer into the one account it serves —
 # see docs/overlays.md for why each account needs its own skills DIRECTORY.
-generic_skills=(execution browser pr-description ci-debugging handoff team desk-follow central-session)
+generic_skills=(execution browser pr-description ci-debugging handoff team desk-follow central-session dependabot)
 
 link ~/dotfiles/.bashrc ~/.bashrc
 link ~/dotfiles/.gitconfig ~/.gitconfig
