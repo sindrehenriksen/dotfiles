@@ -168,7 +168,8 @@ cfg() { # dry_run
 	  ticket_search_tool: "mcp__example-tickets__search", mail_search_tool: $s,
 	  ticket_status_step_id: "T", mail_fetch_step_id: "F-private",
 	  dry_run: $dry, follow_up_settings: "follow-up-settings.json",
-	  passes: {dry: {steps: steps}, live: {steps: steps}, short: {steps: steps}} }' > "$ROOT/instance/config.json"
+	  passes: {dry: {steps: steps}, live: {steps: steps}, short: {steps: steps},
+	    triage_only: {steps: [steps[] | select(.id != "F-private")]}} }' > "$ROOT/instance/config.json"
 }
 
 echo "=== the sort: by rule, with every protection ahead of the rules ==="
@@ -211,6 +212,18 @@ FAKE_W_MODE=skip-trash DESK_CONFIG="$ROOT/instance/config.json" "$DESK_RUN" shor
 assert_eq "the pass exits non-zero" "1" "$?"
 assert_true "the mismatch is named in the log" \
 	"$(grep -q 'trashed thread ids don.t match the pinned set (W count mismatch)' "$ROOT/short.out" && echo true || echo false)"
+
+echo
+echo "=== live, with no digest search in the pass: W only trashes ==="
+rm -f "$W_PINS_COPY"
+DESK_CONFIG="$ROOT/instance/config.json" "$DESK_RUN" triage_only > "$ROOT/triage-only.out" 2>&1
+assert_eq "the pass exits ok" "0" "$?"
+assert_true "the log says there is no digest to mark read" \
+	"$(grep -q 'W: no F-private step in this pass, so no digest to mark read' "$ROOT/triage-only.out" && echo true || echo false)"
+assert_eq "the trash tool is pinned to the noise" "d1 n1 n2 n4" \
+	"$(jq -r --arg t "$TRASH" '[.[$t][].threadId] | sort | join(" ")' "$W_PINS_COPY")"
+assert_eq "and the unlabel tool to nothing" "0" "$(jq --arg u "$UNLABEL" '.[$u] | length' "$W_PINS_COPY")"
+rm -f "$W_PINS_COPY"
 
 echo
 echo "=== the deny hook: one tool cannot be called with the other's pins ==="

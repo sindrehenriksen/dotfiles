@@ -592,37 +592,47 @@ $(jq -r '(.entries // [])[] | .url // empty' "$PASS_SCRATCH/ticket-digest.json" 
 			for fs in "${failed_sources[@]:-}"; do
 				[ "$fs" = "$mail_fetch_step_id" ] && mail_fetch_failed="true"
 			done
+			# A pass with no digest search of its own (no fetch step with the
+			# id mail_fetch_step_id) has nothing to mark read, so its write
+			# step only trashes the mail triage's noise; the checks on the
+			# digest search below are for a pass that has one.
+			digest_in_pass="$(jq -r --arg m "$mail_fetch_step_id" \
+				'any(.steps[]; .kind == "fetch" and .id == $m)' <<< "$pass_config")"
 			if [ "$mail_fetch_failed" = "true" ]; then
 				desk_log "$pass" "$id: $mail_fetch_step_id (the source it unlabels against) failed this pass — refusing to unlabel"
 				result="failed"
 			else
-				pairs="$(desk_tool_call_pairs "$PASS_SCRATCH/$mail_fetch_step_id-tool-uses.jsonl" \
-					"$PASS_SCRATCH/$mail_fetch_step_id-tool-results.jsonl" "$mail_search_tool")"
-				matching_pair="$(jq -c --arg q "$digest_query" \
-					'[.[] | select(.input.query == $q)] | .[0] // empty' <<< "$pairs")"
 				ids_subjects="[]"
 				query_mismatch="false"
 				unreadable="false"
-				if [ -n "$matching_pair" ]; then
-					result_text="$(jq -r '.text' <<< "$matching_pair")"
-					# A `threads` array, or `{}`, the connector's own answer
-					# for no match. Anything else could be any number of
-					# threads, so it pins nothing and refuses below, as a
-					# query that never matched does.
-					if jq -e '(type == "object") and ((.threads | type) == "array" or . == {})' > /dev/null 2>&1 <<< "$result_text"; then
-						# The subject sits on the thread or, in the connector's
-						# shape, on each of its messages; the id stands in when
-						# neither has one.
-						ids_subjects="$(jq -c '[(.threads // [])[] | {id, subject: (
-							first((.subject, .snippet, (.messages // [] | .[] | .subject?)) | select(type == "string" and . != ""))
-							// .id)}]' <<< "$result_text")"
-					else
-						unreadable="true"
-						desk_log "$pass" "$id: $mail_fetch_step_id's digest search result has no threads list — no ids pinned"
-					fi
+				if [ "$digest_in_pass" != "true" ]; then
+					desk_log "$pass" "$id: no $mail_fetch_step_id step in this pass, so no digest to mark read"
 				else
-					query_mismatch="true"
-					desk_log "$pass" "$id: $mail_fetch_step_id's digest search query doesn't match the configured one — no ids pinned"
+					pairs="$(desk_tool_call_pairs "$PASS_SCRATCH/$mail_fetch_step_id-tool-uses.jsonl" \
+						"$PASS_SCRATCH/$mail_fetch_step_id-tool-results.jsonl" "$mail_search_tool")"
+					matching_pair="$(jq -c --arg q "$digest_query" \
+						'[.[] | select(.input.query == $q)] | .[0] // empty' <<< "$pairs")"
+					if [ -n "$matching_pair" ]; then
+						result_text="$(jq -r '.text' <<< "$matching_pair")"
+						# A `threads` array, or `{}`, the connector's own answer
+						# for no match. Anything else could be any number of
+						# threads, so it pins nothing and refuses below, as a
+						# query that never matched does.
+						if jq -e '(type == "object") and ((.threads | type) == "array" or . == {})' > /dev/null 2>&1 <<< "$result_text"; then
+							# The subject sits on the thread or, in the connector's
+							# shape, on each of its messages; the id stands in when
+							# neither has one.
+							ids_subjects="$(jq -c '[(.threads // [])[] | {id, subject: (
+								first((.subject, .snippet, (.messages // [] | .[] | .subject?)) | select(type == "string" and . != ""))
+								// .id)}]' <<< "$result_text")"
+						else
+							unreadable="true"
+							desk_log "$pass" "$id: $mail_fetch_step_id's digest search result has no threads list — no ids pinned"
+						fi
+					else
+						query_mismatch="true"
+						desk_log "$pass" "$id: $mail_fetch_step_id's digest search query doesn't match the configured one — no ids pinned"
+					fi
 				fi
 				# Only a thread the fetch actually opened is marked read: one
 				# judged from its search snippet stays unread for the user.
@@ -682,7 +692,7 @@ $(jq -r '(.entries // [])[] | .url // empty' "$PASS_SCRATCH/ticket-digest.json" 
 					# other's arguments (deny-unlisted-tool.sh).
 					pinned_args_json="$(jq -cn --arg u "$unlabel_tool" --arg t "$trash_tool" \
 						--argjson d "$digest_pins" --argjson n "$trash_json" \
-						'{($u): $d, ($t): [$n[] | {threadId: .id}]}')"
+						'(if $u == "" then {} else {($u): $d} end) + {($t): [$n[] | {threadId: .id}]}')"
 				else
 					pinned_args_json="$digest_pins"
 				fi
