@@ -12,7 +12,10 @@ them.
   carrying, and take `pm_trace` back out if no freeze has been captured by
   then. "Display freeze on resume".
 - **Monthly-ish** — check kernel.org for a newer 7.2.x and rebuild. Last
-  checked 2026-09-05. "Mainline kernel (self-built)".
+  checked 2026-10-07. "Mainline kernel (self-built)".
+- **About 2026-10-17** — 7.2.0 is still installed as a second fallback behind
+  7.2.9. After a quiet week on 7.2.9, remove it:
+  `sudo apt remove linux-image-7.2.0 linux-headers-7.2.0`.
 - **On trigger** — Ubuntu ships >=7.1, or 7.2 goes EOL: drop the self-built
   kernel. Both triggers and the teardown are in that same section.
 
@@ -340,7 +343,7 @@ maintainer can act on. A `pm_trace` device name is what would make it filable.
 ### Mainline kernel (self-built)
 
 This machine runs a **self-built mainline kernel**, not Ubuntu's. `uname -r`
-says `7.2.0` where Ubuntu ships `7.0.0-NN`.
+says a plain version like `7.2.9` where Ubuntu ships `7.0.0-NN`.
 
 Why: the display freeze documented just above. AMD fixed part of it in 7.2-rc7 /
 7.1.8. **`7.0.y` is EOL upstream**, so neither 24.04's HWE stack nor 26.04 (which also ships 7.0)
@@ -348,33 +351,37 @@ will ever receive it, and Ubuntu's mainline PPA had no amd64 builds for the
 fixed versions. Building was the only route. It also brings the `amd_pmc` fix
 in-tree, which is why the kernel is untainted again.
 
-**Verdict still open.** Running 7.2.0 since 2026-09-05. The cascade signature is
-gone, but the freeze itself recurred on 2026-09-20, so the arrangement is only
-partly earning its keep. Nothing short of a quiet stretch beating the old
+**Verdict still open.** Running 7.2 since 2026-09-05, 7.2.9 since 2026-10-09.
+The cascade signature is gone, but the freeze itself recurred on 2026-09-20, so
+the arrangement is only partly earning its keep. 7.2.0 then ran 19 more days to
+the 7.2.9 upgrade without one, and 7.2.1-7.2.9 change nothing in the failing
+display block, so the quiet stretch carries across the upgrade. Nothing short of a quiet stretch beating the old
 kernel's own 33 days settles it, and another rebuild is not the next step:
 "Display freeze on resume" holds the numbers and what is now instrumented.
 **Reassess 2026-11-05.** Worth also confirming the Fn media keys survive a long
 suspend, since the in-tree driver now does that job instead of the DKMS module.
 
-**Nothing updates it.** `apt` has no repository for `linux-image-7.2.0` — its
-only source is the local dpkg status — so it receives no security patches at
-all. Ubuntu's own kernel line keeps updating and stays patched as the fallback,
+**Nothing updates it.** `apt` has no repository for the self-built packages —
+their only source is the local dpkg status — so it receives no security patches
+beyond what each rebuild brings. Ubuntu's own kernel line keeps updating and stays patched as the fallback,
 and all userspace packages update normally. The exposure is kernel-local
 privilege escalation, which needs an attacker already on the machine; real, but
 not the class a laptop behind NAT meets first.
 
-**Rebuild:** `~/dotfiles/system/kernel-mainline-build.sh 7.2.3` — fetches,
+**Rebuild:** `~/dotfiles/system/kernel-mainline-build.sh 7.2.9` — fetches,
 verifies against kernel.org's checksums, configures from the running kernel,
 builds outside the terminal's cgroup, installs and signs. Roughly 40 minutes,
-mostly unattended. GRUB then defaults to the highest version on its own.
+mostly unattended. GRUB then defaults to the highest version on its own. The
+install and signing need sudo, so an agent can only get as far as the build;
+re-running the same command in a terminal then skips the build and finishes.
 
 **Check every month or so** whether a newer 7.2.x exists (`https://kernel.org`),
-and rebuild if so. Last checked: **2026-09-05**, on 7.2.0, with 7.2 the current
-mainline.
+and rebuild if so. Last checked: **2026-10-07**, rebuilt to 7.2.9; 7.3 was at
+rc6, so 7.2's end of life (the second trigger below) is a few weeks out.
 
 **Stop doing this when either trigger fires:**
 - **Ubuntu ships ≥7.1** in the HWE stack or a release upgrade. Then drop back:
-  `sudo apt remove linux-image-7.2.0 linux-headers-7.2.0`, reboot, confirm the
+  `sudo apt remove 'linux-image-7.2.*' 'linux-headers-7.2.*'`, reboot, confirm the
   display bug stays away on the stock kernel. This is the preferred exit —
   supported kernels get security updates.
 - **7.2 goes EOL** (it will, once 7.3 ships — 7.2 is not a longterm branch

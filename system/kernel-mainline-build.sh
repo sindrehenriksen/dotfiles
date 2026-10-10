@@ -52,8 +52,12 @@ fi
 #    a tab gets the linker OOM-killed — everything in a tab also inherits
 #    oom_score_adj=200, making it the kernel's preferred victim. Lower JOBS if
 #    the link still dies; it is the memory peak, not the compiles.
-systemd-run --user --scope --quiet -p MemoryHigh=infinity -p MemoryMax=infinity \
-    nice -n 5 make -j"$JOBS" bindeb-pkg
+#    Skipped when the packages already exist, so a build an agent ran (it stops
+#    at the first sudo) can be finished by re-running this from a terminal.
+if [ ! -f "$WORK/linux-image-${VERSION}_${VERSION}-1_amd64.deb" ]; then
+    systemd-run --user --scope --quiet -p MemoryHigh=infinity -p MemoryMax=infinity \
+        nice -n 5 make -j"$JOBS" bindeb-pkg
+fi
 
 # 4. Install. The postinst regenerates initramfs and GRUB on its own; the
 #    -dbg and libc-dev packages are deliberately not installed.
