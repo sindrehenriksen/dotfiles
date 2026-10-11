@@ -40,11 +40,13 @@ Instructions **to the compactor**, not a summary of the session. It replaces a f
 Written as the user's next message, in their voice, not as a note to self.
 
 - Open by naming the work and the one authoritative thing to read before acting.
+- **Everything still open, not only what is next**: the remaining steps, parked threads, follow-ups promised to the user or to another session, a line each. What the kick-off leaves out is easily forgotten by the user and the session alike.
+- **What is specific to this session**: its standing gos and their limits, the conventions it settled into, the other sessions it works alongside.
 - **Point at the process skills and the phase or stage to enter**, rather than restating the process.
 - **Block explicitly on what only the user can decide.** Anything an agent could invent a plausible number or scope for and shouldn't becomes "come back to me with a proposal before writing code". This is why the pair exists rather than one prompt.
 - **Name how the change gets verified** when the effect is qualitative — otherwise verification silently becomes "tests pass".
 - Say what to delegate and what stays in the main loop.
-- Carry nothing Prompt 1 already preserves. Overlap means one of the two is wrong. Prompt 1 carries facts; Prompt 2 carries intent, and stays short.
+- Carry nothing Prompt 1 already preserves. Overlap means one of the two is wrong. Prompt 1 carries facts; Prompt 2 carries intent and the open items, a line each, with the detail left to Prompt 1.
 - **It is the prompt the user reads.** Prompt 1 tends to get skimmed, so what the user would want to catch has to be visible here: what the next session may do without asking, and what it must bring back. That is intent, so it is no overlap.
 
 ## Delivering
