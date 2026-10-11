@@ -38,7 +38,12 @@ They take the same order as the PRs, a toolchain or runtime major with the other
 4. **Library majors, one at a time:** usage grep, changelog, the covering tests.
 5. **Runtime, framework, language or base-image majors last.**
 
-Majors are part of the sweep, not a separate project: land them, adapting the code to the new version. Only what can't land yet is handed off (below).
+Majors are part of the sweep, not a separate project: land them, adapting the code to the new version. Once the rest has landed they can go to subagents, one per repo or per major, each in its own worktree. Only what can't land yet is handed off (below).
+
+## How much care
+
+- **Core majors get more than the suite.** A language, runtime or framework major (a new Python or Node major, the UI framework) also needs the environment it ships to: the hosting platform supports the version, and a preview deploy or the deployed path is exercised before it lands, not only the local gates.
+- **Who uses it sets the pace.** A tool only the user runs takes a visible change with a report. A product with end users takes it by its stage: the further along (testing, pilot, beta, live), the more lands behind a preview the user has looked at, and the more of what users would notice waits for a yes. The repo's own docs say who uses it and which stage it is in; where they don't, ask once and write the answer there.
 
 ## Adopt the new version
 
