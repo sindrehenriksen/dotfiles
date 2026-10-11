@@ -32,21 +32,21 @@ They take the same order as the PRs, a toolchain or runtime major with the other
 
 ## Order
 
-1. **Security updates first.** They come in their own group (see Config), so the group name in the branch and title picks them out.
+1. **Security updates first**, in their own group (see Config).
 2. **No runtime impact:** CI and Actions pins, test-only and dev tooling.
 3. **Minor/patch groups**, the least critical surface first.
 4. **Library majors, one at a time:** usage grep, changelog, the covering tests.
-5. **Runtime, framework, language or base-image majors last** (below).
+5. **Runtime, framework, language or base-image majors last.**
 
 ## Majors
 
 Majors are part of the sweep, not a separate project: land them with the code adapted to the new version, and report what can't land yet (below). Who does the work follows `team`, as for any other work.
 
-**Adopt the new version.** An upgrade takes the new version as it is meant to be used: its new defaults, its recommended config, its idioms. Adapt the code to them, and don't add compatibility shims that keep the old behaviour, such as an old palette re-declared under the new major, or an old spacing or hover rule restored. A changed default usually is the release's reason for existing, and a pin-back is an unowned fork of the old version that every later upgrade has to step around. Stray only for a concrete reason the code can show, such as a test or a platform constraint, written beside the deviation as for an `ignore`.
+**Adopt the new version.** Take its new defaults, recommended config and idioms, and adapt the code to them rather than adding shims that keep the old behaviour (an old palette re-declared, an old spacing or hover rule restored). A changed default is usually why the release exists, and a pin-back is an unowned fork every later upgrade has to step around. Stray only for a concrete reason the code can show, such as a test or a platform constraint, written beside the deviation.
 
-**Verify in proportion to the change.** The local gates are the floor. A language, runtime or framework major (a new Python or Node major, the UI framework) is also tried where it ships: the platform supports the version, and a preview deploy or the deployed path is exercised. That verifying is the sweep's own work, done before anything waits on the user.
+**Verify in proportion to the change and to who uses it.** The local gates are the floor. A language, runtime or framework major (a new Python or Node major, the UI framework) is also tried where it ships: the platform supports the version, and a preview deploy or the deployed path is exercised. A product with end users gets more the further along it is (testing, pilot, beta, live). All of this comes before anything waits on the user.
 
-**What the user sees or feels may change**, and that is not a reason to hold the upgrade back. Show it: before/after screenshots at the product's own viewport, and a line per visible change in the report. How much also waits for the user's own look follows who uses the product. A tool only the user runs takes a visible change with that report. A product with end users goes by its stage (testing, pilot, beta, live): the further along, the more verifying a change gets first and the more of what users would notice waits for the user's yes. A big change in look or feel (a redesign the version invites, an interaction that works differently) is suggested with its before/after whatever the stage, neither pinned back silently nor landed unannounced. The repo's own docs say who uses it and which stage it is in; where they don't, ask once and write the answer there.
+**What the user sees or feels may change**, and that is not a reason to hold the upgrade back. Show it: before/after screenshots at the product's own viewport, and a line per visible change in the report. How much of it waits for the user's yes goes the same way: little for a tool only they run, more the further along a product with end users is. The repo's docs say who uses it and its stage; where they don't, ask once and write it there. A big change in look or feel (a redesign the version invites, an interaction that works differently) is suggested with its before/after whatever the stage, neither pinned back silently nor landed unannounced.
 
 ## CI on a Dependabot branch
 
