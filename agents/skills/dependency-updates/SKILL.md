@@ -1,12 +1,12 @@
 ---
-name: dependabot
-description: 'Working through open Dependabot PRs in a repo, and keeping its dependabot.yml in shape: triage, the order to land them in, CI on Dependabot branches, paired bumps, handing off heavyweight upgrades. USE FOR: "pick off the dependabot PRs", a dependency sweep, a Dependabot security PR or alert, setting up or changing dependabot.yml. DO NOT USE FOR: a hand-authored dependency change, reviewing other PRs, debugging an unrelated CI failure (ci-debugging). A repo or workspace may layer its own Dependabot skill on top of this one: read both.'
+name: dependency-updates
+description: 'Keeping a repo''s dependencies current: its open Dependabot PRs, and the versions Dependabot does not see (toolchain pins, language constraints, platform runtimes). Triage, the order to land them in, CI on Dependabot branches, paired bumps, handing off heavyweight upgrades, keeping dependabot.yml in shape. USE FOR: "pick off the dependabot PRs", a dependency or version-update sweep, a stale toolchain pin, a Dependabot security PR or alert, setting up or changing dependabot.yml. DO NOT USE FOR: a dependency change that is part of feature work, reviewing other PRs, debugging an unrelated CI failure (ci-debugging). A repo or workspace may layer its own skill on top of this one: read both.'
 allowed-tools: Bash, Read, Grep
 ---
 
-# Dependabot
+# Dependency updates
 
-Land the open Dependabot PRs from least to most risky, one at a time, each green before the next. Present the ordered plan before landing anything: landing is a push to the default branch, often a deploy, so it waits for the user's go like any other.
+Land the updates from least to most risky, one at a time, each green before the next. Dependabot's open PRs are most of the set; what it does not see is the rest (below). Present the ordered plan before landing anything: landing is a push to the default branch, often a deploy, so it waits for the user's go like any other.
 
 ## Snapshot the set
 
@@ -18,6 +18,17 @@ gh api repos/{owner}/{repo}/dependabot/alerts --jq '.[] | select(.state=="open")
 Dependabot regroups between runs, so PR numbers aren't stable: re-derive the set each time, read each diff (`gh pr diff <n>`) for the actual bumps, and close what is superseded.
 
 Its PRs are a starting point, not the unit of work. Split one, combine several, or make the bumps on a branch of your own whenever that lands the change better (a coupled set, a pair it can't make, a group that only fails together), then close the PRs it replaces.
+
+## What Dependabot doesn't see
+
+Dependabot reads the package ecosystems its config lists, and nothing else. Look for the rest, compare each against its upstream's latest release, and add what is behind to the set:
+
+- **Toolchain pins**: mise (`.mise.toml`), `.nvmrc`, `.python-version`, `packageManager` in `package.json`, a Docker base image in a file it doesn't scan.
+- **Language constraints**: `requires-python`, `engines`.
+- **Platform runtimes**: a hosting project's runtime or Node version setting, a managed database's or edge runtime's version.
+- **Ecosystems without an entry** in `dependabot.yml`, or a repo with no config at all: add the entry (see Config) rather than bumping them by hand each time.
+
+They follow the same order as the PRs: a patch or minor bump lands in the sweep, a major is a heavyweight. A pin repeated across repos meant to share a toolchain moves in all of them together, in one sweep.
 
 ## Order
 

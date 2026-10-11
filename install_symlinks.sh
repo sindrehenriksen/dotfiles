@@ -17,7 +17,7 @@ link() {
 # Skills every account gets. Anything more specific belongs to the repo that
 # owns it, linked by that repo's own installer into the one account it serves —
 # see docs/overlays.md for why each account needs its own skills DIRECTORY.
-generic_skills=(execution browser pr-description ci-debugging handoff team desk-follow central-session dependabot reopen-sessions)
+generic_skills=(execution browser pr-description ci-debugging handoff team desk-follow central-session dependency-updates reopen-sessions)
 
 link ~/dotfiles/.bashrc ~/.bashrc
 link ~/dotfiles/.gitconfig ~/.gitconfig
@@ -60,6 +60,12 @@ link ~/.claude/plugins ~/.claude-work/plugins
 mkdir -p ~/.claude-work/skills
 for skill in "${generic_skills[@]}"; do
     link ~/dotfiles/agents/skills/"$skill" ~/.claude-work/skills/"$skill"
+done
+# A renamed skill's old links dangle, and link never removes them.
+for old in dependabot; do
+    for dir in ~/.agents/skills ~/.claude/skills ~/.claude-work/skills; do
+        [ -L "$dir/$old" ] && rm "$dir/$old"
+    done
 done
 
 # Desk, on both platforms. The schedulers, nvim and the tab helpers reach
