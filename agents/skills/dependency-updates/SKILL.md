@@ -1,6 +1,6 @@
 ---
 name: dependency-updates
-description: 'Keeping a repo''s dependencies current: its open Dependabot PRs, and the versions Dependabot does not see (toolchain pins, language constraints, platform runtimes). Triage, the order to land them in, CI on Dependabot branches, paired bumps, handing off heavyweight upgrades, keeping dependabot.yml in shape. USE FOR: "pick off the dependabot PRs", a dependency or version-update sweep, a stale toolchain pin, a Dependabot security PR or alert, setting up or changing dependabot.yml. DO NOT USE FOR: a dependency change that is part of feature work, reviewing other PRs, debugging an unrelated CI failure (ci-debugging). A repo or workspace may layer its own skill on top of this one: read both.'
+description: 'Keeping a repo''s dependencies current: its open Dependabot PRs, and the versions Dependabot does not see (toolchain pins, language constraints, platform runtimes). Triage, the order to land them in, CI on Dependabot branches, paired bumps, landing majors on the new version''s own defaults, handing off what can''t land yet, keeping dependabot.yml in shape. USE FOR: "pick off the dependabot PRs", a dependency or version-update sweep, a stale toolchain pin, a Dependabot security PR or alert, setting up or changing dependabot.yml. DO NOT USE FOR: a dependency change that is part of feature work, reviewing other PRs, debugging an unrelated CI failure (ci-debugging). A repo or workspace may layer its own skill on top of this one: read both.'
 allowed-tools: Bash, Read, Grep
 ---
 
@@ -28,7 +28,7 @@ Dependabot reads the package ecosystems its config lists, and nothing else. Look
 - **Platform runtimes**: a hosting project's runtime or Node version setting, a managed database's or edge runtime's version.
 - **Ecosystems without an entry** in `dependabot.yml`, or a repo with no config at all: add the entry (see Config) rather than bumping them by hand each time.
 
-They follow the same order as the PRs: a patch or minor bump lands in the sweep, a major is a heavyweight. A pin repeated across repos meant to share a toolchain moves in all of them together, in one sweep.
+They take the same order as the PRs, a toolchain or runtime major with the other majors. A pin repeated across repos meant to share a toolchain moves in all of them together, in one sweep.
 
 ## Order
 
@@ -36,7 +36,15 @@ They follow the same order as the PRs: a patch or minor bump lands in the sweep,
 2. **No runtime impact:** CI and Actions pins, test-only and dev tooling.
 3. **Minor/patch groups**, the least critical surface first.
 4. **Library majors, one at a time:** usage grep, changelog, the covering tests.
-5. **Runtime, framework, language or base-image majors last**, and usually handed off rather than landed in the sweep (below).
+5. **Runtime, framework, language or base-image majors last.**
+
+Majors are part of the sweep, not a separate project: land them, adapting the code to the new version. Only what can't land yet is handed off (below).
+
+## Adopt the new version
+
+An upgrade takes the new version as it is meant to be used: its new defaults, its recommended config, its idioms. Adapt the code to them, and don't add compatibility shims that keep the old behaviour, such as an old palette re-declared under the new major, or an old spacing or hover rule restored. A changed default usually is the release's reason for existing, and a pin-back is an unowned fork of the old version that every later upgrade has to step around. Stray only for a concrete reason the code can show, such as a test or a platform constraint, written beside the deviation as for an `ignore`.
+
+So what the user sees or feels may change, and that is not a reason to hold the upgrade back. Show it instead: before/after screenshots at the product's own viewport, and a line per visible change in the report. A small shift (a shade, a margin, hover dropped on touch screens) lands with that report. A big change in look or feel (a redesign the version invites, an interaction that works differently) is suggested with its before/after and waits for the user's yes, neither pinned back silently nor landed unannounced.
 
 ## CI on a Dependabot branch
 
@@ -51,9 +59,9 @@ They follow the same order as the PRs: a patch or minor bump lands in the sweep,
 - Landing one PR makes Dependabot force-update its open siblings within a minute, so re-fetch a branch before pushing to it.
 - How a change lands (PR merge, direct push to the default branch) and whether that deploys is the repo's own process: follow it, and watch a deploy through before the next PR.
 
-## Heavyweights: hand off, don't land in the sweep
+## What can't land yet: hand off
 
-A framework, SDK, runtime or base-image major, a bump only exercised at deploy time, or a coupled set that needs code changes, becomes its own piece of work:
+A major whose ecosystem doesn't admit it yet (a peer range that rules it out, a tool that can't load it), a bump only exercised at deploy time with no safe way to try it first, or one that turns into feature-sized work becomes its own piece of work:
 
 1. Record it where the repo tracks work, after checking whether in-flight work already covers it.
 2. Add an `ignore` with `update-types` (`version-update:semver-major`, or minor too for a runtime), not a version range, which only moves the noise to the next release. Ignore the whole coupled set, not just the headline package, or its siblings keep failing the group.
