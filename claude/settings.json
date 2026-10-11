@@ -312,6 +312,28 @@
         ]
       }
     ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/dotfiles/claude/hooks/compact-handoff.sh pre",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PostCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/dotfiles/claude/hooks/compact-handoff.sh post",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
     "Notification": [
       {
         "matcher": "permission_prompt|idle_prompt|elicitation_dialog|elicitation_url_dialog|agent_needs_input",

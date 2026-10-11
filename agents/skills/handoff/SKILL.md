@@ -31,6 +31,7 @@ Instructions **to the compactor**, not a summary of the session. It replaces a f
 - **Point at sources of truth instead of copying them** — "read the ticket in the tracker rather than relying on memory" survives; a paraphrase competes with the real thing and loses. Copy only what lives nowhere else: exact identifiers (SHAs, run ids, paths, symbol and constant names with their values) and numbers that were expensive to measure.
 - **Decisions already settled, each with its reason, marked do-not-relitigate.** Highest-value block in the prompt: without the reason the next turn reopens them, and the default template's every-user-message habit actively feeds that.
 - **Decisions still open, as a separate list, marked as needing the user.** An open decision that reads like a settled one gets invented.
+- **Every instruction the user gave, with its scope**: what a go covered and what it did not, so a go for one step does not come back as a standing permission.
 - **Gotchas that actually bit us** — environmental traps, a convention that was violated anyway. These travel only in briefs and prompts.
 - Facts, not chronology. No "we discussed", no "then I". Quote the user verbatim only where their exact phrasing was load-bearing — a constraint or a rejection.
 
@@ -44,6 +45,7 @@ Written as the user's next message, in their voice, not as a note to self.
 - **Name how the change gets verified** when the effect is qualitative — otherwise verification silently becomes "tests pass".
 - Say what to delegate and what stays in the main loop.
 - Carry nothing Prompt 1 already preserves. Overlap means one of the two is wrong. Prompt 1 carries facts; Prompt 2 carries intent, and stays short.
+- **It is the prompt the user reads.** Prompt 1 tends to get skimmed, so what the user would want to catch has to be visible here: what the next session may do without asking, and what it must bring back. That is intent, so it is no overlap.
 
 ## Delivering
 
@@ -56,4 +58,4 @@ Written as the user's next message, in their voice, not as a note to self.
 
 At a natural boundary with the context budget getting tight — a phase change, a merged PR, a closed ticket — offer the handoff instead of waiting to be asked. Don't offer it mid-task; the pre-check above would fail anyway.
 
-**Auto-compaction gets no prompt at all.** Standing keep-rules can't be written in the moment, so load-bearing state belongs in a file the session re-reads (see `execution` → Living sessions). A handoff you had to hand-write for state that could have lived on disk is a signal to move it there.
+**A compaction nobody prompted** (an automatic or idle one, or a bare `/compact`) gets this skill's Prompt 1 and Prompt 2 sections through a `PreCompact` hook (`claude/hooks/compact-handoff.sh`). The summary then ends with a suggested kick-off, shown to the user afterwards to read, edit and send. That is a fallback, written with no chance to check state first, so load-bearing state still belongs in a file the session re-reads (see `execution` → Living sessions). A handoff you had to hand-write for state that could have lived on disk is a signal to move it there.
