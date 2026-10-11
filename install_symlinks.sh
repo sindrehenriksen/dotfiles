@@ -61,12 +61,6 @@ mkdir -p ~/.claude-work/skills
 for skill in "${generic_skills[@]}"; do
     link ~/dotfiles/agents/skills/"$skill" ~/.claude-work/skills/"$skill"
 done
-# A renamed skill's old links dangle, and link never removes them.
-for old in dependabot; do
-    for dir in ~/.agents/skills ~/.claude/skills ~/.claude-work/skills; do
-        [ -L "$dir/$old" ] && rm "$dir/$old"
-    done
-done
 
 # Desk, on both platforms. The schedulers, nvim and the tab helpers reach
 # these through PATH, never a repo-relative path. The tab helpers are linked
