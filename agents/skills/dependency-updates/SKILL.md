@@ -1,6 +1,6 @@
 ---
 name: dependency-updates
-description: 'Keeping a repo''s dependencies current: its open Dependabot PRs, and the versions Dependabot does not see (toolchain pins, language constraints, platform runtimes). Triage, the order to land them in, CI on Dependabot branches, paired bumps, landing majors on the new version''s own defaults, handing off what can''t land yet, keeping dependabot.yml in shape. USE FOR: "pick off the dependabot PRs", a dependency or version-update sweep, a stale toolchain pin, a Dependabot security PR or alert, setting up or changing dependabot.yml. DO NOT USE FOR: a dependency change that is part of feature work, reviewing other PRs, debugging an unrelated CI failure (ci-debugging). A repo or workspace may layer its own skill on top of this one: read both.'
+description: 'Keeping a repo''s dependencies current: its open Dependabot PRs, and the versions Dependabot does not see (toolchain pins, language constraints, platform runtimes). Triage, the order to land them in, CI on Dependabot branches, paired bumps, landing majors on the new version''s own defaults, reporting what can''t land yet, keeping dependabot.yml in shape. USE FOR: "pick off the dependabot PRs", a dependency or version-update sweep, a stale toolchain pin, a Dependabot security PR or alert, setting up or changing dependabot.yml. DO NOT USE FOR: a dependency change that is part of feature work, reviewing other PRs, debugging an unrelated CI failure (ci-debugging). A repo or workspace may layer its own skill on top of this one: read both.'
 allowed-tools: Bash, Read, Grep
 ---
 
@@ -40,7 +40,7 @@ They take the same order as the PRs, a toolchain or runtime major with the other
 
 ## Majors
 
-Majors are part of the sweep, not a separate project: land them with the code adapted to the new version, and hand off only what can't land yet (below). They are often most of the work, so give them to subagents or a team where that helps.
+Majors are part of the sweep, not a separate project: land them with the code adapted to the new version, and report what can't land yet (below). Who does the work follows `team`, as for any other work.
 
 **Adopt the new version.** An upgrade takes the new version as it is meant to be used: its new defaults, its recommended config, its idioms. Adapt the code to them, and don't add compatibility shims that keep the old behaviour, such as an old palette re-declared under the new major, or an old spacing or hover rule restored. A changed default usually is the release's reason for existing, and a pin-back is an unowned fork of the old version that every later upgrade has to step around. Stray only for a concrete reason the code can show, such as a test or a platform constraint, written beside the deviation as for an `ignore`.
 
@@ -53,7 +53,7 @@ Majors are part of the sweep, not a separate project: land them with the code ad
 - Runs triggered by Dependabot get **no repo secrets**, so a secret-dependent job fails as an artifact rather than a real red: check that the underlying tests passed. Once you push a commit to the branch, the next run is attributed to you and gets secrets.
 - The common real failures are mechanical: a lockfile the bump left out of sync, a formatter whose new version reformats files. Fix them on the branch.
 - **Paired bumps.** Some versions must move together and Dependabot can only move one of them: a package and the CI image tagged to it, a runtime pinned somewhere Dependabot can't read (mise, a Dockerfile it doesn't scan) and the types or SDK that follow it. The repo's `dependabot.yml` names its pairs in comments. Carry the other half in the same change, whether that lands as a PR merge or a direct push.
-- A grouped set that cannot resolve together gets split: keep what resolves, revert the entangled bumps to the base versions and hand those off. Trust CI's environment over a local resolve.
+- A grouped set that cannot resolve together gets split: keep what resolves, revert the entangled bumps to the base versions and report those (below). Trust CI's environment over a local resolve.
 
 ## Landing
 
@@ -61,9 +61,9 @@ Majors are part of the sweep, not a separate project: land them with the code ad
 - Landing one PR makes Dependabot force-update its open siblings within a minute, so re-fetch a branch before pushing to it.
 - How a change lands (PR merge, direct push to the default branch) and whether that deploys is the repo's own process: follow it, and watch a deploy through before the next PR.
 
-## What can't land yet: hand off
+## What can't land yet: report it
 
-A major whose ecosystem doesn't admit it yet (a peer range that rules it out, a tool that can't load it), a bump only exercised at deploy time with no safe way to try it first, or one that turns into feature-sized work becomes its own piece of work:
+An update the sweep can't land, or isn't sure it should yet (a peer range that rules it out, a tool that can't load it, a bump only exercised at deploy time with no safe way to try it first, one that turns into feature-sized work), goes to the user: what blocks it, what was tried, and what would unblock it. What happens to it next is their call, so never add an `ignore` without their yes. Once they agree to set it aside:
 
 1. Record it where the repo tracks work, after checking whether in-flight work already covers it.
 2. Add an `ignore` with `update-types` (`version-update:semver-major`, or minor too for a runtime), not a version range, which only moves the noise to the next release. Ignore the whole coupled set, not just the headline package, or its siblings keep failing the group.
