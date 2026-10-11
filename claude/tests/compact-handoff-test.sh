@@ -42,12 +42,21 @@ check "pre: falls back when the skill is missing" '[[ $out == *"with its scope"*
 
 summary=$'## Summary\nwork\n\n## Suggested kick-off\n\nContinue the sweep.\nAsk before pushing.\n\n'
 out=$(jq -n --arg s "$summary" '{session_id:"s1",compact_summary:$s}' | "$HOOK" post)
-msg=$(jq -r .systemMessage <<<"$out")
-check "post: shows the kick-off" '[[ $msg == *$'"'"'Continue the sweep.\nAsk before pushing.'"'"' ]]'
+check "post: shows the kick-off as text" '[[ $out == *$'"'"'Continue the sweep.\nAsk before pushing.'"'"' ]]'
+check "post: the rule opens its own line" '[ "$(sed -n 2p <<<"$out")" = "──── Suggested kick-off ────" ]'
 
 summary=$'## Suggested kick-off\nFirst.\n## Later section\nnot this'
 out=$(jq -n --arg s "$summary" '{session_id:"s2",compact_summary:$s}' | "$HOOK" post)
-check "post: stops at the next heading" '[ "$(jq -r .systemMessage <<<"$out" | tail -1)" = "First." ]'
+check "post: stops at the next heading" '[ "$(tail -1 <<<"$out")" = "First." ]'
+
+summary=$'## Suggested kick-off\nNo trailing </summary> tag?\nLast.\n</summary>'
+out=$(jq -n --arg s "$summary" '{session_id:"s4",compact_summary:$s}' | "$HOOK" post)
+check "post: stops at the closing summary tag" '[ "$(tail -1 <<<"$out")" = "Last." ]'
+check "post: keeps a mention of the tag" '[[ $out == *"No trailing </summary> tag?"* ]]'
+
+summary=$'## Suggested kick-off\nLast.</summary>'
+out=$(jq -n --arg s "$summary" '{session_id:"s5",compact_summary:$s}' | "$HOOK" post)
+check "post: stops at a tag ending a line" '[ "$(tail -1 <<<"$out")" = "Last." ]'
 
 out=$(jq -n '{session_id:"s3",compact_summary:"## Summary\nno kick-off"}' | "$HOOK" post)
 check "post: silent without a kick-off" '[ -z "$out" ]'

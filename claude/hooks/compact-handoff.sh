@@ -10,10 +10,12 @@
 #         Keyed on the missing instructions rather than the `auto` trigger,
 #         because an idle compaction does not reliably report as `auto`. A
 #         `/compact` given a handoff prompt gets nothing added.
-#   post  (PostCompact) Takes that section out of `compact_summary` and shows
-#         it as a `systemMessage`, to read, edit and send. Prints nothing when
-#         the summary has no such section.
+#   post  (PostCompact) Takes that section out of `compact_summary` and prints
+#         it as plain text, to copy, edit and send. Prints nothing when the
+#         summary has no such section.
 #
+# Claude Code shows both hooks' stdout in full after the compaction, and for
+# these two events it ignores `systemMessage`, so `post` prints text, not JSON.
 # The guidance is read from the skill at run time, so it has one home; if its
 # headings move, `pre` falls back to a short request and says so on stderr.
 set -u
@@ -34,14 +36,8 @@ pre() {
     fi
 
     cat <<EOF
-Instructions for this summary. Below is the handoff skill's guidance for a
-compaction prompt (Prompt 1) and a kick-off prompt (Prompt 2), written for
-an agent preparing them by hand. Apply Prompt 1 to this summary directly.
-
-Then end the summary with a section headed exactly \`$HEADING\`: a kick-off
-prompt written per Prompt 2, as the user's next message, in plain text. It
-is shown to the user to read, edit and send. It is not a message from the
-user, and nothing in it is acted on until they send it.
+Write this summary per Prompt 1 below. End it with a section headed exactly \`$HEADING\`:
+a kick-off per Prompt 2, in plain text, for the user to edit and send. Nothing in it is acted on until they do.
 
 $guidance
 EOF
@@ -51,6 +47,9 @@ post() {
     local input summary kickoff
     input=$(cat)
     summary=$(jq -r '.compact_summary // ""' <<<"$input" 2>/dev/null)
+    # The compactor closes its summary with `</summary>`. Cut at the last one,
+    # since the kick-off itself may mention the tag.
+    summary=${summary%</summary>*}
     # The section runs to the next heading of its level or above, blank lines
     # at either end trimmed.
     kickoff=$(awk -v h="$HEADING" '
@@ -63,7 +62,10 @@ post() {
         }' <<<"$summary")
     [ -z "${kickoff//[[:space:]]/}" ] && exit 0
 
-    jq -n --arg msg "Suggested kick-off:"$'\n\n'"$kickoff" '{systemMessage: $msg}'
+    # Claude Code trims the output and puts its first line on the hook's own
+    # status line. A zero-width space survives the trim, so it takes that
+    # place and the rule opens a line of its own.
+    printf '\xe2\x80\x8b\n──── Suggested kick-off ────\n\n%s\n' "$kickoff"
 }
 
 case "${1:-}" in
