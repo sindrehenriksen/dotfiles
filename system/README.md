@@ -380,6 +380,13 @@ re-running the same command in a terminal then skips the build and finishes.
 and rebuild if so. Last checked: **2026-10-07**, rebuilt to 7.2.9; 7.3 was at
 rc6, so 7.2's end of life (the second trigger below) is a few weeks out.
 
+**A release upgrade to 26.04 does not fire the first trigger:** 26.04 ships the
+same 7.0 series (7.0.0-38 at 26.04.1). If doing one anyway, do it on the proper
+charger, and answer **no** when it offers to remove obsolete packages, because the
+self-built kernel comes from no repository and is on that list. Third-party PPAs
+come back disabled and need re-enabling. The root-owned files in this directory
+are not package-owned, so they survive.
+
 **Stop doing this when either trigger fires:**
 - **Ubuntu ships ≥7.1** in the HWE stack or a release upgrade. Then drop back:
   `sudo apt remove 'linux-image-7.2.*' 'linux-headers-7.2.*'`, reboot, confirm the
