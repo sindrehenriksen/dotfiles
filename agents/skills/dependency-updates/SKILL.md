@@ -36,20 +36,17 @@ They take the same order as the PRs, a toolchain or runtime major with the other
 2. **No runtime impact:** CI and Actions pins, test-only and dev tooling.
 3. **Minor/patch groups**, the least critical surface first.
 4. **Library majors, one at a time:** usage grep, changelog, the covering tests.
-5. **Runtime, framework, language or base-image majors last.**
+5. **Runtime, framework, language or base-image majors last** (below).
 
-Majors are part of the sweep, not a separate project: land them, adapting the code to the new version. Once the rest has landed they can go to subagents, one per repo or per major, each in its own worktree. Only what can't land yet is handed off (below).
+## Majors
 
-## How much care
+Majors are part of the sweep, not a separate project: land them with the code adapted to the new version, and hand off only what can't land yet (below). They are often most of the work, so give them to subagents or a team where that helps.
 
-- **Core majors get more than the suite.** A language, runtime or framework major (a new Python or Node major, the UI framework) also needs the environment it ships to: the hosting platform supports the version, and a preview deploy or the deployed path is exercised before it lands, not only the local gates.
-- **Who uses it sets the pace.** A tool only the user runs takes a visible change with a report. A product with end users takes it by its stage: the further along (testing, pilot, beta, live), the more lands behind a preview the user has looked at, and the more of what users would notice waits for a yes. The repo's own docs say who uses it and which stage it is in; where they don't, ask once and write the answer there.
+**Adopt the new version.** An upgrade takes the new version as it is meant to be used: its new defaults, its recommended config, its idioms. Adapt the code to them, and don't add compatibility shims that keep the old behaviour, such as an old palette re-declared under the new major, or an old spacing or hover rule restored. A changed default usually is the release's reason for existing, and a pin-back is an unowned fork of the old version that every later upgrade has to step around. Stray only for a concrete reason the code can show, such as a test or a platform constraint, written beside the deviation as for an `ignore`.
 
-## Adopt the new version
+**Verify in proportion to the change.** The local gates are the floor. A language, runtime or framework major (a new Python or Node major, the UI framework) is also tried where it ships: the platform supports the version, and a preview deploy or the deployed path is exercised. That verifying is the sweep's own work, done before anything waits on the user.
 
-An upgrade takes the new version as it is meant to be used: its new defaults, its recommended config, its idioms. Adapt the code to them, and don't add compatibility shims that keep the old behaviour, such as an old palette re-declared under the new major, or an old spacing or hover rule restored. A changed default usually is the release's reason for existing, and a pin-back is an unowned fork of the old version that every later upgrade has to step around. Stray only for a concrete reason the code can show, such as a test or a platform constraint, written beside the deviation as for an `ignore`.
-
-So what the user sees or feels may change, and that is not a reason to hold the upgrade back. Show it instead: before/after screenshots at the product's own viewport, and a line per visible change in the report. A small shift (a shade, a margin, hover dropped on touch screens) lands with that report. A big change in look or feel (a redesign the version invites, an interaction that works differently) is suggested with its before/after and waits for the user's yes, neither pinned back silently nor landed unannounced.
+**What the user sees or feels may change**, and that is not a reason to hold the upgrade back. Show it: before/after screenshots at the product's own viewport, and a line per visible change in the report. How much also waits for the user's own look follows who uses the product. A tool only the user runs takes a visible change with that report. A product with end users goes by its stage (testing, pilot, beta, live): the further along, the more verifying a change gets first and the more of what users would notice waits for the user's yes. A big change in look or feel (a redesign the version invites, an interaction that works differently) is suggested with its before/after whatever the stage, neither pinned back silently nor landed unannounced. The repo's own docs say who uses it and which stage it is in; where they don't, ask once and write the answer there.
 
 ## CI on a Dependabot branch
 
