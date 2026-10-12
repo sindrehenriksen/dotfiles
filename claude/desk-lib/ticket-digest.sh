@@ -39,8 +39,8 @@ desk_ticket_digest_config() {
 		    pr_skip_authors: (.pr_skip_authors // []),
 		    pr_keep: (.pr_keep // null),
 		    max_window_days: (.max_window_days // 4),
-		    max_entries: (.max_entries // 25),
-		    max_changes: (.max_changes // 6),
+		    max_entries: (.max_entries // null),
+		    max_changes: (.max_changes // null),
 		    pr_limit: (.pr_limit // 200) }' <<< "$1" 2> /dev/null
 }
 
@@ -172,13 +172,13 @@ desk_ticket_digest_build() {
 		            author: $pr.author, keys: $pr.keys}
 		       end)
 		      + {latest: ($c[-1].at // 0), has_post: any($c[]; .author != null),
-		         changes: [$c[-($cfg.max_changes):][] | {at: ((.at // 0) | when), what}],
-		         earlier_changes: ([($c | length) - $cfg.max_changes, 0] | max)} ]
+		         changes: [(if $cfg.max_changes then $c[-($cfg.max_changes):] else $c end)[] | {at: ((.at // 0) | when), what}],
+		         earlier_changes: (if $cfg.max_changes then ([($c | length) - $cfg.max_changes, 0] | max) else 0 end)} ]
 		| sort_by([(.has_post | not), -(.latest)]) as $entries
 		| { window: {since: ($w[0].since | when), until: ($w[0].now | when)},
-		    entries: [$entries[:$cfg.max_entries][] | del(.latest, .has_post)
+		    entries: [(if $cfg.max_entries then $entries[:$cfg.max_entries] else $entries end)[] | del(.latest, .has_post)
 		              | if .earlier_changes == 0 then del(.earlier_changes) else . end],
-		    more: [$entries[$cfg.max_entries:][] | .key // .pr],
+		    more: [(if $cfg.max_entries then $entries[$cfg.max_entries:] else [] end)[] | .key // .pr],
 		    counted: $counted,
 		    left_to_follows: $n_covered }' "$work/diff.json" > "$out" 2> "$work/shape.err" || {
 		desk_log "$pass" "$id: ticket digest: shaping the judge file failed: $(head -c 400 "$work/shape.err")"

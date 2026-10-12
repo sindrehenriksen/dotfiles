@@ -24,7 +24,7 @@ desk_ticket_search_config() {
 		| select((.jql // "") != "")
 		| { jql, fields: (.fields // $f), self: (.self // []),
 		    max_window_days: (.max_window_days // 4),
-		    max_description_chars: (.max_description_chars // 1500) }' <<< "$1" 2> /dev/null
+		    max_description_chars: (.max_description_chars // null) }' <<< "$1" 2> /dev/null
 }
 
 # desk_ticket_search_window <id> <cfg> <window_start epoch> <window_end epoch>
@@ -74,7 +74,7 @@ _DESK_TICKET_SEARCH_NORM='
 	    labels: (($f.labels // []) | sort),
 	    mention_text: (($f.summary // "") + " " + ($desc // "")),
 	    description: (if $desc == null then null
-	                  elif ($desc | length) > $max then $desc[0:$max] + " …" else $desc end) }
+	                  elif $max != null and ($desc | length) > $max then $desc[0:$max] + " …" else $desc end) }
 	| select(.key != null)'
 
 # desk_ticket_search_collect <pass> <id> <cfg> <tool>

@@ -346,7 +346,7 @@ A fetch step with a `ticket_digest` key runs the digest's query beside its own w
 - For a PR, opening, ready for review, merging and closing are news, with reviews and comments by people. New commits, a retitle and description edits are counted, as are review-decision changes, labels and checks.
 - A ticket created in the window is counted as `new tickets`, since a new-tickets fetch reports those, and one first seen with no snapshot is counted as the follow pass counts it; its comments in the window are still listed.
 
-**What the judge gets**, as `ticket-digest.json`: `{window: {since, until}, entries, more, counted, left_to_follows}`. Each entry is one ticket (`kind: "ticket"`, `key`, `summary`, `type`, `status`, `assignee`, `parent`) or one PR (`kind: "pr"`, `pr`, `title`, `url`, `state`, `draft`, `author`, `keys`), with its `changes` oldest first (`at`, `what`), at most `max_changes` of them, and `earlier_changes` counting the rest. Entries with a person's post come first, then the most recently moved, up to `max_entries`; `more` names the ones past the cap. A listed PR's `url` is an allowed source for the judge's items, since the runner read it from `gh` itself; a ticket is cited as `ticket:<KEY>`.
+**What the judge gets**, as `ticket-digest.json`: `{window: {since, until}, entries, more, counted, left_to_follows}`. Each entry is one ticket (`kind: "ticket"`, `key`, `summary`, `type`, `status`, `assignee`, `parent`) or one PR (`kind: "pr"`, `pr`, `title`, `url`, `state`, `draft`, `author`, `keys`), with its `changes` oldest first (`at`, `what`), all of them, or the latest `max_changes` with `earlier_changes` counting the rest when that is set. Entries with a person's post come first, then the most recently moved, all of them unless `max_entries` is set; `more` names the ones past it. A listed PR's `url` is an allowed source for the judge's items, since the runner read it from `gh` itself; a ticket is cited as `ticket:<KEY>`.
 
 **Snapshots** are kept in `ticket-digest-state.json` under the state directory and installed only when the pass's fetch window moves, so the pass after a failed one compares against the same snapshots. One left unmoved for 180 days is dropped. The follow list and follow state are only read.
 
@@ -358,14 +358,14 @@ A fetch step with a `ticket_digest` key runs the digest's query beside its own w
 | `self` | `[]` | The user's names and logins. |
 | `pr_skip_authors`, `pr_keep` | `[]`, none | Regexes, case-insensitive. |
 | `max_window_days` | `4` | The window's floor. |
-| `max_entries`, `max_changes` | `25`, `6` | The caps on what the judge gets. |
+| `max_entries`, `max_changes` | none | Optional caps on what the judge reads. Unset, it gets everything and reads as much as it needs. |
 | `pr_limit` | `200` | PRs listed per repo; a listing that reaches it is logged as cut short. |
 
 ## The ticket search
 
 The ticket search lists the tickets created in the pass's window, for the judge to weigh as new work. A fetch step with a `ticket_search` key gets `{{ticket_search_jql}}` and `{{ticket_search_fields}}`; its prompt tells the call to run that query exactly, paging until no page says more follow, and to leave the result alone. The runner reads the result ([runner-read results](#runner-read-results)); the step's reply is not used.
 
-The query is the configured `jql` with `AND created >= -<minutes>m` added, five minutes wider than the window so the tracker's own time zone never shifts it; the runner then keeps the tickets created in the window exactly. The window reaches back at most `max_window_days`, and the coverage line says when it was cut. The step's `<id>.json` (`f-tickets.json` for id `F-tickets`) is `{window: {since, until}, tickets, coverage}`: each ticket as `key`, `summary`, `type`, `status`, `creator`, `assignee`, `priority`, `created`, `parent` (`{key, summary}`), `labels` and `description` (cut at `max_description_chars`), with `user_part` `assigned` or `mentioned` when one of the `self` names is its assignee or appears in its summary or description. A ticket is cited as `ticket:<KEY>`.
+The query is the configured `jql` with `AND created >= -<minutes>m` added, five minutes wider than the window so the tracker's own time zone never shifts it; the runner then keeps the tickets created in the window exactly. The window reaches back at most `max_window_days`, and the coverage line says when it was cut. The step's `<id>.json` (`f-tickets.json` for id `F-tickets`) is `{window: {since, until}, tickets, coverage}`: each ticket as `key`, `summary`, `type`, `status`, `creator`, `assignee`, `priority`, `created`, `parent` (`{key, summary}`), `labels` and `description` (cut at `max_description_chars` when that is set), with `user_part` `assigned` or `mentioned` when one of the `self` names is its assignee or appears in its summary or description. A ticket is cited as `ticket:<KEY>`.
 
 When the query did not come back whole (no result, one that cannot be read, or a last page saying more follow), the step fails as a source: the pass reads `partial` with the step among its failed sources, the follow-up summary is told, and the judge still gets the file, with no tickets and a `coverage` starting `FAILED:`, so new tickets read as unchecked rather than none.
 
@@ -375,7 +375,7 @@ When the query did not come back whole (no result, one that cannot be read, or a
 | `fields` | `summary`, `status`, `issuetype`, `creator`, `assignee`, `created`, `parent`, `labels`, `priority`, `description` | Passed to the prompt as `{{ticket_search_fields}}`. |
 | `self` | `[]` | The user's names, for `user_part`. |
 | `max_window_days` | `4` | How far back the query reaches at most. |
-| `max_description_chars` | `1500` | Where a description is cut. |
+| `max_description_chars` | none | Optional: where a description is cut. Unset, the judge gets it whole. |
 
 ## Mail triage
 
