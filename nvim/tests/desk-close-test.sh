@@ -225,7 +225,12 @@ assert_eq "unchanged again: no call" "0" "$(wc -l < "$FAKE_CLAUDE_CALLS" | tr -d
 printf 'Section A\nSection B\n' > "$repo/notes.md"
 git -C "$repo" commit -q -am "notes moved on"
 result="$(desk_step_close "testpass" "$step_json" "$config_json" "$repo" "2026-10-02" "${files[@]}")"
-assert_eq "notes changed since the offer: a fresh call" "1" "$(wc -l < "$FAKE_CLAUDE_CALLS" | tr -d ' ')"
+assert_eq "notes committed since, the note still valid: offered again, no call" "0" "$(wc -l < "$FAKE_CLAUDE_CALLS" | tr -d ' ')"
+jq -n '{entries: {"11111111-1111-4111-8111-111111111111": {label: "now followed", keys: ["ABC-9"], related: [], added_at: 0}}}' > "$STATE/follow.json"
+result="$(desk_step_close "testpass" "$step_json" "$config_json" "$repo" "2026-10-02" "${files[@]}")"
+assert_eq "a follow added to the idle session since: a fresh call" "1" "$(wc -l < "$FAKE_CLAUDE_CALLS" | tr -d ' ')"
+rm -f "$STATE/follow.json"
+desk_step_close "testpass" "$step_json" "$config_json" "$repo" "2026-10-02" "${files[@]}" > /dev/null
 : > "$FAKE_CLAUDE_CALLS"
 jq '.[] |= (.items[0].kind = "edit" | .items[0].target = {at: "x"} | .items[0].before = "x")' "$DESK_CLOSE_OFFERS_FILE" > "$ROOT/offers.tmp" \
 	&& mv "$ROOT/offers.tmp" "$DESK_CLOSE_OFFERS_FILE"

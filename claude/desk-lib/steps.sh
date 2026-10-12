@@ -567,10 +567,11 @@ desk_step_model_call() {
 			printf '%s\n' '{"mcpServers":{}}' > "$mcp_config"
 		fi
 		strict_mcp="true"
-		# `instructions`: run without --restricted, so the call loads what a
-		# session started in its cwd loads (CLAUDE.md, skills, the settings
-		# files). Its tools stay exactly the step's: --tools, the allowlist
-		# and, always, the deny hook, and MCP stays strict.
+		# `instructions`: run without --restricted, so the call loads the
+		# CLAUDE.md above its cwd and the settings files a session started
+		# there loads (it has no Skill tool, so skills stay unused). Its tools
+		# stay exactly the step's: --tools, the allowlist and, always, the
+		# deny hook, and MCP stays strict.
 		local instructions
 		instructions="$(jq -r '.instructions == true' <<< "$step_json")"
 		[ "$instructions" = "true" ] && restricted="false"
@@ -1087,9 +1088,10 @@ desk_session_capture_call() {
 }
 
 # What the close step last offered per session, so a session whose
-# transcript, follow state and the notes it was placed against are all
-# unchanged since is offered again without a second call:
-# {<session id>: {transcript_stamp, why, items}}, the stamp covering all three.
+# transcript and follow state are unchanged since is offered again without
+# a second call: {<session id>: {transcript_stamp, why, items}}, the stamp
+# covering both. The notes are left out of it, since they are committed most
+# days: a replayed note is validated against them instead.
 DESK_CLOSE_OFFERS_FILE="${DESK_CLOSE_OFFERS_FILE:-$DESK_STATE_DIR/close-offers.json}"
 
 # desk_transcript_stamp <path>: the transcript's mtime and size, which
@@ -1110,8 +1112,9 @@ desk_transcript_stamp() {
 # a closure note (the items shape) and `why`, one line on why it looks done
 # or idle. A followed session is a candidate like any other; its reader
 # entry carries `followed`, so the call can weigh whether every ticket it
-# follows is closed. A session whose transcript has not changed since its
-# last offer gets that offer again, with no call. What survives is offered
+# follows is closed. A session whose transcript and follow state have not
+# changed since its last offer gets that offer again, with no call, once
+# its note still validates against the current notes. What survives is offered
 # in the follow-up tab (desk_follow_up_placeholders' `close_offer`), each
 # note written to the run directory as an items file; only on the user's
 # yes there does that session end it with close-session.sh and stage the
@@ -1147,9 +1150,8 @@ desk_step_close() {
 		return
 	}
 
-	local memo n offer='[]' kept='{}' notes_stamp
+	local memo n offer='[]' kept='{}'
 	memo="$(cat "$DESK_CLOSE_OFFERS_FILE" 2> /dev/null)"
-	notes_stamp="$(git -C "$repo" rev-parse -q --verify "HEAD:${DESK_CAPTURES_FILE:-notes.md}" 2> /dev/null)"
 	jq -e 'type == "object"' > /dev/null 2>&1 <<< "$memo" || memo='{}'
 	n="$(jq 'length' <<< "$candidates")"
 	desk_log "$pass" "close: $n candidate(s) idle >= $close_after working days"
@@ -1163,7 +1165,7 @@ desk_step_close() {
 		id="$(jq -r '.id' <<< "$sess")"
 		name="$(jq -r '.name // .id' <<< "$sess")"
 		stamp="$(desk_transcript_stamp "$(jq -r '.transcript_path // empty' <<< "$sess")")"
-		[ -z "$stamp" ] || stamp="$stamp|$(jq -r '.followed.all_closed_since // ""' <<< "$sess")|$notes_stamp"
+		[ -z "$stamp" ] || stamp="$stamp|$(jq -c '.followed // null' <<< "$sess")"
 		items_json=""
 		if [ -n "$stamp" ] && jq -e --arg id "$id" --arg st "$stamp" '.[$id].transcript_stamp == $st' > /dev/null 2>&1 <<< "$memo"; then
 			why="$(jq -r --arg id "$id" '.[$id].why // ""' <<< "$memo")"
