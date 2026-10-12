@@ -829,9 +829,9 @@ desk_step_commit_push_kind() {
 # `close_after_working_days` *working* days by the user's last human message
 # (session-status.sh's last_human_message — status updates, resumes and
 # tool results do not count as the user being there; last_activity is only a
-# fallback for a reader that does not report it) (an exact
-# Mon-Fri walk, desk-lib/lock.sh's desk_working_days_since — not a
-# calendar-day approximation). The other
+# fallback for a reader that does not report it) (the whole Mon-Fri days
+# passed since, today not counted, desk-lib/lock.sh's
+# desk_working_days_since — not a calendar-day approximation). The other
 # guards (max_closes this pass, "not the first pass after more than N
 # days away", a live re-check "just before" SIGTERM) are applied by the
 # caller around this list, not inside it.

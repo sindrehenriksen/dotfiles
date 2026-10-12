@@ -358,10 +358,11 @@ desk_lock_release() {
 	rm -rf "$lockdir" 2>/dev/null
 }
 
-# The exact count of Mon-Fri calendar dates strictly after $1's own date up
-# to and including $2's (default now) — the close step's "idle ≥ N working
-# days", as a real day-by-day walk built on desk_day_before. 0 if both epochs fall on the
-# same calendar date.
+# The exact count of Mon-Fri calendar dates strictly after $1's own date and
+# strictly before $2's (default now): the whole working days that have
+# passed since, so the day $2 falls on never counts, however far into it.
+# The close step's "idle ≥ N working days", as a real day-by-day walk built
+# on desk_day_before. 0 when the epochs fall on the same or consecutive dates.
 desk_working_days_since() {
 	local since_epoch="$1" now="${2:-$(desk_now)}"
 	local since_date
@@ -371,8 +372,11 @@ desk_working_days_since() {
 		since_date="$(date -j -r "$since_epoch" +%F 2> /dev/null)"
 	fi
 	[ -n "$since_date" ] || { echo 0; return; }
+	local today
+	today="$(desk_day_before "$now" 0 | cut -f1)"
+	[[ "$since_date" < "$today" ]] || { echo 0; return; }
 
-	local count=0 off=0 day_str day_dow
+	local count=0 off=1 day_str day_dow
 	while [ "$off" -lt 400 ]; do
 		IFS=$'\t' read -r day_str day_dow < <(desk_day_before "$now" "$off")
 		[ -n "$day_str" ] || break

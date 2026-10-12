@@ -101,18 +101,25 @@ assert_eq "a failed result never counts as already-ok" "false" \
 	"$(desk_guard_already_ok_today "otherpass" "2026-01-05" && echo true || echo false)"
 
 echo
-echo "=== desk_working_days_since: an exact Mon-Fri walk ==="
+echo "=== desk_working_days_since: whole Mon-Fri days passed ==="
 # 2026-01-05 is a Monday.
 since="$(epoch_at 2026-01-05 09 00)"
 same_day="$(epoch_at 2026-01-05 17 00)"
 assert_eq "same calendar date: 0 working days" "0" "$(desk_working_days_since "$since" "$same_day")"
-next_day="$(epoch_at 2026-01-06 09 00)" # Tuesday
-assert_eq "the next weekday: 1 working day" "1" "$(desk_working_days_since "$since" "$next_day")"
+next_day="$(epoch_at 2026-01-06 23 00)" # Tuesday, nearly over
+assert_eq "the next weekday, however late: 0 (today never counts)" "0" "$(desk_working_days_since "$since" "$next_day")"
+day_after="$(epoch_at 2026-01-07 06 00)" # Wednesday
+assert_eq "two days on: 1 working day (Tuesday)" "1" "$(desk_working_days_since "$since" "$day_after")"
 across_weekend="$(epoch_at 2026-01-09 09 00)" # Friday
-assert_eq "Mon to Fri (same week): 4 working days" "4" "$(desk_working_days_since "$since" "$across_weekend")"
+assert_eq "Mon to Fri (same week): 3 working days" "3" "$(desk_working_days_since "$since" "$across_weekend")"
 past_weekend="$(epoch_at 2026-01-12 09 00)" # the following Monday
-assert_eq "Mon to the next Mon: 5 working days (the weekend doesn't count)" "5" \
+assert_eq "Mon to the next Mon: 4 working days (the weekend doesn't count)" "4" \
 	"$(desk_working_days_since "$since" "$past_weekend")"
+wed="$(epoch_at 2026-01-07 07 49)"
+mon="$(epoch_at 2026-01-12 06 04)"
+assert_eq "Wed morning to early Mon: 2 (Thu and Fri; Monday has barely started)" "2" \
+	"$(desk_working_days_since "$wed" "$mon")"
+assert_eq "a since after now: 0" "0" "$(desk_working_days_since "$mon" "$wed")"
 
 echo
 echo "=== summary: $pass passed, $fail failed ==="

@@ -158,12 +158,13 @@ standard_fixtures() {
 	# kern.boottime can be after a clock step.
 	ev_start "$((REOPEN_BOOT_TIME - 40))" 1791301000 > "$S/$THIS_BOOT.jsonl"
 	reader_line "$THIS_BOOT" 2026-10-07T08:00:00Z
-	# The idle boundary, as the close step counts it: Friday's message is 3
-	# working days old on Wednesday, Monday's is 2.
+	# The idle boundary, as the close step counts it, in whole working days
+	# passed: Thursday's message is 3 old on Wednesday (Fri, Mon, Tue),
+	# Friday's is 2.
 	ev_start "$((PREV_BOOT + 20))" 1790100000 > "$S/$EDGE_IDLE.jsonl"
-	reader_line "$EDGE_IDLE" 2026-10-02T15:00:00Z
+	reader_line "$EDGE_IDLE" 2026-10-01T15:00:00Z
 	ev_start "$PREV_BOOT" 1790100000 > "$S/$EDGE_ACTIVE.jsonl"
-	reader_line "$EDGE_ACTIVE" 2026-10-05T15:00:00Z
+	reader_line "$EDGE_ACTIVE" 2026-10-02T15:00:00Z
 	# A record with no start event at all is ignored.
 	ev_end 1790200000 > "$S/12345678-0000-4000-8000-00000000dead.jsonl"
 }
@@ -191,8 +192,8 @@ assert_eq "old orphan from an earlier boot: not listed" "" "$(status_of "$out" "
 assert_eq "closed again after the restart: not listed" "" "$(status_of "$out" "$CLOSED_SINCE")"
 assert_eq "scheduled pass's call: not listed" "" "$(status_of "$out" "$SCHEDULED")"
 assert_eq "stopped this boot without an end: would open" would-open "$(status_of "$out" "$THIS_BOOT")"
-assert_eq "Friday's message is idle on Wednesday" idle "$(status_of "$out" "$EDGE_IDLE")"
-assert_eq "Monday's message is not" would-open "$(status_of "$out" "$EDGE_ACTIVE")"
+assert_eq "Thursday's message is idle on Wednesday" idle "$(status_of "$out" "$EDGE_IDLE")"
+assert_eq "Friday's message is not" would-open "$(status_of "$out" "$EDGE_ACTIVE")"
 assert_eq "idle line carries the last-message date" "2026-09-25 09:00" \
 	"$(awk -F'\t' -v id="$IDLE" '$2 == id {print $3}' <<< "$out")"
 assert_eq "opener never called on a dry run" 0 "$(opener_calls)"
@@ -215,7 +216,7 @@ json=$("$CLI" --dry-run --json)
 assert_eq "json summary would_open" 4 "$(jq '.summary.would_open' <<< "$json")"
 assert_eq "json summary idle" 2 "$(jq '.summary.idle' <<< "$json")"
 assert_eq "json summary running" 1 "$(jq '.summary.running' <<< "$json")"
-assert_eq "json session carries idle_working_days" 1 \
+assert_eq "json session carries idle_working_days" 0 \
 	"$(jq --arg id "$ACTIVE" '.sessions[] | select(.id == $id) | .idle_working_days' <<< "$json")"
 
 echo

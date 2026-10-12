@@ -112,7 +112,7 @@ Any headless `claude -p` started outside desk (a script, a CI-style helper) reco
 | `push_enabled` | `false` | Push the notes repo after committing. Off: status reads `push: disabled`. |
 | `dry_run` | `true` | The write step logs the ids it would act on (digests to mark read, noise to trash) and makes no call; the follow-up tab is told each mail it would trash. |
 | `log_only` | `true` | The close step queues its closure notes and never ends a session. |
-| `close_after_working_days` | `3` | Idle threshold for closing, in Mon–Fri days since your last message in that session. |
+| `close_after_working_days` | `3` | Idle threshold for closing, in whole Mon–Fri days that have passed since your last message in that session: neither the day of that message nor today counts, so a message on Wednesday is two days old on Monday. |
 | `keep_open` | `[]` | Session names never closed. |
 | `max_closes` | `3` | Real closes per pass. |
 | `away_days` | `5` | A pass more than this many days after the pass last ran to its end, ok, partial or failed, closes nothing. |
