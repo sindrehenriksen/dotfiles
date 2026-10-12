@@ -48,6 +48,12 @@ If a tool does not exist for you, say so. After both attempts, stop.
 PROMPT
 
 STREAM_OUT="$SCRATCH/stream.jsonl"
+# Unrestricted, the pass's envelope includes the deny hook every
+# `instructions` call carries.
+settings_args=()
+if [ "${DESK_CANARY_RESTRICTED:-true}" = "false" ]; then
+	settings_args=(--settings "$(desk_write_deny_hook_settings "$SCRATCH" "" "$SCRATCH" Read)")
+fi
 desk_call_model \
 	--scratch "$SCRATCH" \
 	--prompt-file "$SCRATCH/prompt.txt" \
@@ -57,6 +63,7 @@ desk_call_model \
 	--restricted "${DESK_CANARY_RESTRICTED:-true}" \
 	--mcp-config "$SCRATCH/empty-mcp.json" \
 	--strict-mcp-config true \
+	"${settings_args[@]}" \
 	--max-budget-usd 0.50 \
 	--timeout 120 \
 	--config-dir "$CLAUDE_CONFIG_DIR" \
