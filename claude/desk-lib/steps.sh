@@ -471,14 +471,10 @@ desk_step_model_call() {
 	kind="$(jq -r '.kind // empty' <<< "$step_json")"
 	prompt_rel="$(jq -r '.prompt // empty' <<< "$step_json")"
 	connector="$(jq -r '.connector // false' <<< "$step_json")"
-	timeout="$(jq -r '.timeout // 300' <<< "$step_json")"
-	# A step's own `max_budget_usd`, falling back to the generic default
-	# (common.sh's own DESK_DEFAULT_MAX_BUDGET_USD) — every call gets a
-	# real spend cap, never an unbounded one, whether or not its own step
-	# config ever names one.
-	max_budget_usd="$(jq -r '.max_budget_usd // empty' <<< "$step_json")"
-	[ -n "$max_budget_usd" ] || max_budget_usd="$(jq -r '.default_max_budget_usd // empty' "$DESK_CONFIG" 2> /dev/null)"
-	[ -n "$max_budget_usd" ] || max_budget_usd="$DESK_DEFAULT_MAX_BUDGET_USD"
+	timeout="$(jq -r --arg d "$DESK_DEFAULT_TIMEOUT_SECS" '.timeout // ($d | tonumber)' <<< "$step_json")"
+	# One spend ceiling for every call, a failsafe (common.sh); a step names
+	# none of its own.
+	max_budget_usd="$(desk_max_budget_usd)"
 
 	local visible session_name=""
 	visible="$(jq -r '.visible // false' <<< "$step_json")"
@@ -1337,9 +1333,8 @@ desk_follow_up_summary() {
 	printf '%s\n' '{"mcpServers":{}}' > "$mcp_config"
 
 	local budget timeout rc
-	budget="$(jq -r '.default_max_budget_usd // empty' "$DESK_CONFIG" 2> /dev/null)"
-	[ -n "$budget" ] || budget="$DESK_DEFAULT_MAX_BUDGET_USD"
-	timeout="${DESK_FOLLOW_UP_SUMMARY_TIMEOUT_SECS:-300}"
+	budget="$(desk_max_budget_usd)"
+	timeout="${DESK_FOLLOW_UP_SUMMARY_TIMEOUT_SECS:-$DESK_DEFAULT_TIMEOUT_SECS}"
 	desk_call_model \
 		--scratch "$cwd" \
 		--prompt-file "$prompt_file" \

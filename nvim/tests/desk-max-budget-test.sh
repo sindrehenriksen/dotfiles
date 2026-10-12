@@ -1,10 +1,7 @@
 #!/usr/bin/env bash
-# claude/desk-lib/steps.sh's
-# desk_step_model_call passes --max-budget-usd on every call — a step's
-# own `max_budget_usd`, falling back to common.sh's own
-# DESK_DEFAULT_MAX_BUDGET_USD when a step doesn't name one. Before this
-# fix no call ever passed --max-budget-usd at all, despite desk_call_model
-# already supporting the flag.
+# claude/desk-lib/steps.sh's desk_step_model_call puts one spend ceiling on
+# every call, a failsafe: the config's default_max_budget_usd, else
+# common.sh's DESK_DEFAULT_MAX_BUDGET_USD. A step's own value is ignored.
 set -u
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -55,29 +52,22 @@ extract_budget() {
 	grep -A1 -- '^--max-budget-usd$' "$ARGV_LOG" | tail -n1
 }
 
-echo "=== a step with no max_budget_usd of its own gets the generic default ==="
+echo "=== every call gets the failsafe ceiling ==="
 PASS_SCRATCH="$(desk_scratch_dir test-pass)"
 step_default='{"id":"F","kind":"fetch","tools":["Read"],"connector":false,"timeout":30}'
 desk_step_fetch testpass "$step_default" "" '{}' > /dev/null
-assert_eq "the generic default (common.sh's DESK_DEFAULT_MAX_BUDGET_USD)" "$DESK_DEFAULT_MAX_BUDGET_USD" "$(extract_budget)"
-rm -rf "$PASS_SCRATCH"
-
-echo
-echo "=== a step's own max_budget_usd overrides the default ==="
-PASS_SCRATCH="$(desk_scratch_dir test-pass)"
+assert_eq "the generic default, 25" "25" "$(extract_budget)"
 step_custom='{"id":"F2","kind":"fetch","tools":["Read"],"connector":false,"timeout":30,"max_budget_usd":5}'
 desk_step_fetch testpass "$step_custom" "" '{}' > /dev/null
-assert_eq "the step's own value" "5" "$(extract_budget)"
+assert_eq "a step's own value is ignored" "25" "$(extract_budget)"
 rm -rf "$PASS_SCRATCH"
 
 echo
-echo "=== the config's default_max_budget_usd sits between the step's and the generic default ==="
+echo "=== the config's default_max_budget_usd is the one ceiling when set ==="
 PASS_SCRATCH="$(desk_scratch_dir test-pass)"
-echo '{"default_max_budget_usd": 7}' > "$DESK_CONFIG"
-desk_step_fetch testpass "$step_default" "" '{}' > /dev/null
-assert_eq "the config's default" "7" "$(extract_budget)"
+echo '{"default_max_budget_usd": 40}' > "$DESK_CONFIG"
 desk_step_fetch testpass "$step_custom" "" '{}' > /dev/null
-assert_eq "a step's own value still wins" "5" "$(extract_budget)"
+assert_eq "the config's value" "40" "$(extract_budget)"
 rm -rf "$PASS_SCRATCH"
 
 echo

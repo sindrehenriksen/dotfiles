@@ -22,7 +22,7 @@ Everything below is reference: how it works, and every setting.
 
 **The notes repo.** A private git repo holding `notes.md` and `reading.md` at its root, on branch `main`, with an empty `.desk-notes` marker file. The marker, not a path, tells nvim a buffer is a desk notes file, so this repo never names where the notes live. nvim attaches to the config's `files` (default those two names), and session captures land in `captures_file` (default the first entry of `files`).
 
-**Passes.** `desk-run <pass>` runs one pass from the config: an ordered list of steps, each of one kind (below). Every model call is a headless `claude -p` with an exact tool allowlist, from a scratch directory outside any repo, under a timeout and a spend cap. A pass ends by writing `~/.local/state/desk/status.json`, which the status line reads. Every pass but the follow pass takes one shared lock; a run that cannot get it within 30 minutes gives up, and the lockout is counted in the status file.
+**Passes.** `desk-run <pass>` runs one pass from the config: an ordered list of steps, each of one kind (below). Every model call is a headless `claude -p` with an exact tool allowlist, from a scratch directory outside any repo, under a timeout and a spend ceiling, both failsafes set well above what normal work reaches (20 minutes and $25 a call by default). A pass ends by writing `~/.local/state/desk/status.json`, which the status line reads. Every pass but the follow pass takes one shared lock; a run that cannot get it within 30 minutes gives up, and the lockout is counted in the status file.
 
 **The proposal.** A pass that suggests anything writes one commit to `refs/desk/proposal` in the notes repo: its parent is your `HEAD` at pass time, its tree is the configured files with every suggestion applied, plus `proposal.json` listing the items. The next pass rebuilds it from your newest `HEAD`, plus the previous items you neither took nor declined, plus its own new ones, so leaving a suggestion alone means "not now". A pass's own items sit above those carried from earlier passes and keep the order of the steps that staged them, so the order of `steps` decides what reads first and which of several items landing at one spot goes in first (a section of its own aside, which goes to the side its blank line is on: [Where an item lands](#the-prompt-contract)). What you decided lives on `refs/desk/ledger`: declines (by item id, by source URL, and by content — file, kind, target and normalised before/after — so a declined link or a regenerated copy is never proposed again) and takes (so a taken suggestion's text is recognised as agent-written later, even after you edit or move it).
 
@@ -118,7 +118,7 @@ Any headless `claude -p` started outside desk (a script, a CI-style helper) reco
 | `away_days` | `5` | A pass more than this many days after the pass last ran to its end, ok, partial or failed, closes nothing. |
 | `retention_warn_days` | `14` | How many days before Claude Code deletes a transcript the `retention` step warns about it. |
 | `caps.<name>` | none | `{act, worth_knowing, wildcard}`: how many tiered items a judge may keep. Which entry a pass uses is its `caps` key; absent, `weekly` for a pass named `weekly` and `daily` for every other. |
-| `default_max_budget_usd` | `$DESK_DEFAULT_MAX_BUDGET_USD`, `2` | Spend cap for a model call whose step has no `max_budget_usd`. |
+| `default_max_budget_usd` | `$DESK_DEFAULT_MAX_BUDGET_USD`, `25` | The spend ceiling on every model call, passed as `--max-budget-usd`: a failsafe against a runaway call, never a size for one. A step names none of its own. |
 | `tokens` | `[]` | The token table, below. |
 | `sources_file` | `sources.json` | Relative to the config's directory. Substituted whole into `{{sources}}` and copied to the judge as `sources.json`. |
 | `digest_gmail_label` | `Digest` | The label in `{{digest_query}}`, written as the mail search tool matches it in `label:` ([Mail triage](#mail-triage) has how the Gmail connector spells a label). |
@@ -152,8 +152,7 @@ Every step has `id` and `kind`. Model steps (`fetch`, `judge`, `write`, `close`,
 | `tools` | `[]` | The exact tool list. Passed as written to `--allowedTools` and to the deny hook, and by name to `--tools`, which decides what loads: a pattern such as `Bash(gh run list:*)` loads `Bash`, and the allowlist and the hook keep it to the pattern. A restricted call gets the hook only when it has a pattern or a scoped `Read`. The hook checks a Bash pattern (an exact command, or a prefix ending in `:*` or ` *`) and refuses any command holding a shell operator or substitution, quoted or not; any other pattern it refuses outright. |
 | `connector` | `false` | `true` loads your user settings so claude.ai connectors are available; a PreToolUse hook (`claude/desk-lib/deny-unlisted-tool.sh`) then refuses every tool not in `tools`, whatever your own allow rules say. `false` runs `--restricted` with `--strict-mcp-config`. |
 | `mcp_config` | empty | Non-connector calls only: an MCP config file (relative to the config's directory) for tools that need a server. |
-| `timeout` | `300` | Seconds; the call's whole process group is killed after it. |
-| `max_budget_usd` | `default_max_budget_usd`, then `$DESK_DEFAULT_MAX_BUDGET_USD`, then `2` | Passed as `--max-budget-usd`. |
+| `timeout` | `$DESK_DEFAULT_TIMEOUT_SECS`, `1200` | Seconds; the call's whole process group is killed after it. A failsafe like the spend ceiling, so leave it at the default unless a call needs longer. |
 | `visible` | `false` | Persist the session under the name `desk-<pass>-<date>-<id>`, with its cwd kept under `~/.local/state/desk/runs/` for seven days, so it can be resumed. A session you carried on in (resumed, or opened by the follow-up tab) is yours: its cwd and transcript stay until Claude Code's own retention removes the transcript ([Retention](#retention)). |
 
 A judge, close or retention step whose `tools` include `Read` gets it narrowed to its own scratch directory, by the allowlist and again by the deny hook.
@@ -321,11 +320,11 @@ A ticket's field changes travel together: when any of them is forwarded, the lin
 | `interval_minutes` | `15` | The schedule's spacing. Values under 15 are clamped to 15, with a log line. Keep the plist's `StartInterval`, or the timer's `OnUnitActiveSec`, at this interval. |
 | `scope_refresh_minutes` | `60` | How often the scope query reruns. |
 | `jira.tool`, `jira.prompt` | required | The search tool and the prompt that runs the two queries. The prompt gets `{{scope_jql}}` and `{{changes_jql}}` (each `none` when it doesn't run), `{{scope_fields}}`, `{{changes_fields}}` and `{{today}}`. |
-| `jira.mcp_config`, `jira.model`, `jira.timeout`, `jira.max_budget_usd` | none, the account's default, `300`, `1` | As for a step. |
+| `jira.mcp_config`, `jira.model`, `jira.timeout` | none, the account's default, `1200` | As for a step; the spend ceiling is `default_max_budget_usd`. |
 | `jira.max_output_tokens` | `2000` | Passed as `MAX_MCP_OUTPUT_TOKENS`, so a search result past it is saved to a file the runner reads ([runner-read results](#runner-read-results)). Keep each query under the 100 results one page holds. |
 | `github_repos` | `[]` | `owner/name` repos whose PRs are matched. |
 | `send.prompt` | required to send | Gets `{{to}}` and `{{message}}`. It must tell the call to send exactly that, once. |
-| `send.model`, `send.timeout`, `send.max_budget_usd` | the account's default, `180`, `1` | |
+| `send.model`, `send.timeout` | the account's default, `1200` | |
 | `preamble` | `prompts/follow-preamble.md` | The standing preamble, relative to the config's directory. |
 | `message_max_chars` | `8000` | The send call copies the message into its tool call, and the deny hook refuses any copy that is not exact, so a shorter message is likelier to go through first time. |
 | `queue_max` | `200` | Per session; older changes past it are counted, not kept. |

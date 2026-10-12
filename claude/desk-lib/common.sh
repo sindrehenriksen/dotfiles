@@ -54,11 +54,19 @@ DESK_KILL_GRACE_SECS="${DESK_KILL_GRACE_SECS:-5}"
 DESK_LOCK_NO_META_GRACE_SECS="${DESK_LOCK_NO_META_GRACE_SECS:-10}"
 DESK_LOCK_LIVENESS_TOLERANCE_SECS="${DESK_LOCK_LIVENESS_TOLERANCE_SECS:-3}"
 
-# The per-call --max-budget-usd a step falls back to when it (and
-# $DESK_CONFIG's own top-level `default_max_budget_usd`) don't name one —
-# a generic backstop, never an instantiation-specific figure, same as
-# every other numeric default in this file.
-DESK_DEFAULT_MAX_BUDGET_USD="${DESK_DEFAULT_MAX_BUDGET_USD:-2}"
+# Failsafes on every model call, set high enough that normal work never
+# reaches them: they are there to stop a runaway call, not to size one. The
+# spend ceiling is the config's top-level `default_max_budget_usd`, else
+# this; the timeout is a step's own `timeout`, else this.
+DESK_DEFAULT_MAX_BUDGET_USD="${DESK_DEFAULT_MAX_BUDGET_USD:-25}"
+DESK_DEFAULT_TIMEOUT_SECS="${DESK_DEFAULT_TIMEOUT_SECS:-1200}"
+
+# desk_max_budget_usd: the one per-call spend ceiling.
+desk_max_budget_usd() {
+	local v
+	v="$(jq -r '.default_max_budget_usd // empty' "${DESK_CONFIG:-/dev/null}" 2> /dev/null)"
+	printf '%s' "${v:-$DESK_DEFAULT_MAX_BUDGET_USD}"
+}
 
 mkdir -p "$DESK_STATE_DIR" "$DESK_LOCK_DIR" "$DESK_GUARD_DIR" "$DESK_SCRATCH_ROOT" "$DESK_LOG_DIR" "$DESK_RUNS_ROOT" 2>/dev/null
 

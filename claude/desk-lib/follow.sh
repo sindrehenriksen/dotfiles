@@ -377,9 +377,9 @@ desk_follow_fetch_jira() {
 		desk_call_model --scratch "$scratch" --prompt-file "$prompt_file" \
 			--allowed-tools "$tool" --tools "" --restricted true \
 			--mcp-config "$mcp_config" --strict-mcp-config true \
-			--max-budget-usd "$(jq -r '.max_budget_usd // 1' <<< "$jira")" \
+			--max-budget-usd "$(desk_max_budget_usd)" \
 			${model:+--model "$model"} --spill-dir "$out_dir/spill" \
-			--timeout "$(jq -r '.timeout // 300' <<< "$jira")" \
+			--timeout "$(jq -r --arg d "$DESK_DEFAULT_TIMEOUT_SECS" '.timeout // ($d | tonumber)' <<< "$jira")" \
 			--config-dir "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" --out "$out"
 	)
 	local rc=$?
@@ -640,9 +640,9 @@ desk_follow_send() {
 	desk_call_model --scratch "$scratch" --prompt-file "$prompt_file" \
 		--allowed-tools SendMessage --tools SendMessage --restricted true \
 		--mcp-config "$scratch/empty-mcp.json" --strict-mcp-config true --settings "$settings" \
-		--max-budget-usd "$(jq -r '.max_budget_usd // 1' <<< "$send")" \
+		--max-budget-usd "$(desk_max_budget_usd)" \
 		${model:+--model "$model"} \
-		--timeout "$(jq -r '.timeout // 180' <<< "$send")" \
+		--timeout "$(jq -r --arg d "$DESK_DEFAULT_TIMEOUT_SECS" '.timeout // ($d | tonumber)' <<< "$send")" \
 		--config-dir "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" --out "$out" > /dev/null
 	desk_follow_note_cost "$out"
 	local verdict
