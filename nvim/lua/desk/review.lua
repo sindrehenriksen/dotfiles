@@ -1237,6 +1237,14 @@ function M.open_review(notes_buf)
 	vim.bo[review_buf].modeline = false
 	vim.api.nvim_buf_set_name(review_buf, "desk-review://" .. file)
 	vim.bo[review_buf].filetype = vim.bo[notes_buf].filetype
+	-- Highlighted as the notes are, by the markdown tree-sitter parser: the
+	-- legacy syntax file marks an underscore inside a word (sync_queue_items)
+	-- as an error, and hides no link URL. The window conceals links as the
+	-- notes window does.
+	if vim.bo[review_buf].filetype == "markdown" and not vim.treesitter.highlighter.active[review_buf] then
+		pcall(vim.treesitter.start, review_buf, "markdown")
+	end
+	vim.wo[review_win].conceallevel = vim.wo[notes_win].conceallevel
 	-- Loaded outside the undo history, so `u` in the split never blanks it.
 	local undolevels = vim.bo[review_buf].undolevels
 	vim.bo[review_buf].undolevels = -1
@@ -2630,8 +2638,20 @@ function M.qf_act(verb)
 	if t then
 		end_take(s, t)
 	end
+	local qwin = vim.api.nvim_get_current_win()
+	local row = vim.fn.line(".")
 	M.refresh_overview(s)
 	M.refresh_status_line(s.notes_buf)
+	-- The entry that moves up into this row is the one now under the cursor:
+	-- show it as moving onto it would. The cursor itself has not moved, so
+	-- no CursorMoved does it.
+	if vim.bo[vim.api.nvim_win_get_buf(qwin)].buftype == "quickfix" then
+		local n = #vim.fn.getqflist()
+		if n > 0 then
+			vim.api.nvim_win_set_cursor(qwin, { math.min(row, n), 0 })
+			M.qf_preview()
+		end
+	end
 	return true
 end
 

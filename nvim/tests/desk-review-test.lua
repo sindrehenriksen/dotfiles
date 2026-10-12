@@ -1099,7 +1099,13 @@ do
 	assert_eq("and only that one", nil, line_of(nb, "NEWS n1"))
 	assert_eq("the cursor stays in the list", qw, vim.api.nvim_get_current_win())
 	assert_eq("the list drops it", 2, #vim.fn.getqflist())
-	assert_eq("the split's cursor is on it", line_of(rb, "  added under B"), vim.api.nvim_win_get_cursor(rw)[1])
+	assert_eq("the next entry comes up under the cursor", "drop more", vim.fn.getqflist()[vim.fn.line(".")].text)
+	local after_take = vim.api.nvim_win_get_cursor(rw)[1]
+	vim.api.nvim_win_set_cursor(qw, { 1, 0 })
+	vim.api.nvim_exec_autocmds("CursorMoved", { buffer = vim.api.nvim_win_get_buf(qw) })
+	vim.api.nvim_win_set_cursor(qw, { 2, 0 })
+	vim.api.nvim_exec_autocmds("CursorMoved", { buffer = vim.api.nvim_win_get_buf(qw) })
+	assert_eq("and the split jumps to its suggestion, as moving onto it would", vim.api.nvim_win_get_cursor(rw)[1], after_take)
 	assert_true("the count moves", vim.wo[rw].winbar:match("%%=2 left %(3 saved%)$") ~= nil)
 	on("drop more", "x")
 	assert_true("x declines it: the split keeps the line", line_of(rb, "  more") ~= nil)
@@ -2382,6 +2388,21 @@ do
 	assert_true("staged from outside: the bar has not moved yet", vim.wo[win].winbar:match("untaken") == nil)
 	vim.api.nvim_exec_autocmds("FocusGained", {})
 	assert_true("focus back in nvim: the new count", vim.wo[win].winbar:match("%(2 untaken%)") ~= nil)
+end
+
+print("\n=== the review split is highlighted by tree-sitter, as the notes are, never the legacy syntax ===")
+do
+	local r = new_repo({ "Section A", "  offered: the sync_queue_items timer" })
+	build(r, "2026-10-01", { item("n1") })
+	local nb = open_notes(r)
+	vim.bo[nb].filetype = "markdown"
+	vim.wo.conceallevel = 2
+	review.attach(nb)
+	assert_true("review opens", review.open_review(nb))
+	local rb = review_buf_of(nb)
+	assert_true("tree-sitter highlights the split", vim.treesitter.highlighter.active[rb] ~= nil)
+	assert_eq("and no legacy syntax runs under it (which marks sync_queue_items' underscores as errors)", "", vim.bo[rb].syntax)
+	assert_eq("the split conceals links as the notes window does", 2, vim.wo[vim.fn.bufwinid(rb)].conceallevel)
 end
 
 print(string.format("\n=== summary: %d passed, %d failed ===", pass, fail))
