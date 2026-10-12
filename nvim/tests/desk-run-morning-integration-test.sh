@@ -70,7 +70,13 @@ case "$cwd" in
 		;;
 	*-T-*)
 		echo '{"type":"assistant","message":{"content":[{"type":"tool_use","id":"u2","name":"mcp__example-tickets__search","input":{"jql":"key in (\"DESK-NONE-0\")"}}]}}'
-		echo '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"u2","content":[{"type":"text","text":"{\"issues\":[]}"}]}]}}'
+		# Too large for the call: saved under the project folder, the call
+		# seeing only where, as a status search over many keys is.
+		saved="$CLAUDE_CONFIG_DIR/projects/$(printf '%s' "$cwd" | tr -c 'A-Za-z0-9' '-')/sess/tool-results/saved-t.txt"
+		mkdir -p "$(dirname "$saved")"
+		jq -cn '[{type: "text", text: ({issues: {nodes: [{key: "ABC-7", summary: "a ticket", status: {name: "Done"}}]}} | tojson)}]' > "$saved"
+		jq -nc --arg p "$saved" '{type:"user",message:{content:[{type:"tool_result",tool_use_id:"u2",
+			content:("Error: result exceeds maximum allowed tokens. Output has been saved to " + $p + ".")}]}}'
 		echo '{"type":"result","subtype":"success"}'
 		;;
 	*-J-*)
@@ -197,9 +203,10 @@ assert_eq "the pass exits ok" "0" "$rc"
 
 echo
 echo "=== T's ticket cache ==="
-assert_true "the ticket cache was written (empty issues is still an ok result)" \
+assert_true "the ticket cache was written" \
 	"$([ -f "$DESK_TICKET_CACHE" ] && echo true || echo false)"
 assert_eq "checked_at is a number" "true" "$(jq -e '.checked_at | type == "number"' > /dev/null 2>&1 "$DESK_TICKET_CACHE" && echo true || echo false)"
+assert_eq "a result saved to a file is read from it" "Done" "$(jq -r '.tickets["ABC-7"].status' "$DESK_TICKET_CACHE" 2> /dev/null)"
 
 echo
 echo "=== J's validated item landed in the ledger/proposal ==="

@@ -444,6 +444,14 @@ $(git -C "$repo" show "HEAD:$f" 2> /dev/null)"
 					placeholders="$(jq -c --argjson d "$(desk_mail_triage_placeholders "$mail_triage_cfg")" '. + $d' <<< "$placeholders")"
 				fi
 				result="$(desk_step_fetch "$pass" "$step_json" "" "$placeholders" "" "" "$scheduled_date")"
+				# The status search over every key the notes name is often
+				# past the output limit, so its result is read from the saved
+				# file, before the cache keeps it for a retry slot.
+				if [ "$result" = "ok" ] && [ "$id" = "$ticket_status_step_id" ]; then
+					_desk_follow_resolve_spills "$PASS_SCRATCH/$id-tool-results.jsonl" "$PASS_SCRATCH/$id-spill" \
+						> "$PASS_SCRATCH/$id-tool-results.resolved" \
+						&& mv -f "$PASS_SCRATCH/$id-tool-results.resolved" "$PASS_SCRATCH/$id-tool-results.jsonl"
+				fi
 				if [ "$result" = "ok" ] && [ -n "$mail_triage_cfg" ]; then
 					desk_mail_triage_collect "$pass" "$id" "$mail_triage_cfg" \
 						"$mail_search_tool" "$today" || result="failed"

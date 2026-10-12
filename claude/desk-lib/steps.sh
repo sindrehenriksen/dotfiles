@@ -681,11 +681,12 @@ desk_step_model_call() {
 	else
 		tools_args=(--tools "$(desk_step_loaded_tools "$step_json" false)")
 	fi
-	# A ticket digest's, ticket search's or mail triage's result can be past
-	# Claude Code's output limit, so it reaches the stream only as a saved
-	# file, copied out here for the runner's own reading of it.
+	# A fetch's result can be past Claude Code's output limit, so it reaches
+	# the stream only as a saved file, copied out here for the runner's own
+	# reading of it (a ticket digest, ticket search, mail triage or the
+	# ticket status check).
 	local spill_dir=""
-	jq -e '.ticket_digest or .ticket_search or .mail_triage' > /dev/null 2>&1 <<< "$step_json" && spill_dir="$PASS_SCRATCH/${id}-spill"
+	jq -e '.kind == "fetch"' > /dev/null 2>&1 <<< "$step_json" && spill_dir="$PASS_SCRATCH/${id}-spill"
 	local rc
 	desk_call_model \
 		--scratch "$call_scratch" \
