@@ -240,6 +240,12 @@ export DESK_DENY_HOOK_SCRIPT
 # yet wired to it) is resolved into an actual tab once the pass is done,
 # below.
 desk_prune_old_runs
+# A calls_root moved the runs elsewhere: the old root is swept by the same
+# rule until it is empty.
+if [ "$DESK_RUNS_ROOT" != "$DESK_STATE_DIR/runs" ] && [ -d "$DESK_STATE_DIR/runs" ]; then
+	desk_prune_old_runs "" "$DESK_STATE_DIR/runs"
+	rmdir "$DESK_STATE_DIR/runs" 2> /dev/null
+fi
 # Left by passes from before a pass ran once a day, when failed sources were
 # retried from a same-day cache.
 [ -d "$DESK_STATE_DIR/fetch-cache" ] && rm -rf "${DESK_STATE_DIR:?}/fetch-cache"

@@ -275,8 +275,10 @@ cfg2="$ROOT/instance/config.json"
 mkdir -p "$ROOT/instance"
 jq '.calls_root = "calls/" | .passes = {other: .passes.testpass}' "$cfg" > "$cfg2"
 : > "$CALL_LOG"
+mkdir -p "$STATE/runs/other-$old_date/Z"
 env -u DESK_RUNS_ROOT -u DESK_SCRATCH_ROOT DESK_CONFIG="$cfg2" "$DESK_RUN" other > "$ROOT/run2.out" 2>&1
 assert_eq "the run succeeds" "0" "$?"
+assert_true "the old runs root is still swept by the same rule" "$([ ! -d "$STATE/runs/other-$old_date" ] && echo true || echo false)"
 # The root is resolved (no trailing slash, symlinks followed), as a cwd is.
 calls="$(cd -P "$ROOT/instance/calls" && pwd -P)"
 assert_true "a visible call's cwd is under <calls_root>/runs, relative to the config" \

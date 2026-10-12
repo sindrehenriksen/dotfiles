@@ -57,7 +57,7 @@ desk_pass_scratch_dir() {
 	echo "$dir"
 }
 
-# desk_prune_old_runs [<now_epoch>]
+# desk_prune_old_runs [<now_epoch>] [<runs root>]
 # Removes any $DESK_RUNS_ROOT/<pass>-<date> directory whose <date> is more
 # than 7 days old, taking each visible
 # call's own CLAUDE_CONFIG_DIR project folder down with it — a persisted call's transcript and
@@ -73,11 +73,11 @@ desk_pass_scratch_dir() {
 # that is not the runner's own (a resume), or one the follow-up tab opened
 # (desk_mark_opened_for_user).
 desk_prune_old_runs() {
-	local now="${1:-$(desk_now)}"
+	local now="${1:-$(desk_now)}" runs_root="${2:-$DESK_RUNS_ROOT}"
 	local config_dir="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
-	[ -d "$DESK_RUNS_ROOT" ] || return 0
+	[ -d "$runs_root" ] || return 0
 	local d base date_part date_epoch age_days step_dir kept user_cwds="" loaded="false"
-	for d in "$DESK_RUNS_ROOT"/*; do
+	for d in "$runs_root"/*; do
 		[ -d "$d" ] || continue
 		base="$(basename "$d")"
 		date_part="$(printf '%s' "$base" | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}$')"
