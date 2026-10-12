@@ -126,8 +126,12 @@ desk_build_ticket_cache() {
 		issues="$(desk_parse_jira_issues "$text")" || continue
 		any_valid="true"
 		# Whether this page says more follow; the last page read decides.
-		more="$(jq -r '((.nextPageToken // .issues.pageInfo.endCursor // null) != null
-			and (.isLast != true) and (.issues.pageInfo.hasNextPage? // true) != false)' <<< "$text" 2> /dev/null)"
+		# The REST shape says so with a nextPageToken (and isLast not true),
+		# the GraphQL one with pageInfo.hasNextPage; an endCursor alone, as a
+		# final GraphQL page carries, says nothing.
+		more="$(jq -r '
+			if (.issues | type) == "object" then (.issues.pageInfo.hasNextPage == true)
+			else ((.nextPageToken // null) != null and .isLast != true) end' <<< "$text" 2> /dev/null)"
 		local issue key summary status
 		while IFS= read -r issue; do
 			[ -n "$issue" ] || continue
