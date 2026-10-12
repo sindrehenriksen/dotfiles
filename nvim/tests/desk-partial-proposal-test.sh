@@ -164,5 +164,26 @@ assert_true "W's own refusal is logged" "$(grep -q 'F-private.*failed this pass'
 assert_eq "W itself is recorded as the step that failed the pass" "W" "$(jq -r '.passes.testpass.stopped_at' "$DESK_STATUS_FILE")"
 
 echo
+echo "=== a close step that fails before J: J and the rest still run, the pass reads partial ==="
+rm -rf "$STATE"
+: > "$J_CALLS"
+cat > "$FAKEBIN/session-status.sh" <<'FAKE'
+#!/usr/bin/env bash
+echo "reader broken" >&2
+exit 1
+FAKE
+chmod +x "$FAKEBIN/session-status.sh"
+cfg4="$ROOT/config4.json"
+jq --arg prompt "$prompt" '.passes.testpass.steps = [
+	{id: "close", kind: "close", prompt: $prompt, tools: ["Read"], connector: false, timeout: 30},
+	{id: "J", kind: "judge", prompt: $prompt, tools: ["Read"], connector: false, timeout: 30}
+]' "$cfg" > "$cfg4"
+DESK_CONFIG="$cfg4" "$DESK_RUN" testpass > "$ROOT/run4.out" 2>&1
+assert_eq "desk-run exits 0" "0" "$?"
+assert_true "J still ran" "$([ -s "$J_CALLS" ] && echo true || echo false)"
+assert_eq "the pass reads partial" "partial" "$(jq -r '.passes.testpass.result' "$DESK_STATUS_FILE")"
+assert_eq "the close step is named as failed" '["close"]' "$(jq -c '.passes.testpass.failed_sources' "$DESK_STATUS_FILE")"
+
+echo
 echo "=== summary: $pass passed, $fail failed ==="
 [ "$fail" -eq 0 ]

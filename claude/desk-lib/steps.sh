@@ -416,14 +416,17 @@ desk_seed_named_file() {
 }
 
 # desk_failed_source_reason <id> <result>: why a fetch step failed, in a
-# few words for the run status: how its call ended when that was not a
-# success, else that its result could not be used.
+# few words for the run status: that its call never ran, ran out of time,
+# or ended some other way than a success, else that its result could not
+# be used.
 desk_failed_source_reason() {
 	local id="$1" result="$2" ended
 	ended="$(cat "$PASS_SCRATCH/$id.call-end" 2> /dev/null)"
 	if [ "$result" = "timeout" ]; then
 		printf 'its call ran out of time'
-	elif [ -n "$ended" ] && [[ "$ended" != success* ]]; then
+	elif [ -z "$ended" ]; then
+		printf 'its call never ran'
+	elif [[ "$ended" != success* ]]; then
 		printf 'its call ended %s' "$ended"
 	else
 		printf 'its call ran, but its result could not be used (the log says why)'
@@ -771,15 +774,15 @@ desk_followed_sessions() {
 # passed since, today not counted, desk-lib/lock.sh's
 # desk_working_days_since — not a calendar-day approximation). Each carries
 # `idle_working_days`, and `followed` (desk_followed_sessions's entry) when
-# it is on the follow list, which the caller offers only once done. The
-# away-days guard is the caller's.
+# it is on the follow list. The away-days guard is the caller's.
 desk_close_candidates() {
 	local close_after_working_days="$1" keep_open_json="$2" followed_json="${3:-}"
 	[ -n "$followed_json" ] || followed_json='{}'
 	local now
 	now="$(desk_now)"
 	local all
-	all="$(session-status.sh 2> /dev/null | jq -s '.')" || return 1
+	all="$(session-status.sh 2> /dev/null)" || return 1
+	all="$(jq -s '.' <<< "$all")" || return 1
 	local pre_filtered
 	pre_filtered="$(jq -c --argjson keep "$keep_open_json" '
 		[ .[] | select(
@@ -974,24 +977,48 @@ desk_step_capture_sessions() {
 	echo "ok"
 }
 
-# A session's whole transcript, as JSON lines, each keeping its own `uuid`,
-# copied for a close or retention call to read as far back as it needs. A
-# call's per-bullet turn citations are checked against exactly this copy.
+# desk_write_transcript_copy <transcript> <readable-out> <jsonl-out>
+# A session's whole transcript twice: as JSON lines at <jsonl-out>, which a
+# call's turn citations are checked against, and at <readable-out> as one
+# plain line per entry for the call to read: the first 8 characters of its
+# uuid, its time and role, then its text, a tool call's name and input, or
+# a tool result's text, newlines flattened. The uuid goes first so it
+# survives the Read tool's cut of a long line, and the line count is the
+# call's `transcript_lines`, so it can read from the end with an offset.
+# Entries with no uuid (summaries, snapshots) are left out. Prints the
+# readable copy's line count.
 desk_write_transcript_copy() {
-	local transcript_path="$1" out_file="$2"
+	local transcript_path="$1" readable="$2" jsonl="$3"
 	if [ -n "$transcript_path" ] && [ -f "$transcript_path" ]; then
-		cp -f "$transcript_path" "$out_file" 2> /dev/null || : > "$out_file"
+		cp -f "$transcript_path" "$jsonl" 2> /dev/null || : > "$jsonl"
 	else
-		: > "$out_file"
+		: > "$jsonl"
 	fi
+	jq -R -r 'fromjson? | select(type == "object" and (.uuid | type) == "string")
+		| (.message.content // "") as $c
+		| (if ($c | type) == "string" then $c
+		   elif ($c | type) == "array" then
+			[$c[] | objects
+			 | if .type == "text" then .text
+			   elif .type == "tool_use" then "[tool " + (.name // "?") + "] " + (.input | tojson)
+			   elif .type == "tool_result" then "[result] " + (
+				if (.content | type) == "string" then .content
+				elif (.content | type) == "array" then ([.content[] | objects | .text // empty] | join(" "))
+				else "" end)
+			   else empty end] | join(" | ")
+		   else "" end) as $text
+		| "\(.uuid[0:8]) \(.timestamp // "") \(.message.role // .type // "?"): \($text | gsub("[\r\n]+"; " "))"' \
+		"$jsonl" > "$readable" 2> /dev/null || : > "$readable"
+	wc -l < "$readable" | tr -d ' '
 }
 
 # desk_session_capture_call <pass> <step_json> <repo> <scheduled_date>
 #   <session_json> <call_id> <label> <placeholders_json>
 # The one per-session capture call the close and retention kinds share: seeds
-# the call's cwd with `session.json` (the reader entry), a copy of the
-# session's whole transcript, which the call reads as far back as it needs,
-# and the marked captures file for placement; makes the call under the
+# the call's cwd with `session.json` (the reader entry), a readable copy of
+# the session's whole transcript (`transcript.txt`, desk_write_transcript_copy),
+# which the call reads as far back as it needs, its line count as the
+# `transcript_lines` placeholder, and the marked captures file for placement; makes the call under the
 # step's own tools and prompt with the step id replaced by `call_id`; and
 # turns the reply into items: the pinned shape, every turn citation checked
 # against the transcript it was given and stripped, then the generic
@@ -1010,11 +1037,11 @@ desk_session_capture_call() {
 
 	# Copied into the call's own cwd by desk_step_model_call, which is the one
 	# directory a scoped Read can reach.
-	local seed="$PASS_SCRATCH/$call_id-seed" tail_copy="$PASS_SCRATCH/$call_id-transcript.jsonl"
+	local seed="$PASS_SCRATCH/$call_id-seed" tail_copy="$PASS_SCRATCH/$call_id-transcript.jsonl" lines
 	mkdir -p "$seed"
 	echo "$sess" > "$seed/session.json"
-	desk_write_transcript_copy "$transcript_path" "$seed/transcript.jsonl"
-	cp -f "$seed/transcript.jsonl" "$tail_copy" 2> /dev/null
+	lines="$(desk_write_transcript_copy "$transcript_path" "$seed/transcript.txt" "$tail_copy")"
+	placeholders="$(jq -c --arg n "${lines:-0}" '. + {transcript_lines: $n}' <<< "$placeholders")"
 	# The marked copy, as J gets: the marks keep a line the call echoes back
 	# from carrying them into the notes.
 	desk_write_marked_head_copy "$repo" "$captures" "$seed/$captures"
@@ -1042,20 +1069,38 @@ desk_session_capture_call() {
 	printf '%s' "$items_json"
 }
 
+# What the close step last offered per session, so a session whose
+# transcript has not changed since is offered again without a second call:
+# {<session id>: {transcript_stamp, why, items}}.
+DESK_CLOSE_OFFERS_FILE="${DESK_CLOSE_OFFERS_FILE:-$DESK_STATE_DIR/close-offers.json}"
+
+# desk_transcript_stamp <path>: the transcript's mtime and size, which
+# change whenever the session writes to it; empty when it is missing.
+desk_transcript_stamp() {
+	[ -n "$1" ] && [ -f "$1" ] || return 0
+	if desk_is_linux; then
+		stat -c '%Y:%s' "$1" 2> /dev/null
+	else
+		stat -f '%m:%z' "$1" 2> /dev/null
+	fi
+}
+
 # desk_step_close <pass> <step_json> <config_json> <repo> <scheduled_date> <file>...
 # The close step closes nothing and stages nothing: it offers. For each live
-# session idle at least `close_after_working_days` (desk_close_candidates),
-# not on `keep_open`, and, if it is followed, only once every ticket it
-# follows is closed: one call over its transcript, whose reply carries a
-# closure note (the items shape) and `why`, one line on why it looks done
-# or idle. What survives is offered in the follow-up tab
-# (desk_follow_up_placeholders' `close_offer`), with each note written to
-# the run directory as an items file; only on the user's yes there does
-# that session end it with close-session.sh and stage the note with
-# desk-propose. Skips every candidate on the first pass after more than
-# `away_days` days away, so a return from a long absence is not a flood of
-# calls. Prints "ok" once every candidate is processed, "failed" only if
-# the mechanism itself (session-status.sh) breaks.
+# session idle at least `close_after_working_days` (desk_close_candidates)
+# and not on `keep_open`: one call over its transcript, whose reply carries
+# a closure note (the items shape) and `why`, one line on why it looks done
+# or idle. A followed session is a candidate like any other; its reader
+# entry carries `followed`, so the call can weigh whether every ticket it
+# follows is closed. A session whose transcript has not changed since its
+# last offer gets that offer again, with no call. What survives is offered
+# in the follow-up tab (desk_follow_up_placeholders' `close_offer`), each
+# note written to the run directory as an items file; only on the user's
+# yes there does that session end it with close-session.sh and stage the
+# note with desk-propose. Skips every candidate on the first pass after
+# more than `away_days` days away, so a return from a long absence is not
+# a flood of calls. Prints "ok" once every candidate is processed, "failed"
+# only if the mechanism itself (session-status.sh) breaks.
 desk_step_close() {
 	local pass="$1" step_json="$2" config_json="$3" repo="$4" scheduled_date="$5"
 	shift 5
@@ -1077,22 +1122,16 @@ desk_step_close() {
 		fi
 	fi
 
-	local candidates followed
-	followed="$(desk_followed_sessions)"
-	candidates="$(desk_close_candidates "$close_after" "$keep_open" "$followed")" || {
+	local candidates
+	candidates="$(desk_close_candidates "$close_after" "$keep_open" "$(desk_followed_sessions)")" || {
 		desk_log "$pass" "close: session-status.sh failed"
 		echo "failed"
 		return
 	}
-	# A followed session holds the plan for its tickets: offered only once
-	# every ticket it follows is closed.
-	local f_name
-	while IFS= read -r f_name; do
-		[ -n "$f_name" ] && desk_log "$pass" "close: session $f_name is followed and not done — not offered"
-	done < <(jq -r '.[] | select(.followed and (.followed.all_closed_since | not)) | .name // .id' <<< "$candidates")
-	candidates="$(jq -c '[.[] | select((.followed | not) or .followed.all_closed_since)]' <<< "$candidates")"
 
-	local n offer='[]'
+	local memo n offer='[]' kept='{}'
+	memo="$(cat "$DESK_CLOSE_OFFERS_FILE" 2> /dev/null)"
+	jq -e 'type == "object"' > /dev/null 2>&1 <<< "$memo" || memo='{}'
 	n="$(jq 'length' <<< "$candidates")"
 	desk_log "$pass" "close: $n candidate(s) idle >= $close_after working days"
 	local offer_dir="$DESK_RUNS_ROOT/$pass-$scheduled_date"
@@ -1100,17 +1139,26 @@ desk_step_close() {
 
 	local i
 	for ((i = 0; i < n; i++)); do
-		local sess id name placeholders items_json why items_file
+		local sess id name placeholders items_json why items_file stamp
 		sess="$(jq -c ".[$i]" <<< "$candidates")"
 		id="$(jq -r '.id' <<< "$sess")"
 		name="$(jq -r '.name // .id' <<< "$sess")"
-		placeholders="$(jq -n --arg sn "$name" --arg sid "$id" --arg today "$(date +%F)" \
-			'{session_name: $sn, session_id: $sid, today: $today}')"
-		items_json="$(desk_session_capture_call "$pass" "$step_json" "$repo" "$scheduled_date" \
-			"$sess" "close-$id" "close:$name" "$placeholders")" || continue
-		why="$(desk_extract_final_text "$PASS_SCRATCH/close-$id-stream.jsonl" \
-			| jq -r 'if type == "object" then (.why // "") else "" end | tostring' 2> /dev/null \
-			| tr '\000-\037' ' ' | sed 's/^ *//; s/ *$//' | cut -c1-240)"
+		stamp="$(desk_transcript_stamp "$(jq -r '.transcript_path // empty' <<< "$sess")")"
+		if [ -n "$stamp" ] && jq -e --arg id "$id" --arg st "$stamp" '.[$id].transcript_stamp == $st' > /dev/null 2>&1 <<< "$memo"; then
+			why="$(jq -r --arg id "$id" '.[$id].why // ""' <<< "$memo")"
+			items_json="$(jq -c --arg id "$id" '.[$id].items' <<< "$memo")"
+			desk_log "$pass" "close: $name unchanged since its last offer — offered again, no call"
+		else
+			placeholders="$(jq -n --arg sn "$name" --arg sid "$id" --arg today "$(date +%F)" \
+				'{session_name: $sn, session_id: $sid, today: $today}')"
+			items_json="$(desk_session_capture_call "$pass" "$step_json" "$repo" "$scheduled_date" \
+				"$sess" "close-$id" "close:$name" "$placeholders")" || continue
+			why="$(desk_extract_final_text "$PASS_SCRATCH/close-$id-stream.jsonl" \
+				| jq -r 'if type == "object" then (.why // "") else "" end | tostring' 2> /dev/null \
+				| tr '\000-\037' ' ' | sed 's/^ *//; s/ *$//')"
+		fi
+		kept="$(jq -c --arg id "$id" --arg st "$stamp" --arg why "$why" --argjson items "$items_json" \
+			'.[$id] = {transcript_stamp: $st, why: $why, items: $items}' <<< "$kept")"
 		items_file="$offer_dir/close-$id.items.json"
 		jq -n --argjson items "$items_json" '{items: $items}' > "$items_file"
 		offer="$(jq -c --argjson s "$sess" --arg why "$why" --arg f "$items_file" --argjson items "$items_json" '
@@ -1119,6 +1167,9 @@ desk_step_close() {
 		' <<< "$offer")"
 		desk_log "$pass" "close: offering to close $name"
 	done
+	# Only this pass's candidates are kept: a session that came back into
+	# use, or ended, starts afresh next time.
+	desk_write_atomic "$DESK_CLOSE_OFFERS_FILE" "$kept"
 	[ -z "${PASS_SCRATCH:-}" ] || printf '%s\n' "$offer" > "$PASS_SCRATCH/close-offer.json"
 	echo "ok"
 }
@@ -1364,7 +1415,7 @@ desk_open_follow_up_tab() {
 # desk_follow_up_run_status <pass>
 # One paragraph on how this pass's run went, from the status file the pass
 # has just written and the pass's step list: which steps it has, and whether
-# they all ran, which sources failed, or where it stopped; then each step's
+# they all ran, which steps failed, or where it stopped; then each step's
 # own note on how it ran (desk_run_note), such as a write that was only
 # logged or a close that was log-only.
 desk_follow_up_run_status() {
@@ -1379,7 +1430,7 @@ desk_follow_up_run_status() {
 			elif .mail_triage then "mailbox listing for mail triage"
 			elif .kind == "write" and $triage then "mail triage: marking the fetched digests read and trashing automated mail"
 			else {commit_push: "commit of the notes", fetch: "fetch", judge: "judge, which proposes the suggestions",
-				write: "marking the fetched mail read", capture: "session capture", close: "closing idle sessions",
+				write: "marking the fetched mail read", capture: "session capture", close: "offering idle sessions to close",
 				retention: "transcript deletion warnings", open_tab: "tab"}[.kind] // .kind end) + ")"]
 		| join(", ")' "$DESK_CONFIG" 2> /dev/null)"
 	local summary
@@ -1388,7 +1439,7 @@ desk_follow_up_run_status() {
 		| (($s.failed_sources // []) | join(", ")) as $failed
 		| "Its steps, in order: \($steps). "
 		+ (if $s.result == "ok" then "It finished ok: every step ran."
-			elif $s.result == "partial" then "It finished partial: these sources failed, and nothing retries them today: \($failed). Every other step ran."
+			elif $s.result == "partial" then "It finished partial: these steps failed, and nothing reruns them today: \($failed). Every other step ran."
 			elif $s.result == "failed" then "It failed at step \($s.stopped_at // "unknown"), so the steps after that did not run, and nothing reruns them today."
 				+ (if $failed != "" then " These sources had failed too: \($failed)." else "" end)
 			else "Its result was not recorded." end)')"
@@ -1489,7 +1540,7 @@ desk_follow_up_placeholders() {
 		dropped="$(cat "$PASS_SCRATCH/dropped.json" 2> /dev/null)"
 		jq -e 'type == "array"' > /dev/null 2>&1 <<< "$dropped" || dropped='[]'
 	fi
-	jq -c --arg prefix "$pass-$scheduled_date-" --arg today "$(date +%F)" --arg pass "$pass" \
+	jq -c --arg prefix "$pass-$scheduled_date-" --arg today "$(date +%F)" --arg pass "$pass" --arg scheduled_date "$scheduled_date" \
 		--argjson capped "$capped" --argjson near "$near" --argjson dropped "$dropped" --argjson chat "$chat" --argjson close_offer "$close_offer" \
 		--argjson mail_noise "$mail_noise" --argjson mail_offer "$mail_offer" \
 		--arg run_status "$(desk_follow_up_run_status "$pass")" '
@@ -1498,6 +1549,7 @@ desk_follow_up_placeholders() {
 		| {
 			pass: $pass,
 			today: $today,
+			scheduled_date: $scheduled_date,
 			run_status: $run_status,
 			item_count: ($mine | length | tostring),
 			items: ($mine | map({file, kind, headline, tier, source, before, after, capture_kind}

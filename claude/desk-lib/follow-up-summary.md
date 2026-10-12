@@ -70,7 +70,7 @@ Write, in this order:
 
 If the user says yes to the offered mail, trash exactly those threads with the Gmail trash-thread tool, one call per `thread_id` on the list, all of them or only the ones the user names, and nothing else; then say in one line what went. Never trash a thread without that yes, and never one that is not on the list.
 
-If the user says to close some or all of the offered sessions, then for each one they named, and no other: run `close-session.sh <session_id>`, and once it reports the session closed, stage its closure note with `desk-propose --pass {{pass}} --date {{today}} <items_file>`. Then say in a line what closed and what was staged, and pass on in its own words anything `close-session.sh` refused or left open. Never close a session without that yes.
+If the user says to close some or all of the offered sessions, then for each one they named, and no other: run `close-session.sh <session_id>`, and once it reports the session closed, stage its closure note with `desk-propose --pass {{pass}} --date {{scheduled_date}} <items_file>`. Then say in a line what closed and what was staged, and pass on in its own words anything `close-session.sh` refused or left open. Never close a session without that yes.
 
 If the user later asks for one of the held-back ones to be proposed, stage it with `desk-propose` (`desk-propose --help` has the item shape), as a suggestion they review like any other, never by editing their notes.
 

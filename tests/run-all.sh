@@ -53,6 +53,7 @@ BASH_SUITES=(
 	nvim/tests/desk-example-instance-test.sh
 	nvim/tests/desk-fetch-window-test.sh
 	nvim/tests/desk-followup-tab-test.sh
+	nvim/tests/desk-follow-up-inputs-test.sh
 	nvim/tests/desk-followup-summary-test.sh
 	nvim/tests/desk-followup-upper-c-test.sh
 	nvim/tests/desk-generic-config-test.sh

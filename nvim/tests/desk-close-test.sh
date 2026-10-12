@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # claude/desk-lib/steps.sh's desk_step_close, which only offers: an idle
 # session is offered with its closure note and why, nothing is signaled,
-# recorded or staged; a followed session is offered only once everything it
-# follows is closed; keep_open, an invalid turn citation and the away_days
-# valve each keep a session out of the offer. session-status.sh,
+# recorded or staged; a followed session is offered like any other, its
+# follow state passed to the call; the call reads a readable copy of the
+# whole transcript with its line count; an unchanged transcript is offered
+# again without a call; keep_open, an invalid turn citation and the
+# away_days valve each keep a session out of the offer. session-status.sh,
 # session-recorder.sh and the tab helper are faked; the sessions are sleeps
 # this script starts and owns, run under the name `claude`, and none may be
 # signaled.
@@ -76,8 +78,7 @@ export DESK_SESSION_RECORDER_BIN="$FAKEBIN/session-recorder-fake.sh"
 
 # session-status.sh is looked up bare on PATH (desk_close_candidates); this
 # fake reads its candidate list from $SESSION_STATUS_FIXTURE, which each
-# case below writes before calling desk_step_close, and re-reads it live
-# for the close step's own "just before" re-check.
+# case below writes before calling desk_step_close.
 SESSION_STATUS_FIXTURE="$ROOT/sessions.jsonl"
 cat > "$FAKEBIN/session-status.sh" <<FAKE
 #!/usr/bin/env bash
@@ -97,6 +98,9 @@ FAKE_CLAUDE_ITEMS_FILE="$ROOT/fake-claude-items.json"
 cat > "$FAKEBIN/claude" <<'FAKE'
 #!/usr/bin/env bash
 echo call >> "$FAKE_CLAUDE_CALLS"
+# The rendered prompt is the last argument.
+for a in "$@"; do last="$a"; done
+printf '%s\n' "$last" > "$FAKE_CLAUDE_CALLS.prompt"
 cat "$FAKE_CLAUDE_ITEMS_FILE"
 echo '{"type":"result","subtype":"success"}'
 exit 0
@@ -139,7 +143,8 @@ source "$LIB/lock.sh"
 # shellcheck source=../../claude/desk-lib/steps.sh
 source "$LIB/steps.sh"
 
-step_json='{"id":"close","kind":"close","tools":["Read"],"connector":false,"timeout":30}'
+printf 'session {{session_name}} lines={{transcript_lines}}\n' > "$ROOT/close-prompt.md"
+step_json='{"id":"close","kind":"close","prompt":"close-prompt.md","tools":["Read"],"connector":false,"timeout":30}'
 config_json='{"close_after_working_days": 3, "keep_open": ["kept-session"], "away_days": 5}'
 
 write_items_reply() {
@@ -158,8 +163,15 @@ spawn_throwaway() {
 	echo $!
 }
 
+# A long transcript, the cited turn its very first entry: a copy of only its
+# end would lose it.
 transcript="$ROOT/transcript.jsonl"
-printf '{"uuid":"aaaaaaaa-0000-0000-0000-000000000000","type":"assistant"}\n' > "$transcript"
+{
+	printf '{"uuid":"aaaaaaaa-0000-0000-0000-000000000000","type":"user","message":{"role":"user","content":"start the work\\nplease"}}\n'
+	for k in $(seq 1 499); do
+		printf '{"uuid":"%08d-0000-0000-0000-000000000000","type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"step %d"}]}}\n' "$k" "$k"
+	done
+} > "$transcript"
 session_line() { # <id> <name> <pid>
 	jq -cn --arg id "$1" --arg name "$2" --argjson pid "$3" --arg tp "$transcript" \
 		'{id:$id, name:$name, live:true, has_start_event:true, last_activity:0, pid:$pid, transcript_path:$tp}'
@@ -188,13 +200,24 @@ items_file="$(offer '.[0].items_file' | jq -r .)"
 assert_eq "its items file is beside the run, ready for desk-propose" "$DESK_RUNS_ROOT/testpass-2026-09-28/close-11111111-1111-4111-8111-111111111111.items.json" "$items_file"
 assert_eq "and holds the note" "closure notes" "$(jq -r '.items[0].after' "$items_file" 2> /dev/null)"
 assert_eq "a keep_open session is not offered" "1" "$(offer 'length')"
-assert_true "the call read the whole transcript copy" \
-	"$([ -f "$PASS_SCRATCH/close-11111111-1111-4111-8111-111111111111-transcript.jsonl" ] && echo true || echo false)"
+readable="$PASS_SCRATCH/close-11111111-1111-4111-8111-111111111111-seed/transcript.txt"
+assert_eq "the call gets a readable copy of the whole transcript" "500" "$(wc -l < "$readable" | tr -d ' ')"
+assert_eq "its first entry, uuid first, newlines flattened" "aaaaaaaa  user: start the work please" "$(head -n 1 "$readable")"
+assert_true "and its line count" "$(grep -q 'lines=500' "$FAKE_CLAUDE_CALLS.prompt" && echo true || echo false)"
+: > "$FAKE_CLAUDE_CALLS"
+result="$(desk_step_close "testpass" "$step_json" "$config_json" "$repo" "2026-09-29" "${files[@]}")"
+assert_eq "the next pass, transcript unchanged: offered again" '["a-session","its PR merged and nothing is left"]' "$(offer '[.[] | .name, .why]')"
+assert_eq "with no call" "0" "$(wc -l < "$FAKE_CLAUDE_CALLS" | tr -d ' ')"
+assert_eq "its items file is written for that day too" "closure notes" \
+	"$(jq -r '.items[0].after' "$DESK_RUNS_ROOT/testpass-2026-09-29/close-11111111-1111-4111-8111-111111111111.items.json" 2> /dev/null)"
+printf '{"uuid":"bbbbbbbb-0000-0000-0000-000000000000","type":"user","message":{"role":"user","content":"more"}}\n' >> "$transcript"
+result="$(desk_step_close "testpass" "$step_json" "$config_json" "$repo" "2026-09-30" "${files[@]}")"
+assert_eq "a changed transcript gets a fresh call" "1" "$(wc -l < "$FAKE_CLAUDE_CALLS" | tr -d ' ')"
 kill "$pid1" "$pid_kept" 2> /dev/null
 rm -rf "$PASS_SCRATCH"
 
 echo
-echo "=== a followed session: offered only once everything it follows is closed ==="
+echo "=== a followed session is offered like any other, its follow state passed to the call ==="
 rm -rf "$STATE"
 mkdir -p "$STATE"
 : > "$FAKE_CLAUDE_CALLS"
@@ -210,8 +233,9 @@ jq -n '{all_closed: {"33333333-3333-4333-8333-333333333333": 1791100000}}' > "$S
 write_items_reply "[turn aaaaaaaa]"
 result="$(desk_step_close "testpass" "$step_json" "$config_json" "$repo" "2026-09-29" "${files[@]}")"
 assert_eq "the step reports ok" "ok" "$result"
-assert_eq "only the done one is offered, marked followed" '[["followed-done",true]]' "$(offer '[.[] | [.name, .followed]]')"
-assert_eq "no call was made for the open one" "1" "$(wc -l < "$FAKE_CLAUDE_CALLS" | tr -d ' ')"
+assert_eq "both are offered, marked followed" '[["followed-open",true],["followed-done",true]]' "$(offer '[.[] | [.name, .followed]]')"
+assert_eq "the call sees whether everything it follows is closed" "1791100000" \
+	"$(jq -r '.followed.all_closed_since' "$PASS_SCRATCH/close-33333333-3333-4333-8333-333333333333-seed/session.json" 2> /dev/null)"
 kill "$pid2" "$pid3" 2> /dev/null
 rm -rf "$PASS_SCRATCH"
 

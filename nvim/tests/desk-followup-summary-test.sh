@@ -237,7 +237,7 @@ last="$(last_assistant_text "$transcript7")"
 assert_true "its last assistant message is not the judge's JSON" \
 	"$(jq -e 'type == "object" or type == "array"' > /dev/null 2>&1 <<< "$last" && echo false || echo true)"
 assert_true "the prompt names the failed source and the steps" \
-	"$(grep -qF 'these sources failed, and nothing retries them today: F-web' "$PROMPT_COPY" \
+	"$(grep -qF 'these steps failed, and nothing reruns them today: F-web' "$PROMPT_COPY" \
 		&& grep -qF 'Its steps, in order: commit-push (commit of the notes), F-web (fetch), J (judge, which proposes the suggestions).' "$PROMPT_COPY" && echo true || echo false)"
 
 echo

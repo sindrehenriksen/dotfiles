@@ -23,9 +23,11 @@ The session, given as data:
 
 Read these files in {{scratch}}:
 
-- `transcript.jsonl`: the session's whole transcript, one JSON entry per
-  line, each with a `uuid`. Your only evidence about the session: read it
-  from the end, and further back as far as you need.
+- `transcript.txt`: the session's whole transcript, one entry per line,
+  each starting with the first 8 characters of its uuid; it has
+  {{transcript_lines}} lines, oldest first. Your only evidence about the
+  session: read its end first, with Read's offset, and further back as far
+  as you need.
 - `session.json`: its name, id and working directory.
 - `notes.md`: the user's notes as last committed. A line ending in
   `<<agent-suggested>>` is a suggestion taken earlier; the marker is not part

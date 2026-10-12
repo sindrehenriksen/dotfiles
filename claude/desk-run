@@ -358,6 +358,10 @@ stopped_at=""
 # Source (fetch) steps get their own failure mode: recorded here, never
 # aborting the pass outright, and never retried the same day.
 failed_sources=()
+# Steps that only read or offer (retention, close) fail the same way: the
+# pass carries on, so the judge and the write still run, and the failure
+# is reported. Unlike a source, theirs never holds the fetch window back.
+failed_steps=()
 # Whether any fetch step of THIS pass actually ran (as opposed to being
 # skipped by the weekday_only_pass/weekend guard above) — desk_status_
 # set_fetch_ok only ever advances the window when this is true, so a
@@ -535,9 +539,9 @@ $(jq -r '(.entries // [])[] | .url // empty' "$PASS_SCRATCH/ticket-digest.json" 
 					# own {kept, overflow} pair) only exists in this branch's
 					# own scope; the end-of-pass status write below reads it
 					# back out of this variable.
-					proposal_overflow_json="$(jq -c '
-						{act: 0, worth_knowing: 0, wildcard: 0}
-						+ ([.overflow[] | .tier] | group_by(.) | map({(.[0]): length}) | add // {})
+					proposal_overflow_json="$(jq -c --argjson prev "$proposal_overflow_json" '
+						([.overflow[] | .tier] | group_by(.) | map({(.[0]): length}) | add // {}) as $mine
+						| $prev | with_entries(.value += ($mine[.key] // 0))
 					' <<< "$capped")"
 					items_file="$PASS_SCRATCH/${id}-validated-items.json"
 					jq -n --argjson items "$kept_json" '{items: $items}' > "$items_file"
@@ -784,6 +788,12 @@ $(jq -r '(.entries // [])[] | .url // empty' "$PASS_SCRATCH/ticket-digest.json" 
 
 	case "$result" in
 		failed | timeout | error)
+			if [ "$kind" = "retention" ] || [ "$kind" = "close" ]; then
+				failed_steps+=("$id")
+				desk_log "$pass" "step $id ($kind): $result (it only reads or offers — pass continues, flagged partial)"
+				desk_run_note "$id failed: it could not read the sessions or the notes' ledger (the log says which)."
+				continue
+			fi
 			overall_result="failed"
 			stopped_at="$id"
 			break
@@ -799,10 +809,11 @@ done
 # today (desk_guard_already_ran_today); the window stays where it was, so
 # the next pass covers what they missed.
 failed_sources_json="[]"
-if [ "${#failed_sources[@]}" -gt 0 ]; then
-	failed_sources_json="$(printf '%s\n' "${failed_sources[@]}" | jq -R . | jq -s .)"
+if [ "${#failed_sources[@]}" -gt 0 ] || [ "${#failed_steps[@]}" -gt 0 ]; then
+	failed_sources_json="$(printf '%s\n' "${failed_sources[@]}" "${failed_steps[@]}" | sed '/^$/d' | jq -R . | jq -s .)"
 	[ "$overall_result" = "ok" ] && overall_result="partial"
-elif [ "$overall_result" != "failed" ]; then
+fi
+if [ "${#failed_sources[@]}" -eq 0 ] && [ "$overall_result" != "failed" ]; then
 	# Gated on the PASS's own overall_result, not just on failed_sources
 	# being empty: a later, non-source step (judge/write/close) can still
 	# hard-fail and `break` the loop with every fetch itself having
