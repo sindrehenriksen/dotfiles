@@ -49,7 +49,7 @@ Mail the pass judged no longer useful (answered, covered in the notes, done or s
 {{mail_offer}}
 ```
 
-Sessions the pass offers to close, none of them closed or noted yet, `[]` when none: each with its `name`, `session_id`, how many whole working days it has been idle, whether it is `followed` (offered only because every ticket it follows is closed), `why` it looks done or idle, the closure `note` it would stage, and the `items_file` holding that note:
+Sessions the pass offers to close, none of them closed or noted yet, `[]` when none: each with its `name`, `session_id`, how many whole working days it has been idle, whether it is `followed` (it follows tickets for the user, which the `why` weighs), `why` it looks done or idle, the closure `note` it would stage, and the `items_file` holding that note:
 
 ```json
 {{close_offer}}
