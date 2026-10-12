@@ -841,11 +841,15 @@ desk_name_in_notes() {
 
 # The capture step's three-ground exclusion of the runner's own sessions
 # (described there), as a jq definition for every step that selects
-# sessions. Needs `$runs_root` bound to $DESK_RUNS_ROOT.
-DESK_JQ_IS_DESK_RUN='def is_desk_run:
+# sessions. Needs `$runs_root` bound to $DESK_RUNS_ROOT and `$scratch_root`
+# to $DESK_SCRATCH_ROOT: a cwd at or below either is a call's, and a
+# directory beside them that only shares a prefix (the workspace the roots
+# sit in, under `calls_root`) is not.
+DESK_JQ_IS_DESK_RUN='def under($root): ($root != "") and ((.cwd // "") as $c | $c == $root or ($c | startswith($root + "/")));
+def is_desk_run:
 	(.any_desk_run_start == true)
 	or ((.name // "") | startswith("desk-"))
-	or (($runs_root != "") and ((.cwd // "") | startswith($runs_root)));'
+	or under($runs_root) or under($scratch_root);'
 
 # True (exit 0) if $1 (ledger-state's own JSON) already holds an item for
 # (session_id $2, capture_kind $3) . Captures dedup on
@@ -916,7 +920,7 @@ desk_step_capture_sessions() {
 	# somehow both wrong (an old recorder record predating this field, a
 	# session renamed away from the convention).
 	local candidates
-	candidates="$(jq -c --arg runs_root "$DESK_RUNS_ROOT" "$DESK_JQ_IS_DESK_RUN"'
+	candidates="$(jq -c --arg runs_root "$DESK_RUNS_ROOT" --arg scratch_root "$DESK_SCRATCH_ROOT" "$DESK_JQ_IS_DESK_RUN"'
 		[ .[] | select(.has_start_event == true and (is_desk_run | not)) ] as $eligible
 		| [ $eligible[] | select(.live == true) | . + {capture_kind: "running"} ]
 		+ [ $eligible[] | select(.left_open == true) | . + {capture_kind: "dropped"} ]

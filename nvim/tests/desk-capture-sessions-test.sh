@@ -116,6 +116,11 @@ sess() { # id name name_source live has_start_event source ended end_reason [any
 	# Excluded on its cwd alone (under $DESK_RUNS_ROOT), even with a plain
 	# name and source — the third, independent defense.
 	sess "sess-runs-root-cwd" "Some Call" "user" true true "startup" false "" false "$DESK_RUNS_ROOT/morning-2026-09-28/F"
+	sess "sess-scratch-root-cwd" "Other Call" "user" true true "startup" false "" false "$DESK_SCRATCH_ROOT/morning-F-1-2-3"
+	# The directory the roots sit in (a workspace, under calls_root) and a
+	# sibling sharing a prefix are the user's own.
+	sess "sess-workspace-cwd" "Workspace Work" "user" true true "startup" false "" false "$(dirname "$DESK_RUNS_ROOT")"
+	sess "sess-prefix-cwd" "Prefix Work" "user" true true "startup" false "" false "${DESK_RUNS_ROOT}-other"
 } > "$SESSION_STATUS_FIXTURE"
 
 PASS_SCRATCH="$(mktemp -d)"
@@ -173,6 +178,12 @@ assert_true "a session named like a visible call (desk-...) is excluded on its n
 
 assert_true "a session whose cwd sits under the runs root is excluded on that alone" \
 	"$([ -z "$(by_sid sess-runs-root-cwd)" ] && echo true || echo false)"
+assert_true "so is one under the scratch root" \
+	"$([ -z "$(by_sid sess-scratch-root-cwd)" ] && echo true || echo false)"
+assert_true "a session in the directory the roots sit in is the user's, and captured" \
+	"$([ -n "$(by_sid sess-workspace-cwd)" ] && echo true || echo false)"
+assert_true "so is one in a sibling that only shares the runs root's prefix" \
+	"$([ -n "$(by_sid sess-prefix-cwd)" ] && echo true || echo false)"
 
 echo
 echo "=== a second capture pass: already-ledgered captures never duplicate ==="

@@ -75,6 +75,9 @@ if ! jq -e . > /dev/null 2>&1 <<< "$config"; then
 	exit 2
 fi
 
+# Where the model calls run, before anything below makes a directory there.
+desk_apply_calls_root "$config" "$(cd "$(dirname "$DESK_CONFIG")" && pwd)"
+
 pass_config="$(jq -c --arg p "$pass" '.passes[$p] // empty' <<< "$config")"
 if [ -z "$pass_config" ]; then
 	desk_log "$pass" "unknown pass (no .passes.$pass in \$DESK_CONFIG)"

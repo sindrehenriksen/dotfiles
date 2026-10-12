@@ -270,5 +270,18 @@ assert_true "it marks F's step as opened for the user, so the prune leaves it" \
 	"$([ -e "$f_scratch.opened-for-user" ] && echo true || echo false)"
 
 echo
+echo "=== calls_root: every call runs under the config's directory for it ==="
+cfg2="$ROOT/instance/config.json"
+mkdir -p "$ROOT/instance"
+jq '.calls_root = "calls" | .passes = {other: .passes.testpass}' "$cfg" > "$cfg2"
+: > "$CALL_LOG"
+env -u DESK_RUNS_ROOT -u DESK_SCRATCH_ROOT DESK_CONFIG="$cfg2" "$DESK_RUN" other > "$ROOT/run2.out" 2>&1
+assert_eq "the run succeeds" "0" "$?"
+assert_true "a visible call's cwd is under <calls_root>/runs, relative to the config" \
+	"$(grep -qxF "CWD=$ROOT/instance/calls/runs/other-$today/F" "$CALL_LOG" && echo true || echo false)"
+assert_true "an ephemeral call's is under <calls_root>/scratch" \
+	"$(grep -qE "^CWD=$ROOT/instance/calls/scratch/other-H-" "$CALL_LOG" && echo true || echo false)"
+
+echo
 echo "=== summary: $pass passed, $fail failed ==="
 [ "$fail" -eq 0 ]

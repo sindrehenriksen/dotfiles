@@ -100,7 +100,7 @@ desk_retention_candidates() {
 	all="$(desk_sessions_in_notes "$repo" "$all" "$@")" || return 1
 	local projects="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects/"
 	local eligible
-	eligible="$(jq -c --arg runs_root "$DESK_RUNS_ROOT" --arg projects "$projects" \
+	eligible="$(jq -c --arg runs_root "$DESK_RUNS_ROOT" --arg scratch_root "$DESK_SCRATCH_ROOT" --arg projects "$projects" \
 		"$DESK_JQ_IS_DESK_RUN"'
 		[ .[] | select(
 			(.live != true)

@@ -32,6 +32,9 @@ DESK_STATE_DIR="${DESK_STATE_DIR:-$HOME/.local/state/desk}"
 DESK_STATUS_FILE="${DESK_STATUS_FILE:-$DESK_STATE_DIR/status.json}"
 DESK_LOCK_DIR="${DESK_LOCK_ROOT:-$DESK_STATE_DIR/lock}"
 DESK_GUARD_DIR="${DESK_GUARD_ROOT:-$DESK_STATE_DIR/guard}"
+# Whether the caller set the call roots itself, which wins over the
+# config's `calls_root` (desk_apply_calls_root).
+DESK_ROOTS_FROM_ENV="${DESK_SCRATCH_ROOT:+scratch}${DESK_RUNS_ROOT:+runs}"
 DESK_SCRATCH_ROOT="${DESK_SCRATCH_ROOT:-$DESK_STATE_DIR/scratch}"
 DESK_LOG_DIR="${DESK_LOG_DIR:-$DESK_STATE_DIR/logs}"
 # Durable per-call scratch dirs for a "visible" (persisted) call: kept here, never under
@@ -39,6 +42,23 @@ DESK_LOG_DIR="${DESK_LOG_DIR:-$DESK_STATE_DIR/logs}"
 # so a `claude --resume` after the pass finishes still finds its cwd. See
 # claude/desk-lib/model-call.sh's desk_pass_scratch_dir/desk_prune_old_runs.
 DESK_RUNS_ROOT="${DESK_RUNS_ROOT:-$DESK_STATE_DIR/runs}"
+
+# desk_apply_calls_root <config-json> <config-dir>: the config's
+# `calls_root`, when set, is where every model call runs: visible calls
+# under <calls_root>/runs, the rest under <calls_root>/scratch. A leading
+# `~` is expanded and a relative path is taken from the config's directory.
+# A DESK_RUNS_ROOT or DESK_SCRATCH_ROOT the caller set still wins.
+desk_apply_calls_root() {
+	local root
+	root="$(jq -r '.calls_root // empty' <<< "$1" 2> /dev/null)"
+	[ -n "$root" ] || return 0
+	root="${root/#\~/$HOME}"
+	case "$root" in /*) ;; *) root="$2/$root" ;; esac
+	[[ "$DESK_ROOTS_FROM_ENV" == *runs* ]] || DESK_RUNS_ROOT="$root/runs"
+	[[ "$DESK_ROOTS_FROM_ENV" == *scratch* ]] || DESK_SCRATCH_ROOT="$root/scratch"
+	mkdir -p "$DESK_RUNS_ROOT" "$DESK_SCRATCH_ROOT" 2> /dev/null
+	export DESK_RUNS_ROOT DESK_SCRATCH_ROOT
+}
 
 # How long a lock wait gives up after, and how often it polls.
 # Both are overridable so a test never waits the real default.
