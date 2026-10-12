@@ -63,7 +63,7 @@ desk_call_model \
 	--restricted "${DESK_CANARY_RESTRICTED:-true}" \
 	--mcp-config "$SCRATCH/empty-mcp.json" \
 	--strict-mcp-config true \
-	"${settings_args[@]}" \
+	${settings_args[@]+"${settings_args[@]}"} \
 	--max-budget-usd 0.50 \
 	--timeout 120 \
 	--config-dir "$CLAUDE_CONFIG_DIR" \

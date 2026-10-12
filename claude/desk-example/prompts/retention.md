@@ -24,7 +24,8 @@ The session, given as data:
 Read these files in {{scratch}}:
 
 - `transcript.txt`: the session's whole transcript, one entry per line,
-  each starting with the first 8 characters of its uuid; it has
+  each starting with the first 8 characters of its uuid, a tool call's
+  input and a tool result cut short with a marker; it has
   {{transcript_lines}} lines, oldest first. Your only evidence about the
   session: read its end first, with Read's offset, and further back as far
   as you need.
