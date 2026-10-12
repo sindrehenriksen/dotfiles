@@ -224,6 +224,29 @@ assert_true "the prompt says there were no suggestions" "$(grep -qF '0 suggestio
 assert_true "and that every step ran" "$(grep -qF 'It finished ok: every step ran.' "$PROMPT_COPY" && echo true || echo false)"
 
 echo
+echo "=== a tab that cannot open (screen locked) opens at a later slot, with no second summary ==="
+: > "$OPEN_TAB_LOG"
+sid12="12121212-1212-4121-8121-121212121212"
+judge_reply='{"items":[]}'
+transcript12="$(seed_judge_session morning 2026-10-21 "$sid12")"
+desk_status_set_result morning ok "" '[]' 2026-10-21
+cat > "$FAKEBIN/open-tab-locked" << 'FAKE'
+#!/usr/bin/env bash
+exit 1
+FAKE
+chmod +x "$FAKEBIN/open-tab-locked"
+DESK_OPEN_TAB_BIN="$FAKEBIN/open-tab-locked" desk_open_follow_up_tab morning 2026-10-21 J "$repo" > /dev/null 2>&1
+assert_true "it is kept for later" "$([ -f "$DESK_GUARD_ROOT/followup-pending-morning-2026-10-21" ] && echo true || echo false)"
+turns_before="$(wc -l < "$transcript12" | tr -d ' ')"
+desk_retry_follow_up_tab morning 2026-10-21 > /dev/null 2>&1
+assert_eq "a later slot opens it, resuming the pass's session" "claude --resume '$sid12'" "$(tab_cmd)"
+assert_eq "with no second summary turn" "$turns_before" "$(wc -l < "$transcript12" | tr -d ' ')"
+assert_true "and records it as opened" "$([ -f "$DESK_GUARD_ROOT/followup-morning-2026-10-21" ] && [ ! -f "$DESK_GUARD_ROOT/followup-pending-morning-2026-10-21" ] && echo true || echo false)"
+: > "$OPEN_TAB_LOG"
+desk_retry_follow_up_tab morning 2026-10-21 > /dev/null 2>&1
+assert_eq "once" "0" "$(wc -l < "$OPEN_TAB_LOG" | tr -d ' ')"
+
+echo
 echo "=== a partial run: the same, and the prompt names the failed source ==="
 : > "$OPEN_TAB_LOG"
 sid7="77777777-7777-4777-8777-777777777777"
@@ -286,7 +309,7 @@ desk_status_set_result morning partial "" '["F-web"]' "$d"
 desk_open_follow_up_tab morning "$d" J "$repo" > /dev/null 2>&1
 desk_status_set_result morning ok "" '[]' "$d"
 desk_open_follow_up_tab morning "$d" J "$repo" > /dev/null 2>&1
-assert_eq "one tab across the partial run and its retry" "1" "$(wc -l < "$OPEN_TAB_LOG" | tr -d ' ')"
+assert_eq "one tab across the partial run and a rerun of it" "1" "$(wc -l < "$OPEN_TAB_LOG" | tr -d ' ')"
 assert_eq "and it is J's, not a close call's" "claude --resume '$sid9'" "$(tab_cmd)"
 : > "$OPEN_TAB_LOG"
 d=2026-10-20

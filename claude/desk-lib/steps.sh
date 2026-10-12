@@ -1387,7 +1387,8 @@ desk_open_follow_up_tab() {
 			desk_write_atomic "$guard_marker" ""
 			echo "ok"
 		else
-			desk_log "$pass" "follow-up tab: $helper failed"
+			desk_log "$pass" "follow-up tab: $helper failed — a later slot today opens it"
+			desk_follow_up_tab_pending "$pass" "$scheduled_date" "$command" "" "$status_cwd"
 			echo "failed"
 		fi
 		return
@@ -1411,9 +1412,44 @@ desk_open_follow_up_tab() {
 		desk_write_atomic "$guard_marker" ""
 		echo "ok"
 	else
-		desk_log "$pass" "follow-up tab: $helper failed"
+		desk_log "$pass" "follow-up tab: $helper failed — a later slot today opens it"
+		desk_follow_up_tab_pending "$pass" "$scheduled_date" "$command" "$id" "$cwd"
 		echo "failed"
 	fi
+}
+
+# desk_follow_up_tab_pending <pass> <scheduled_date> <command> <session id> <cwd>
+# A follow-up tab that could not open (the screen locked, the terminal not
+# answering) is kept, summary turn and all, for the next slot that day.
+desk_follow_up_tab_pending() {
+	desk_write_atomic "$DESK_GUARD_DIR/followup-pending-$1-$2" \
+		"$(jq -cn --arg c "$3" --arg id "$4" --arg cwd "$5" '{command: $c, id: $id, cwd: $cwd}')"
+}
+
+# desk_retry_follow_up_tab <pass> <scheduled_date>
+# What a later slot does for a date that already ran: opens the follow-up
+# tab the pass could not, as it was, with no second summary turn. Nothing
+# when the tab opened, or when the session is already live.
+desk_retry_follow_up_tab() {
+	local pass="$1" scheduled_date="$2"
+	local pending="$DESK_GUARD_DIR/followup-pending-$pass-$scheduled_date"
+	local guard_marker="$DESK_GUARD_DIR/followup-$pass-$scheduled_date"
+	[ -f "$pending" ] && [ ! -f "$guard_marker" ] || return 0
+	local command id cwd helper="${DESK_OPEN_TAB_BIN:-desk-open-tab.sh}"
+	command="$(jq -r '.command' "$pending")"
+	id="$(jq -r '.id // ""' "$pending")"
+	cwd="$(jq -r '.cwd' "$pending")"
+	if [ -n "$id" ] && [ "$(session-status.sh resolve "$id" 2> /dev/null | jq -r '.live // false')" = "true" ]; then
+		desk_log "$pass" "follow-up tab: its session is already live — leaving it alone"
+	elif "$helper" "$command" "$id" "$cwd" background > /dev/null 2>&1; then
+		desk_mark_opened_for_user "$cwd"
+		desk_log "$pass" "follow-up tab: opened it at a later slot, in $cwd"
+	else
+		desk_log "$pass" "follow-up tab: $helper failed again — the next slot tries"
+		return 0
+	fi
+	desk_write_atomic "$guard_marker" ""
+	rm -f "$pending"
 }
 
 # desk_follow_up_run_status <pass>

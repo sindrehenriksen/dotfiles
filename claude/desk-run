@@ -46,9 +46,13 @@ source "$DESK_RUN_DIR/desk-lib/sleep-inhibit.sh"
 
 pass="${1:-}"
 if [ -z "$pass" ]; then
-	echo "usage: desk-run <pass> [follow options]" >&2
+	echo "usage: desk-run <pass> [--rerun] [follow options]" >&2
 	exit 2
 fi
+# `--rerun`: run the pass again for a scheduled date that already ran, by
+# hand, follow-up tab included.
+rerun="false"
+[ "${2:-}" = "--rerun" ] && rerun="true"
 
 # The deny hook every connector call runs under needs jq and realpath; without
 # them it could only deny everything, so a pass that would make such a call
@@ -187,8 +191,14 @@ fi
 # The once-a-day guard: a slot firing after this scheduled date's pass
 # already ran is a no-op, whatever came of that run. What failed is said in
 # the follow-up tab, and the next day's window covers what it missed.
-if desk_guard_already_ran_today "$pass" "$scheduled_date"; then
+if [ "$rerun" = "true" ]; then
+	desk_log "$pass" "--rerun: running $scheduled_date again"
+	rm -f "$DESK_GUARD_DIR/followup-$pass-$scheduled_date" "$DESK_GUARD_DIR/followup-pending-$pass-$scheduled_date"
+elif desk_guard_already_ran_today "$pass" "$scheduled_date"; then
 	desk_log "$pass" "already ran today (scheduled $scheduled_date): no-op"
+	# The one thing a later slot still does: open a follow-up tab the pass
+	# could not open itself, the screen locked at the time.
+	desk_retry_follow_up_tab "$pass" "$scheduled_date"
 	exit 0
 fi
 

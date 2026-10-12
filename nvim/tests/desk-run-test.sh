@@ -184,6 +184,10 @@ assert_true "the later slot never re-ran the pass" \
 	"$([ "$(grep -c 'already ran today' "$ROOT/case1b.out")" -ge 1 ] && echo true || echo false)"
 head_after="$(git -C "$repo" rev-parse HEAD)"
 assert_eq "HEAD didn't move on the no-op slot" "$head_before" "$head_after"
+DESK_CONFIG="$cfg" "$DESK_RUN" testpass --rerun > "$ROOT/case1c.out" 2>&1
+assert_eq "--rerun runs it again by hand" "0" "$?"
+assert_true "and says so, rather than no-op" \
+	"$(grep -q -- '--rerun: running' "$ROOT/case1c.out" && ! grep -q 'already ran today' "$ROOT/case1c.out" && echo true || echo false)"
 
 echo
 echo "=== an offline slot: a hung model call is killed at its timeout, flagged partial (a source failure never aborts the pass) ==="
