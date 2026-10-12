@@ -40,6 +40,24 @@ check "pre: a bare /compact gets the guidance" '[[ $out == *"keep-list guidance"
 out=$(echo '{"custom_instructions":null}' | COMPACT_HANDOFF_SKILL="$TMP/missing.md" "$HOOK" pre 2>/dev/null)
 check "pre: falls back when the skill is missing" '[[ $out == *"with its scope"* ]]'
 
+cat >"$TMP/layer.md" <<'EOF'
+# Workspace handoff
+## What the pre-check adds here
+precheck text
+## What Prompt 1 must carry
+layer keep-list
+## What Prompt 2 must carry
+layer kick-off
+## Unrelated
+other text
+EOF
+out=$(echo '{"custom_instructions":null}' | COMPACT_HANDOFF_LAYERS="$TMP/missing.md:$TMP/layer.md" "$HOOK" pre 2>/dev/null)
+check "pre: appends a layer's prompt sections" '[[ $out == *"layer keep-list"* && $out == *"layer kick-off"* && $out == *"keep-list guidance"* ]]'
+check "pre: leaves a layer's other sections out" '[[ $out != *"precheck text"* && $out != *"other text"* ]]'
+mkdir -p "$TMP/home" && cp "$TMP/layer.md" "$TMP/home/layer.md"
+out=$(echo '{"custom_instructions":null}' | HOME="$TMP/home" COMPACT_HANDOFF_LAYERS="~/layer.md" "$HOOK" pre 2>/dev/null)
+check "pre: expands a leading ~/ in a layer path" '[[ $out == *"layer keep-list"* ]]'
+
 summary=$'## Summary\nwork\n\n## Suggested kick-off\n\nContinue the sweep.\nAsk before pushing.\n\n'
 out=$(jq -n --arg s "$summary" '{session_id:"s1",compact_summary:$s}' | "$HOOK" post)
 check "post: shows the kick-off as text" '[[ $out == *$'"'"'Continue the sweep.\nAsk before pushing.'"'"' ]]'

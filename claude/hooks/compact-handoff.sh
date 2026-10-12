@@ -18,6 +18,10 @@
 # these two events it ignores `systemMessage`, so `post` prints text, not JSON.
 # The guidance is read from the skill at run time, so it has one home; if its
 # headings move, `pre` falls back to a short request and says so on stderr.
+# COMPACT_HANDOFF_LAYERS, a colon-separated list of skill files (a leading
+# `~/` expands), adds a workspace's handoff layer: every `##` section whose
+# heading names Prompt 1 or Prompt 2 is appended after the base guidance. A
+# listed file that is missing is skipped with a note on stderr.
 set -u
 
 SKILL="${COMPACT_HANDOFF_SKILL:-$HOME/dotfiles/agents/skills/handoff/SKILL.md}"
@@ -34,6 +38,19 @@ pre() {
         echo "compact-handoff: no Prompt 1/2 sections found in $SKILL" >&2
         guidance="Keep what the next turn needs: in-flight work, settled decisions with their reasons, open decisions, and every instruction the user gave with its scope. Drop finished threads."
     fi
+
+    local layer layers extra
+    IFS=: read -ra layers <<<"${COMPACT_HANDOFF_LAYERS:-}"
+    for layer in ${layers[@]+"${layers[@]}"}; do
+        [ -n "$layer" ] || continue
+        layer=${layer/#\~\//$HOME/}
+        if [ ! -r "$layer" ]; then
+            echo "compact-handoff: layer $layer not found, skipped" >&2
+            continue
+        fi
+        extra=$(awk '/^## /{on = /Prompt [12]/} on' "$layer")
+        [ -n "$extra" ] && guidance+=$'\n\nA workspace layer on top of the above:\n\n'"$extra"
+    done
 
     cat <<EOF
 Write this summary per Prompt 1 below. End it with a section headed exactly \`$HEADING\`:
