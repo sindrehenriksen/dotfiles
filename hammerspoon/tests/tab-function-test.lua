@@ -1007,6 +1007,77 @@ assert_eq("the same Ghostty window keeping focus is left alone", false,
 assert_eq("another Ghostty window taking focus is the close's doing", true,
   DeskTab.close_took_focus({ app = "Ghostty", script_id = "w1" }, { app = "Ghostty" }, "w2"))
 
+-- ---------------------------------------------------------------------------
+-- DeskWindow: full height for the review overview, and back
+-- ---------------------------------------------------------------------------
+local function frame_str(f)
+  if not f then return "nil" end
+  return string.format("%d %d %d %d", math.floor(f.x + 0.5), math.floor(f.y + 0.5), math.floor(f.w + 0.5), math.floor(f.h + 0.5))
+end
+local wide = { frame = function() return { x = 0, y = 25, w = 3840, h = 1575 } end }
+local narrow = { frame = function() return { x = 0, y = 25, w = 1512, h = 957 } end }
+-- The frames the picker gives, built the way init.lua builds them: a half
+-- slot is the top or bottom half of its third, with the gaps.
+local function third(col, yf, hf, scr)
+  local s, GAP = scr.frame(), 10
+  local left = col == 0 and GAP or 5
+  local right = col == 2 and GAP or 5
+  local top = yf == 0 and 0 or 5
+  local bottom = yf + hf >= 0.999 and GAP or 5
+  return { x = s.x + col / 3 * s.w + left, y = s.y + yf * s.h + top, w = s.w / 3 - left - right, h = hf * s.h - top - bottom }
+end
+for col, name in pairs({ [0] = "L", [1] = "C", [2] = "R" }) do
+  assert_eq("upper_" .. name .. " goes to full_" .. name, frame_str(third(col, 0, 1, wide)),
+    frame_str(DeskWindow.tall_target(wide, third(col, 0, 0.5, wide))))
+  assert_eq("lower_" .. name .. " goes to full_" .. name, frame_str(third(col, 0, 1, wide)),
+    frame_str(DeskWindow.tall_target(wide, third(col, 0.5, 0.5, wide))))
+end
+assert_eq("a full column has no taller form", "nil", frame_str(DeskWindow.tall_target(wide, third(1, 0, 1, wide))))
+-- The large two-up on the right ("e"): 48% wide, 90% high, 10% in, on the ultrawide.
+local s = wide.frame()
+local e_frame = { x = s.x + 0.42 * s.w + 5, y = s.y + 0.05 * s.h + 5, w = 0.48 * s.w - 10, h = 0.90 * s.h - 10 }
+assert_eq("the large two-up goes to the screen's height, same x and width",
+  frame_str({ x = e_frame.x, y = s.y, w = e_frame.w, h = s.h - 10 }), frame_str(DeskWindow.tall_target(wide, e_frame)))
+local n = narrow.frame()
+local e_narrow = { x = n.x + (1 - 0.005 - 0.73) * n.w + 5, y = n.y + 0.02 * n.h + 5, w = 0.73 * n.w - 10, h = 0.96 * n.h - 10 }
+assert_eq("on the laptop too", frame_str({ x = e_narrow.x, y = n.y, w = e_narrow.w, h = n.h - 10 }),
+  frame_str(DeskWindow.tall_target(narrow, e_narrow)))
+local small = { x = s.x + 0.10 * s.w + 10, y = s.y + 0.15 * s.h + 5, w = 0.295 * s.w - 15, h = 0.70 * s.h - 10 }
+assert_eq("the small two-up is left as it is", "nil", frame_str(DeskWindow.tall_target(wide, small)))
+assert_eq("so is a window anywhere else", "nil", frame_str(DeskWindow.tall_target(wide, { x = 3, y = 40, w = 800, h = 600 })))
+
+local function fake_window(id, frame, scr)
+  local w = { set = {} }
+  function w:frame() return frame end
+  function w:setFrame(f) frame = f; self.set[#self.set + 1] = frame_str(f) end
+  function w:id() return id end
+  function w:screen() return scr end
+  return w
+end
+local upper = third(1, 0, 0.5, wide)
+local win = fake_window(42, upper, wide)
+hs.window.focusedWindow = function() return win end
+local reply = DeskWindowTall()
+assert_eq("DeskWindowTall stretches it and reports both frames",
+  "42 " .. frame_str(upper) .. " " .. frame_str(third(1, 0, 1, wide)), reply)
+hs.window.get = function(id) return id == 42 and win or nil end
+local nums = {}
+for v in reply:gmatch("%-?%d+") do nums[#nums + 1] = tonumber(v) end
+assert_eq("DeskWindowRestore puts it back while it sits where it was left", true, DeskWindowRestore(table.unpack(nums)))
+assert_eq("at its old frame", frame_str(upper), frame_str(win:frame()))
+win = fake_window(42, upper, wide)
+DeskWindowTall()
+win:setFrame(third(2, 0, 1, wide))
+local moved = #win.set
+assert_eq("a window moved since is left where the user put it", false, DeskWindowRestore(table.unpack(nums)))
+assert_eq("untouched", moved, #win.set)
+assert_eq("a window gone is no error", false, DeskWindowRestore(7, 0, 0, 1, 1, 0, 0, 1, 1))
+hs.window.focusedWindow = function() return fake_window(9, { x = 3, y = 40, w = 800, h = 600 }, wide) end
+assert_eq("a window at no such placement: none", "none", DeskWindowTall())
+hs.window.focusedWindow = function() return nil end
+assert_eq("no focused window: none", "none", DeskWindowTall())
+hs.window.get = function() return nil end
+
 print()
 print(string.format("=== summary: %d passed, %d failed ===", pass, fail))
 os.exit(fail == 0 and 0 or 1)

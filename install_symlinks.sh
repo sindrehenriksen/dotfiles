@@ -79,8 +79,9 @@ if [[ "$(uname)" == "Darwin" ]]; then
     mkdir -p ~/.hammerspoon
     link ~/dotfiles/hammerspoon/init.lua ~/.hammerspoon/init.lua
 
-    # macOS: desk's tab helpers, through Hammerspoon.
-    for helper in desk-open-tab.sh desk-focus-tab.sh desk-close-tab.sh; do
+    # macOS: desk's tab helpers, and the window bridge the review overview
+    # uses, through Hammerspoon.
+    for helper in desk-open-tab.sh desk-focus-tab.sh desk-close-tab.sh desk-window.sh; do
         link ~/dotfiles/hammerspoon/"$helper" ~/.local/bin/"$helper"
     done
 

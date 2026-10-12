@@ -2397,6 +2397,32 @@ function M.refresh_overview(s)
 	})
 end
 
+--- True while the overview's list is open in a window.
+function M.overview_open()
+	local info = vim.fn.getqflist({ winid = 0, title = 0 })
+	return info.winid ~= 0 and info.title == M.OVERVIEW_TITLE
+end
+
+-- The editor's window goes full height while the list is open
+-- (desk.window), and back once it closes, however it closes. A list
+-- reopened in place closes its old window first, so the restore waits a
+-- tick and stays away when the list is open again by then.
+local function watch_overview_window(win)
+	local window = require("desk.window")
+	window.tall()
+	vim.api.nvim_create_autocmd("WinClosed", {
+		pattern = tostring(win),
+		once = true,
+		callback = function()
+			vim.schedule(function()
+				if not M.overview_open() then
+					window.restore()
+				end
+			end)
+		end,
+	})
+end
+
 --- The overview key: opens the review split if needed, then a quickfix list
 --- with one headline per remaining hunk.
 function M.overview(notes_buf)
@@ -2424,6 +2450,7 @@ function M.overview(notes_buf)
 	preview = {}
 	vim.cmd("topleft copen " .. math.min(#items, 10))
 	M.qf_bars()
+	watch_overview_window(vim.api.nvim_get_current_win())
 	M.qf_preview()
 	return true
 end

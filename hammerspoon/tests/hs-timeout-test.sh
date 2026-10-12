@@ -13,6 +13,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 OPEN_TAB_SH="$HERE/../desk-open-tab.sh"
 FOCUS_TAB_SH="$HERE/../desk-focus-tab.sh"
 CLOSE_TAB_SH="$HERE/../desk-close-tab.sh"
+WINDOW_SH="$HERE/../desk-window.sh"
 
 pass=0
 fail=0
@@ -120,6 +121,39 @@ stub_hs 'echo "DeskCloseTerminalTab: not closed: its tab holds other terminals t
 assert_eq "close exits 1 when the tab was left" "1" "$?"
 "$CLOSE_TAB_SH" find ttys007 notapid < /dev/null > /dev/null 2>&1
 assert_eq "a pid that is not a number is a usage error" "2" "$?"
+
+echo
+echo "=== desk-window.sh ==="
+stub_hs 'exec sleep 30'
+read -r status _ < <(timed "$WINDOW_SH" tall < /dev/null)
+assert_eq "tall reports the timeout as a failure" "124" "$status"
+stub_hs 'for a in "$@"; do last=$a; done; printf "%s\n" "$last" > "'"$ROOT"'/expr"; echo "42 10 0 600 400 10 0 600 800"'
+"$WINDOW_SH" tall < /dev/null > "$ROOT/out" 2> /dev/null
+assert_eq "tall exits 0 on a stretched window" "0" "$?"
+assert_eq "...printing its frames" "42 10 0 600 400 10 0 600 800" "$(cat "$ROOT/out")"
+assert_eq "...having called DeskWindowTall" "DeskWindowTall()" "$(cat "$ROOT/expr")"
+stub_hs 'echo none'
+"$WINDOW_SH" tall < /dev/null > "$ROOT/out" 2> /dev/null
+assert_eq "tall exits 0 on none too" "0" "$?"
+assert_eq "...printing none" "none" "$(cat "$ROOT/out")"
+stub_hs 'echo "*** ERROR: attempt to call a nil value (global DeskWindowTall)"'
+"$WINDOW_SH" tall < /dev/null > "$ROOT/out" 2> "$ROOT/err"
+assert_eq "an answer that is neither is exit 1" "1" "$?"
+assert_eq "...printing nothing to act on" "" "$(cat "$ROOT/out")"
+stub_hs 'for a in "$@"; do last=$a; done; printf "%s\n" "$last" > "'"$ROOT"'/expr"; echo true'
+"$WINDOW_SH" restore 42 10 0 600 400 10 0 600 800 < /dev/null > /dev/null 2>&1
+assert_eq "restore exits 0 when the window went back" "0" "$?"
+assert_eq "...passing the frames as numbers" "DeskWindowRestore(42,10,0,600,400,10,0,600,800)" "$(cat "$ROOT/expr")"
+stub_hs 'echo false'
+"$WINDOW_SH" restore 42 10 0 600 400 10 0 600 800 < /dev/null > /dev/null 2>&1
+assert_eq "restore exits 1 when the window was gone or moved" "1" "$?"
+stub_hs 'printf called > "'"$ROOT"'/called"; echo true'
+rm -f "$ROOT/called"
+"$WINDOW_SH" restore 42 10 0 600 400 10 0 600 'os.exit()' < /dev/null > /dev/null 2>&1
+assert_eq "an argument that is not an integer is a usage error" "2" "$?"
+assert_eq "...that never reaches hs" "false" "$([ -e "$ROOT/called" ] && echo true || echo false)"
+"$WINDOW_SH" restore 42 10 < /dev/null > /dev/null 2>&1
+assert_eq "too few frames is a usage error" "2" "$?"
 
 echo
 echo "=== the flags argument ==="

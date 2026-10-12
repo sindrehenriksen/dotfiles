@@ -12,6 +12,17 @@ local git = require("desk.git")
 local snippet = require("desk.snippet")
 local git_safety = dofile((debug.getinfo(1, "S").source:sub(2):match("^(.*)/[^/]+$") or ".") .. "/../../tests/lib/git-safety.lua")
 
+-- The overview stretches the editor's window through desk.window: a stub
+-- here, so no test reaches Hammerspoon. Its own section below swaps in
+-- replies.
+local window = require("desk.window")
+local window_reply = "none"
+local window_calls = {}
+window.run = function(args, cb)
+	window_calls[#window_calls + 1] = table.concat(args, " ")
+	cb(true, args[1] == "tall" and window_reply or "")
+end
+
 vim.env.DESK_STATE_DIR = vim.fn.tempname()
 vim.env.DESK_STATUS_FILE = vim.fn.tempname()
 
@@ -2404,6 +2415,108 @@ do
 	assert_true("tree-sitter highlights the split", vim.treesitter.highlighter.active[rb] ~= nil)
 	assert_eq("and no legacy syntax runs under it (which marks sync_queue_items' underscores as errors)", "", vim.bo[rb].syntax)
 	assert_eq("the split conceals links as the notes window does", 2, vim.wo[vim.fn.bufwinid(rb)].conceallevel)
+end
+
+print("\n=== the overview makes the editor's window full height while it is open, and puts it back ===")
+do
+	local function tick()
+		vim.wait(20, function()
+			return false
+		end)
+	end
+	local function setup(keep)
+		local r = new_repo(BASE)
+		build(r, "2026-10-01", { item("n1"), item("n2") })
+		local nb = open_notes(r)
+		review.attach(nb)
+		if not keep then
+			window.reset()
+			window_calls = {}
+		end
+		return r, nb
+	end
+	local function in_list(keys)
+		vim.api.nvim_set_current_win(vim.fn.getqflist({ winid = 0 }).winid)
+		vim.cmd("normal " .. keys)
+		tick()
+	end
+	local FRAMES = "42 1290 0 1270 700 1290 0 1270 1400"
+	window_reply = "42 1290 0 1270 700 1290 0 1270 1400"
+
+	local _, nb = setup()
+	assert_true("overview opens", review.overview(nb))
+	assert_eq("opening it stretches the window", { "tall" }, window_calls)
+	assert_true("reopened over itself", review.overview(nb))
+	tick()
+	assert_eq("reopening it in place neither puts it back nor stretches it again", { "tall" }, window_calls)
+	in_list("q")
+	assert_eq("q puts it back, with the frames Hammerspoon reported", { "tall", "restore " .. FRAMES }, window_calls)
+	tick()
+	assert_eq("and once back, nothing more", 2, #window_calls)
+
+	_, nb = setup()
+	assert_true("overview opens", review.overview(nb))
+	in_list("Q")
+	assert_eq("Q, ending the review, puts it back too", { "tall", "restore " .. FRAMES }, window_calls)
+
+	_, nb = setup()
+	assert_true("overview opens", review.overview(nb))
+	vim.cmd("cclose")
+	tick()
+	assert_eq("so does a list closed any other way", { "tall", "restore " .. FRAMES }, window_calls)
+
+	window_reply = "none"
+	_, nb = setup()
+	assert_true("overview opens", review.overview(nb))
+	in_list("q")
+	assert_eq("a window at no placement with a full-height form is left alone both ways", { "tall" }, window_calls)
+
+	-- The stretch is async: a list closed before Hammerspoon answers still
+	-- puts the window back once it does.
+	local later
+	window.run = function(args, cb)
+		window_calls[#window_calls + 1] = table.concat(args, " ")
+		if args[1] == "tall" then
+			later = cb
+		else
+			cb(true, "")
+		end
+	end
+	_, nb = setup()
+	assert_true("overview opens", review.overview(nb))
+	in_list("q")
+	assert_eq("closed before the stretch came back: nothing to put back yet", { "tall" }, window_calls)
+	later(true, FRAMES)
+	assert_eq("and put back as soon as it does", { "tall", "restore " .. FRAMES }, window_calls)
+
+	local said = {}
+	local notify = vim.notify
+	vim.notify = function(m)
+		said[#said + 1] = m
+	end
+	window.run = function(args, cb)
+		window_calls[#window_calls + 1] = table.concat(args, " ")
+		cb(false, "hs did not return within 6s; killed")
+	end
+	window.reset()
+	window_calls = {}
+	for _ = 1, 2 do
+		nb = select(2, setup(true))
+		assert_true("overview opens", review.overview(nb))
+		in_list("q")
+	end
+	vim.notify = notify
+	local warned = vim.tbl_filter(function(m)
+		return m:match("couldn't make the window full height") ~= nil
+	end, said)
+	assert_eq("Hammerspoon not answering is said once, not at every open", 1, #warned)
+	assert_eq("and nothing is put back", { "tall", "tall" }, window_calls)
+
+	window.run = function(args, cb)
+		window_calls[#window_calls + 1] = table.concat(args, " ")
+		cb(true, args[1] == "tall" and window_reply or "")
+	end
+	window_reply = "none"
 end
 
 print("\n=== q and Q in the overview save the notes first ===")

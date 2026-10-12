@@ -240,6 +240,64 @@ bind(nil, "e", function() place_two_up("large", "right") end)
 
 picker:bind({}, "escape", function() picker:exit() end)
 
+-- Full height for a while, then back: nvim's desk review overview opens a
+-- list across the top of the editor, which a terminal in half a column has
+-- no room for. desk-window.sh calls these over `hs -c`. DeskWindowTall
+-- stretches the focused window when it sits in a half slot (to its column)
+-- or in a large two-up placement (to the screen's height, same x and width),
+-- and returns "<id> <x y w h before> <x y w h after>", or "none" when the
+-- window is anywhere else. DeskWindowRestore puts it back, but only while it
+-- is still where DeskWindowTall left it: a window moved meanwhile was moved
+-- on purpose.
+DeskWindow = {}
+
+DeskWindow.TALL_SLOT = {
+  upper_L = "full_L", lower_L = "full_L",
+  upper_C = "full_C", lower_C = "full_C",
+  upper_R = "full_R", lower_R = "full_R",
+}
+
+-- The full-height frame for a window at `frame` on `screen`, or nil.
+function DeskWindow.tall_target(screen, frame)
+  for from, to in pairs(DeskWindow.TALL_SLOT) do
+    if frames_equal(frame, slot_frame(screen, from)) then
+      return slot_frame(screen, to)
+    end
+  end
+  for _, side in ipairs({ "left", "right" }) do
+    local xf, yf, wf, hf = two_up_rect(screen, "large", side)
+    if frames_equal(frame, target_frame(screen, xf, yf, wf, hf)) then
+      return target_frame(screen, xf, 0, wf, 1)
+    end
+  end
+  return nil
+end
+
+local function rounded(f)
+  local function r(v) return math.floor(v + 0.5) end
+  return string.format("%d %d %d %d", r(f.x), r(f.y), r(f.w), r(f.h))
+end
+
+function DeskWindowTall()
+  local win = hs.window.focusedWindow()
+  if not win then return "none" end
+  local before = win:frame()
+  local target = DeskWindow.tall_target(win:screen(), before)
+  if not target then return "none" end
+  win:setFrame(target)
+  return string.format("%d %s %s", win:id(), rounded(before), rounded(win:frame()))
+end
+
+function DeskWindowRestore(id, x, y, w, h, tx, ty, tw, th)
+  local win = hs.window.get(id)
+  if not win then return false end
+  if not frames_equal(win:frame(), { x = tx, y = ty, w = tw, h = th }) then
+    return false
+  end
+  win:setFrame({ x = x, y = y, w = w, h = h })
+  return true
+end
+
 -- Cross-window directional focus and swap on the Dvorak home row
 -- h/t/n/s = west/north/south/east. Works across screens.
 -- Focus uses Caps Lock as a hold-modifier (see dual-function block below).

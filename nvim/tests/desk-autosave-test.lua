@@ -21,6 +21,11 @@ local git = require("desk.git")
 local snippet = require("desk.snippet")
 local git_safety = dofile((debug.getinfo(1, "S").source:sub(2):match("^(.*)/[^/]+$") or ".") .. "/../../tests/lib/git-safety.lua")
 
+-- The overview is not opened here, but nothing may reach Hammerspoon.
+require("desk.window").run = function(_, cb)
+	cb(true, "none")
+end
+
 local pass, fail = 0, 0
 local function assert_eq(desc, expected, actual)
 	local e, a = vim.json.encode(expected), vim.json.encode(actual)

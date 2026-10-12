@@ -92,6 +92,8 @@ Their geometry is per display, since the two screens do not want the same thing:
 
 The ultrawide has room to tile both with air around them. The laptop does not, so the large window takes the screen and the small one floats over it, held high rather than centred — the small window is the terminal, and the space below it is where the large one stays readable. Screens are told apart by aspect ratio (wider than 2:1 counts as wide), not by resolution, so the split survives a different monitor.
 
+**Full height for a while.** `DeskWindowTall` and `DeskWindowRestore` stretch the focused window to full height and put it back, for nvim's desk review overview (`docs/desk.md`, through `hammerspoon/desk-window.sh`): a half goes to its whole column, the large window of a pair to the screen's height at the same x and width, and any other placement is left alone. It goes back only while it is still where it was left.
+
 ### Linux/Ubuntu — GNOME Shell extension
 
 Wayland blocks external window manipulation, so the only viable approach is a Shell extension that operates inside the compositor.
