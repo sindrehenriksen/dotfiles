@@ -515,6 +515,8 @@ The defaults are the safe side of every outward-facing switch: `dry_run` (no wri
 
 ## Tests
 
+**Change desk code in a worktree, never in the main checkout.** The scheduled passes run their code straight from the clone at `~/dotfiles` (`install_symlinks.sh` links it into `~/.local/bin`), so a half-made edit there is live at the next slot: make desk changes in a `git worktree` of this repo and bring them into the main checkout only as finished, tested commits.
+
 ```sh
 DESK_GUARD_REPOS="$HOME/dotfiles" bash tests/run-all.sh
 ```
