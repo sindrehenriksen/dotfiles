@@ -54,6 +54,10 @@ desk_apply_calls_root() {
 	[ -n "$root" ] || return 0
 	root="${root/#\~/$HOME}"
 	case "$root" in /*) ;; *) root="$2/$root" ;; esac
+	# Resolved, with no trailing slash, so a session's cwd (always physical)
+	# compares to it exactly.
+	mkdir -p "$root" 2> /dev/null
+	root="$(cd -P "$root" 2> /dev/null && pwd -P)" || return 0
 	[[ "$DESK_ROOTS_FROM_ENV" == *runs* ]] || DESK_RUNS_ROOT="$root/runs"
 	[[ "$DESK_ROOTS_FROM_ENV" == *scratch* ]] || DESK_SCRATCH_ROOT="$root/scratch"
 	mkdir -p "$DESK_RUNS_ROOT" "$DESK_SCRATCH_ROOT" 2> /dev/null
