@@ -135,23 +135,34 @@ end
 
 local focus_installed = false
 
+--- Records what each file named like a notes file held when it was read or
+--- written, before any buffer is attached: one the review loads unseen and
+--- takes into is modified by the time it is shown and attached, and its
+--- read is the only moment its disk content was known. Safe to call again.
+function M.setup(patterns)
+	vim.api.nvim_create_autocmd({ "BufReadPost", "BufWritePost", "FileChangedShellPost" }, {
+		group = vim.api.nvim_create_augroup("desk_autosave_disk", { clear = true }),
+		pattern = patterns,
+		callback = function(args)
+			if vim.bo[args.buf].buftype == "" then
+				remember_disk(args.buf)
+			end
+		end,
+	})
+end
+
 --- Turns auto-save on for notes buffer `buf`. Safe to call again.
 function M.attach(buf)
 	if vim.b[buf].desk_autosave then
 		return
 	end
 	vim.b[buf].desk_autosave = true
-	if not vim.bo[buf].modified then
+	-- A buffer read before M.setup's autocmds existed has no record of
+	-- what it read; unmodified, it still holds it.
+	if vim.b[buf].desk_autosave_disk == nil and not vim.bo[buf].modified then
 		remember_disk(buf)
 	end
 	local group = vim.api.nvim_create_augroup("desk_autosave_" .. buf, { clear = true })
-	vim.api.nvim_create_autocmd({ "BufReadPost", "BufWritePost", "FileChangedShellPost" }, {
-		group = group,
-		buffer = buf,
-		callback = function()
-			remember_disk(buf)
-		end,
-	})
 	-- After the event: a save inside it would run the write's own autocmds
 	-- unnested, and BufLeave fires in the middle of window changes.
 	vim.api.nvim_create_autocmd({ "InsertLeave", "BufLeave" }, {

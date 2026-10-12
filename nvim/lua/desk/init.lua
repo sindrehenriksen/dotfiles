@@ -21,6 +21,8 @@ function M.setup()
 		end
 	end
 
+	require("desk.autosave").setup(patterns)
+
 	-- nomodeline, buffer-local, before the file is even read: a notes file
 	-- routinely holds pasted/captured text (a session transcript, a
 	-- fetched page) nobody wrote by hand to be safe vim config, so it

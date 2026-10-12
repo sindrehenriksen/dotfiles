@@ -202,6 +202,69 @@ do
 	vim.bo[nb].modified = false
 end
 
+print("\n=== the content check behind checktime, through the attach path ===")
+do
+	-- A change on disk checktime cannot see: the same size, and the mtime
+	-- put back, so only the content says the file is not what was read.
+	-- The mtime is a whole second, set before the read: a fractional one
+	-- does not survive being set back exactly, and nvim compares it to the
+	-- nanosecond.
+	local T = os.time() - 100
+	local function pin(path)
+		vim.uv.fs_utime(path, T, T)
+	end
+	local function write_unseen(path, lines)
+		vim.fn.writefile(lines, path)
+		pin(path)
+	end
+
+	local r = new_repo()
+	local path = r .. "/notes.md"
+	pin(path)
+	local nb = open(path)
+	edit(nb, "  mine")
+	local theirs = { "Section A", "  EXISTING", "Section B", "  other" }
+	write_unseen(path, theirs)
+	said = {}
+	event("InsertLeave", nb)
+	assert_eq("a change checktime misses is still not written over", theirs, vim.fn.readfile(path))
+	assert_true("the edit stays unsaved", vim.bo[nb].modified)
+	assert_eq("and it says why", 1, said_matching("^desk: notes%.md changed on disk: not saved"))
+	assert_true("which checktime did not catch: no disk merge", not diskmerge.conflict(nb))
+	vim.bo[nb].modified = false
+
+	-- reading.md read but never entered, and edited before it is shown:
+	-- attached only once modified. BufEnter is held off for the load, since
+	-- bufload's autocmd window would otherwise enter it, and attach it,
+	-- unmodified.
+	for _, changed in ipairs({ false, true }) do
+		r = new_repo()
+		open(r .. "/notes.md")
+		local rpath = r .. "/reading.md"
+		pin(rpath)
+		local rd = vim.fn.bufadd(rpath)
+		vim.o.eventignore = "BufEnter"
+		vim.fn.bufload(rd)
+		vim.o.eventignore = ""
+		assert_true("loaded, not yet attached", vim.b[rd].desk_autosave == nil)
+		vim.api.nvim_buf_set_lines(rd, 0, -1, false, { "- a line", "- taken in" })
+		if changed then
+			write_unseen(rpath, { "- A LINE" })
+		end
+		vim.cmd("buffer " .. rd)
+		settle()
+		assert_true("attached while modified", vim.b[rd].desk_autosave == true and vim.bo[rd].modified)
+		event("InsertLeave", rd)
+		if changed then
+			assert_eq("its read is its baseline: a change since is not written over", { "- A LINE" }, vim.fn.readfile(rpath))
+			assert_true("which checktime did not catch either", not diskmerge.conflict(rd))
+			vim.bo[rd].modified = false
+		else
+			assert_eq("and with none, it is saved", { "- a line", "- taken in" }, vim.fn.readfile(rpath))
+		end
+	end
+end
+
 print("\n=== paused while a review is open on the file ===")
 do
 	local r = new_repo()
