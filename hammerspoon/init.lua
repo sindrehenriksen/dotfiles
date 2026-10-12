@@ -1484,7 +1484,8 @@ function DeskWindow.tall_target(screen, frame)
 end
 
 -- The AppleScript that finds the terminal on `tty` and the window holding
--- it: "<foreground pid>|<window id>|<front window id>", or "none" or "many".
+-- it: "<foreground pid>|<window id>|<front window id>|<window name>", or
+-- "none" or "many". The name goes last, since it may hold a "|".
 function DeskWindow.terminal_window_script(tty)
   return table.concat({
     'tell application "Ghostty"',
@@ -1494,32 +1495,40 @@ function DeskWindow.terminal_window_script(tty)
     "set term to item 1 of matches",
     "set tid to id of term",
     'set wid to ""',
+    'set wname to ""',
     "repeat with w in windows",
     "repeat with t in tabs of w",
-    "if (id of terminals of t) contains tid then set wid to (id of w) as text",
+    "if (id of terminals of t) contains tid then",
+    "set wid to (id of w) as text",
+    "set wname to (name of w) as text",
+    "end if",
     "end repeat",
     "end repeat",
-    'return ((pid of term) as text) & "|" & wid & "|" & ((id of front window) as text)',
+    'return ((pid of term) as text) & "|" & wid & "|" & ((id of front window) as text) & "|" & wname',
     "end tell",
   }, "\n")
 end
 
 function DeskWindow.parse_terminal_window(reply)
-  local pid, wid, front = tostring(reply or ""):match("^(%d+)|([^|]*)|([^|]*)$")
+  local pid, wid, front, name = tostring(reply or ""):match("^(%d+)|([^|]*)|([^|]*)|(.*)$")
   if not pid then return nil end
-  return tonumber(pid), wid, front
+  return tonumber(pid), wid, front, name
 end
 
 -- The hs window of the terminal on `tty` whose foreground process is
--- `pid`, or nil and why.
+-- `pid`, or nil and why. Ghostty names its windows in its own terms, so
+-- the focused hs window counts as that one only when it is Ghostty's,
+-- focused across the whole lookup (read before the script and again after
+-- it), and titled as Ghostty names the terminal's window.
 function DeskWindow.owner_window(tty, pid)
   if not hs.application.get("Ghostty") then return nil, "Ghostty is not running" end
+  local focused = hs.window.focusedWindow()
   local ok, result, descriptor = hs.osascript.applescript(DeskWindow.terminal_window_script(tty))
   if not ok then return nil, "osascript failed: " .. DeskTab.osascript_error(descriptor) end
   if result == "none" or result == "many" then
     return nil, (result == "none" and "no" or "more than one") .. " Ghostty terminal on " .. tty
   end
-  local fg, wid, front = DeskWindow.parse_terminal_window(result)
+  local fg, wid, front, name = DeskWindow.parse_terminal_window(result)
   if not fg then return nil, "unexpected reply from Ghostty: " .. tostring(result) end
   if fg ~= tonumber(pid) then
     return nil, string.format("the terminal on %s runs pid %d in the foreground, not %s", tty, fg, tostring(pid))
@@ -1528,6 +1537,10 @@ function DeskWindow.owner_window(tty, pid)
   local win = hs.window.focusedWindow()
   local app = win and win:application()
   if not (app and app:name() == "Ghostty") then return nil, "Ghostty's window is not the focused one" end
+  if not (focused and focused:id() == win:id()) then return nil, "the focus moved during the lookup" end
+  if win:title() ~= name then
+    return nil, string.format("the focused window is titled %q, not %q as Ghostty names the terminal's", win:title(), name)
+  end
   return win
 end
 

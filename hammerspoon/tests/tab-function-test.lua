@@ -1046,8 +1046,9 @@ local small = { x = s.x + 0.10 * s.w + 10, y = s.y + 0.15 * s.h + 5, w = 0.295 *
 assert_eq("the small two-up is left as it is", "nil", frame_str(DeskWindow.tall_target(wide, small)))
 assert_eq("so is a window anywhere else", "nil", frame_str(DeskWindow.tall_target(wide, { x = 3, y = 40, w = 800, h = 600 })))
 
-local function fake_window(id, frame, scr, app_name)
+local function fake_window(id, frame, scr, app_name, title)
   local w = { set = {} }
+  function w:title() return title or "nvim notes.md" end
   function w:frame() return frame end
   function w:setFrame(f) frame = f; self.set[#self.set + 1] = frame_str(f) end
   function w:id() return id end
@@ -1056,7 +1057,7 @@ local function fake_window(id, frame, scr, app_name)
   return w
 end
 local real_as, real_app_get = hs.osascript.applescript, hs.application.get
-local ghostty_reply = "4242|tab-group-1|tab-group-1"
+local ghostty_reply = "4242|tab-group-1|tab-group-1|nvim notes.md"
 hs.application.get = function(name) return name == "Ghostty" and {} or nil end
 hs.osascript.applescript = function(script)
   if script:find("every terminal whose tty is", 1, true) then return true, ghostty_reply, "" end
@@ -1064,6 +1065,8 @@ hs.osascript.applescript = function(script)
 end
 assert_eq("the script looks the terminal up by its /dev tty", true,
   DeskWindow.terminal_window_script("ttys009"):find('tty is "/dev/ttys009"', 1, true) ~= nil)
+assert_eq("a window name holding a | is read whole", "a | b",
+  select(4, DeskWindow.parse_terminal_window("4242|w1|w1|a | b")))
 
 local upper = third(1, 0, 0.5, wide)
 local win = fake_window(42, upper, wide)
@@ -1089,14 +1092,25 @@ assert_eq("restoring a terminal never stretched is no error", false, DeskWindowR
 local function left_alone(desc, setup)
   win = fake_window(42, upper, wide)
   hs.window.focusedWindow = function() return win end
-  ghostty_reply = "4242|tab-group-1|tab-group-1"
+  ghostty_reply = "4242|tab-group-1|tab-group-1|nvim notes.md"
   setup()
   assert_eq(desc, "none", DeskWindowTall("ttys009", 4242))
   assert_eq(desc .. ": nothing moved", 0, #win.set)
   hs.application.get = function(name) return name == "Ghostty" and {} or nil end
 end
-left_alone("its window not Ghostty's front window", function() ghostty_reply = "4242|tab-group-1|tab-group-2" end)
-left_alone("another pid in the terminal's foreground", function() ghostty_reply = "999|tab-group-1|tab-group-1" end)
+left_alone("its window not Ghostty's front window", function() ghostty_reply = "4242|tab-group-1|tab-group-2|nvim notes.md" end)
+left_alone("another pid in the terminal's foreground", function() ghostty_reply = "999|tab-group-1|tab-group-1|nvim notes.md" end)
+left_alone("the focused window titled otherwise than Ghostty names the terminal's", function()
+  ghostty_reply = "4242|tab-group-1|tab-group-1|claude: some session"
+end)
+left_alone("the focus moving to another Ghostty window during the lookup", function()
+  local calls = 0
+  local other = fake_window(43, upper, wide)
+  hs.window.focusedWindow = function()
+    calls = calls + 1
+    return calls == 1 and other or win
+  end
+end)
 left_alone("no terminal on the tty", function() ghostty_reply = "none" end)
 left_alone("two terminals on the tty", function() ghostty_reply = "many" end)
 left_alone("the focused window another app's", function()
