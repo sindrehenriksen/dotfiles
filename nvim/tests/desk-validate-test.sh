@@ -250,6 +250,23 @@ assert_eq "a bare array reply has none" "[]" "$(desk_near_misses '[]')"
 assert_eq "a long headline is cut" "120" "$(desk_near_misses "{\"near_misses\": [{\"headline\": \"$(printf 'x%.0s' {1..300})\"}]}" | jq '.[0].headline | length')"
 
 echo
+echo "=== desk_chat_notes: news for the follow-up conversation, sources checked ==="
+: > "$PASS_SCRATCH/dropped.json"
+chat="$(desk_chat_notes '{"items": [], "chat_notes": [
+	{"text": "Model X in preview\nsee [the post](https://ok.example/post) or https://bad.example/x", "source": "https://ok.example/post", "home": "the Models section https://bad.example/h"},
+	{"text": "From an unchecked page", "source": "https://bad.example/y"},
+	{"text": "A ticket moved", "source": "ticket:ABC-1"},
+	{"text": ""}, "bare", {"source": "https://ok.example/post"}]}' "https://ok.example/post")"
+assert_eq "entries without text go, a URL source not in the fetch results drops the note" \
+	'["https://ok.example/post","ticket:ABC-1"]' "$(jq -c '[.[].source]' <<< "$chat")"
+assert_eq "text keeps a checked link, loses any other URL, and is one line" \
+	'Model X in preview see [the post](https://ok.example/post) or [url removed]' "$(jq -r '.[0].text' <<< "$chat")"
+assert_eq "home keeps no URL" 'the Models section [url removed]' "$(jq -r '.[0].home' <<< "$chat")"
+assert_eq "an empty home is left out" "false" "$(jq '.[1] | has("home")' <<< "$chat")"
+assert_eq "the dropped note is recorded for the summary" "From an unchecked page" "$(jq -r '.[-1].headline' "$PASS_SCRATCH/dropped.json")"
+assert_eq "a reply without chat_notes has none" "[]" "$(desk_chat_notes '{"items": []}' "")"
+
+echo
 echo "=== desk_verify_and_strip_turn_citations ==="
 tail_file="$ROOT/transcript-tail.jsonl"
 cat > "$tail_file" <<'JSONL'

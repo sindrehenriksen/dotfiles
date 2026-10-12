@@ -91,12 +91,13 @@ case "$cwd" in
 		jq -nc '{type:"assistant",message:{content:[{type:"text",text:({items:([range(1;5) as $n
 			| {id:"j\($n)",file:"notes.md",kind:"new",target:"top",before:"",after:"a validated item \($n)",source:"notes",headline:"h\($n)",tier:"act"}]
 			+ [{id:"j5",file:"notes.md",kind:"new",target:"top",before:"",after:"an unverifiable item",source:"https://example.invalid/never-fetched",headline:"unverifiable",tier:"worth_knowing"}]),
-			near_misses:[{headline:"close call",why_not:"routine for now"}]} | tojson)}]}}'
+			near_misses:[{headline:"close call",why_not:"routine for now"}],
+			chat_notes:[{text:"news with no home",source:"notes",home:"a new section"}]} | tojson)}]}}'
 		echo '{"type":"result","subtype":"success"}'
 		;;
 	*-F-after-*)
 		# Runs after J: copies what J's branch held back out of the pass's scratch.
-		for f in "$DESK_SCRATCH_ROOT"/testpass-*/capped.json "$DESK_SCRATCH_ROOT"/testpass-*/near-misses.json; do
+		for f in "$DESK_SCRATCH_ROOT"/testpass-*/capped.json "$DESK_SCRATCH_ROOT"/testpass-*/near-misses.json "$DESK_SCRATCH_ROOT"/testpass-*/chat-notes.json; do
 			[ -f "$f" ] && cp "$f" "$HELD_DIR/"
 		done
 		echo '{"type":"result","subtype":"success"}'
@@ -217,6 +218,8 @@ echo
 echo "=== what J's branch held back is kept for the follow-up summary ==="
 assert_eq "the item over the ACT cap is recorded" '["h4"]' "$(jq -c '[.[].headline]' "$ROOT/held/capped.json" 2> /dev/null)"
 assert_eq "and the near miss" '["close call"]' "$(jq -c '[.[].headline]' "$ROOT/held/near-misses.json" 2> /dev/null)"
+assert_eq "and the news left for the conversation" '[{"text":"news with no home","source":"notes","home":"a new section"}]' \
+	"$(jq -c '.' "$ROOT/held/chat-notes.json" 2> /dev/null)"
 assert_eq "the status file counts the capped one" "1" "$(jq '.proposal.overflow.act' "$STATE/status.json" 2> /dev/null)"
 
 echo

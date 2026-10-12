@@ -538,6 +538,9 @@ $(jq -r '(.entries // [])[] | .url // empty' "$PASS_SCRATCH/ticket-digest.json" 
 					capped="$(desk_apply_caps "$validated_json" "$caps_json")"
 					desk_record_capped "$(jq -c '.overflow' <<< "$capped")"
 					desk_near_misses "$final_text" > "$PASS_SCRATCH/near-misses.json"
+					# News the judge leaves for the follow-up conversation
+					# instead of the notes, its sources checked as an item's are.
+					desk_chat_notes "$final_text" "$allowed_urls" > "$PASS_SCRATCH/chat-notes.json"
 					# Mail the judge reads as no longer useful is only offered
 					# to the user in the follow-up tab, and only where it names
 					# a thread the triage handed it.

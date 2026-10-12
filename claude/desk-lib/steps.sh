@@ -1699,8 +1699,9 @@ desk_follow_up_settings_arg() {
 # (open items whose id carries `<pass>-<scheduled_date>-`, read from <repo>'s
 # proposal) as `items` and `item_count`, `open_note`, a line about older
 # items still waiting, `capped` and `near_misses`, JSON arrays of what
-# the pass held back, and `dropped`, the items it threw out because their
-# source URL was in no fetch result.
+# the pass held back, `chat_notes`, the news the judge left for this
+# conversation rather than the notes, and `dropped`, the items it threw out
+# because their source URL was in no fetch result.
 desk_follow_up_placeholders() {
 	local pass="$1" scheduled_date="$2" repo="${3:-}"
 	local open='{"items":[]}'
@@ -1710,7 +1711,7 @@ desk_follow_up_placeholders() {
 	fi
 	# What the pass held back: items over the caps, and candidates the judge
 	# put just below the bar. Both are `[]` when there were none.
-	local capped='[]' near='[]' dropped='[]' mail_noise='{}' mail_offer='[]'
+	local capped='[]' near='[]' dropped='[]' mail_noise='{}' mail_offer='[]' chat='[]'
 	if [ -n "${PASS_SCRATCH:-}" ]; then
 		# The mail triage's noise as the write step acted on it (or, dry,
 		# would have), and what the judge offers for the user to trash.
@@ -1723,11 +1724,13 @@ desk_follow_up_placeholders() {
 		jq -e 'type == "array"' > /dev/null 2>&1 <<< "$capped" || capped='[]'
 		near="$(cat "$PASS_SCRATCH/near-misses.json" 2> /dev/null)"
 		jq -e 'type == "array"' > /dev/null 2>&1 <<< "$near" || near='[]'
+		chat="$(cat "$PASS_SCRATCH/chat-notes.json" 2> /dev/null)"
+		jq -e 'type == "array"' > /dev/null 2>&1 <<< "$chat" || chat='[]'
 		dropped="$(cat "$PASS_SCRATCH/dropped.json" 2> /dev/null)"
 		jq -e 'type == "array"' > /dev/null 2>&1 <<< "$dropped" || dropped='[]'
 	fi
 	jq -c --arg prefix "$pass-$scheduled_date-" --arg today "$(date +%F)" --arg pass "$pass" \
-		--argjson capped "$capped" --argjson near "$near" --argjson dropped "$dropped" \
+		--argjson capped "$capped" --argjson near "$near" --argjson dropped "$dropped" --argjson chat "$chat" \
 		--argjson mail_noise "$mail_noise" --argjson mail_offer "$mail_offer" \
 		--arg run_status "$(desk_follow_up_run_status "$pass")" '
 		[.items[] | select(.id | startswith($prefix))] as $mine
@@ -1744,6 +1747,7 @@ desk_follow_up_placeholders() {
 				else "" end),
 			capped: ($capped | tojson),
 			near_misses: ($near | tojson),
+			chat_notes: ($chat | tojson),
 			dropped: ($dropped | tojson),
 			mail_noise: ($mail_noise | tojson),
 			mail_offer: ($mail_offer | tojson)

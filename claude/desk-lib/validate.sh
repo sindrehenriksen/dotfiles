@@ -347,6 +347,37 @@ desk_record_dropped() {
 		<<< "$1" > "$file.tmp" 2> /dev/null && mv -f "$file.tmp" "$file"
 }
 
+# desk_chat_notes <reply-json> <allowed-urls>: the judge reply's
+# `chat_notes`, news it leaves for the follow-up conversation rather than the
+# notes, cleaned: at most eight, each {text, source, home} as plain one-line
+# text. A URL `source` must be in <allowed-urls> as an item's must, or the
+# note is dropped and recorded as an item would be (desk_record_dropped);
+# `text` keeps only allowed URLs, and `home` none.
+desk_chat_notes() {
+	local reply="$1" allowed="$2" raw n i note text source home out='[]'
+	raw="$(jq -c '
+		if type == "object" and (.chat_notes | type) == "array" then
+			[.chat_notes[] | objects | select((.text | type) == "string" and .text != "")][0:8]
+		else [] end' <<< "$reply" 2> /dev/null)"
+	jq -e 'type == "array"' > /dev/null 2>&1 <<< "$raw" || raw='[]'
+	n="$(jq 'length' <<< "$raw")"
+	for ((i = 0; i < n; i++)); do
+		note="$(jq -c ".[$i] | {text, source: ((.source // \"\") | tostring), home: ((.home // \"\") | tostring)}" <<< "$raw")"
+		if ! desk_source_allowed "$note" "$allowed"; then
+			desk_record_dropped "$(jq -c '{headline: .text, source}' <<< "$note")"
+			continue
+		fi
+		text="$(desk_strip_disallowed_urls "$(jq -r '.text' <<< "$note")" "$allowed")"
+		home="$(desk_strip_disallowed_urls "$(jq -r '.home' <<< "$note")" "")"
+		source="$(jq -r '.source' <<< "$note")"
+		out="$(jq -c --arg t "$text" --arg s "$source" --arg h "$home" '
+			def clean($n): gsub("[\u0000-\u001f\u007f]"; " ") | gsub("\\s+"; " ") | sub("^ "; "") | sub(" $"; "") | .[0:$n];
+			. + [{text: ($t | clean(300)), source: ($s | clean(500)), home: ($h | clean(160))}
+				| with_entries(select(.value != ""))]' <<< "$out")"
+	done
+	printf '%s\n' "$out"
+}
+
 # desk_near_misses <reply-json>: the judge reply's `near_misses`, the
 # candidates it judged just below the bar, cleaned: at most five, each
 # {headline, why_not} as plain one-line text, anything else dropped.
