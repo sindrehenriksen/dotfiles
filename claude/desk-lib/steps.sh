@@ -1081,8 +1081,9 @@ desk_session_capture_call() {
 }
 
 # What the close step last offered per session, so a session whose
-# transcript has not changed since is offered again without a second call:
-# {<session id>: {transcript_stamp, why, items}}.
+# transcript, follow state and the notes it was placed against are all
+# unchanged since is offered again without a second call:
+# {<session id>: {transcript_stamp, why, items}}, the stamp covering all three.
 DESK_CLOSE_OFFERS_FILE="${DESK_CLOSE_OFFERS_FILE:-$DESK_STATE_DIR/close-offers.json}"
 
 # desk_transcript_stamp <path>: the transcript's mtime and size, which
@@ -1140,8 +1141,9 @@ desk_step_close() {
 		return
 	}
 
-	local memo n offer='[]' kept='{}'
+	local memo n offer='[]' kept='{}' notes_stamp
 	memo="$(cat "$DESK_CLOSE_OFFERS_FILE" 2> /dev/null)"
+	notes_stamp="$(git -C "$repo" rev-parse -q --verify "HEAD:${DESK_CAPTURES_FILE:-notes.md}" 2> /dev/null)"
 	jq -e 'type == "object"' > /dev/null 2>&1 <<< "$memo" || memo='{}'
 	n="$(jq 'length' <<< "$candidates")"
 	desk_log "$pass" "close: $n candidate(s) idle >= $close_after working days"
@@ -1155,11 +1157,19 @@ desk_step_close() {
 		id="$(jq -r '.id' <<< "$sess")"
 		name="$(jq -r '.name // .id' <<< "$sess")"
 		stamp="$(desk_transcript_stamp "$(jq -r '.transcript_path // empty' <<< "$sess")")"
+		[ -z "$stamp" ] || stamp="$stamp|$(jq -r '.followed.all_closed_since // ""' <<< "$sess")|$notes_stamp"
+		items_json=""
 		if [ -n "$stamp" ] && jq -e --arg id "$id" --arg st "$stamp" '.[$id].transcript_stamp == $st' > /dev/null 2>&1 <<< "$memo"; then
 			why="$(jq -r --arg id "$id" '.[$id].why // ""' <<< "$memo")"
-			items_json="$(jq -c --arg id "$id" '.[$id].items' <<< "$memo")"
-			desk_log "$pass" "close: $name unchanged since its last offer — offered again, no call"
-		else
+			# Checked again as a fresh reply would be.
+			items_json="$(desk_validate_items "$(jq -c --arg id "$id" '.[$id].items' <<< "$memo")" "" "$repo")"
+			if [ "$(jq 'length' <<< "$items_json" 2> /dev/null || echo 0)" -gt 0 ]; then
+				desk_log "$pass" "close: $name unchanged since its last offer — offered again, no call"
+			else
+				items_json=""
+			fi
+		fi
+		if [ -z "$items_json" ]; then
 			placeholders="$(jq -n --arg sn "$name" --arg sid "$id" --arg today "$(date +%F)" \
 				'{session_name: $sn, session_id: $sid, today: $today}')"
 			items_json="$(desk_session_capture_call "$pass" "$step_json" "$repo" "$scheduled_date" \

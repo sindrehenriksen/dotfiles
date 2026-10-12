@@ -213,6 +213,18 @@ assert_eq "its items file is written for that day too" "closure notes" \
 printf '{"uuid":"bbbbbbbb-0000-0000-0000-000000000000","type":"user","message":{"role":"user","content":"more"}}\n' >> "$transcript"
 result="$(desk_step_close "testpass" "$step_json" "$config_json" "$repo" "2026-09-30" "${files[@]}")"
 assert_eq "a changed transcript gets a fresh call" "1" "$(wc -l < "$FAKE_CLAUDE_CALLS" | tr -d ' ')"
+: > "$FAKE_CLAUDE_CALLS"
+result="$(desk_step_close "testpass" "$step_json" "$config_json" "$repo" "2026-10-01" "${files[@]}")"
+assert_eq "unchanged again: no call" "0" "$(wc -l < "$FAKE_CLAUDE_CALLS" | tr -d ' ')"
+printf 'Section A\nSection B\n' > "$repo/notes.md"
+git -C "$repo" commit -q -am "notes moved on"
+result="$(desk_step_close "testpass" "$step_json" "$config_json" "$repo" "2026-10-02" "${files[@]}")"
+assert_eq "notes changed since the offer: a fresh call" "1" "$(wc -l < "$FAKE_CLAUDE_CALLS" | tr -d ' ')"
+: > "$FAKE_CLAUDE_CALLS"
+jq '.[] |= (.items[0].kind = "edit" | .items[0].target = {at: "x"} | .items[0].before = "x")' "$DESK_CLOSE_OFFERS_FILE" > "$ROOT/offers.tmp" \
+	&& mv "$ROOT/offers.tmp" "$DESK_CLOSE_OFFERS_FILE"
+result="$(desk_step_close "testpass" "$step_json" "$config_json" "$repo" "2026-10-03" "${files[@]}" 2> /dev/null)"
+assert_eq "a replayed note that no longer validates gets a fresh call" "1" "$(wc -l < "$FAKE_CLAUDE_CALLS" | tr -d ' ')"
 kill "$pid1" "$pid_kept" 2> /dev/null
 rm -rf "$PASS_SCRATCH"
 
@@ -236,6 +248,12 @@ assert_eq "the step reports ok" "ok" "$result"
 assert_eq "both are offered, marked followed" '[["followed-open",true],["followed-done",true]]' "$(offer '[.[] | [.name, .followed]]')"
 assert_eq "the call sees whether everything it follows is closed" "1791100000" \
 	"$(jq -r '.followed.all_closed_since' "$PASS_SCRATCH/close-33333333-3333-4333-8333-333333333333-seed/session.json" 2> /dev/null)"
+: > "$FAKE_CLAUDE_CALLS"
+result="$(desk_step_close "testpass" "$step_json" "$config_json" "$repo" "2026-09-30" "${files[@]}")"
+assert_eq "the next pass, nothing changed: no calls" "0" "$(wc -l < "$FAKE_CLAUDE_CALLS" | tr -d ' ')"
+jq '.all_closed["22222222-2222-4222-8222-222222222222"] = 1791200000' "$STATE/follow-state.json" > "$ROOT/fs.tmp" && mv "$ROOT/fs.tmp" "$STATE/follow-state.json"
+result="$(desk_step_close "testpass" "$step_json" "$config_json" "$repo" "2026-10-01" "${files[@]}")"
+assert_eq "a follow whose tickets have all closed since gets a fresh call" "1" "$(wc -l < "$FAKE_CLAUDE_CALLS" | tr -d ' ')"
 kill "$pid2" "$pid3" 2> /dev/null
 rm -rf "$PASS_SCRATCH"
 
