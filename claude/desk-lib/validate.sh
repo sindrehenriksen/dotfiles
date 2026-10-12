@@ -240,7 +240,7 @@ desk_validate_items() {
 # in the user's notes.
 # ---------------------------------------------------------------------------
 _DESK_TURN_MARK_GREP='\[turn [A-Za-z0-9]+\]'
-_DESK_TURN_MARK_SED='s/\[turn [A-Za-z0-9]+\]//g'
+_DESK_TURN_MARK_SED='s/ *\[turn [A-Za-z0-9]+\]//g'
 
 desk_verify_and_strip_turn_citations() {
 	local items_json="$1" transcript_tail_file="$2"

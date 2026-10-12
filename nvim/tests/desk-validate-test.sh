@@ -278,7 +278,7 @@ assert_eq "a reply without chat_notes has none" "[]" "$(desk_chat_notes '{"items
 
 echo
 echo "=== desk_verify_and_strip_turn_citations ==="
-tail_file="$ROOT/transcript-tail.jsonl"
+tail_file="$ROOT/transcript.jsonl"
 cat > "$tail_file" <<'JSONL'
 {"uuid":"aaaaaaaa-1111-2222-3333-444444444444","type":"assistant"}
 {"uuid":"bbbbbbbb-1111-2222-3333-444444444444","type":"user"}

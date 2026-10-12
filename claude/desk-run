@@ -298,7 +298,7 @@ mapfile -t files < <(jq -r '.files[]' <<< "$config")
 # default the first configured file.
 DESK_CAPTURES_FILE="$(jq -r --arg d "${files[0]:-notes.md}" '.captures_file // $d' <<< "$config")"
 export DESK_CAPTURES_FILE
-# NOT `.push_enabled // false`: see the dry_run/log_only comments
+# NOT `.push_enabled // false`: see the dry_run comments
 # elsewhere in this file on why jq's `//` can't be used for a boolean
 # whose explicit "false" is meaningful — here that's moot (false already
 # is the default), but it's the same spelling everywhere a config boolean

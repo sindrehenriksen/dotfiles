@@ -212,7 +212,7 @@ reply 77777777-0009 '{"id":"r1","file":"notes.md","kind":"new","target":"top","b
 
 
 PASS_SCRATCH="$(mktemp -d "$ROOT/pass.XXXX")"
-step_json='{"id":"retention","kind":"retention","prompt":"prompt.md","tools":["Read"],"cap":50,"timeout":30}'
+step_json='{"id":"retention","kind":"retention","prompt":"prompt.md","tools":["Read"],"timeout":30}'
 printf 'session {{session_name}} {{session_id}} deleted {{deletion_date}} in {{days_left}}d, today {{today}}\n' > "$ROOT/prompt.md"
 result="$(desk_step_retention "morning" "$step_json" '{}' "$repo" "2027-01-15" '{"act": 3}' "${files[@]}")"
 assert_eq "the step reports ok" "ok" "$result"

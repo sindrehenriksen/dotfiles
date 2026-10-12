@@ -771,10 +771,8 @@ desk_followed_sessions() {
 # passed since, today not counted, desk-lib/lock.sh's
 # desk_working_days_since — not a calendar-day approximation). Each carries
 # `idle_working_days`, and `followed` (desk_followed_sessions's entry) when
-# it is on the follow list: the caller never closes one of those. The other
-# guards (max_closes this pass, "not the first pass after more than N
-# days away", a live re-check "just before" SIGTERM) are applied by the
-# caller around this list, not inside it.
+# it is on the follow list, which the caller offers only once done. The
+# away-days guard is the caller's.
 desk_close_candidates() {
 	local close_after_working_days="$1" keep_open_json="$2" followed_json="${3:-}"
 	[ -n "$followed_json" ] || followed_json='{}'
@@ -976,14 +974,13 @@ desk_step_capture_sessions() {
 	echo "ok"
 }
 
-# The capped tail of a session's own transcript (only its end), as JSON lines, each keeping its own
-# `uuid` — a close or retention prompt's per-bullet turn citations are
-# checked against exactly this file, never the full transcript. $3 = cap
-# in lines (the step's own `cap` field; a step with none gets 200).
-desk_write_transcript_tail() {
-	local transcript_path="$1" out_file="$2" cap="${3:-200}"
+# A session's whole transcript, as JSON lines, each keeping its own `uuid`,
+# copied for a close or retention call to read as far back as it needs. A
+# call's per-bullet turn citations are checked against exactly this copy.
+desk_write_transcript_copy() {
+	local transcript_path="$1" out_file="$2"
 	if [ -n "$transcript_path" ] && [ -f "$transcript_path" ]; then
-		tail -n "$cap" "$transcript_path" > "$out_file" 2> /dev/null || : > "$out_file"
+		cp -f "$transcript_path" "$out_file" 2> /dev/null || : > "$out_file"
 	else
 		: > "$out_file"
 	fi
@@ -992,31 +989,32 @@ desk_write_transcript_tail() {
 # desk_session_capture_call <pass> <step_json> <repo> <scheduled_date>
 #   <session_json> <call_id> <label> <placeholders_json>
 # The one per-session capture call the close and retention kinds share: seeds
-# the call's cwd with `session.json` (the reader entry), the capped end of the
-# session's transcript (the step's `cap`, default 200 lines) and the marked
-# captures file for placement; makes the call under the step's own tools and
-# prompt with the step id replaced by `call_id`; and turns the reply into
-# items: the pinned shape, every turn citation checked against the tail it
-# was given and stripped, then the generic validation (no URL is allowed,
-# since a capture call has no fetch results). Prints the items as a JSON
-# array and returns 0 when at least one survives; logs why and returns 1
-# otherwise. The transcript itself is only ever read here (`tail`): a write
-# to it would move its mtime, which is what Claude Code's retention sweep
-# measures.
+# the call's cwd with `session.json` (the reader entry), a copy of the
+# session's whole transcript, which the call reads as far back as it needs,
+# and the marked captures file for placement; makes the call under the
+# step's own tools and prompt with the step id replaced by `call_id`; and
+# turns the reply into items: the pinned shape, every turn citation checked
+# against the transcript it was given and stripped, then the generic
+# validation (no URL is allowed, since a capture call has no fetch
+# results). Prints the items as a JSON array and returns 0 when at least
+# one survives; logs why and returns 1 otherwise. The reply's final text
+# stays in $PASS_SCRATCH/<call_id>-stream.jsonl for a caller that reads
+# more of it. The transcript itself is only ever read here (copied): a
+# write to it would move its mtime, which is what Claude Code's retention
+# sweep measures.
 desk_session_capture_call() {
 	local pass="$1" step_json="$2" repo="$3" scheduled_date="$4" sess="$5" call_id="$6" label="$7" placeholders="$8"
-	local cap transcript_path captures
-	cap="$(jq -r '.cap // 200' <<< "$step_json")"
+	local transcript_path captures
 	transcript_path="$(jq -r '.transcript_path // empty' <<< "$sess")"
 	captures="${DESK_CAPTURES_FILE:-notes.md}"
 
 	# Copied into the call's own cwd by desk_step_model_call, which is the one
 	# directory a scoped Read can reach.
-	local seed="$PASS_SCRATCH/$call_id-seed" tail_copy="$PASS_SCRATCH/$call_id-transcript-tail.jsonl"
+	local seed="$PASS_SCRATCH/$call_id-seed" tail_copy="$PASS_SCRATCH/$call_id-transcript.jsonl"
 	mkdir -p "$seed"
 	echo "$sess" > "$seed/session.json"
-	desk_write_transcript_tail "$transcript_path" "$seed/transcript-tail.jsonl" "$cap"
-	cp -f "$seed/transcript-tail.jsonl" "$tail_copy" 2> /dev/null
+	desk_write_transcript_copy "$transcript_path" "$seed/transcript.jsonl"
+	cp -f "$seed/transcript.jsonl" "$tail_copy" 2> /dev/null
 	# The marked copy, as J gets: the marks keep a line the call echoes back
 	# from carrying them into the notes.
 	desk_write_marked_head_copy "$repo" "$captures" "$seed/$captures"
@@ -1044,40 +1042,28 @@ desk_session_capture_call() {
 	printf '%s' "$items_json"
 }
 
-# desk_step_close <pass> <step_json> <config_json> <repo> <file>...
-# The composite close step.
-# Skips every candidate (closes nothing) on the first pass after more than
-# `away_days` days away (since the pass last ran to its end, whatever its
-# result), a safety valve against a close storm on first wake. Otherwise, per candidate, in order: the per-session call;
-# its reply's turn citations verified/stripped and its text sanitized
-# (desk-lib/validate.sh); if a closure-note item survives, staged into the
-# ledger/proposal (capture_kind "would_close" under `log_only`, "closed"
-# otherwise) — only once that staging succeeds does this re-check the
-# session is still live and idle, then (unless `log_only`, default true)
-# end it through close-session.sh ($DESK_CLOSE_SESSION_BIN), the same path
-# a session takes when closed by hand: the close recorded, SIGTERM, a
-# survivor recorded as a failed close and never retried, and the tab closed
-# only when identified for certain. Each close says in the run status
-# whether its tab went.
-# `max_closes` (K) bounds real closes only; `log_only` queues every
-# would-close candidate regardless, so the dry-run week
-# sees the whole list. Prints "ok" once every candidate is processed (each
-# one's own outcome is only ever logged/counted, never a step failure),
-# "failed" only if the mechanism itself (session-status.sh) breaks.
+# desk_step_close <pass> <step_json> <config_json> <repo> <scheduled_date> <file>...
+# The close step closes nothing and stages nothing: it offers. For each live
+# session idle at least `close_after_working_days` (desk_close_candidates),
+# not on `keep_open`, and, if it is followed, only once every ticket it
+# follows is closed: one call over its transcript, whose reply carries a
+# closure note (the items shape) and `why`, one line on why it looks done
+# or idle. What survives is offered in the follow-up tab
+# (desk_follow_up_placeholders' `close_offer`), with each note written to
+# the run directory as an items file; only on the user's yes there does
+# that session end it with close-session.sh and stage the note with
+# desk-propose. Skips every candidate on the first pass after more than
+# `away_days` days away, so a return from a long absence is not a flood of
+# calls. Prints "ok" once every candidate is processed, "failed" only if
+# the mechanism itself (session-status.sh) breaks.
 desk_step_close() {
 	local pass="$1" step_json="$2" config_json="$3" repo="$4" scheduled_date="$5"
 	shift 5
-	local files=("$@")
 
-	local close_after keep_open max_closes away_days log_only
+	local close_after keep_open away_days
 	close_after="$(jq -r '.close_after_working_days // 3' <<< "$config_json")"
 	keep_open="$(jq -c '.keep_open // []' <<< "$config_json")"
-	max_closes="$(jq -r '.max_closes // 3' <<< "$config_json")"
 	away_days="$(jq -r '.away_days // 5' <<< "$config_json")"
-	# NOT `.log_only // true`: jq's `//` treats a real `false` as falsy
-	# too, so that spelling would silently ignore an explicit
-	# "log_only": false and always come back "true".
-	log_only="$(jq -r 'if .log_only == null then true else .log_only end' <<< "$config_json")"
 
 	local last_done now away_gap
 	now="$(desk_now)"
@@ -1085,7 +1071,7 @@ desk_step_close() {
 	if [ -n "$last_done" ]; then
 		away_gap=$(( (now - last_done) / 86400 ))
 		if [ "$away_gap" -gt "$away_days" ]; then
-			desk_log "$pass" "close: first pass after ${away_gap}d away (> ${away_days}d) — closing nothing this pass"
+			desk_log "$pass" "close: first pass after ${away_gap}d away (> ${away_days}d) — offering nothing this pass"
 			echo "ok"
 			return
 		fi
@@ -1098,191 +1084,42 @@ desk_step_close() {
 		echo "failed"
 		return
 	}
-	# A followed session is never closed by a pass, however long it has been
-	# quiet: the follow-up summary is told, and suggests closing it.
-	local step_id_for_notes f_line
-	step_id_for_notes="$(jq -r '.id' <<< "$step_json")"
-	while IFS= read -r f_line; do
-		[ -n "$f_line" ] || continue
-		desk_log "$pass" "close: session ${f_line%%$'\t'*} is followed — left open"
-		desk_run_note "$step_id_for_notes left the followed session ${f_line#*$'\t'}"
-	done < <(jq -r '.[] | select(.followed) | (.name // .id) + "\t" + (.name // .id)
-		+ " open, since a pass never closes a followed session, though it has been idle "
-		+ (.idle_working_days | tostring) + " working days; "
-		+ (if .followed.all_closed_since
-			then "every ticket it follows has been closed since " + (.followed.all_closed_since | strflocaltime("%a %d %b")) + "."
-			else "the follow pass does not report every ticket it follows as closed." end)' <<< "$candidates")
-	candidates="$(jq -c '[.[] | select(.followed | not)]' <<< "$candidates")"
+	# A followed session holds the plan for its tickets: offered only once
+	# every ticket it follows is closed.
+	local f_name
+	while IFS= read -r f_name; do
+		[ -n "$f_name" ] && desk_log "$pass" "close: session $f_name is followed and not done — not offered"
+	done < <(jq -r '.[] | select(.followed and (.followed.all_closed_since | not)) | .name // .id' <<< "$candidates")
+	candidates="$(jq -c '[.[] | select((.followed | not) or .followed.all_closed_since)]' <<< "$candidates")"
 
-	local ledger_state
-	ledger_state="$(desk_nvim_cli ledger-state "$repo")" || {
-		desk_log "$pass" "close: ledger-state failed"
-		echo "failed"
-		return
-	}
-
-	local n closes_this_pass=0 held_log_only=0 held_over_cap=0
+	local n offer='[]'
 	n="$(jq 'length' <<< "$candidates")"
 	desk_log "$pass" "close: $n candidate(s) idle >= $close_after working days"
+	local offer_dir="$DESK_RUNS_ROOT/$pass-$scheduled_date"
+	mkdir -p "$offer_dir"
 
 	local i
 	for ((i = 0; i < n; i++)); do
-		local sess id name
+		local sess id name placeholders items_json why items_file
 		sess="$(jq -c ".[$i]" <<< "$candidates")"
 		id="$(jq -r '.id' <<< "$sess")"
 		name="$(jq -r '.name // .id' <<< "$sess")"
-
-		# Real closing needs BOTH log_only off and this pass still under
-		# its K cap; either one missing means queue the capture (as a
-		# dry-run "would_close") without ever signaling the session.
-		local would_close="true"
-		if [ "$log_only" != "true" ] && [ "$closes_this_pass" -lt "$max_closes" ]; then
-			would_close="false"
-		fi
-		local capture_kind="closed"
-		[ "$would_close" = "true" ] && capture_kind="would_close"
-
-		# A session whose note for this kind is already in the standing
-		# proposal, taken or declined gets no second call: without this a
-		# log-only week would make a fresh model call and a fresh note for
-		# the same idle session every pass.
-		if desk_capture_already_ledgered "$ledger_state" "$id" "$capture_kind"; then
-			desk_log "$pass" "close: session $name ($capture_kind) — already captured, skipping"
-			continue
-		fi
-
-		local placeholders items_json
 		placeholders="$(jq -n --arg sn "$name" --arg sid "$id" --arg today "$(date +%F)" \
 			'{session_name: $sn, session_id: $sid, today: $today}')"
 		items_json="$(desk_session_capture_call "$pass" "$step_json" "$repo" "$scheduled_date" \
 			"$sess" "close-$id" "close:$name" "$placeholders")" || continue
-
-		items_json="$(jq -c --arg sid "$id" --arg ck "$capture_kind" \
-			'map(.session_id = $sid | .capture_kind = $ck)' <<< "$items_json")"
-
-		local items_file sha
-		items_file="$PASS_SCRATCH/close-$id-items.json"
+		why="$(desk_extract_final_text "$PASS_SCRATCH/close-$id-stream.jsonl" \
+			| jq -r 'if type == "object" then (.why // "") else "" end | tostring' 2> /dev/null \
+			| tr '\000-\037' ' ' | sed 's/^ *//; s/ *$//' | cut -c1-240)"
+		items_file="$offer_dir/close-$id.items.json"
 		jq -n --argjson items "$items_json" '{items: $items}' > "$items_file"
-		if ! sha="$(desk_stage_and_write_proposal "$repo" "$pass" "$scheduled_date" "$items_file" "${files[@]}")" || [ -z "$sha" ]; then
-			desk_log "$pass" "close: session $name — staging the capture failed, not closing"
-			continue
-		fi
-
-		if [ "$would_close" = "true" ]; then
-			if [ "$log_only" = "true" ]; then
-				held_log_only=$((held_log_only + 1))
-				desk_log "$pass" "close: session $name — would close (log_only); capture queued"
-			else
-				held_over_cap=$((held_over_cap + 1))
-				desk_log "$pass" "close: session $name — would close (over max_closes); capture queued"
-			fi
-			continue
-		fi
-
-		# Re-check just before signaling (it must still be idle): a fresh read, the same session id,
-		# still both live AND idle — the candidate list was built (and
-		# every earlier candidate in this same loop was processed,
-		# model call included) possibly minutes ago, so "still live" alone
-		# isn't "still idle": the user may have come back to this exact session
-		# in the meantime, and a session the user is actively using again must
-		# never be the one that gets SIGTERM'd just because it was idle
-		# when the pass started.
-		local recheck_matches recheck_n
-		recheck_matches="$(session-status.sh 2> /dev/null | jq -c --arg id "$id" 'select(.id == $id)')"
-		recheck_n="$(jq -s 'length' <<< "$recheck_matches" 2> /dev/null || echo 0)"
-		if [ "$recheck_n" -gt 1 ]; then
-			# Two live pid files claiming the same session id is exactly
-			# the kind of corruption that must never be resolved by
-			# guessing which one is "really" this session — refuse outright
-			# rather than risk signaling the wrong process.
-			desk_log "$pass" "close: session $name — $recheck_n pid files share session id $id on re-check — refusing to signal"
-			continue
-		fi
-		if [ "$recheck_n" -ne 1 ]; then
-			desk_log "$pass" "close: session $name is no longer live on re-check — not signaling"
-			continue
-		fi
-		local recheck
-		recheck="$recheck_matches"
-		if [ "$(jq -r '.live // false' <<< "$recheck")" != "true" ]; then
-			desk_log "$pass" "close: session $name is no longer live on re-check — not signaling"
-			continue
-		fi
-		if [ "$(jq -r '.duplicate_pids // false' <<< "$recheck")" = "true" ]; then
-			# More than one pid file names this session id (session-status.sh's
-			# own duplicate_pids) — the reader's own "prefer the live one" is
-			# a best-effort display choice, never grounds for actually
-			# signaling a process: refuse outright rather than risk killing
-			# the wrong one.
-			desk_log "$pass" "close: session $name has more than one pid file on re-check — refusing to signal"
-			continue
-		fi
-
-		local recheck_last_activity recheck_working_days
-		recheck_last_activity="$(jq -r '.last_human_message // .last_activity // empty' <<< "$recheck")"
-		if [ -z "$recheck_last_activity" ]; then
-			desk_log "$pass" "close: session $name has no last human message on re-check — not signaling"
-			continue
-		fi
-		recheck_working_days="$(desk_working_days_since "$recheck_last_activity" "$(desk_now)")"
-		if [ "$recheck_working_days" -lt "$close_after" ]; then
-			desk_log "$pass" "close: session $name is active again on re-check (idle only ${recheck_working_days}d) — not signaling"
-			continue
-		fi
-
-		if jq -e --arg id "$id" 'has($id)' > /dev/null 2>&1 <<< "$(desk_followed_sessions)"; then
-			desk_log "$pass" "close: session $name is followed now, on re-check — not signaling"
-			continue
-		fi
-
-		local pid
-		pid="$(jq -r '.pid // empty' <<< "$recheck")"
-		if [ -z "$pid" ]; then
-			desk_log "$pass" "close: session $name has no pid on re-check — not signaling"
-			continue
-		fi
-
-		# The session ends the way close-session.sh ends any session from
-		# outside it: the close recorded as deliberate, SIGTERM, the
-		# survivor and reader re-checks, and its Ghostty tab closed only when
-		# it could be told apart for certain. That script also refuses on its
-		# own grounds (a pid that is not a claude process, keep_open, two
-		# processes), which leave the session as it is.
-		local close_line close_status close_detail tab_outcome
-		close_line="$(DESK_SESSION_RECORDER_BIN="$DESK_SESSION_RECORDER_BIN" \
-			CLOSE_SESSION_GRACE_SECS="$DESK_KILL_GRACE_SECS" \
-			"${DESK_CLOSE_SESSION_BIN:-$DESK_LIB_DIR/../close-session.sh}" "$id" < /dev/null 2> /dev/null | tail -n 1)"
-		close_status="$(cut -f1 <<< "$close_line")"
-		close_detail="$(cut -f4- <<< "$close_line")"
-		case "$close_status" in
-			closed)
-				case "$close_detail" in
-					"tab closed") tab_outcome="closed, tab closed" ;;
-					*"timed out"* | *"not closed"*) tab_outcome="closed, tab left (closing it failed)" ;;
-					*) tab_outcome="closed, tab left (not identified)" ;;
-				esac
-				closes_this_pass=$((closes_this_pass + 1))
-				desk_status_bump closes
-				desk_status_note_closed "$name"
-				desk_log "$pass" "close: session $name $tab_outcome — $close_detail"
-				desk_run_note "$(jq -r '.id' <<< "$step_json") ended the idle session $name: $tab_outcome."
-				;;
-			refused)
-				desk_log "$pass" "close: session $name — close-session.sh refused: $close_detail; not signaled"
-				;;
-			*)
-				# close-session.sh has recorded a survivor as a failed close
-				# itself; a session it could not see end is counted the same.
-				desk_status_bump failed_closes
-				desk_log "$pass" "close: session $name — the close failed: ${close_detail:-close-session.sh gave no result}"
-				desk_run_note "$(jq -r '.id' <<< "$step_json") could not end the idle session $name: ${close_detail:-no result}."
-				;;
-		esac
+		offer="$(jq -c --argjson s "$sess" --arg why "$why" --arg f "$items_file" --argjson items "$items_json" '
+			. + [{session_id: $s.id, name: ($s.name // $s.id), idle_working_days: $s.idle_working_days,
+			      followed: ($s.followed != null), why: $why, note: ([$items[].after] | join("\n")), items_file: $f}]
+		' <<< "$offer")"
+		desk_log "$pass" "close: offering to close $name"
 	done
-	local step_id
-	step_id="$(jq -r '.id' <<< "$step_json")"
-	[ "$held_log_only" -eq 0 ] || desk_run_note "$step_id ran log-only, so it closed no session: its closure note for $held_log_only session(s) says what it would close, and each session is still open."
-	[ "$held_over_cap" -eq 0 ] || desk_run_note "$step_id reached its limit of $max_closes close(s) this pass: $held_over_cap more session(s) got a closure note on what it would close, and are still open."
+	[ -z "${PASS_SCRATCH:-}" ] || printf '%s\n' "$offer" > "$PASS_SCRATCH/close-offer.json"
 	echo "ok"
 }
 
@@ -1620,7 +1457,8 @@ desk_follow_up_settings_arg() {
 # proposal) as `items` and `item_count`, `open_note`, a line about older
 # items still waiting, `capped` and `near_misses`, JSON arrays of what
 # the pass held back, `chat_notes`, the news the judge left for this
-# conversation rather than the notes, and `dropped`, the items it threw out
+# conversation rather than the notes, `close_offer`, the sessions the close
+# step offers to close, and `dropped`, the items it threw out
 # because their source URL was in no fetch result.
 desk_follow_up_placeholders() {
 	local pass="$1" scheduled_date="$2" repo="${3:-}"
@@ -1631,7 +1469,7 @@ desk_follow_up_placeholders() {
 	fi
 	# What the pass held back: items over the caps, and candidates the judge
 	# put just below the bar. Both are `[]` when there were none.
-	local capped='[]' near='[]' dropped='[]' mail_noise='{}' mail_offer='[]' chat='[]'
+	local capped='[]' near='[]' dropped='[]' mail_noise='{}' mail_offer='[]' chat='[]' close_offer='[]'
 	if [ -n "${PASS_SCRATCH:-}" ]; then
 		# The mail triage's noise as the write step acted on it (or, dry,
 		# would have), and what the judge offers for the user to trash.
@@ -1646,11 +1484,13 @@ desk_follow_up_placeholders() {
 		jq -e 'type == "array"' > /dev/null 2>&1 <<< "$near" || near='[]'
 		chat="$(cat "$PASS_SCRATCH/chat-notes.json" 2> /dev/null)"
 		jq -e 'type == "array"' > /dev/null 2>&1 <<< "$chat" || chat='[]'
+		close_offer="$(cat "$PASS_SCRATCH/close-offer.json" 2> /dev/null)"
+		jq -e 'type == "array"' > /dev/null 2>&1 <<< "$close_offer" || close_offer='[]'
 		dropped="$(cat "$PASS_SCRATCH/dropped.json" 2> /dev/null)"
 		jq -e 'type == "array"' > /dev/null 2>&1 <<< "$dropped" || dropped='[]'
 	fi
 	jq -c --arg prefix "$pass-$scheduled_date-" --arg today "$(date +%F)" --arg pass "$pass" \
-		--argjson capped "$capped" --argjson near "$near" --argjson dropped "$dropped" --argjson chat "$chat" \
+		--argjson capped "$capped" --argjson near "$near" --argjson dropped "$dropped" --argjson chat "$chat" --argjson close_offer "$close_offer" \
 		--argjson mail_noise "$mail_noise" --argjson mail_offer "$mail_offer" \
 		--arg run_status "$(desk_follow_up_run_status "$pass")" '
 		[.items[] | select(.id | startswith($prefix))] as $mine
@@ -1668,6 +1508,7 @@ desk_follow_up_placeholders() {
 			capped: ($capped | tojson),
 			near_misses: ($near | tojson),
 			chat_notes: ($chat | tojson),
+			close_offer: ($close_offer | tojson),
 			dropped: ($dropped | tojson),
 			mail_noise: ($mail_noise | tojson),
 			mail_offer: ($mail_offer | tojson)

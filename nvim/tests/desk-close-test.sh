@@ -1,13 +1,12 @@
 #!/usr/bin/env bash
-# claude/desk-lib/steps.sh's desk_step_close. Covers the
-# away_days safety valve, log_only queuing a "would_close" capture without
-# ever signaling, a real close of a throwaway process this test spawns
-# itself through the real close-session.sh (its tab closed when the fake tab
-# helper names it, left when the session has no terminal), an invalid turn
-# citation dropping the capture, and the max_closes cap. session-status.sh,
-# session-recorder.sh and the tab helper are faked; the only process ever
-# signaled is one this script starts and owns, a sleep run under the name
-# `claude` — never a real Claude Code session.
+# claude/desk-lib/steps.sh's desk_step_close, which only offers: an idle
+# session is offered with its closure note and why, nothing is signaled,
+# recorded or staged; a followed session is offered only once everything it
+# follows is closed; keep_open, an invalid turn citation and the away_days
+# valve each keep a session out of the offer. session-status.sh,
+# session-recorder.sh and the tab helper are faked; the sessions are sleeps
+# this script starts and owns, run under the name `claude`, and none may be
+# signaled.
 set -u
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -140,246 +139,112 @@ source "$LIB/lock.sh"
 # shellcheck source=../../claude/desk-lib/steps.sh
 source "$LIB/steps.sh"
 
-step_json='{"id":"close","kind":"close","tools":["Read"],"connector":false,"cap":50,"timeout":30}'
-config_json_base='{"close_after_working_days": 3, "keep_open": [], "max_closes": 3, "away_days": 5}'
+step_json='{"id":"close","kind":"close","tools":["Read"],"connector":false,"timeout":30}'
+config_json='{"close_after_working_days": 3, "keep_open": ["kept-session"], "away_days": 5}'
 
 write_items_reply() {
 	# $1 = the exact turn-mark to embed (or "" for none)
 	local mark="$1"
 	jq -cn --arg after "closure notes${mark:+ $mark}" '
-		{type:"assistant",message:{content:[{type:"text",text:({items:[{id:"c1",file:"notes.md",kind:"new",target:"top",before:"",after:$after,source:"session:11111111-1111-4111-8111-111111111111",headline:"h"}]} | tojson)}]}}
+		{type:"assistant",message:{content:[{type:"text",text:({why:"its PR merged and nothing is left",items:[{id:"c1",file:"notes.md",kind:"new",target:"top",before:"",after:$after,source:"session:11111111-1111-4111-8111-111111111111",headline:"h"}]} | tojson)}]}}
 	' > "$FAKE_CLAUDE_ITEMS_FILE"
 }
 
 spawn_throwaway() {
-	# A harmless sleep this test owns end-to-end — never a real session.
-	# stdin/stdout/stderr are all redirected away from /dev/null explicitly:
-	# left inherited, the background job would hold this function's own
-	# stdout pipe open, and $(spawn_throwaway) (a command substitution)
-	# would then block reading it until the 300s sleep actually exits,
-	# rather than returning as soon as this function does.
+	# Redirected away from the caller's stdout, so $(spawn_throwaway)
+	# returns at once rather than when the sleep exits.
 	"$PROCBIN/claude" 300 < /dev/null > /dev/null 2>&1 &
 	disown
 	echo $!
 }
 
-spawn_immortal() {
-	# A throwaway process that ignores SIGTERM outright (an ignored
-	# disposition survives exec, unlike a caught one) — the one survivor
-	# close-session.sh's grace period never revives, so its
-	# "close-failed" follow-up event actually gets exercised.
-	( trap '' TERM; exec "$PROCBIN/claude" 300 ) < /dev/null > /dev/null 2>&1 &
-	disown
-	echo $!
+transcript="$ROOT/transcript.jsonl"
+printf '{"uuid":"aaaaaaaa-0000-0000-0000-000000000000","type":"assistant"}\n' > "$transcript"
+session_line() { # <id> <name> <pid>
+	jq -cn --arg id "$1" --arg name "$2" --argjson pid "$3" --arg tp "$transcript" \
+		'{id:$id, name:$name, live:true, has_start_event:true, last_activity:0, pid:$pid, transcript_path:$tp}'
 }
+offer() { jq -c "$1" "$PASS_SCRATCH/close-offer.json" 2> /dev/null; }
 
-echo "=== a real close: staged, recorded, SIGTERM'd, and confirmed dead ==="
-PASS_SCRATCH="$(mktemp -d)"
-pid1="$(spawn_throwaway)"
-transcript1="$ROOT/transcript1.jsonl"
-printf '{"uuid":"aaaaaaaa-0000-0000-0000-000000000000","type":"assistant"}\n' > "$transcript1"
-jq -n --argjson pid "$pid1" --arg tp "$transcript1" \
-	'{id:"11111111-1111-4111-8111-111111111111", name:"a-session", live:true, has_start_event:true, last_activity:0, pid:$pid, transcript_path:$tp}' \
-	> "$SESSION_STATUS_FIXTURE"
-write_items_reply "[turn aaaaaaaa]"
-no_log_only_config="$(jq -c '. + {log_only: false}' <<< "$config_json_base")"
-result="$(desk_step_close "testpass" "$step_json" "$no_log_only_config" "$repo" "2026-09-28" "${files[@]}")"
-assert_eq "the step reports ok" "ok" "$result"
-sleep 1
-assert_true "the throwaway process is dead" "$(kill -0 "$pid1" 2> /dev/null && echo false || echo true)"
-assert_true "session-recorder was told to close 11111111-1111-4111-8111-111111111111" "$(grep -q 'close 11111111-1111-4111-8111-111111111111' "$RECORDER_LOG" && echo true || echo false)"
-assert_eq "status.closes was bumped" "1" "$(jq -r '.closes // 0' "$DESK_STATUS_FILE")"
-assert_eq "status.closed_names names the closed session" "a-session" "$(jq -r '(.closed_names // []) | join(",")' "$DESK_STATUS_FILE")"
-proposal_blob="$(git -C "$repo" show refs/desk/proposal:proposal.json 2> /dev/null)"
-# Staging namespaces every item's own model-assigned id (desk_stage_and_
-# write_proposal, via cli.lua's namespace-ids), so "c1" survives only as
-# an "-c1" suffix on the real, ledger-unique id.
-assert_true "the closure note landed in the proposal" \
-	"$(jq -e '.items[] | select(.id | endswith("-c1"))' > /dev/null 2>&1 <<< "$proposal_blob" && echo true || echo false)"
-assert_true "the turn-citation marker was stripped from the note text" \
-	"$(jq -r '.items[] | select(.id | endswith("-c1")) | .after' <<< "$proposal_blob" | grep -q '\[turn' && echo false || echo true)"
-assert_true "the run status says it closed and left the tab of a session with no terminal" \
-	"$(grep -qF 'close ended the idle session a-session: closed, tab left (not identified).' "$PASS_SCRATCH/run-notes.txt" 2> /dev/null && echo true || echo false)"
-assert_true "no tab was looked up or closed for it" "$([ ! -s "$TAB_LOG" ] && echo true || echo false)"
-rm -rf "$PASS_SCRATCH"
-
-echo
-echo "=== a real close of a session in a tab it can name: the tab is closed too ==="
-rm -rf "$STATE"
-: > "$RECORDER_LOG"
-PASS_SCRATCH="$(mktemp -d)"
-pid1t="$(spawn_throwaway)"
-jq -n --argjson pid "$pid1t" --arg tp "$transcript1" \
-	'{id:"1a1a1a1a-1a1a-41a1-81a1-1a1a1a1a1a1a", name:"tab-session", live:true, has_start_event:true, last_activity:0, pid:$pid, tty:"ttys900", transcript_path:$tp}' \
-	> "$SESSION_STATUS_FIXTURE"
-write_items_reply "[turn aaaaaaaa]"
-result="$(desk_step_close "testpass" "$step_json" "$no_log_only_config" "$repo" "2026-09-30" "${files[@]}")"
-assert_eq "the step reports ok" "ok" "$result"
-assert_true "the throwaway process is dead" "$(kill -0 "$pid1t" 2> /dev/null && echo false || echo true)"
-assert_eq "the tab was found by its tty and pid, then closed" "find ttys900 $pid1t|close T-$pid1t" "$(paste -sd'|' "$TAB_LOG")"
-assert_true "the run status says the tab was closed" \
-	"$(grep -qF 'close ended the idle session tab-session: closed, tab closed.' "$PASS_SCRATCH/run-notes.txt" 2> /dev/null && echo true || echo false)"
-: > "$TAB_LOG"
-rm -rf "$PASS_SCRATCH"
-
-echo
-echo "=== log_only (default true): queues a would_close capture, never signals ==="
-rm -rf "$STATE"
-: > "$RECORDER_LOG"
-PASS_SCRATCH="$(mktemp -d)"
-pid2="$(spawn_throwaway)"
-jq -n --argjson pid "$pid2" \
-	'{id:"22222222-2222-4222-8222-222222222222", name:"b-session", live:true, has_start_event:true, last_activity:0, pid:$pid, transcript_path:""}' \
-	> "$SESSION_STATUS_FIXTURE"
-write_items_reply ""
-log_only_config="$(jq -c '. + {log_only: true}' <<< "$config_json_base")"
-result="$(desk_step_close "testpass" "$step_json" "$log_only_config" "$repo" "2026-09-28" "${files[@]}")"
-assert_eq "the step reports ok" "ok" "$result"
-assert_true "the throwaway process is still alive (never signaled)" "$(kill -0 "$pid2" 2> /dev/null && echo true || echo false)"
-assert_true "session-recorder was never called" "$([ ! -s "$RECORDER_LOG" ] && echo true || echo false)"
-assert_true "the run status will say the close was only log-only" \
-	"$(grep -qF 'ran log-only, so it closed no session: its closure note for 1 session(s) says what it would close, and each session is still open.' "$PASS_SCRATCH/run-notes.txt" 2> /dev/null && echo true || echo false)"
-assert_eq "the staged note is marked as a would-close" "would_close" \
-	"$(git -C "$repo" show refs/desk/proposal:proposal.json 2> /dev/null | jq -r '[.items[] | select(.session_id == "22222222-2222-4222-8222-222222222222") | .capture_kind] | first // empty')"
-kill "$pid2" 2> /dev/null
-rm -rf "$PASS_SCRATCH"
-
-echo
-echo "=== log_only: a session already ledgered for its kind costs no second call or note ==="
-: > "$FAKE_CLAUDE_CALLS"
-PASS_SCRATCH="$(mktemp -d)"
-pid2b="$(spawn_throwaway)"
-jq -n --argjson pid "$pid2b" \
-	'{id:"22222222-2222-4222-8222-222222222222", name:"b-session", live:true, has_start_event:true, last_activity:0, pid:$pid, transcript_path:""}' \
-	> "$SESSION_STATUS_FIXTURE"
-result="$(desk_step_close "testpass" "$step_json" "$log_only_config" "$repo" "2026-09-29" "${files[@]}")"
-assert_eq "the repeat pass reports ok" "ok" "$result"
-assert_eq "no model call was made for the already-captured session" "0" "$(wc -l < "$FAKE_CLAUDE_CALLS" | tr -d ' ')"
-assert_eq "still exactly one would_close note" "1" "$(git -C "$repo" show refs/desk/proposal:proposal.json | jq '[.items[] | select(.session_id == "22222222-2222-4222-8222-222222222222")] | length')"
-kill "$pid2b" 2> /dev/null
-rm -rf "$PASS_SCRATCH"
-
-echo
-echo "=== away_days: the first pass after a long gap closes nothing ==="
-rm -rf "$STATE"
-: > "$RECORDER_LOG"
-PASS_SCRATCH="$(mktemp -d)"
-long_ago=$(( $(desk_now) - 20 * 86400 ))
-desk_status_set_result "testpass" "ok" "" "[]" "" > /dev/null
-# desk_step_close's away-days check reads the last run that finished,
-# whatever its result (status.sh's `last_done_run`); every field a real run
-# that long ago would have left is backdated here.
-jq --argjson t "$long_ago" '.passes.testpass |= (.last_run = $t | .last_ok_run = $t | .last_done_run = $t)' \
-	"$DESK_STATUS_FILE" > "$DESK_STATUS_FILE.tmp" && mv "$DESK_STATUS_FILE.tmp" "$DESK_STATUS_FILE"
-pid3="$(spawn_throwaway)"
-jq -n --argjson pid "$pid3" \
-	'{id:"33333333-3333-4333-8333-333333333333", name:"c-session", live:true, has_start_event:true, last_activity:0, pid:$pid, transcript_path:""}' \
-	> "$SESSION_STATUS_FIXTURE"
-write_items_reply ""
-no_log_only_config="$(jq -c '. + {log_only: false}' <<< "$config_json_base")"
-result="$(desk_step_close "testpass" "$step_json" "$no_log_only_config" "$repo" "2026-09-28" "${files[@]}")"
-assert_eq "the step reports ok" "ok" "$result"
-assert_true "nothing was signaled after a long away gap" "$(kill -0 "$pid3" 2> /dev/null && echo true || echo false)"
-assert_true "session-recorder was never called" "$([ ! -s "$RECORDER_LOG" ] && echo true || echo false)"
-kill "$pid3" 2> /dev/null
-rm -rf "$PASS_SCRATCH"
-
-echo
-echo "=== away_days: passes that finished partial since the last ok one are not an absence ==="
-rm -rf "$STATE"
-: > "$RECORDER_LOG"
-PASS_SCRATCH="$(mktemp -d)"
-desk_status_set_result "testpass" "ok" "" "[]" "" > /dev/null
-jq --argjson t "$long_ago" '.passes.testpass |= (.last_run = $t | .last_ok_run = $t)' \
-	"$DESK_STATUS_FILE" > "$DESK_STATUS_FILE.tmp" && mv "$DESK_STATUS_FILE.tmp" "$DESK_STATUS_FILE"
-desk_status_set_running "testpass" > /dev/null
-desk_status_set_result "testpass" "partial" "" '["F-web"]' "" > /dev/null
-pid3b="$(spawn_throwaway)"
-jq -n --argjson pid "$pid3b" \
-	'{id:"3b3b3b3b-3b3b-43b3-83b3-3b3b3b3b3b3b", name:"d-session", live:true, has_start_event:true, last_activity:0, pid:$pid, transcript_path:""}' \
-	> "$SESSION_STATUS_FIXTURE"
-write_items_reply ""
-result="$(desk_step_close "testpass" "$step_json" "$no_log_only_config" "$repo" "2026-09-28" "${files[@]}")"
-assert_eq "the step reports ok" "ok" "$result"
-assert_true "the idle session was closed" "$(grep -q 'close 3b3b3b3b-3b3b-43b3-83b3-3b3b3b3b3b3b' "$RECORDER_LOG" && echo true || echo false)"
-kill "$pid3b" 2> /dev/null
-rm -rf "$PASS_SCRATCH"
-
-echo
-echo "=== an invalid turn citation drops the capture entirely ==="
-rm -rf "$STATE"
-: > "$RECORDER_LOG"
-PASS_SCRATCH="$(mktemp -d)"
-pid4="$(spawn_throwaway)"
-transcript4="$ROOT/transcript4.jsonl"
-printf '{"uuid":"bbbbbbbb-0000-0000-0000-000000000000","type":"assistant"}\n' > "$transcript4"
-jq -n --argjson pid "$pid4" --arg tp "$transcript4" \
-	'{id:"44444444-4444-4444-8444-444444444444", name:"d-session", live:true, has_start_event:true, last_activity:0, pid:$pid, transcript_path:$tp}' \
-	> "$SESSION_STATUS_FIXTURE"
-write_items_reply "[turn fabricate]"
-result="$(desk_step_close "testpass" "$step_json" "$no_log_only_config" "$repo" "2026-09-28" "${files[@]}")"
-assert_eq "the step still reports ok" "ok" "$result"
-assert_true "the session is never signaled (nothing durable was staged)" "$(kill -0 "$pid4" 2> /dev/null && echo true || echo false)"
-assert_true "session-recorder was never called" "$([ ! -s "$RECORDER_LOG" ] && echo true || echo false)"
-kill "$pid4" 2> /dev/null
-rm -rf "$PASS_SCRATCH"
-
-echo
-echo "=== a survivor: SIGTERM'd but still alive — counted, and recorded as such ==="
-rm -rf "$STATE"
-: > "$RECORDER_LOG"
-PASS_SCRATCH="$(mktemp -d)"
-pid5="$(spawn_immortal)"
-transcript5="$ROOT/transcript5.jsonl"
-printf '{"uuid":"cccccccc-0000-0000-0000-000000000000","type":"assistant"}\n' > "$transcript5"
-jq -n --argjson pid "$pid5" --arg tp "$transcript5" \
-	'{id:"55555555-5555-4555-8555-555555555555", name:"e-session", live:true, has_start_event:true, last_activity:0, pid:$pid, transcript_path:$tp}' \
-	> "$SESSION_STATUS_FIXTURE"
-write_items_reply "[turn cccccccc]"
-result="$(desk_step_close "testpass" "$step_json" "$no_log_only_config" "$repo" "2026-09-28" "${files[@]}")"
-assert_eq "the step still reports ok (a survivor is counted, never a step failure)" "ok" "$result"
-sleep 1
-assert_true "the immortal process is still alive (SIGTERM alone never used SIGKILL)" \
-	"$(kill -0 "$pid5" 2> /dev/null && echo true || echo false)"
-assert_true "session-recorder was told to close 55555555-5555-4555-8555-555555555555" "$(grep -q 'close 55555555-5555-4555-8555-555555555555' "$RECORDER_LOG" && echo true || echo false)"
-assert_true "session-recorder was also told close-failed 55555555-5555-4555-8555-555555555555" \
-	"$(grep -q 'close-failed 55555555-5555-4555-8555-555555555555' "$RECORDER_LOG" && echo true || echo false)"
-assert_eq "status.failed_closes was bumped" "1" "$(jq -r '.failed_closes // 0' "$DESK_STATUS_FILE")"
-assert_eq "status.closes was never bumped for this one" "0" "$(jq -r '.closes // 0' "$DESK_STATUS_FILE")"
-kill -KILL "$pid5" 2> /dev/null
-rm -rf "$PASS_SCRATCH"
-
-echo
-echo "=== a followed session is never closed: left open, and the run status says so ==="
+echo "=== an idle session is offered, with its note and why, and nothing is done to it ==="
 rm -rf "$STATE"
 mkdir -p "$STATE"
 : > "$RECORDER_LOG"
 PASS_SCRATCH="$(mktemp -d)"
-pid6="$(spawn_throwaway)"
-pid6b="$(spawn_throwaway)"
-jq -n '{entries: {"66666666-6666-4666-8666-666666666666": {label: "epic work", keys: ["ABC-1"], related: [], added_at: 0}}}' \
-	> "$STATE/follow.json"
-jq -n '{all_closed: {"66666666-6666-4666-8666-666666666666": 1791100000}}' > "$STATE/follow-state.json"
-{
-	jq -cn --argjson pid "$pid6" --arg tp "$transcript1" \
-		'{id:"66666666-6666-4666-8666-666666666666", name:"followed-session", live:true, has_start_event:true, last_activity:0, pid:$pid, transcript_path:$tp}'
-	jq -cn --argjson pid "$pid6b" --arg tp "$transcript1" \
-		'{id:"67676767-6767-4676-8676-676767676767", name:"plain-session", live:true, has_start_event:true, last_activity:0, pid:$pid, transcript_path:$tp}'
-} > "$SESSION_STATUS_FIXTURE"
+pid1="$(spawn_throwaway)"
+pid_kept="$(spawn_throwaway)"
+{ session_line 11111111-1111-4111-8111-111111111111 a-session "$pid1"
+  session_line 12121212-1212-4121-8121-121212121212 kept-session "$pid_kept"; } > "$SESSION_STATUS_FIXTURE"
 write_items_reply "[turn aaaaaaaa]"
-result="$(desk_step_close "testpass" "$step_json" "$no_log_only_config" "$repo" "2026-10-01" "${files[@]}")"
+result="$(desk_step_close "testpass" "$step_json" "$config_json" "$repo" "2026-09-28" "${files[@]}")"
 assert_eq "the step reports ok" "ok" "$result"
 sleep 1
-assert_true "the followed session is still alive" "$(kill -0 "$pid6" 2> /dev/null && echo true || echo false)"
-assert_true "session-recorder was never told to close it" \
-	"$(grep -q 'close 66666666' "$RECORDER_LOG" && echo false || echo true)"
-assert_true "no closure note was staged for it" \
-	"$(git -C "$repo" show refs/desk/proposal:proposal.json 2> /dev/null | jq -e '.items[] | select(.session_id == "66666666-6666-4666-8666-666666666666")' > /dev/null && echo false || echo true)"
-assert_true "the run status names it as followed and left open, with its tickets closed" \
-	"$(grep -qE '^close left the followed session followed-session open, since a pass never closes a followed session, though it has been idle [0-9]+ working days; every ticket it follows has been closed since ' "$PASS_SCRATCH/run-notes.txt" 2> /dev/null && echo true || echo false)"
-assert_true "the session beside it, not followed, is closed as before" \
-	"$(grep -q 'close 67676767-6767-4676-8676-676767676767' "$RECORDER_LOG" && echo true || echo false)"
-kill "$pid6" "$pid6b" 2> /dev/null
+assert_true "the session is still alive" "$(kill -0 "$pid1" 2> /dev/null && echo true || echo false)"
+assert_true "session-recorder was never called" "$([ ! -s "$RECORDER_LOG" ] && echo true || echo false)"
+assert_true "nothing was staged" "$(git -C "$repo" rev-parse -q --verify refs/desk/proposal > /dev/null && echo false || echo true)"
+assert_eq "it is offered, with why" '["a-session","its PR merged and nothing is left"]' "$(offer '[.[] | .name, .why]')"
+assert_eq "the note has its turn mark stripped" "closure notes" "$(offer '.[0].note' | jq -r .)"
+items_file="$(offer '.[0].items_file' | jq -r .)"
+assert_eq "its items file is beside the run, ready for desk-propose" "$DESK_RUNS_ROOT/testpass-2026-09-28/close-11111111-1111-4111-8111-111111111111.items.json" "$items_file"
+assert_eq "and holds the note" "closure notes" "$(jq -r '.items[0].after' "$items_file" 2> /dev/null)"
+assert_eq "a keep_open session is not offered" "1" "$(offer 'length')"
+assert_true "the call read the whole transcript copy" \
+	"$([ -f "$PASS_SCRATCH/close-11111111-1111-4111-8111-111111111111-transcript.jsonl" ] && echo true || echo false)"
+kill "$pid1" "$pid_kept" 2> /dev/null
+rm -rf "$PASS_SCRATCH"
+
+echo
+echo "=== a followed session: offered only once everything it follows is closed ==="
+rm -rf "$STATE"
+mkdir -p "$STATE"
+: > "$FAKE_CLAUDE_CALLS"
+PASS_SCRATCH="$(mktemp -d)"
+pid2="$(spawn_throwaway)"
+pid3="$(spawn_throwaway)"
+jq -n '{entries: {
+	"22222222-2222-4222-8222-222222222222": {label: "open epic", keys: ["ABC-1"], related: [], added_at: 0},
+	"33333333-3333-4333-8333-333333333333": {label: "done epic", keys: ["ABC-2"], related: [], added_at: 0}}}' > "$STATE/follow.json"
+jq -n '{all_closed: {"33333333-3333-4333-8333-333333333333": 1791100000}}' > "$STATE/follow-state.json"
+{ session_line 22222222-2222-4222-8222-222222222222 followed-open "$pid2"
+  session_line 33333333-3333-4333-8333-333333333333 followed-done "$pid3"; } > "$SESSION_STATUS_FIXTURE"
+write_items_reply "[turn aaaaaaaa]"
+result="$(desk_step_close "testpass" "$step_json" "$config_json" "$repo" "2026-09-29" "${files[@]}")"
+assert_eq "the step reports ok" "ok" "$result"
+assert_eq "only the done one is offered, marked followed" '[["followed-done",true]]' "$(offer '[.[] | [.name, .followed]]')"
+assert_eq "no call was made for the open one" "1" "$(wc -l < "$FAKE_CLAUDE_CALLS" | tr -d ' ')"
+kill "$pid2" "$pid3" 2> /dev/null
+rm -rf "$PASS_SCRATCH"
+
+echo
+echo "=== an invalid turn citation keeps a session out of the offer ==="
+rm -rf "$STATE"
+mkdir -p "$STATE"
+PASS_SCRATCH="$(mktemp -d)"
+pid4="$(spawn_throwaway)"
+session_line 44444444-4444-4444-8444-444444444444 d-session "$pid4" > "$SESSION_STATUS_FIXTURE"
+write_items_reply "[turn fabricate]"
+result="$(desk_step_close "testpass" "$step_json" "$config_json" "$repo" "2026-09-30" "${files[@]}")"
+assert_eq "the step still reports ok" "ok" "$result"
+assert_eq "nothing is offered" "0" "$(offer 'length')"
+kill "$pid4" 2> /dev/null
+rm -rf "$PASS_SCRATCH"
+
+echo
+echo "=== away_days: the first pass after a long gap offers nothing ==="
+rm -rf "$STATE"
+mkdir -p "$STATE"
+: > "$FAKE_CLAUDE_CALLS"
+PASS_SCRATCH="$(mktemp -d)"
+long_ago=$(( $(desk_now) - 20 * 86400 ))
+desk_status_set_result "testpass" "ok" "" "[]" "" > /dev/null
+jq --argjson t "$long_ago" '.passes.testpass |= (.last_run = $t | .last_ok_run = $t | .last_done_run = $t)' \
+	"$DESK_STATUS_FILE" > "$DESK_STATUS_FILE.tmp" && mv "$DESK_STATUS_FILE.tmp" "$DESK_STATUS_FILE"
+pid5="$(spawn_throwaway)"
+session_line 55555555-5555-4555-8555-555555555555 e-session "$pid5" > "$SESSION_STATUS_FIXTURE"
+result="$(desk_step_close "testpass" "$step_json" "$config_json" "$repo" "2026-10-01" "${files[@]}")"
+assert_eq "the step reports ok" "ok" "$result"
+assert_eq "no call was made" "0" "$(wc -l < "$FAKE_CLAUDE_CALLS" | tr -d ' ')"
+kill "$pid5" 2> /dev/null
 rm -rf "$PASS_SCRATCH"
 
 echo

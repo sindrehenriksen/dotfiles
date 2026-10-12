@@ -48,7 +48,6 @@ BASH_SUITES=(
 	nvim/tests/desk-capture-sessions-test.sh
 	nvim/tests/desk-cli-test.sh
 	nvim/tests/desk-cli-tokens-test.sh
-	nvim/tests/desk-close-recheck-test.sh
 	nvim/tests/desk-close-test.sh
 	nvim/tests/desk-deny-hook-test.sh
 	nvim/tests/desk-example-instance-test.sh
