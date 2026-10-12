@@ -117,7 +117,7 @@ desk_build_ticket_cache() {
 		return 1
 	fi
 
-	local tickets="{}" any_valid="false"
+	local tickets="{}" any_valid="false" more="false"
 	local i
 	for ((i = 0; i < n; i++)); do
 		local text issues
@@ -125,6 +125,9 @@ desk_build_ticket_cache() {
 		[ -n "$text" ] || continue
 		issues="$(desk_parse_jira_issues "$text")" || continue
 		any_valid="true"
+		# Whether this page says more follow; the last page read decides.
+		more="$(jq -r '((.nextPageToken // .issues.pageInfo.endCursor // null) != null
+			and (.isLast != true) and (.issues.pageInfo.hasNextPage? // true) != false)' <<< "$text" 2> /dev/null)"
 		local issue key summary status
 		while IFS= read -r issue; do
 			[ -n "$issue" ] || continue
@@ -141,6 +144,15 @@ desk_build_ticket_cache() {
 		return 1
 	fi
 
+	# A search cut short (more pages than the call could read, a result
+	# saved to a file showing it no next-page token) updates the tickets it
+	# did read and keeps the rest as they were, rather than dropping them.
+	if [ "$more" = "true" ]; then
+		local old
+		old="$(jq -c '.tickets // {}' "$DESK_TICKET_CACHE" 2> /dev/null)"
+		jq -e 'type == "object"' > /dev/null 2>&1 <<< "$old" || old='{}'
+		tickets="$(jq -c --argjson old "$old" '$old + .' <<< "$tickets")"
+	fi
 	local now out
 	now="$(desk_now)"
 	out="$(jq -n --argjson now "$now" --argjson tickets "$tickets" \

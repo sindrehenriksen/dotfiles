@@ -3,8 +3,7 @@
 # branch treats an unparseable or schema-invalid J reply (not the pinned
 # {"items": [...]} shape) as a loud pass failure — before this fix it only
 # logged a line and left `result` "ok", so the step after J (W) still ran,
-# and the pass was marked done even though nothing was actually staged,
-# which meant a retry slot never got another chance at it.
+# and the pass read ok even though nothing was actually staged.
 set -u
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

@@ -114,5 +114,19 @@ after_cache="$(cat "$DESK_TICKET_CACHE")"
 assert_eq "the cache file is untouched" "$before_cache" "$after_cache"
 
 echo
+echo "=== desk_build_ticket_cache: a search cut short keeps the tickets it could not read ==="
+cat > "$results_file" <<'JSONL'
+{"type":"tool_result","tool_use_id":"u1","content":[{"type":"text","text":"{\"issues\":{\"nodes\":[{\"key\":\"TICKET-123\",\"summary\":\"Do the thing\",\"status\":{\"name\":\"Done\"}}],\"pageInfo\":{\"hasNextPage\":true,\"endCursor\":\"c2\"}}}"}]}
+JSONL
+desk_build_ticket_cache "$uses_file" "$results_file" "mcp__example-tickets__search" > /dev/null
+assert_eq "the ticket it read is updated" "Done" "$(jq -r '.tickets["TICKET-123"].status' "$DESK_TICKET_CACHE")"
+assert_eq "the one on a page it never read is kept" "Done" "$(jq -r '.tickets["TICKET-45"].status // "gone"' "$DESK_TICKET_CACHE")"
+cat > "$results_file" <<'JSONL'
+{"type":"tool_result","tool_use_id":"u1","content":[{"type":"text","text":"{\"issues\":{\"nodes\":[{\"key\":\"TICKET-123\",\"summary\":\"Do the thing\",\"status\":{\"name\":\"Done\"}}],\"pageInfo\":{\"hasNextPage\":false}}}"}]}
+JSONL
+desk_build_ticket_cache "$uses_file" "$results_file" "mcp__example-tickets__search" > /dev/null
+assert_eq "a whole search replaces the cache" "gone" "$(jq -r '.tickets["TICKET-45"].status // "gone"' "$DESK_TICKET_CACHE")"
+
+echo
 echo "=== summary: $pass passed, $fail failed ==="
 [ "$fail" -eq 0 ]

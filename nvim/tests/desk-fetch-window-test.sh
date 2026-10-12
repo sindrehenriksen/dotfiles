@@ -107,15 +107,6 @@ jq -n --arg repo "$repo" --arg prompt "$prompt" '{
 			{ id: "commit-push", kind: "commit_push" },
 			{ id: "F-fail-then", kind: "fetch", prompt: $prompt, tools: ["Read"], connector: false, timeout: 30 },
 			{ id: "J-always-fail", kind: "judge", prompt: $prompt, tools: ["Read"], connector: false, timeout: 30 }
-		] },
-		cachehit: { steps: [
-			{ id: "commit-push", kind: "commit_push" },
-			{ id: "F-private", kind: "fetch", prompt: $prompt, tools: ["mcp__claude_ai_Gmail__search_threads"], connector: true, timeout: 30 },
-			{ id: "W", kind: "write", prompt: $prompt, tools: ["mcp__claude_ai_Gmail__unlabel_thread"], connector: true, pinned_label: "UNREAD", timeout: 30 }
-		] },
-		retrygap: { steps: [
-			{ id: "F-fresh", kind: "fetch", prompt: $prompt, tools: ["Read"], connector: false, timeout: 30 },
-			{ id: "F-cached", kind: "fetch", prompt: $prompt, tools: ["Read"], connector: false, timeout: 30 }
 		] }
 	}
 }' > "$cfg"

@@ -18,6 +18,13 @@ assert_eq() {
 	if [ "$2" = "$3" ]; then ok "$1"; else bad "$1 (expected [$2], got [$3])"; fi
 }
 
+# The helpers bound each ghostty call with coreutils' timeout, which every
+# Linux they run on has; elsewhere (macOS) there is nothing to check.
+if ! command -v timeout > /dev/null 2>&1; then
+	echo "skip: no coreutils timeout here; the Linux helpers need it"
+	exit 0
+fi
+
 ROOT="$(mktemp -d)"
 trap 'rm -rf "$ROOT"' EXIT
 

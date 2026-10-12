@@ -236,6 +236,9 @@ export DESK_DENY_HOOK_SCRIPT
 # yet wired to it) is resolved into an actual tab once the pass is done,
 # below.
 desk_prune_old_runs
+# Left by passes from before a pass ran once a day, when failed sources were
+# retried from a same-day cache.
+[ -d "$DESK_STATE_DIR/fetch-cache" ] && rm -rf "${DESK_STATE_DIR:?}/fetch-cache"
 follow_up_step="$(jq -r '.follow_up_step // empty' <<< "$pass_config")"
 
 # A fixed lookback window for F-private's Gmail queries (epoch
