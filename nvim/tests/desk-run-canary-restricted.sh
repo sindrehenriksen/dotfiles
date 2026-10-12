@@ -5,6 +5,9 @@
 # use two tools that are not on its list: the built-in Bash and a user-level
 # MCP tool. Both must be refused. Read-only (a harmless echo and a search
 # that never runs). Spends real budget, so it is never in run-all.sh.
+# DESK_CANARY_RESTRICTED=false checks the same envelope for a step with
+# `instructions`, which runs without --restricted; DESK_CANARY_SCRATCH_PARENT
+# runs the call inside a given directory, such as an instance's calls_root.
 set -u
 
 if [ "${DESK_CANARY_LIVE:-}" != "1" ]; then
@@ -28,7 +31,7 @@ ok() { pass=$((pass + 1)); printf 'ok   - %s\n' "$1"; }
 bad() { fail=$((fail + 1)); printf 'FAIL - %s\n' "$1"; }
 
 export CLAUDE_CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude-work}"
-SCRATCH="$(mktemp -d)"
+SCRATCH="$(mktemp -d "${DESK_CANARY_SCRATCH_PARENT:-${TMPDIR:-/tmp}}/desk-canary.XXXXXX")"
 echo '{"mcpServers":{}}' > "$SCRATCH/empty-mcp.json"
 # Set to an MCP tool your user settings provide, so the refusal is of a
 # tool that exists outside this call.
@@ -51,7 +54,7 @@ desk_call_model \
 	--allowed-tools "Read" \
 	--tools "Read" \
 	--connector false \
-	--restricted true \
+	--restricted "${DESK_CANARY_RESTRICTED:-true}" \
 	--mcp-config "$SCRATCH/empty-mcp.json" \
 	--strict-mcp-config true \
 	--max-budget-usd 0.50 \

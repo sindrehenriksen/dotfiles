@@ -106,6 +106,17 @@ fi
 check F-web-again '{"id":"F-web","kind":"fetch","tools":["WebSearch"],"connector":false,"timeout":30}' WebSearch empty
 assert_eq "F-web: no pattern, no Read: no --settings" false "$(has_flag --settings)"
 
+# `instructions`: no --restricted, so the cwd's instructions load, while the
+# tools stay the step's: --tools, strict MCP, and the deny hook every time.
+run_step '{"id":"J","kind":"judge","tools":["Read"],"connector":false,"instructions":true,"timeout":30}'
+assert_eq "J with instructions: no --restricted" false "$(has_flag --restricted)"
+assert_eq "...--tools is still just Read" Read "$(value_after --tools)"
+assert_eq "...--strict-mcp-config" true "$(has_flag --strict-mcp-config)"
+assert_eq "...an empty server set" '{"mcpServers":{}}' "$(jq -c . "$MCP_LOG")"
+assert_eq "...and the deny hook" true "$(has_flag --settings)"
+run_step '{"id":"F-web","kind":"fetch","tools":["WebSearch"],"connector":false,"instructions":true,"timeout":30}'
+assert_eq "F-web with instructions: the deny hook even with no pattern or Read" true "$(has_flag --settings)"
+
 echo
 echo "=== summary: $pass passed, $fail failed ==="
 [ "$fail" -eq 0 ]

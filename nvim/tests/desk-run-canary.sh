@@ -47,7 +47,7 @@ bad() {
 
 export CLAUDE_CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude-work}"
 
-SCRATCH="$(mktemp -d)"
+SCRATCH="$(mktemp -d "${DESK_CANARY_SCRATCH_PARENT:-${TMPDIR:-/tmp}}/desk-canary.XXXXXX")"
 
 PROMPT_FILE="$SCRATCH/prompt.txt"
 cat > "$PROMPT_FILE" << 'PROMPT'

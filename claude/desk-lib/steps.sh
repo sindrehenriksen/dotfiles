@@ -567,13 +567,20 @@ desk_step_model_call() {
 			printf '%s\n' '{"mcpServers":{}}' > "$mcp_config"
 		fi
 		strict_mcp="true"
+		# `instructions`: run without --restricted, so the call loads what a
+		# session started in its cwd loads (CLAUDE.md, skills, the settings
+		# files). Its tools stay exactly the step's: --tools, the allowlist
+		# and, always, the deny hook, and MCP stays strict.
+		local instructions
+		instructions="$(jq -r '.instructions == true' <<< "$step_json")"
+		[ "$instructions" = "true" ] && restricted="false"
 		# A restricted call otherwise gets no --settings at all (it needs
 		# none: --allowedTools plus --permission-mode dontAsk already do
 		# the job) — except a judge/close call whose Read is scoped above,
 		# and a call whose tools include a pattern such as `Bash(gh run
 		# list:*)`, which loads the whole tool: both get this hook wired in
 		# as the pattern's own second layer.
-		if [ -n "$hook_scratch" ] || desk_step_has_tool_pattern "$step_json"; then
+		if [ "$instructions" = "true" ] || [ -n "$hook_scratch" ] || desk_step_has_tool_pattern "$step_json"; then
 			local -a tools_arr
 			mapfile -t tools_arr < <(jq -r '(.tools // [])[]' <<< "$step_json")
 			if ! settings_arg="$(desk_write_deny_hook_settings "$call_scratch" "" "$hook_scratch" "${tools_arr[@]}")"; then
