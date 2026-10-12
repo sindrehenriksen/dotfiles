@@ -109,8 +109,12 @@ desk_sanitize_item_text() {
 		fi
 		printf -v "$field" '%s' "$val"
 	done
-	jq -c --arg b "$before" --arg a "$after" --arg h "$headline" \
-		'.before = $b | .after = $a | .headline = $h' <<< "$item_json"
+	# A quoted anchor line copied from the marked scratch copy carries the
+	# mark too, and would then match no line of the user's file.
+	jq -c --arg b "$before" --arg a "$after" --arg h "$headline" --arg mark "${DESK_AGENT_MARK:-  <<agent-suggested>>}" '
+		.before = $b | .after = $a | .headline = $h
+		| if has("target") then .target |= walk(if type == "string" then split($mark) | join("") else . end) else . end
+	' <<< "$item_json"
 }
 
 # desk_before_is_committed <item-json> <before> <repo>: true when the item

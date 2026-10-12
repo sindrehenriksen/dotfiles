@@ -234,8 +234,8 @@ assert_true "the deletion date is in the text, the turn mark is not" \
 unnamed="$(jq -c '.items[] | select(.session_id == "0000aaaa-0008")' <<< "$proposal")"
 assert_eq "a move that rewrites the user's line lands as new on top" "new \"top\" " \
 	"$(jq -r '"\(.kind) \(.target | tojson) \(.before)"' <<< "$unnamed")"
-assert_eq "...keeping its first line and added bullets, with the date appended" \
-	"- unnamed: rewritten (transcript deleted $(date_of $((NOW + 9 * day))) unless resumed)|  - where it stood" \
+assert_eq "...keeping its first line and added bullets, with the date appended, set off as a section" \
+	"- unnamed: rewritten (transcript deleted $(date_of $((NOW + 9 * day))) unless resumed)|  - where it stood||" \
 	"$(jq -r '.after | split("\n") | join("|")' <<< "$unnamed")"
 past="$(jq -c '.items[] | select(.session_id == "77777777-0009")' <<< "$proposal")"
 assert_eq "an item without the date gets it on its first line" "past-work (transcript deleted $(date_of "$NOW") unless resumed)" \

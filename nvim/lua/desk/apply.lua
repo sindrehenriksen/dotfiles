@@ -41,10 +41,10 @@ end
 -- of it is kept, one at most, only where it separates it from text on
 -- that side; any other is dropped, so an `after` never doubles a blank
 -- line or leaves one at the file's start or end. With `section` (a move
--- of a block that stood between blank lines), a landing spot that is a
--- section boundary (blank or the file's edge on one side) also gets a
--- blank line on each side that meets text. An all-blank `insert` is left
--- as it is.
+-- of a block that stood between blank lines, or an insertion that is a
+-- section of its own), a landing spot that is a section boundary (blank or
+-- the file's edge on one side) also gets a blank line on each side that
+-- meets text. An all-blank `insert` is left as it is.
 local function fit_edges(insert, prev, nxt, section)
 	local first, last = 1, #insert
 	while first <= last and is_blank(insert[first]) do
@@ -68,6 +68,21 @@ local function fit_edges(insert, prev, nxt, section)
 		out[#out + 1] = ""
 	end
 	return out
+end
+
+-- Whether an inserted text is a section of its own: a heading line
+-- (desk.block.is_heading) with more lines under it, as a closure note for a
+-- session the notes have no section for yet is. Blank lines at its edges
+-- don't count.
+local function is_section(insert)
+	local first, last = 1, #insert
+	while first <= last and is_blank(insert[first]) do
+		first = first + 1
+	end
+	while last >= first and is_blank(insert[last]) do
+		last = last - 1
+	end
+	return last > first and block.is_heading(vim.list_slice(insert, first, last), 1)
 end
 
 -- The blank line a move of committed lines `first`..`last` takes along: when
@@ -118,7 +133,7 @@ local function landing(lines, item)
 	if INSERT_KINDS[item.kind] then
 		local pos = block.find_after_anchor(lines, land_anchor)
 		if pos then
-			return true, lines[pos], lines[pos + 1], false
+			return true, lines[pos], lines[pos + 1], is_section(snippet.split_lines(item.after))
 		end
 	elseif item.kind == "edit" then
 		local pos, status = resolve_leave(lines, leave_anchor, before_lines)
@@ -197,7 +212,7 @@ function M.apply_file(lines, items)
 		local function put(gap, insert, in_place)
 			if #insert > 0 then
 				pieces[gap] = pieces[gap] or {}
-				table.insert(pieces[gap], { insert = insert, seq = item_index, in_place = in_place })
+				table.insert(pieces[gap], { insert = insert, seq = item_index, in_place = in_place, section = is_section(insert) })
 			end
 		end
 		if INSERT_KINDS[item.kind] then
@@ -262,13 +277,22 @@ function M.apply_file(lines, items)
 		end
 	end
 
+	-- Within one gap, a section goes to the side its blank line is on (its
+	-- trailing one when the gap opens on a blank line or the file's start,
+	-- its leading one otherwise), so it never runs into a line another
+	-- suggestion put beside it. Which side depends only on the committed
+	-- lines, so applying any subset of the items keeps the rest in place.
 	local new_lines = {}
 	for gap = 0, #lines do
 		local here = pieces[gap]
 		if here then
+			local sections_first = gap == 0 or is_blank(lines[gap])
 			table.sort(here, function(a, b)
 				if a.in_place ~= b.in_place then
 					return not a.in_place
+				end
+				if a.section ~= b.section then
+					return a.section == sections_first
 				end
 				return a.seq < b.seq
 			end)

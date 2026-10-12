@@ -214,6 +214,33 @@ for _, kind in ipairs({ "move", "merge" }) do
 	assert_eq("and its text is not put back", SECTIONS, got)
 end
 
+print("\n=== a new section is set off by blank lines, as the notes' own are ===")
+local LOOSE = { "- WK: loose one", "- WK: loose two", "", "Alpha", "- a1", "", "Bravo", "- b1" }
+on(LOOSE, "sections on top go above the loose lines landing there, each followed by a blank line", {
+	it("n1", "new", "top", "", "- WK: news one"),
+	it("s1", "new", "top", "", "session-one\n  - where it stood"),
+	it("s2", "new", "top", "", "session-two\n- where it stood"),
+	it("n2", "new", "top", "", "- WK: news two"),
+}, {
+	"session-one", "  - where it stood", "",
+	"session-two", "- where it stood", "",
+	"- WK: news one", "- WK: news two",
+	"- WK: loose one", "- WK: loose two", "", "Alpha", "- a1", "", "Bravo", "- b1",
+})
+on(LOOSE, "a section alone on top: no blank line at the file's start", {
+	it("s1", "new", "top", "", "session-one\n  - where it stood"),
+}, { "session-one", "  - where it stood", "", "- WK: loose one", "- WK: loose two", "", "Alpha", "- a1", "", "Bravo", "- b1" })
+on(LOOSE, "after a block, a section goes below a line landing there, behind a blank line", {
+	it("s1", "add", { after = "- a1" }, "", "session-one\n  - where it stood"),
+	it("n1", "add", { after = "- a1" }, "", "- a2"),
+}, { "- WK: loose one", "- WK: loose two", "", "Alpha", "- a1", "- a2", "", "session-one", "  - where it stood", "", "Bravo", "- b1" })
+on(LOOSE, "bullets added under a section are not a section", {
+	it("b", "add", { under = "Alpha" }, "", "- a2\n- a3"),
+}, { "- WK: loose one", "- WK: loose two", "", "Alpha", "- a1", "- a2", "- a3", "", "Bravo", "- b1" })
+on(LOOSE, "an anchor quoted with the runner's agent mark still finds its line", {
+	it("b", "add", { under = "Alpha  <<agent-suggested>>" }, "", "- a2"),
+}, { "- WK: loose one", "- WK: loose two", "", "Alpha", "- a1", "- a2", "", "Bravo", "- b1" })
+
 print(string.format("\n=== summary: %d passed, %d failed ===", pass, fail))
 if fail > 0 then
 	os.exit(1)

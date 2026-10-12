@@ -80,6 +80,16 @@ assert_eq "an item citing its source as a labelled link is kept intact" \
 	"- WK: x [Slack thread](https://example.com/allowed)" "$(jq -r '.[0].after' <<< "$validated")"
 
 echo
+echo "=== an anchor quoted from the marked scratch copy loses the mark ==="
+validated="$(desk_validate_items '[
+	{"id":"m1","file":"notes.md","kind":"add","target":{"under":"a-session  <<agent-suggested>>"},"before":"","after":"- x","source":"notes","headline":"h"},
+	{"id":"m2","file":"notes.md","kind":"move","target":[{"at":"- line  <<agent-suggested>>"},{"after":"- other  <<agent-suggested>>"}],"before":"- line  <<agent-suggested>>","after":"- line","source":"notes","headline":"h"},
+	{"id":"m3","file":"notes.md","kind":"new","target":"top","before":"","after":"- y","source":"notes","headline":"h"}]' "")"
+assert_eq "an under anchor" '{"under":"a-session"}' "$(jq -c '.[0].target' <<< "$validated")"
+assert_eq "both anchors of a move" '[{"at":"- line"},{"after":"- other"}]' "$(jq -c '.[1].target' <<< "$validated")"
+assert_eq "top is left as it is" '"top"' "$(jq -c '.[2].target' <<< "$validated")"
+
+echo
 echo "=== desk_allowed_urls: Gmail literal + Slack rebuilt-from-raw ==="
 results_file="$ROOT/tool-results.jsonl"
 cat > "$results_file" <<'JSONL'

@@ -101,6 +101,19 @@ function M.find_line(lines, quote)
 	return nil
 end
 
+-- The mark the runner appends to a taken suggestion's lines in the copies a
+-- call reads (claude/desk-lib/steps.sh, DESK_AGENT_MARK). The runner strips
+-- it from an item's anchors; this keeps an item staged before it did from
+-- landing on top for a line it quoted with the mark.
+local AGENT_MARK = "  <<agent-suggested>>"
+
+local function unmarked(quote)
+	if type(quote) ~= "string" then
+		return quote
+	end
+	return (quote:gsub(vim.pesc(AGENT_MARK), ""))
+end
+
 --- Parses one wire-shape anchor — the string `"top"`, or a single-key table `{under=...}` |
 --- `{after=...}` | `{at=...}` — into this module's internal `{kind=...,
 --- quote=...}` shape. Returns nil for anything else (an invalid anchor).
@@ -112,13 +125,13 @@ function M.parse_anchor(t)
 		return nil
 	end
 	if t.under ~= nil then
-		return { kind = "under", quote = t.under }
+		return { kind = "under", quote = unmarked(t.under) }
 	end
 	if t.after ~= nil then
-		return { kind = "after", quote = t.after }
+		return { kind = "after", quote = unmarked(t.after) }
 	end
 	if t.at ~= nil then
-		return { kind = "at", quote = t.at }
+		return { kind = "at", quote = unmarked(t.at) }
 	end
 	return nil
 end
