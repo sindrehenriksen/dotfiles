@@ -234,6 +234,13 @@ on(LOOSE, "after a block, a section goes below a line landing there, behind a bl
 	it("s1", "add", { after = "- a1" }, "", "session-one\n  - where it stood"),
 	it("n1", "add", { after = "- a1" }, "", "- a2"),
 }, { "- WK: loose one", "- WK: loose two", "", "Alpha", "- a1", "- a2", "", "session-one", "  - where it stood", "", "Bravo", "- b1" })
+on(LOOSE, "a bullet with a sub-bullet on top is not a section: no blank line, not moved above other items", {
+	it("n1", "new", "top", "", "- WK: news one"),
+	it("b", "new", "top", "", "- a thing\n  - its detail"),
+}, { "- WK: news one", "- a thing", "  - its detail", "- WK: loose one", "- WK: loose two", "", "Alpha", "- a1", "", "Bravo", "- b1" })
+on(LOOSE, "nor when added under a section", {
+	it("b", "add", { under = "Alpha" }, "", "- a2\n  - its detail"),
+}, { "- WK: loose one", "- WK: loose two", "", "Alpha", "- a1", "- a2", "  - its detail", "", "Bravo", "- b1" })
 on(LOOSE, "bullets added under a section are not a section", {
 	it("b", "add", { under = "Alpha" }, "", "- a2\n- a3"),
 }, { "- WK: loose one", "- WK: loose two", "", "Alpha", "- a1", "- a2", "- a3", "", "Bravo", "- b1" })

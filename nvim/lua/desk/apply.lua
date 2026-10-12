@@ -70,10 +70,12 @@ local function fit_edges(insert, prev, nxt, section)
 	return out
 end
 
--- Whether an inserted text is a section of its own: a heading line
--- (desk.block.is_heading) with more lines under it, as a closure note for a
--- session the notes have no section for yet is. Blank lines at its edges
--- don't count.
+-- Whether an inserted text is a section of its own: a column-0 line that
+-- is not a list item, with more lines under it, as a closure note for a
+-- session the notes have no section for yet is. A bullet with sub-bullets
+-- is not one, even though it can head a section in the user's own text: an
+-- insertion shaped like that belongs with the lines around it. Blank lines
+-- at its edges don't count.
 local function is_section(insert)
 	local first, last = 1, #insert
 	while first <= last and is_blank(insert[first]) do
@@ -82,7 +84,11 @@ local function is_section(insert)
 	while last >= first and is_blank(insert[last]) do
 		last = last - 1
 	end
-	return last > first and block.is_heading(vim.list_slice(insert, first, last), 1)
+	local head = insert[first]
+	return last > first
+		and head:match("^%S") ~= nil
+		and head:match("^[-*+]%s") == nil
+		and head:match("^%d+[.)]%s") == nil
 end
 
 -- The blank line a move of committed lines `first`..`last` takes along: when
