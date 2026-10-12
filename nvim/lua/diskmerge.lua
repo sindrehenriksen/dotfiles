@@ -135,6 +135,12 @@ function M.close(buf)
 	end
 end
 
+--- True while `buf` has a change on disk it has not been merged with: a
+--- merge waiting to open, or one open. A save then would overwrite theirs.
+function M.conflict(buf)
+	return pending[buf] ~= nil or merges[buf] ~= nil
+end
+
 --- The scratch split's buffer while a merge is open on `buf`, else nil.
 function M.scratch_for(buf)
 	local m = merges[buf]

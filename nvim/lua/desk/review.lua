@@ -592,30 +592,50 @@ end
 -- buffer until that is written, so quitting nvim after ending the review
 -- would lose it. Pending takes are recorded first, since a write from an
 -- autocmd need not run BufWritePost.
-local function write_taken_notes(s)
-	local wrote = {}
+-- Saves the notes the review took into, recording the takes, and with
+-- `everything` (the review's close keys) every other notes file with
+-- unsaved edits too. Each save is desk.autosave's, so none goes over a
+-- change on disk. Says in one line what it saved, and why it left any.
+local function write_taken_notes(s, everything)
+	local autosave = require("desk.autosave")
+	local took, wrote, left = {}, {}, {}
 	for b in pairs(s.took_into or {}) do
 		if vim.api.nvim_buf_is_loaded(b) and vim.bo[b].modified then
-			local name = vim.fn.fnamemodify(vim.api.nvim_buf_get_name(b), ":t")
-			M.flush_taken(b)
-			local ok, err = pcall(vim.api.nvim_buf_call, b, function()
-				vim.cmd("silent write")
-			end)
+			took[b] = true
+			-- Recorded once on disk, never before: a save held back over a
+			-- change on disk leaves the takes pending, as any unsaved take is.
+			local ok, why = autosave.save(b, { known = true })
 			if ok then
-				wrote[#wrote + 1] = name
+				M.flush_taken(b)
+				wrote[#wrote + 1] = vim.fn.fnamemodify(vim.api.nvim_buf_get_name(b), ":t")
 			else
-				vim.notify(string.format("desk: couldn't save %s: %s", name, (tostring(err):gsub("^Vim:", ""))), vim.log.levels.WARN)
+				left[#left + 1] = why
 			end
 		end
 	end
 	table.sort(wrote)
-	if #wrote > 0 then
-		-- After the windows close, whose redraw would hide it.
-		local msg = "desk: saved " .. table.concat(wrote, " and ") .. " with your takes"
-		vim.schedule(function()
-			vim.notify(msg, vim.log.levels.INFO)
-		end)
+	local others = {}
+	if everything then
+		local more
+		others, more = autosave.save_all(took)
+		vim.list_extend(left, more)
 	end
+	local parts = {}
+	if #wrote > 0 then
+		parts[#parts + 1] = "saved " .. table.concat(wrote, " and ") .. " with your takes"
+	end
+	if #others > 0 then
+		parts[#parts + 1] = (#wrote > 0 and "and " or "saved ") .. table.concat(others, " and ")
+	end
+	-- After the windows close, whose redraw would hide it.
+	vim.schedule(function()
+		if #parts > 0 then
+			vim.notify("desk: " .. table.concat(parts, ", "), vim.log.levels.INFO)
+		end
+		for _, why in ipairs(left) do
+			vim.notify("desk: " .. why, vim.log.levels.WARN)
+		end
+	end)
 end
 
 -- ---------------------------------------------------------------------------
@@ -2085,7 +2105,7 @@ function M.close_review(s)
 	if not ok then
 		return false, why
 	end
-	write_taken_notes(s)
+	write_taken_notes(s, true)
 	local info = vim.fn.getqflist({ title = 0, context = 0 })
 	local ctx = type(info.context) == "table" and info.context or {}
 	if info.title == M.OVERVIEW_TITLE and (ctx.desk_review_buf == s.review_buf or not session_for_review_buf(ctx.desk_review_buf or -1)) then
@@ -2668,6 +2688,22 @@ function M.qf_check()
 	end
 end
 
+--- The overview's `q`: saves the notes files with unsaved edits, as
+--- desk.autosave saves them, then closes the list. Says what it saved, or
+--- why it left one.
+function M.qf_close_list()
+	local wrote, left = require("desk.autosave").save_all()
+	vim.cmd("cclose")
+	vim.schedule(function()
+		if #wrote > 0 then
+			vim.notify("desk: saved " .. table.concat(wrote, " and "), vim.log.levels.INFO)
+		end
+		for _, why in ipairs(left) do
+			vim.notify("desk: " .. why, vim.log.levels.WARN)
+		end
+	end)
+end
+
 --- The overview's `Q`: ends the review the list belongs to, list and
 --- split together, as `<leader>gq` does. With no review open it closes
 --- the list. Returns true, or false, why.
@@ -3241,7 +3277,7 @@ local function install_qf_autocmd()
 						end
 					end
 					if verb == "close list" then
-						vim.cmd("cclose")
+						M.qf_close_list()
 					elseif verb == "close review" then
 						say(M.qf_close_review())
 					else

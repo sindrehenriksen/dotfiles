@@ -2346,9 +2346,10 @@ do
 	vim.api.nvim_set_current_win(vim.fn.bufwinid(rb3))
 	leader("gq")
 	tick()
-	assert_eq("with nothing taken, ␣gq writes nothing", BASE, on_disk(r3))
-	assert_true("and leaves the user's own edit unsaved", vim.bo[nb3].modified)
-	assert_true("and says nothing about saving", not vim.tbl_contains(said, "desk: saved notes.md with your takes"))
+	assert_true("with nothing taken, ␣gq still saves the user's own edit", vim.tbl_contains(on_disk(r3), "  mine"))
+	assert_eq("and the notes are saved", false, vim.bo[nb3].modified)
+	assert_true("says it saved them, with no takes", vim.tbl_contains(said, "desk: saved notes.md"))
+	assert_true("and nothing about takes", not vim.tbl_contains(said, "desk: saved notes.md with your takes"))
 
 	-- A review that moved to the other file writes both.
 	local r4 = new_repo(BASE)
@@ -2403,6 +2404,92 @@ do
 	assert_true("tree-sitter highlights the split", vim.treesitter.highlighter.active[rb] ~= nil)
 	assert_eq("and no legacy syntax runs under it (which marks sync_queue_items' underscores as errors)", "", vim.bo[rb].syntax)
 	assert_eq("the split conceals links as the notes window does", 2, vim.wo[vim.fn.bufwinid(rb)].conceallevel)
+end
+
+print("\n=== q and Q in the overview save the notes first ===")
+do
+	local function tick()
+		vim.wait(20, function()
+			return false
+		end)
+	end
+	local said = {}
+	local notify = vim.notify
+	vim.notify = function(m)
+		said[#said + 1] = m
+	end
+	local function on_disk(r, file)
+		return vim.fn.readfile(r .. "/" .. (file or "notes.md"))
+	end
+	local function setup()
+		local r = new_repo(BASE)
+		build(r, "2026-10-01", { item("n1"), item("n2") })
+		local nb = open_notes(r)
+		review.attach(nb)
+		vim.api.nvim_buf_set_lines(nb, 1, 2, false, { "  mine" })
+		assert_true("overview opens", review.overview(nb))
+		return r, nb, review_buf_of(nb)
+	end
+	local function in_list(keys)
+		vim.api.nvim_set_current_win(vim.fn.getqflist({ winid = 0 }).winid)
+		vim.cmd("normal " .. keys)
+		tick()
+	end
+
+	local r, nb, rb = setup()
+	in_list("q")
+	assert_true("q saves the user's own edit", vim.tbl_contains(on_disk(r), "  mine"))
+	assert_eq("the notes are saved", false, vim.bo[nb].modified)
+	assert_true("the review stays open", vim.api.nvim_buf_is_valid(rb) and vim.fn.bufwinid(rb) ~= -1)
+	assert_true("and it says so", vim.tbl_contains(said, "desk: saved notes.md"))
+
+	r, nb, rb = setup()
+	go_to(vim.fn.bufwinid(rb), rb, "NEWS n1")
+	vim.cmd("normal dp")
+	in_list("Q")
+	assert_true("Q saves the take", vim.tbl_contains(on_disk(r), "NEWS n1"))
+	assert_true("and the user's own edit with it", vim.tbl_contains(on_disk(r), "  mine"))
+	assert_eq("the notes are saved", false, vim.bo[nb].modified)
+	assert_true("the review ended", not vim.api.nvim_buf_is_valid(rb))
+
+	-- reading.md open with an edit of its own, nothing taken into it.
+	r, nb, rb = setup()
+	local rd = vim.fn.bufadd(r .. "/reading.md")
+	vim.fn.bufload(rd)
+	vim.b[rd].desk_attached = true
+	vim.api.nvim_buf_set_lines(rd, 0, -1, false, { "- a paper" })
+	in_list("Q")
+	assert_true("Q saves the other notes file's edit too", vim.tbl_contains(on_disk(r, "reading.md"), "- a paper"))
+	assert_true("both named", vim.tbl_contains(said, "desk: saved notes.md and reading.md"))
+
+	-- Their change on disk under the user's edit: q leaves the notes unsaved.
+	r, nb, rb = setup()
+	vim.b[nb].desk_autosave_disk = vim.fn.sha256(table.concat(BASE, "\n"))
+	vim.fn.writefile({ "Section A", "  theirs", "Section B", "  other" }, r .. "/notes.md")
+	said = {}
+	in_list("q")
+	assert_eq("q never writes over a change on disk", { "Section A", "  theirs", "Section B", "  other" }, on_disk(r))
+	assert_true("the edit stays in the buffer, unsaved", vim.bo[nb].modified and vim.tbl_contains(lines_of(nb), "  mine"))
+	assert_true("and it says why", #vim.tbl_filter(function(m)
+		return m:match("notes.md changed on disk") ~= nil
+	end, said) == 1)
+
+	-- The same under a take: Q leaves the take unsaved, and unrecorded.
+	r, nb, rb = setup()
+	go_to(vim.fn.bufwinid(rb), rb, "NEWS n1")
+	vim.cmd("normal dp")
+	vim.b[nb].desk_autosave_disk = vim.fn.sha256(table.concat(BASE, "\n"))
+	vim.fn.writefile({ "Section A", "  theirs", "Section B", "  other" }, r .. "/notes.md")
+	in_list("Q")
+	assert_eq("Q never writes a take over a change on disk", { "Section A", "  theirs", "Section B", "  other" }, on_disk(r))
+	assert_true("the take stays in the buffer", vim.tbl_contains(lines_of(nb), "NEWS n1"))
+	local recorded = false
+	for _, rec in pairs(ledger.taken_by_id(ledger.read(r))) do
+		recorded = recorded or rec.headline == "headline n1"
+	end
+	assert_true("and is not recorded as taken while it is not on disk", not recorded)
+
+	vim.notify = notify
 end
 
 print(string.format("\n=== summary: %d passed, %d failed ===", pass, fail))

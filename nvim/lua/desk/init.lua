@@ -46,6 +46,9 @@ function M.setup()
 				return
 			end
 			review.attach(args.buf)
+			-- Notes only, never vim-wide: written as you go, never over a
+			-- change on disk (desk/autosave.lua).
+			require("desk.autosave").attach(args.buf)
 
 			-- Links are written `[label](url)`: show the label and reveal the
 			-- URL on the cursor line (concealcursor left at its empty default).
