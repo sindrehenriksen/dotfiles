@@ -3294,6 +3294,24 @@ local function install_focus_autocmd()
 	})
 end
 
+local leave_autocmd_installed = false
+
+-- A take the overview's `q` saved waits to be recorded until its review
+-- ends, and quitting nvim ends it without wiping the split: recorded here.
+local function install_leave_autocmd()
+	if leave_autocmd_installed then
+		return
+	end
+	leave_autocmd_installed = true
+	vim.api.nvim_create_autocmd("VimLeavePre", {
+		callback = function()
+			for _, s in pairs(sessions) do
+				record_saved_takes(s)
+			end
+		end,
+	})
+end
+
 local qf_autocmd_installed = false
 
 local function install_qf_autocmd()
@@ -3360,6 +3378,7 @@ function M.attach(bufnr)
 	vim.b[bufnr].desk_attached = true
 	install_qf_autocmd()
 	install_focus_autocmd()
+	install_leave_autocmd()
 
 	local map = function(lhs, fn, desc)
 		vim.keymap.set("n", lhs, fn, { buffer = bufnr, desc = desc })

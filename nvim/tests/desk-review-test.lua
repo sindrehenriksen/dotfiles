@@ -2686,6 +2686,51 @@ do
 	tick()
 	assert_true("and when :q ends it, the take being on disk already", recorded(r))
 
+	-- take, edit the taken line, q, then :qa: quitting nvim ends the review
+	-- without wiping the split, and the take q saved is still recorded. A
+	-- real :qa, so in an nvim of its own.
+	do
+		local qr = new_repo(BASE)
+		build(qr, "2026-10-01", { item("n1"), item("n2") })
+		local here = debug.getinfo(1, "S").source:sub(2):match("^(.*)/[^/]+$")
+		local child = vim.fn.tempname() .. ".lua"
+		vim.fn.writefile(vim.split([[
+local review = require("desk.review")
+require("desk.window").run = function(_, cb) cb(true, "none") end
+require("desk.window").owner_fn = function() return nil end
+vim.cmd("edit " .. vim.fn.fnameescape(vim.env.DESK_TEST_REPO .. "/notes.md"))
+local nb = vim.api.nvim_get_current_buf()
+review.attach(nb)
+assert(review.overview(nb))
+local rb
+for _, b in ipairs(vim.api.nvim_list_bufs()) do
+	if vim.api.nvim_buf_get_name(b):match("^desk%-review://") then rb = b end
+end
+local function line(buf, text)
+	for i, l in ipairs(vim.api.nvim_buf_get_lines(buf, 0, -1, false)) do
+		if l == text then return i end
+	end
+end
+vim.api.nvim_set_current_win(vim.fn.bufwinid(rb))
+vim.api.nvim_win_set_cursor(0, { line(rb, "NEWS n1"), 0 })
+vim.cmd("normal dp")
+local n = line(nb, "NEWS n1")
+vim.api.nvim_buf_set_lines(nb, n - 1, n, false, { "NEWS n1, edited" })
+vim.api.nvim_set_current_win(vim.fn.getqflist({ winid = 0 }).winid)
+vim.cmd("normal q")
+vim.wait(50, function() return false end)
+vim.cmd("qa")
+]], "\n"), child)
+		local res = vim.system({ vim.v.progpath, "--headless", "-u", here .. "/minimal_init.lua", "-l", child },
+			{ text = true, env = { DESK_TEST_REPO = qr }, timeout = 60000 }):wait()
+		assert_eq("the nvim that took and quit exits cleanly", 0, res.code)
+		assert_true("q saved the edited take", vim.tbl_contains(on_disk(qr), "NEWS n1, edited"))
+		assert_true("and :qa recorded it as taken", recorded(qr))
+		if res.code ~= 0 then
+			print(res.stdout, res.stderr)
+		end
+	end
+
 	-- reading.md open with an edit of its own, nothing taken into it.
 	r, nb, rb = setup()
 	local rd = vim.fn.bufadd(r .. "/reading.md")

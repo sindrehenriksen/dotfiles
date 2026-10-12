@@ -446,7 +446,7 @@ In your notes window while a review is open, keys that go when it ends. The sugg
 | `u` | Undo the latest `<leader>gA` or `<leader>gD` made here while nothing has changed since, else plain undo, which is how a `do` take is undone. |
 | `<leader>gq` | End the review, as in the review split. |
 
-Not taking something is either a decline, from either window, or leaving it alone: an untaken suggestion comes back with the next pass. A take is remembered when you make it and recorded on the next save of either buffer other than the overview's `q`, or when the review ends, so a suggestion you edit right after taking stays taken.
+Not taking something is either a decline, from either window, or leaving it alone: an untaken suggestion comes back with the next pass. A take is remembered when you make it and recorded on the next save of either buffer other than the overview's `q`, or when the review ends, nvim quitting included, so a suggestion you edit right after taking stays taken.
 
 When the notes file changes on disk while you have unsaved edits in it and a review is open, the disk merge (README, Neovim) waits: it says so in one line and opens once the review ends, so the notes window is never in two diffs at once.
 
