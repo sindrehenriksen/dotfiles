@@ -824,19 +824,39 @@ desk_step_commit_push_kind() {
 # — so no session is ended that nothing durable recorded wanting to close.
 # ---------------------------------------------------------------------------
 
-# Every session-status.sh entry that's a `close` candidate right now:
-# live, has a recorder start event, not on `keep_open`, and idle at least
+# The sessions on the follow list (docs/desk.md, "The follow pass") as
+# {<session id>: {label, all_closed_since}}, `all_closed_since` the epoch
+# since which every ticket it follows is done, or null. Read straight from
+# the follow pass's own files, which only desk-follow and that pass write.
+# `{}` when nothing is followed or the list can't be read.
+desk_followed_sessions() {
+	local list="${DESK_FOLLOW_FILE:-$DESK_STATE_DIR/follow.json}"
+	local state_file="${DESK_FOLLOW_STATE_FILE:-$DESK_STATE_DIR/follow-state.json}" state out
+	state="$(cat "$state_file" 2> /dev/null)"
+	jq -e 'type == "object"' > /dev/null 2>&1 <<< "$state" || state='{}'
+	out="$(jq -c --argjson st "$state" '
+		(.entries // {}) | with_entries(.value = {label: .value.label, all_closed_since: ($st.all_closed[.key] // null)})
+	' "$list" 2> /dev/null)"
+	jq -e 'type == "object"' > /dev/null 2>&1 <<< "$out" || out='{}'
+	printf '%s' "$out"
+}
+
+# Every session-status.sh entry idle enough to close right now: live, has
+# a recorder start event, not on `keep_open`, and idle at least
 # `close_after_working_days` *working* days by the user's last human message
 # (session-status.sh's last_human_message — status updates, resumes and
 # tool results do not count as the user being there; last_activity is only a
 # fallback for a reader that does not report it) (the whole Mon-Fri days
 # passed since, today not counted, desk-lib/lock.sh's
-# desk_working_days_since — not a calendar-day approximation). The other
+# desk_working_days_since — not a calendar-day approximation). Each carries
+# `idle_working_days`, and `followed` (desk_followed_sessions's entry) when
+# it is on the follow list: the caller never closes one of those. The other
 # guards (max_closes this pass, "not the first pass after more than N
 # days away", a live re-check "just before" SIGTERM) are applied by the
 # caller around this list, not inside it.
 desk_close_candidates() {
-	local close_after_working_days="$1" keep_open_json="$2"
+	local close_after_working_days="$1" keep_open_json="$2" followed_json="${3:-}"
+	[ -n "$followed_json" ] || followed_json='{}'
 	local now
 	now="$(desk_now)"
 	local all
@@ -862,7 +882,9 @@ desk_close_candidates() {
 		last_activity="$(jq -r '.last_human_message // .last_activity' <<< "$sess")"
 		wd="$(desk_working_days_since "$last_activity" "$now")"
 		if [ "$wd" -ge "$close_after_working_days" ]; then
-			out="$(jq -c --argjson s "$sess" '. + [$s]' <<< "$out")"
+			out="$(jq -c --argjson s "$sess" --argjson wd "$wd" --argjson f "$followed_json" '
+				. + [$s + {idle_working_days: $wd} + (if $f[$s.id] then {followed: $f[$s.id]} else {} end)]
+			' <<< "$out")"
 		fi
 	done
 	printf '%s' "$out"
@@ -1148,12 +1170,28 @@ desk_step_close() {
 		fi
 	fi
 
-	local candidates
-	candidates="$(desk_close_candidates "$close_after" "$keep_open")" || {
+	local candidates followed
+	followed="$(desk_followed_sessions)"
+	candidates="$(desk_close_candidates "$close_after" "$keep_open" "$followed")" || {
 		desk_log "$pass" "close: session-status.sh failed"
 		echo "failed"
 		return
 	}
+	# A followed session is never closed by a pass, however long it has been
+	# quiet: the follow-up summary is told, and suggests closing it.
+	local step_id_for_notes f_line
+	step_id_for_notes="$(jq -r '.id' <<< "$step_json")"
+	while IFS= read -r f_line; do
+		[ -n "$f_line" ] || continue
+		desk_log "$pass" "close: session ${f_line%%$'\t'*} is followed — left open"
+		desk_run_note "$step_id_for_notes left the followed session ${f_line#*$'\t'}"
+	done < <(jq -r '.[] | select(.followed) | (.name // .id) + "\t" + (.name // .id)
+		+ " open, since a pass never closes a followed session, though it has been idle "
+		+ (.idle_working_days | tostring) + " working days; "
+		+ (if .followed.all_closed_since
+			then "every ticket it follows has been closed since " + (.followed.all_closed_since | strflocaltime("%a %d %b")) + "."
+			else "the follow pass does not report every ticket it follows as closed." end)' <<< "$candidates")
+	candidates="$(jq -c '[.[] | select(.followed | not)]' <<< "$candidates")"
 
 	local ledger_state
 	ledger_state="$(desk_nvim_cli ledger-state "$repo")" || {
@@ -1268,6 +1306,11 @@ desk_step_close() {
 		recheck_working_days="$(desk_working_days_since "$recheck_last_activity" "$(desk_now)")"
 		if [ "$recheck_working_days" -lt "$close_after" ]; then
 			desk_log "$pass" "close: session $name is active again on re-check (idle only ${recheck_working_days}d) — not signaling"
+			continue
+		fi
+
+		if jq -e --arg id "$id" 'has($id)' > /dev/null 2>&1 <<< "$(desk_followed_sessions)"; then
+			desk_log "$pass" "close: session $name is followed now, on re-check — not signaling"
 			continue
 		fi
 

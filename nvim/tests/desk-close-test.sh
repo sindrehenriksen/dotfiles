@@ -350,5 +350,38 @@ kill -KILL "$pid5" 2> /dev/null
 rm -rf "$PASS_SCRATCH"
 
 echo
+echo "=== a followed session is never closed: left open, and the run status says so ==="
+rm -rf "$STATE"
+mkdir -p "$STATE"
+: > "$RECORDER_LOG"
+PASS_SCRATCH="$(mktemp -d)"
+pid6="$(spawn_throwaway)"
+pid6b="$(spawn_throwaway)"
+jq -n '{entries: {"66666666-6666-4666-8666-666666666666": {label: "epic work", keys: ["ABC-1"], related: [], added_at: 0}}}' \
+	> "$STATE/follow.json"
+jq -n '{all_closed: {"66666666-6666-4666-8666-666666666666": 1791100000}}' > "$STATE/follow-state.json"
+{
+	jq -cn --argjson pid "$pid6" --arg tp "$transcript1" \
+		'{id:"66666666-6666-4666-8666-666666666666", name:"followed-session", live:true, has_start_event:true, last_activity:0, pid:$pid, transcript_path:$tp}'
+	jq -cn --argjson pid "$pid6b" --arg tp "$transcript1" \
+		'{id:"67676767-6767-4676-8676-676767676767", name:"plain-session", live:true, has_start_event:true, last_activity:0, pid:$pid, transcript_path:$tp}'
+} > "$SESSION_STATUS_FIXTURE"
+write_items_reply "[turn aaaaaaaa]"
+result="$(desk_step_close "testpass" "$step_json" "$no_log_only_config" "$repo" "2026-10-01" "${files[@]}")"
+assert_eq "the step reports ok" "ok" "$result"
+sleep 1
+assert_true "the followed session is still alive" "$(kill -0 "$pid6" 2> /dev/null && echo true || echo false)"
+assert_true "session-recorder was never told to close it" \
+	"$(grep -q 'close 66666666' "$RECORDER_LOG" && echo false || echo true)"
+assert_true "no closure note was staged for it" \
+	"$(git -C "$repo" show refs/desk/proposal:proposal.json 2> /dev/null | jq -e '.items[] | select(.session_id == "66666666-6666-4666-8666-666666666666")' > /dev/null && echo false || echo true)"
+assert_true "the run status names it as followed and left open, with its tickets closed" \
+	"$(grep -qE '^close left the followed session followed-session open, since a pass never closes a followed session, though it has been idle [0-9]+ working days; every ticket it follows has been closed since ' "$PASS_SCRATCH/run-notes.txt" 2> /dev/null && echo true || echo false)"
+assert_true "the session beside it, not followed, is closed as before" \
+	"$(grep -q 'close 67676767-6767-4676-8676-676767676767' "$RECORDER_LOG" && echo true || echo false)"
+kill "$pid6" "$pid6b" 2> /dev/null
+rm -rf "$PASS_SCRATCH"
+
+echo
 echo "=== summary: $pass passed, $fail failed ==="
 [ "$fail" -eq 0 ]
