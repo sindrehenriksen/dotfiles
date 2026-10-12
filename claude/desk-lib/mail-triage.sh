@@ -15,8 +15,7 @@
 #               user in the follow-up tab, never trashed by the pass
 #
 # Nothing here asks a model which thread is which: every rule is a property
-# of the listing. Files, in $PASS_SCRATCH and named after the step, so the
-# same-day fetch cache carries them to a retry slot:
+# of the listing. Files, in $PASS_SCRATCH and named after the step:
 #   <id>-mail-triage.jsonl   the sorted listing (one JSON object)
 set -u
 

@@ -8,8 +8,7 @@
 # lost. The step's judge file, <lowercased id>.json, is the runner's
 # {window, tickets, coverage} in place of the model's reply.
 #
-# Files, in $PASS_SCRATCH and named after the step, so the same-day fetch
-# cache carries them to a retry slot:
+# Files, in $PASS_SCRATCH and named after the step:
 #   <id>-ticket-search-window.jsonl   {since, until, jql, capped}, fixed when the call is made
 #   <id>-ticket-search.jsonl          the judge file
 set -u

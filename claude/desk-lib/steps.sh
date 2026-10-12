@@ -415,96 +415,19 @@ desk_seed_named_file() {
 	esac
 }
 
-# ---------------------------------------------------------------------------
-# Partial-proposal support: a fetch (source) step's own failure never
-# aborts the whole pass (desk-run's own step loop is what actually decides
-# that — see its "fetch" case) — but it also shouldn't cost a source that
-# already succeeded once *this scheduled date* a redundant, budget-burning
-# re-run on the next retry slot. This is the per-(pass, scheduled_date, id)
-# cache that makes "later slots only retry the missing sources" true: a
-# fetch step's own raw stream/tool-results/tool-uses, kept only long enough
-# to survive to the next slot the same day, keyed on scheduled_date so a
-# new day never sees a stale hit.
-# ---------------------------------------------------------------------------
-DESK_FETCH_CACHE_ROOT="${DESK_FETCH_CACHE_ROOT:-$DESK_STATE_DIR/fetch-cache}"
-
-desk_fetch_cache_dir() {
-	local pass="$1" scheduled_date="$2" id="$3"
-	printf '%s/%s-%s-%s' "$DESK_FETCH_CACHE_ROOT" "$pass" "$scheduled_date" "$id"
-}
-
-# True (exit 0) if $3 (a fetch step's own id) already completed ok for
-# $1/$2 (pass, scheduled date) earlier this same day.
-desk_fetch_already_done() {
-	local dir
-	dir="$(desk_fetch_cache_dir "$1" "$2" "$3")"
-	[ -f "$dir/done" ]
-}
-
-# Persists $3's own scratch-jsonl outputs (desk_step_model_call's own
-# "$PASS_SCRATCH/${id}-*.jsonl" naming) so a later retry slot the same day
-# can skip re-running this source entirely and still hand J the same
-# inputs it would have gotten from a fresh run. Also persists the exact
-# digest_query (desk-run's own, computed fresh once per invocation from
-# THIS run's own gmail_window_end) this source's own call actually ran
-# with, whatever id it is — cheap to save unconditionally, and it's the
-# one piece a later retry slot can't otherwise recover: that slot computes
-# its OWN, different digest_query (a new gmail_window_end), but W's later
-# match is against what the CACHED call's own tool_use actually asked for,
-# never against a value re-derived after the fact from a different clock
-# read (see desk_fetch_cache_digest_query below, and desk-run's own use of
-# it). $5 is the end of the window the call covered: a retry that reuses
-# this entry has covered only that far, whatever its own window end is
-# (desk_fetch_cache_window_end).
-desk_fetch_cache_save() {
-	local pass="$1" scheduled_date="$2" id="$3" digest_query="${4:-}" window_end="${5:-}"
-	local dir
-	dir="$(desk_fetch_cache_dir "$pass" "$scheduled_date" "$id")"
-	mkdir -p "$dir" 2> /dev/null
-	cp -f "$PASS_SCRATCH/$id"-*.jsonl "$dir/" 2> /dev/null
-	printf '%s' "$digest_query" > "$dir/digest_query"
-	printf '%s' "$window_end" > "$dir/window_end"
-	: > "$dir/done"
-}
-
-# The window end a cached source's call covered (desk_fetch_cache_save's
-# $5), or "" when the entry recorded none.
-desk_fetch_cache_window_end() {
-	local dir
-	dir="$(desk_fetch_cache_dir "$1" "$2" "$3")"
-	cat "$dir/window_end" 2> /dev/null
-}
-
-# The inverse of desk_fetch_cache_save: copies a previously cached source's
-# own scratch-jsonl files back into $PASS_SCRATCH, as if this run had just
-# made the call itself.
-desk_fetch_cache_restore() {
-	local pass="$1" scheduled_date="$2" id="$3"
-	local dir
-	dir="$(desk_fetch_cache_dir "$pass" "$scheduled_date" "$id")"
-	cp -f "$dir/$id"-*.jsonl "$PASS_SCRATCH/" 2> /dev/null
-}
-
-# The digest_query a cached source's own call actually ran with (see
-# desk_fetch_cache_save above), or "" if none was ever saved for it (an
-# older cache entry from before this existed, or a source this was never
-# called for). Empty is a legitimate "don't know" — desk-run's own caller
-# falls back to its freshly computed value rather than treating this as
-# an error.
-desk_fetch_cache_digest_query() {
-	local pass="$1" scheduled_date="$2" id="$3"
-	local dir
-	dir="$(desk_fetch_cache_dir "$pass" "$scheduled_date" "$id")"
-	cat "$dir/digest_query" 2> /dev/null
-}
-
-# Clears every cached source for $1 (pass) — called once the pass finishes
-# with no failed sources left, since a cache entry only ever exists to
-# survive to that pass's own next same-day retry slot; a pass that's fully
-# "ok" has no more retrying left to do, cached or not.
-desk_fetch_cache_clear() {
-	local pass="$1"
-	rm -rf "${DESK_FETCH_CACHE_ROOT:?}/$pass-"* 2> /dev/null
+# desk_failed_source_reason <id> <result>: why a fetch step failed, in a
+# few words for the run status: how its call ended when that was not a
+# success, else that its result could not be used.
+desk_failed_source_reason() {
+	local id="$1" result="$2" ended
+	ended="$(cat "$PASS_SCRATCH/$id.call-end" 2> /dev/null)"
+	if [ "$result" = "timeout" ]; then
+		printf 'its call ran out of time'
+	elif [ -n "$ended" ] && [[ "$ended" != success* ]]; then
+		printf 'its call ended %s' "$ended"
+	else
+		printf 'its call ran, but its result could not be used (the log says why)'
+	fi
 }
 
 # ---------------------------------------------------------------------------
@@ -723,6 +646,7 @@ desk_step_model_call() {
 	# step's budget and timeout can be set from what it actually used.
 	local call_end
 	call_end="$(jq -r 'select(.type == "result") | "\(.subtype // "?"), \((.duration_ms // 0) / 1000 | floor)s"' "$out" 2> /dev/null | tail -n1)"
+	printf '%s\n' "${call_end:-without a result}" > "$PASS_SCRATCH/${id}.call-end"
 	desk_log "$pass" "model call: $id${label:+ ($label)} ended ${call_end:-without a result}, ${call_cost:-?} of $max_budget_usd USD (timeout ${timeout}s)"
 	# A visible call's own cwd is left standing (desk_call_model's own
 	# header comment): a follow-up `claude --resume` needs it, and
@@ -1479,9 +1403,9 @@ desk_follow_up_summary() {
 #
 # At most one tab is ever opened per (pass, scheduled_date) — a guard
 # stamp under $DESK_GUARD_DIR, written only once this function has
-# actually opened or focused something, so a later retry slot the same
-# scheduled date (a partial pass's own re-run) never opens a second one on
-# top of a tab the user may already be sitting in. If the resolved session is
+# actually opened or focused something, so a later run for the same
+# scheduled date (a manual one) never opens a second one on top of a tab
+# the user may already be sitting in. If the resolved session is
 # already LIVE (already open in a tab, resumed by hand or by an earlier
 # slot), this never opens a second process against it — a second process
 # against a live transcript is worse than no tab at all — and never
@@ -1632,8 +1556,8 @@ desk_follow_up_run_status() {
 		| (($s.failed_sources // []) | join(", ")) as $failed
 		| "Its steps, in order: \($steps). "
 		+ (if $s.result == "ok" then "It finished ok: every step ran."
-			elif $s.result == "partial" then "It finished partial: these sources failed and are retried at the next slot: \($failed). Every other step ran."
-			elif $s.result == "failed" then "It failed at step \($s.stopped_at // "unknown"), so the steps after that did not run."
+			elif $s.result == "partial" then "It finished partial: these sources failed, and nothing retries them today: \($failed). Every other step ran."
+			elif $s.result == "failed" then "It failed at step \($s.stopped_at // "unknown"), so the steps after that did not run, and nothing reruns them today."
 				+ (if $failed != "" then " These sources had failed too: \($failed)." else "" end)
 			else "Its result was not recorded." end)')"
 	local notes=""

@@ -182,9 +182,10 @@ if [ "$same_day_only" = "true" ]; then
 fi
 
 # The once-a-day guard: a slot firing after this scheduled date's pass
-# already finished ok is a no-op.
-if desk_guard_already_ok_today "$pass" "$scheduled_date"; then
-	desk_log "$pass" "already ok today (scheduled $scheduled_date): no-op"
+# already ran is a no-op, whatever came of that run. What failed is said in
+# the follow-up tab, and the next day's window covers what it missed.
+if desk_guard_already_ran_today "$pass" "$scheduled_date"; then
+	desk_log "$pass" "already ran today (scheduled $scheduled_date): no-op"
 	exit 0
 fi
 
@@ -242,7 +243,7 @@ last_ok="$(desk_status_last_ok_run "$pass")"
 # advance last_ok_run and silently narrow the next weekday's own lookback
 # past mail/Slack the weekend itself never actually fetched. last_fetch_ok
 # only ever moves forward when a fetch step of THIS pass actually ran and
-# none failed (see the "nothing left to retry" branch below).
+# none failed (see the end of the step loop below).
 last_fetch_ok="$(desk_status_last_fetch_ok "$pass")"
 if [ -n "$last_fetch_ok" ]; then
 	gmail_window_start="$last_fetch_ok"
@@ -255,8 +256,6 @@ fi
 digest_label="$(jq -r '.digest_gmail_label // "Digest"' <<< "$config")"
 digest_query="label:\"${digest_label}\" after:${gmail_window_start} before:${gmail_window_end}"
 inbox_query="in:inbox after:${gmail_window_start} before:${gmail_window_end}"
-
-desk_status_set_running "$pass"
 
 repo="$(jq -r '.notes_repo' <<< "$config")"
 repo="${repo/#\~/$HOME}"
@@ -291,6 +290,9 @@ if [ "$repo_toplevel" != "$repo_resolved" ]; then
 	exit 2
 fi
 repo="$repo_resolved"
+# Recorded as running only from here, so a run refused over its config never
+# counts as the day's run (desk_guard_already_ran_today).
+desk_status_set_running "$pass" "$scheduled_date"
 mapfile -t files < <(jq -r '.files[]' <<< "$config")
 # Where capture items land: `captures_file`,
 # default the first configured file.
@@ -354,20 +356,13 @@ pass_ctx="$(jq -n --arg repo "$repo" --arg sources_path "$sources_path" --arg pa
 overall_result="ok"
 stopped_at=""
 # Source (fetch) steps get their own failure mode: recorded here, never
-# aborting the pass outright (a later slot retries only the
-# missing sources — see steps.sh's desk_fetch_cache_* for the same-day
-# cache that makes an already-succeeded source skip a redundant re-run
-# rather than this array growing to include it again).
+# aborting the pass outright, and never retried the same day.
 failed_sources=()
 # Whether any fetch step of THIS pass actually ran (as opposed to being
 # skipped by the weekday_only_pass/weekend guard above) — desk_status_
 # set_fetch_ok only ever advances the window when this is true, so a
 # weekend commit-only run of a weekdays_only pass never moves it.
 any_fetch_step_ran="false"
-# How far every fetch this pass used has covered: this run's window end,
-# lowered to a reused cache entry's own. The next window starts here, so a
-# retry that reuses an earlier slot's fetch leaves no gap behind it.
-fetch_covered_through="$gmail_window_end"
 # The judge branch below fills this in from its own {kept, overflow}
 # result; a pass with no judge step this run (a close-only pass, a
 # commit_push-only pass) reports no overflow, matching status.lua's own
@@ -398,75 +393,48 @@ for ((i = 0; i < steps_len; i++)); do
 			fi
 			ticket_search_cfg="$(desk_ticket_search_config "$step_json")"
 			mail_triage_cfg="$(desk_mail_triage_config "$step_json")"
-			if desk_fetch_already_done "$pass" "$scheduled_date" "$id"; then
-				desk_fetch_cache_restore "$pass" "$scheduled_date" "$id"
-				result="ok"
-				desk_log "$pass" "fetch $id: already fetched today (cached) — reusing, no re-run"
-				# The cached call ran with an EARLIER slot's own
-				# gmail_window_end, baked into the digest_query its own
-				# prompt actually used — never this run's freshly computed
-				# one. W's own later match (below) is against exactly what
-				# that call's tool_use asked for, so digest_query has to
-				# track the cached call, not "now", for the rest of this
-				# run. Empty (an older cache entry, saved before this
-				# existed) leaves digest_query as this run's own value,
-				# same as before.
-				if [ "$id" = "$mail_fetch_step_id" ]; then
-					cached_digest_query="$(desk_fetch_cache_digest_query "$pass" "$scheduled_date" "$id")"
-					[ -n "$cached_digest_query" ] && digest_query="$cached_digest_query"
-				fi
-				# An entry that recorded no window end covered an unknown
-				# stretch, so the window stays where it started.
-				cached_end="$(desk_fetch_cache_window_end "$pass" "$scheduled_date" "$id")"
-				[[ "$cached_end" =~ ^[0-9]+$ ]] || cached_end="$gmail_window_start"
-				[ "$cached_end" -lt "$fetch_covered_through" ] && fetch_covered_through="$cached_end"
-			else
-				placeholders="$common_placeholders"
-				if [ "$id" = "$ticket_status_step_id" ]; then
-					notes_text=""
-					for f in "${files[@]}"; do
-						notes_text="$notes_text
+			placeholders="$common_placeholders"
+			if [ "$id" = "$ticket_status_step_id" ]; then
+				notes_text=""
+				for f in "${files[@]}"; do
+					notes_text="$notes_text
 $(git -C "$repo" show "HEAD:$f" 2> /dev/null)"
-					done
-					tokens_json="$(jq -c '.tokens // []' <<< "$config")"
-					jql="$(desk_build_jql "$notes_text" "$tokens_json")"
-					placeholders="$(jq -c --arg jql "$jql" '. + {jql: $jql}' <<< "$common_placeholders")"
-				fi
-				if [ -n "$ticket_digest_cfg" ]; then
-					placeholders="$(jq -c --argjson d "$(desk_ticket_digest_window "$id" "$ticket_digest_cfg" \
-						"$gmail_window_start" "$gmail_window_end")" '. + $d' <<< "$placeholders")"
-				fi
-				if [ -n "$ticket_search_cfg" ]; then
-					placeholders="$(jq -c --argjson d "$(desk_ticket_search_window "$id" "$ticket_search_cfg" \
-						"$gmail_window_start" "$gmail_window_end")" '. + $d' <<< "$placeholders")"
-				fi
-				if [ -n "$mail_triage_cfg" ]; then
-					placeholders="$(jq -c --argjson d "$(desk_mail_triage_placeholders "$mail_triage_cfg")" '. + $d' <<< "$placeholders")"
-				fi
-				result="$(desk_step_fetch "$pass" "$step_json" "" "$placeholders" "" "" "$scheduled_date")"
-				# The status search over every key the notes name is often
-				# past the output limit, so its result is read from the saved
-				# file, before the cache keeps it for a retry slot.
-				if [ "$result" = "ok" ] && [ "$id" = "$ticket_status_step_id" ]; then
-					_desk_follow_resolve_spills "$PASS_SCRATCH/$id-tool-results.jsonl" "$PASS_SCRATCH/$id-spill" \
-						> "$PASS_SCRATCH/$id-tool-results.resolved" \
-						&& mv -f "$PASS_SCRATCH/$id-tool-results.resolved" "$PASS_SCRATCH/$id-tool-results.jsonl"
-				fi
-				if [ "$result" = "ok" ] && [ -n "$mail_triage_cfg" ]; then
-					desk_mail_triage_collect "$pass" "$id" "$mail_triage_cfg" \
-						"$mail_search_tool" "$today" || result="failed"
-				fi
-				if [ "$result" = "ok" ] && [ -n "$ticket_search_cfg" ]; then
-					desk_ticket_search_collect "$pass" "$id" "$ticket_search_cfg" \
-						"$(jq -r '(.tools // [])[0] // empty' <<< "$step_json")" || result="failed"
-				fi
-				if [ "$result" = "ok" ] && [ -n "$ticket_digest_cfg" ]; then
-					desk_ticket_digest_collect "$pass" "$id" "$ticket_digest_cfg" \
-						"$(jq -r '(.tools // [])[0] // empty' <<< "$step_json")" || result="failed"
-				fi
-				if [ "$result" = "ok" ]; then
-					desk_fetch_cache_save "$pass" "$scheduled_date" "$id" "$digest_query" "$gmail_window_end"
-				fi
+				done
+				tokens_json="$(jq -c '.tokens // []' <<< "$config")"
+				jql="$(desk_build_jql "$notes_text" "$tokens_json")"
+				placeholders="$(jq -c --arg jql "$jql" '. + {jql: $jql}' <<< "$common_placeholders")"
+			fi
+			if [ -n "$ticket_digest_cfg" ]; then
+				placeholders="$(jq -c --argjson d "$(desk_ticket_digest_window "$id" "$ticket_digest_cfg" \
+					"$gmail_window_start" "$gmail_window_end")" '. + $d' <<< "$placeholders")"
+			fi
+			if [ -n "$ticket_search_cfg" ]; then
+				placeholders="$(jq -c --argjson d "$(desk_ticket_search_window "$id" "$ticket_search_cfg" \
+					"$gmail_window_start" "$gmail_window_end")" '. + $d' <<< "$placeholders")"
+			fi
+			if [ -n "$mail_triage_cfg" ]; then
+				placeholders="$(jq -c --argjson d "$(desk_mail_triage_placeholders "$mail_triage_cfg")" '. + $d' <<< "$placeholders")"
+			fi
+			result="$(desk_step_fetch "$pass" "$step_json" "" "$placeholders" "" "" "$scheduled_date")"
+			# The status search over every key the notes name is often
+			# past the output limit, so its result is read from the saved
+			# file.
+			if [ "$result" = "ok" ] && [ "$id" = "$ticket_status_step_id" ]; then
+				_desk_follow_resolve_spills "$PASS_SCRATCH/$id-tool-results.jsonl" "$PASS_SCRATCH/$id-spill" \
+					> "$PASS_SCRATCH/$id-tool-results.resolved" \
+					&& mv -f "$PASS_SCRATCH/$id-tool-results.resolved" "$PASS_SCRATCH/$id-tool-results.jsonl"
+			fi
+			if [ "$result" = "ok" ] && [ -n "$mail_triage_cfg" ]; then
+				desk_mail_triage_collect "$pass" "$id" "$mail_triage_cfg" \
+					"$mail_search_tool" "$today" || result="failed"
+			fi
+			if [ "$result" = "ok" ] && [ -n "$ticket_search_cfg" ]; then
+				desk_ticket_search_collect "$pass" "$id" "$ticket_search_cfg" \
+					"$(jq -r '(.tools // [])[0] // empty' <<< "$step_json")" || result="failed"
+			fi
+			if [ "$result" = "ok" ] && [ -n "$ticket_digest_cfg" ]; then
+				desk_ticket_digest_collect "$pass" "$id" "$ticket_digest_cfg" \
+					"$(jq -r '(.tools // [])[0] // empty' <<< "$step_json")" || result="failed"
 			fi
 			if [ -n "$ticket_digest_cfg" ] && [ "$result" = "ok" ]; then
 				desk_ticket_digest_build "$pass" "$id" "$ticket_digest_cfg" "$timezone" || result="failed"
@@ -479,11 +447,12 @@ $(git -C "$repo" show "HEAD:$f" 2> /dev/null)"
 			if [ "$result" != "ok" ]; then
 				# A source's own failure is never fatal to the pass (a
 				# "partial proposal"): recorded, logged, and the loop carries
-				# on with whatever other sources/J/W/close still have to say —
-				# never marked done for this scheduled date, so a later slot
-				# retries exactly this (and only this) source.
+				# on with whatever other sources/J/W/close still have to say.
+				# Nothing retries it today: the follow-up tab says what failed
+				# and why, and the next pass's window covers what it missed.
 				failed_sources+=("$id")
 				desk_log "$pass" "step $id ($kind): $result (a source failure — pass continues, flagged partial)"
+				desk_run_note "$id failed: $(desk_failed_source_reason "$id" "$result")."
 				continue
 			fi
 			;;
@@ -505,8 +474,8 @@ $(git -C "$repo" show "HEAD:$f" 2> /dev/null)"
 				# staging) assumes without re-checking. An unparseable or
 				# schema-invalid reply here is a loud failure (not just a log
 				# line): no W runs after a J whose reply couldn't be trusted,
-				# and the pass is never marked done, so a retry slot re-runs it
-				# instead of silently treating "nothing staged" as success.
+				# and the pass reads failed rather than silently treating
+				# "nothing staged" as success.
 				if [ -z "$items_json" ] || ! jq -e 'type == "array"' > /dev/null 2>&1 <<< "$items_json"; then
 					desk_log "$pass" "judge $id: reply wasn't the pinned {\"items\": [...]} shape — failing the pass"
 					result="failed"
@@ -826,33 +795,25 @@ done
 # so reaching here with the loop otherwise clean ("ok", not a harder
 # failed/break from a later non-source step) but with sources still
 # outstanding is exactly a "partial" pass: J still ran and staged
-# whatever it could, flagged partial, but this scheduled date isn't fully
-# done — a later slot retries the missing sources, per
-# desk_guard_already_ok_today only ever treating "ok" as done.
+# whatever it could, flagged partial. Nothing retries the missing sources
+# today (desk_guard_already_ran_today); the window stays where it was, so
+# the next pass covers what they missed.
 failed_sources_json="[]"
 if [ "${#failed_sources[@]}" -gt 0 ]; then
 	failed_sources_json="$(printf '%s\n' "${failed_sources[@]}" | jq -R . | jq -s .)"
 	[ "$overall_result" = "ok" ] && overall_result="partial"
 elif [ "$overall_result" != "failed" ]; then
-	# Nothing left to retry: the same-day fetch cache has done its job.
 	# Gated on the PASS's own overall_result, not just on failed_sources
 	# being empty: a later, non-source step (judge/write/close) can still
 	# hard-fail and `break` the loop with every fetch itself having
-	# succeeded — failed_sources stays empty in that case too, but the
-	# pass as a whole did not finish, so clearing the cache here would
-	# throw away a retry slot's one reason to skip re-running fetches that
-	# already succeeded, and advancing last_fetch_ok would silently narrow
-	# the next window past content this failed pass never actually got to
-	# use.
-	desk_fetch_cache_clear "$pass"
+	# succeeded, and advancing last_fetch_ok then would silently narrow
+	# the next window past content this failed pass never got to use.
 	# Every fetch step this pass actually ran (if any) succeeded: the
-	# window is now covered through fetch_covered_through (gmail_window_end,
-	# or an earlier end a reused cache entry covered), so the next run's own
-	# window picks up exactly where this one left off rather than gapping
-	# any of it. Never set at all when no fetch step ran this pass (a
-	# weekend commit-only invocation) — last_fetch_ok stays wherever it last
-	# legitimately was.
-	[ "$any_fetch_step_ran" = "true" ] && desk_status_set_fetch_ok "$pass" "$fetch_covered_through"
+	# window is now covered through gmail_window_end, so the next run's own
+	# window picks up exactly where this one left off. Never set at all
+	# when no fetch step ran this pass (a weekend commit-only invocation) —
+	# last_fetch_ok stays wherever it last legitimately was.
+	[ "$any_fetch_step_ran" = "true" ] && desk_status_set_fetch_ok "$pass" "$gmail_window_end"
 	desk_ticket_digest_commit
 fi
 

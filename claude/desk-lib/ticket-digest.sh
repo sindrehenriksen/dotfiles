@@ -7,8 +7,7 @@
 # a followed session already covers, and hands the judge what is left as
 # ticket-digest.json, grouped per ticket and per PR and capped.
 #
-# Files, all in $PASS_SCRATCH and named after the step, so the same-day
-# fetch cache carries them to a retry slot:
+# Files, all in $PASS_SCRATCH and named after the step:
 #   <id>-ticket-digest-window.jsonl   {since, now, jql}, fixed when the call is made
 #   <id>-ticket-digest-issues.jsonl   the normalized tickets
 #   <id>-ticket-digest-prs.jsonl      the normalized pull requests

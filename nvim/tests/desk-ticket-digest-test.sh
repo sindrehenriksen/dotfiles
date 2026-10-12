@@ -5,8 +5,9 @@
 # and what is only counted (bots, the user's own posts and PRs, dependency
 # PRs unless kept, status moves, PR updates), what a follow session
 # already covers, grouping and the cap, snapshots installed only once the
-# pass's window moves, and the whole thing through desk-run with a retry
-# slot reusing the cached fetch. Offline: `claude` and `gh` are fakes.
+# pass's window moves, and the whole thing through desk-run, with the next
+# day's pass covering what a failed one missed. Offline: `claude` and `gh`
+# are fakes.
 set -u
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -300,13 +301,17 @@ assert_eq "a pass whose judge fails exits non-zero" "1" "$?"
 assert_eq "the judge was handed the digest" '["ABC-1","org/repo#7"]' "$(jq -c '[.entries[] | .key // .pr]' "$J_SEEN" 2> /dev/null)"
 assert_eq "a failed pass installs no snapshots" "false" "$([ -e "$DESK_TICKET_DIGEST_STATE_FILE" ] && echo true || echo false)"
 
+DESK_CONFIG="$INST/config.json" "$DESK_RUN" digestpass > "$ROOT/run1b.out" 2>&1
+assert_true "a later slot the same day runs nothing" "$(grep -q 'already ran today' "$ROOT/run1b.out" && echo true || echo false)"
+
+# The next day: the failed pass never moved the window, so this one covers it.
 rm -f "$ROOT/j-fail" "$J_SEEN"
-echo '{"issues": []}' > "$FIX/run-issues.json" # a fresh call would now see nothing
+jq 'del(.passes.digestpass.scheduled_date)' "$DESK_STATUS_FILE" > "$ROOT/st.json" && mv "$ROOT/st.json" "$DESK_STATUS_FILE"
 DESK_CONFIG="$INST/config.json" "$DESK_RUN" digestpass > "$ROOT/run2.out" 2>&1
 rc=$?
-assert_eq "the retry passes" "0" "$rc"
+assert_eq "the next pass passes" "0" "$rc"
 [ "$rc" -eq 0 ] || sed 's/^/    /' "$ROOT/run2.out"
-assert_eq "the retry reused the cached fetch, so the judge sees the same digest" '["ABC-1","org/repo#7"]' \
+assert_eq "its window still covers what the failed pass saw" '["ABC-1","org/repo#7"]' \
 	"$(jq -c '[.entries[] | .key // .pr]' "$J_SEEN" 2> /dev/null)"
 assert_eq "an ok pass installs the snapshots" '["ABC-1"]' "$(jq -c '.tickets | keys' "$DESK_TICKET_DIGEST_STATE_FILE" 2> /dev/null)"
 proposal="$(git -C "$repo" show refs/desk/proposal:proposal.json 2> /dev/null)"

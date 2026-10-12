@@ -61,7 +61,6 @@ export DESK_LOCK_ROOT="$STATE/lock"
 export DESK_GUARD_ROOT="$STATE/guard"
 export DESK_SCRATCH_ROOT="$STATE/scratch"
 export DESK_LOG_DIR="$STATE/logs"
-export DESK_FETCH_CACHE_ROOT="$STATE/fetch-cache"
 export CLAUDE_CONFIG_DIR="$ROOT/claude-config"
 export DESK_LOCK_MAX_WAIT_SECS=15
 export DESK_LOCK_POLL_SECS=1

@@ -10,8 +10,9 @@ PartOf=graphical-session.target
 [Timer]
 # Mirror of the pass's `trigger.start_calendar_interval` in config.json: the
 # runner never reads this file, so the two are kept equal by hand. A weekday
-# goes first, as in `Mon *-*-* 08:30:00`. The later slot only retries; once
-# a scheduled date has finished ok, another firing for it is a no-op.
+# goes first, as in `Mon *-*-* 08:30:00`. The later slot is for a
+# morning the machine slept through: once a scheduled date has had a run,
+# another firing for it is a no-op.
 OnCalendar=*-*-* 08:30:00
 OnCalendar=*-*-* 10:00:00
 # systemd's default accuracy lets a slot fire up to a minute late. On a

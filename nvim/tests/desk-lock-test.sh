@@ -2,7 +2,7 @@
 # claude/desk-lib/lock.sh's guard, keyed on the slot's *scheduled*
 # date rather than the date desk-run happens to be invoked on.
 # Covers desk_scheduled_date_for directly (the wake-next-morning case, and its symmetric "same evening" case) plus
-# desk_guard_already_ok_today against a hand-written status file — never
+# desk_guard_already_ran_today against a hand-written status file — never
 # through desk-run itself, so this suite isolates the date arithmetic from
 # the runner's own guard-call wiring (already covered by desk-run-test.sh's
 # "later slot" cases).
@@ -88,17 +88,27 @@ assert_eq "a weekday-pinned slot: Thursday morning reads back to Wednesday's slo
 	"$(desk_scheduled_date_for "$weekly" "$now")"
 
 echo
-echo "=== desk_guard_already_ok_today: keyed on scheduled_date, not last_run's date ==="
+echo "=== desk_guard_already_ran_today: keyed on scheduled_date, not last_run's date ==="
 desk_status_set_result "testpass" "ok" "" "[]" "2026-01-05"
 assert_eq "the same scheduled date reads as already done" "true" \
-	"$(desk_guard_already_ok_today "testpass" "2026-01-05" && echo true || echo false)"
+	"$(desk_guard_already_ran_today "testpass" "2026-01-05" && echo true || echo false)"
 assert_eq "a later slot's own (different) scheduled date is not a repeat" "false" \
-	"$(desk_guard_already_ok_today "testpass" "2026-01-06" && echo true || echo false)"
+	"$(desk_guard_already_ran_today "testpass" "2026-01-06" && echo true || echo false)"
 
-echo "--- a failed pass is never treated as already-done, whatever the scheduled date ---"
-desk_status_set_result "otherpass" "failed" "some-step" "[]" "2026-01-05"
-assert_eq "a failed result never counts as already-ok" "false" \
-	"$(desk_guard_already_ok_today "otherpass" "2026-01-05" && echo true || echo false)"
+echo "--- a pass that ran at all is done for its date, whatever came of it ---"
+for r in partial failed; do
+	desk_status_set_result "otherpass" "$r" "some-step" "[]" "2026-01-05"
+	assert_eq "a $r run counts as having run" "true" \
+		"$(desk_guard_already_ran_today "otherpass" "2026-01-05" && echo true || echo false)"
+done
+desk_status_set_running "stalepass" "2026-01-05"
+assert_eq "one still marked running does not, until it is marked stale" "false" \
+	"$(desk_guard_already_ran_today "stalepass" "2026-01-05" && echo true || echo false)"
+desk_status_mark_stale_running "stalepass" 2> /dev/null
+assert_eq "a run that never finished counts once marked stale" "true" \
+	"$(desk_guard_already_ran_today "stalepass" "2026-01-05" && echo true || echo false)"
+assert_eq "a date with no run is not done" "false" \
+	"$(desk_guard_already_ran_today "neverpass" "2026-01-05" && echo true || echo false)"
 
 echo
 echo "=== desk_working_days_since: whole Mon-Fri days passed ==="

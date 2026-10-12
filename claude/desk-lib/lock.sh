@@ -2,8 +2,7 @@
 # The once-a-day guard and the mutual-exclusion lock.
 #
 # The two are deliberately separate: the guard answers "has this pass
-# already finished ok today" (so a later retry slot the same day is a
-# no-op), reusing the status file as its own record rather than a second
+# already run today" (so a later slot the same day is a no-op), reusing the status file as its own record rather than a second
 # on-disk marker; the lock answers "is another desk-run for this pass
 # running right now" (so two slots firing close together, or a manual run
 # overlapping a scheduled one, never race the same pass concurrently).
@@ -132,15 +131,17 @@ desk_last_weekday_epoch() {
 	done
 }
 
-# True (exit 0) if $1 already completed "ok" for $2's own scheduled date
-# (a slot whose scheduled date already
-# succeeded is a no-op, not a second run — see desk_scheduled_date_for for
-# what "scheduled date" means here instead of simply "today").
-desk_guard_already_ok_today() {
+# True (exit 0) if $1 already ran for $2's own scheduled date, whatever
+# came of it: ok, partial, or failed (a run that never finished is marked
+# failed first, desk_status_mark_stale_running). A pass runs once a
+# scheduled date; a later slot is only for a date that never got a run
+# (see desk_scheduled_date_for for what "scheduled date" means here
+# instead of simply "today").
+desk_guard_already_ran_today() {
 	local pass="$1" scheduled_date="$2" status result last_scheduled_date
 	status="$(desk_status_read)"
 	result="$(jq -r --arg p "$pass" '.passes[$p].result // empty' <<< "$status")"
-	[ "$result" = "ok" ] || return 1
+	case "$result" in ok | partial | failed) ;; *) return 1 ;; esac
 	last_scheduled_date="$(jq -r --arg p "$pass" '.passes[$p].scheduled_date // empty' <<< "$status")"
 	[ -n "$last_scheduled_date" ] || return 1
 	[ "$last_scheduled_date" = "$scheduled_date" ]

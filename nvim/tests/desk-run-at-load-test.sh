@@ -51,7 +51,6 @@ export DESK_GUARD_ROOT="$STATE/guard"
 export DESK_SCRATCH_ROOT="$STATE/scratch"
 export DESK_LOG_DIR="$STATE/logs"
 export DESK_RUNS_ROOT="$STATE/runs"
-export DESK_FETCH_CACHE_ROOT="$STATE/fetch-cache"
 export CLAUDE_CONFIG_DIR="$ROOT/claude-config"
 
 repo="$ROOT/notes"
@@ -108,7 +107,7 @@ assert_eq "the login run made its call" "1" "$(calls)"
 assert_eq "it ran as that day's pass" "2026-10-14" "$(jq -r '.passes.morning.scheduled_date' "$DESK_STATUS_FILE")"
 run_at 2026-10-14 08:00
 assert_eq "the 08:00 slot was a no-op" "1" "$(calls)"
-assert_eq "and said so" "1" "$(grep -c 'already ok today (scheduled 2026-10-14)' "$ROOT/runs.log")"
+assert_eq "and said so" "1" "$(grep -c 'already ran today (scheduled 2026-10-14)' "$ROOT/runs.log")"
 
 echo
 echo "=== the next day's login runs again ==="
@@ -118,7 +117,7 @@ assert_eq "a second call, for the new day" "2" "$(calls)"
 echo
 echo "=== a login before the day's first slot is the previous day's, already done ==="
 run_at 2026-10-16 05:30
-assert_eq "no call: the 15th already finished ok" "2" "$(calls)"
+assert_eq "no call: the 15th already ran" "2" "$(calls)"
 run_at 2026-10-16 06:00
 assert_eq "the first slot runs the 16th" "3" "$(calls)"
 

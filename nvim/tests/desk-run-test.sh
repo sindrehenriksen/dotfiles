@@ -168,7 +168,7 @@ run_desk() {
 
 # ---------------------------------------------------------------------------
 
-echo "=== a slept-through slot: a pass already ok today is a no-op ==="
+echo "=== a slept-through slot: a pass that already ran today is a no-op ==="
 rm -rf "$STATE"
 repo="$(new_notes_repo "$ROOT/case1")"
 cfg="$ROOT/case1/config.json"
@@ -181,7 +181,7 @@ run_desk "$cfg" > "$ROOT/case1b.out" 2>&1
 second_rc=$?
 assert_eq "a later slot the same day exits ok too (no-op)" "0" "$second_rc"
 assert_true "the later slot never re-ran the pass" \
-	"$([ "$(grep -c 'already ok today' "$ROOT/case1b.out")" -ge 1 ] && echo true || echo false)"
+	"$([ "$(grep -c 'already ran today' "$ROOT/case1b.out")" -ge 1 ] && echo true || echo false)"
 head_after="$(git -C "$repo" rev-parse HEAD)"
 assert_eq "HEAD didn't move on the no-op slot" "$head_before" "$head_after"
 
@@ -346,7 +346,7 @@ project_dirs="$(find "$ROOT/case9-claude-config/projects" -mindepth 1 -maxdepth 
 assert_eq "no project folder is left behind after the call" "0" "$project_dirs"
 
 echo
-echo "=== a later slot retries a partial pass (the guard only skips an 'ok' one) ==="
+echo "=== a later slot does not rerun a partial pass ==="
 rm -rf "$STATE"
 repo="$(new_notes_repo "$ROOT/case8")"
 cfg="$ROOT/case8/config.json"
@@ -358,10 +358,10 @@ assert_eq "the first (source-failing) slot is recorded as partial" "partial" \
 	"$(jq -r '.passes.testpass.result' "$DESK_STATUS_FILE")"
 run_desk "$cfg" > "$ROOT/case8b.out" 2>&1
 rc=$?
-assert_eq "a later slot the same day actually retries (succeeds this time)" "0" "$rc"
-assert_eq "status now shows ok" "ok" "$(jq -r '.passes.testpass.result' "$DESK_STATUS_FILE")"
-assert_true "the later slot did not treat it as already-done" \
-	"$([ "$(grep -c 'already ok today' "$ROOT/case8b.out")" -eq 0 ] && echo true || echo false)"
+assert_eq "a later slot the same day exits 0" "0" "$rc"
+assert_eq "status still shows partial" "partial" "$(jq -r '.passes.testpass.result' "$DESK_STATUS_FILE")"
+assert_true "the later slot treated the date as done" \
+	"$([ "$(grep -c 'already ran today' "$ROOT/case8b.out")" -eq 1 ] && echo true || echo false)"
 
 echo
 echo "=== notes_repo validation: must be absolute and its own git toplevel ==="
@@ -395,6 +395,8 @@ missing_rc=$?
 assert_eq "a non-existent notes_repo path is refused" "2" "$missing_rc"
 assert_true "it says the path doesn't exist" \
 	"$([ "$(grep -c "doesn't exist" "$ROOT/case10-missing.out")" -ge 1 ] && echo true || echo false)"
+assert_eq "a refused run is not the day's run: nothing recorded for it" "null" \
+	"$(jq -r '.passes.testpass.result // null' "$DESK_STATUS_FILE" 2> /dev/null || echo null)"
 
 echo
 echo "=== summary: $pass passed, $fail failed ==="

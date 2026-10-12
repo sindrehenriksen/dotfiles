@@ -2,10 +2,9 @@
 # a fetch (source) step's own failure never
 # aborts the pass — desk-run's own step loop records it in failed_sources
 # and keeps going, J still runs and stages whatever it can (the pass
-# result reads "partial", not "failed" or "ok"), the day is never marked
-# done for that source (a later slot retries it), and a source that
-# already succeeded is never redundantly re-run on that retry
-# (steps.sh's own desk_fetch_cache_*). Exercised through desk-run itself,
+# result reads "partial", not "failed" or "ok"), the run status says why
+# the source failed, and nothing reruns the pass that day. Exercised
+# through desk-run itself,
 # against from-scratch fixtures — no live model call.
 set -u
 
@@ -74,7 +73,6 @@ export DESK_LOCK_ROOT="$STATE/lock"
 export DESK_GUARD_ROOT="$STATE/guard"
 export DESK_SCRATCH_ROOT="$STATE/scratch"
 export DESK_LOG_DIR="$STATE/logs"
-export DESK_FETCH_CACHE_ROOT="$STATE/fetch-cache"
 export CLAUDE_CONFIG_DIR="$ROOT/claude-config"
 
 repo="$ROOT/notes"
@@ -121,20 +119,16 @@ assert_true "J still ran despite F-A's failure" "$([ -s "$J_CALLS" ] && echo tru
 assert_true "F-B ran (and succeeded)" "$([ "$(wc -l < "$B_CALLS" | tr -d ' ')" = "1" ] && echo true || echo false)"
 
 echo
-echo "=== second slot (same day): F-A retried, F-B never re-run (cached) ==="
-: > "$FAIL_A_MARKER" # will be emptied (not removed) just below to let F-A succeed
+echo "=== second slot (same day): nothing reruns, even the failed source ==="
 rm -f "$FAIL_A_MARKER"
 : > "$J_CALLS"
 DESK_CONFIG="$cfg" "$DESK_RUN" testpass > "$ROOT/run2.out" 2>&1
 rc2=$?
-assert_eq "the retry succeeds fully now" "0" "$rc2"
-assert_eq "status reads ok now that every source succeeded" "ok" "$(jq -r '.passes.testpass.result' "$DESK_STATUS_FILE")"
-assert_eq "failed_sources is empty" "[]" "$(jq -c '.passes.testpass.failed_sources' "$DESK_STATUS_FILE")"
-assert_true "F-B was never re-invoked (still exactly one call, from the first slot)" \
-	"$([ "$(wc -l < "$B_CALLS" | tr -d ' ')" = "1" ] && echo true || echo false)"
-assert_true "J ran again on the retry" "$([ -s "$J_CALLS" ] && echo true || echo false)"
-assert_true "the fetch cache is cleared once nothing is left to retry" \
-	"$([ -z "$(find "$DESK_FETCH_CACHE_ROOT" -mindepth 1 2> /dev/null)" ] && echo true || echo false)"
+assert_eq "the later slot exits 0" "0" "$rc2"
+assert_true "it says the pass already ran today" "$(grep -q 'already ran today' "$ROOT/run2.out" && echo true || echo false)"
+assert_eq "status still reads partial" "partial" "$(jq -r '.passes.testpass.result' "$DESK_STATUS_FILE")"
+assert_true "F-B was not re-run" "$([ "$(wc -l < "$B_CALLS" | tr -d ' ')" = "1" ] && echo true || echo false)"
+assert_true "J did not run again" "$([ -s "$J_CALLS" ] && echo false || echo true)"
 
 echo
 echo "=== W refuses to unlabel when F-private (its own source) failed this pass ==="

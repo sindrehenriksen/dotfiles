@@ -58,7 +58,6 @@ export DESK_LOCK_ROOT="$STATE/lock"
 export DESK_GUARD_ROOT="$STATE/guard"
 export DESK_SCRATCH_ROOT="$STATE/scratch"
 export DESK_LOG_DIR="$STATE/logs"
-export DESK_FETCH_CACHE_ROOT="$STATE/fetch-cache"
 export CLAUDE_CONFIG_DIR="$ROOT/claude-config"
 
 repo="$ROOT/notes"
@@ -145,73 +144,20 @@ assert_eq "morning's own last_fetch_ok (a different pass) is untouched by evenin
 	"$last_fetch_ok" "$(jq -r '.passes.morning.last_fetch_ok' "$DESK_STATUS_FILE")"
 
 echo
-echo "=== a later step's own hard failure never advances last_fetch_ok or clears the fetch cache, even though the fetch itself succeeded ==="
+echo "=== a later step's own hard failure never advances last_fetch_ok, even though the fetch itself succeeded ==="
 DESK_CONFIG="$cfg" "$DESK_RUN" failtest > "$ROOT/failtest.out" 2>&1
 rc_failtest=$?
 assert_eq "the pass exits non-zero (a later step hard-failed)" "1" "$rc_failtest"
 assert_eq "status shows failed" "failed" "$(jq -r '.passes.failtest.result' "$DESK_STATUS_FILE")"
 failtest_has_fetch_ok="$(jq -r 'has("passes") and (.passes | has("failtest")) and (.passes.failtest | has("last_fetch_ok"))' "$DESK_STATUS_FILE")"
 assert_eq "failtest's own last_fetch_ok was never set" "false" "$failtest_has_fetch_ok"
-failtest_scheduled_date="$(date +%F)"
-assert_true "the fetch cache for the fetch step that DID succeed is still there (cleared only once the whole pass is ok)" \
-	"$([ -f "$STATE/fetch-cache/failtest-$failtest_scheduled_date-F-fail-then/done" ] && echo true || echo false)"
-
 echo
-echo "=== a retry that restores a cached fetch uses THAT source's own cached digest_query, never a freshly recomputed one ==="
-cachehit_scheduled_date="$(date +%F)"
-cache_dir="$STATE/fetch-cache/cachehit-$cachehit_scheduled_date-F-private"
-mkdir -p "$cache_dir"
-: > "$cache_dir/done"
-# Deliberately not JQL/query-shaped at all — a freshly computed digest_query
-# (label:"..." after:N before:N) could never coincidentally equal this, so
-# W only ever matches it if desk-run actually substituted the CACHED value
-# back in for this run, rather than using its own freshly computed one.
-printf 'a-fixed-cached-query-never-recomputed' > "$cache_dir/digest_query"
-cat > "$cache_dir/F-private-tool-uses.jsonl" << 'JSONL'
-{"type":"tool_use","id":"u1","name":"mcp__claude_ai_Gmail__search_threads","input":{"query":"a-fixed-cached-query-never-recomputed"}}
-{"type":"tool_use","id":"u2","name":"mcp__claude_ai_Gmail__get_thread","input":{"threadId":"cached-thread-1"}}
-JSONL
-cat > "$cache_dir/F-private-tool-results.jsonl" << 'JSONL'
-{"type":"tool_result","tool_use_id":"u1","content":[{"type":"text","text":"{\"threads\":[{\"id\":\"cached-thread-1\",\"subject\":\"Cached Digest\"}]}"}]}
-{"type":"tool_result","tool_use_id":"u2","content":[{"type":"text","text":"{\"id\":\"cached-thread-1\"}"}]}
-JSONL
-DESK_CONFIG="$cfg" "$DESK_RUN" cachehit > "$ROOT/cachehit.out" 2>&1
-rc_cachehit=$?
-assert_eq "the pass exits ok" "0" "$rc_cachehit"
-assert_eq "status shows ok" "ok" "$(jq -r '.passes.cachehit.result' "$DESK_STATUS_FILE")"
-assert_true "F-private was reused from cache, never re-run" \
-	"$(grep -q 'F-private: already fetched today (cached)' "$ROOT/cachehit.out" && echo true || echo false)"
-assert_true "W's own match found the cached thread (proving digest_query tracked the cached call, not a fresh one)" \
-	"$(grep -q 'would unlabel cached-thread-1' "$ROOT/cachehit.out" && echo true || echo false)"
-assert_true "never logged as a query mismatch" \
-	"$(grep -q 'digest search query doesn.t match' "$ROOT/cachehit.out" && echo false || echo true)"
-
-echo
-echo "=== a retry that reuses a cached fetch moves the window only as far as that fetch covered ==="
-# The earlier slot fetched F-cached through its own window end, then failed
-# elsewhere; this slot runs F-fresh through now. Mail between the two ends
-# was never fetched by F-cached, so the next window starts at its end.
-retry_date="$(date +%F)"
-earlier_end=$(($(date +%s) - 5400))
-cached_dir="$STATE/fetch-cache/retrygap-$retry_date-F-cached"
-mkdir -p "$cached_dir"
-: > "$cached_dir/done"
-printf '%s' "$earlier_end" > "$cached_dir/window_end"
-DESK_CONFIG="$cfg" "$DESK_RUN" retrygap > "$ROOT/retrygap.out" 2>&1
-assert_eq "the retry finishes ok" "ok" "$(jq -r '.passes.retrygap.result' "$DESK_STATUS_FILE")"
-assert_true "F-cached was reused, not re-run" \
-	"$(grep -q 'F-cached: already fetched today (cached)' "$ROOT/retrygap.out" && echo true || echo false)"
-assert_eq "last_fetch_ok is the cached fetch's own window end, not this run's" \
-	"$earlier_end" "$(jq -r '.passes.retrygap.last_fetch_ok' "$DESK_STATUS_FILE")"
-
-echo
-echo "=== a cached fetch with no recorded window end leaves the window where it was ==="
-jq --argjson s 1700000000 '.passes.retrygap.last_fetch_ok = $s' "$DESK_STATUS_FILE" > "$ROOT/st.json" && mv "$ROOT/st.json" "$DESK_STATUS_FILE"
-jq '.passes.retrygap.result = "partial"' "$DESK_STATUS_FILE" > "$ROOT/st.json" && mv "$ROOT/st.json" "$DESK_STATUS_FILE"
-mkdir -p "$cached_dir"
-: > "$cached_dir/done"
-DESK_CONFIG="$cfg" "$DESK_RUN" retrygap > "$ROOT/retrygap2.out" 2>&1
-assert_eq "last_fetch_ok is unchanged" "1700000000" "$(jq -r '.passes.retrygap.last_fetch_ok' "$DESK_STATUS_FILE")"
+echo "=== a later slot the same day runs nothing, even after a failed pass ==="
+DESK_CONFIG="$cfg" "$DESK_RUN" failtest > "$ROOT/failtest2.out" 2>&1
+assert_eq "it exits 0" "0" "$?"
+assert_true "it says the pass already ran today" \
+	"$(grep -q 'already ran today' "$ROOT/failtest2.out" && echo true || echo false)"
+assert_true "no fetch ran" "$(grep -q 'model call: F' "$ROOT/failtest2.out" && echo false || echo true)"
 
 echo
 echo "=== summary: $pass passed, $fail failed ==="

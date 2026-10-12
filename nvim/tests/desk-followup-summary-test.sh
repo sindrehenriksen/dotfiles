@@ -237,7 +237,7 @@ last="$(last_assistant_text "$transcript7")"
 assert_true "its last assistant message is not the judge's JSON" \
 	"$(jq -e 'type == "object" or type == "array"' > /dev/null 2>&1 <<< "$last" && echo false || echo true)"
 assert_true "the prompt names the failed source and the steps" \
-	"$(grep -qF 'these sources failed and are retried at the next slot: F-web' "$PROMPT_COPY" \
+	"$(grep -qF 'these sources failed, and nothing retries them today: F-web' "$PROMPT_COPY" \
 		&& grep -qF 'Its steps, in order: commit-push (commit of the notes), F-web (fetch), J (judge, which proposes the suggestions).' "$PROMPT_COPY" && echo true || echo false)"
 
 echo
@@ -253,7 +253,7 @@ assert_true "never a -p call" "$(grep -qE -- '(^| )-p( |$)|--print' <<< "$cmd" &
 assert_eq "no headless call was made for it" "0" "$(wc -l < "$ARGV_LOG" | tr -d ' ')"
 status_prompt="$DESK_RUNS_ROOT/morning-2026-10-16/status/prompt.txt"
 assert_true "its first turn says where the pass stopped" \
-	"$(grep -qF 'It failed at step commit-push, so the steps after that did not run.' "$status_prompt" && echo true || echo false)"
+	"$(grep -qF 'It failed at step commit-push, so the steps after that did not run, and nothing reruns them today.' "$status_prompt" && echo true || echo false)"
 assert_true "every placeholder of the status prompt was filled" \
 	"$(grep -qE '\{\{[a-z_]+\}\}' "$status_prompt" && echo false || echo true)"
 assert_true "the command reads its prompt from that file, on one line" \

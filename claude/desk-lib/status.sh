@@ -62,7 +62,7 @@ desk_status_mark_stale_running() {
 }
 
 desk_status_set_running() {
-	local pass="$1" now
+	local pass="$1" scheduled_date="${2:-}" now
 	now="$(desk_now)"
 	# `last_ok_run` (this pass's own last successful run's own `last_run`)
 	# is carried forward explicitly rather
@@ -77,10 +77,11 @@ desk_status_set_running() {
 		| (.passes[$pass].last_fetch_ok // null) as $prev_fetch_ok
 		| (.passes[$pass].last_done_run // null) as $prev_done
 		| .passes[$pass] = { last_run: $now, result: "running", stopped_at: null, failed_sources: [] }
+		| (if $scheduled_date == "" then . else .passes[$pass].scheduled_date = $scheduled_date end)
 		| (if $prev_ok != null then .passes[$pass].last_ok_run = $prev_ok else . end)
 		| (if $prev_fetch_ok != null then .passes[$pass].last_fetch_ok = $prev_fetch_ok else . end)
 		| (if $prev_done != null then .passes[$pass].last_done_run = $prev_done else . end)
-	' --arg pass "$pass" --argjson now "$now"
+	' --arg pass "$pass" --argjson now "$now" --arg scheduled_date "$scheduled_date"
 }
 
 # $2 = result ("ok"/"failed"/"partial"), $3 = stopped_at (step id, or ""
