@@ -506,7 +506,7 @@ The list holds one Perl regex per line (`#` comments), matched case-insensitivel
 
 ## Dry-running a new instance
 
-The defaults are the safe side of every outward-facing switch: `dry_run` (no write call, so no mail marked read or trashed), and `push_enabled` off; no pass ends a session on its own. Fetch and judge calls are real model calls even then, `follow_up_step` makes one more for its summary turn, and it and `open_tab` open real tabs.
+The defaults are the safe side of every outward-facing switch: `dry_run` (no write call, so no mail marked read or trashed) and `push_enabled` off, and no pass ends a session on its own. Fetch and judge calls are real model calls even then, `follow_up_step` makes one more for its summary turn, and it and `open_tab` open real tabs.
 
 - **Offline**, to check the config and prompts: point `DESK_CLAUDE_BIN` at a stub that prints a stream-json result, `DESK_OPEN_TAB_BIN` and `DESK_FOCUS_TAB_BIN` at stubs, and `DESK_STATE_DIR` and `CLAUDE_SESSION_STORE` at a temp directory, then `DESK_CONFIG=… desk-run <pass>`. `nvim/tests/desk-example-instance-test.sh` is a worked version, and checks that every placeholder a prompt uses is one the runner fills.
 - **Live, without side effects**, against a copy: clone the notes repo to a temp path, point `notes_repo` at the clone in a copy of the config, and run each pass by hand with `DESK_STATE_DIR` set to a temp directory so the real status file, ledger and caches stay untouched. Read the log and `status.json`, then `<leader>gR` in the clone.
