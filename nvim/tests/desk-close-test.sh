@@ -168,7 +168,10 @@ spawn_throwaway() {
 transcript="$ROOT/transcript.jsonl"
 {
 	printf '{"uuid":"aaaaaaaa-0000-0000-0000-000000000000","type":"user","message":{"role":"user","content":"start the work\\nplease"}}\n'
-	for k in $(seq 1 499); do
+	long="$(printf 'x%.0s' $(seq 1 5000))"
+	printf '{"uuid":"cccccccc-0000-0000-0000-000000000000","type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"%s"}]}}\n' "$long"
+	printf '{"uuid":"dddddddd-0000-0000-0000-000000000000","type":"user","message":{"role":"user","content":"%s"}}\n' "$long"
+	for k in $(seq 1 497); do
 		printf '{"uuid":"%08d-0000-0000-0000-000000000000","type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"step %d"}]}}\n' "$k" "$k"
 	done
 } > "$transcript"
@@ -203,6 +206,9 @@ assert_eq "a keep_open session is not offered" "1" "$(offer 'length')"
 readable="$PASS_SCRATCH/close-11111111-1111-4111-8111-111111111111-seed/transcript.txt"
 assert_eq "the call gets a readable copy of the whole transcript" "500" "$(wc -l < "$readable" | tr -d ' ')"
 assert_eq "its first entry, uuid first, newlines flattened" "aaaaaaaa  user: start the work please" "$(head -n 1 "$readable")"
+assert_true "a long tool result is cut, so a read of many lines stays readable" \
+	"$(sed -n 2p "$readable" | awk '{ exit !(length < 1000) }' && sed -n 2p "$readable" | grep -q '\[cut\]$' && echo true || echo false)"
+assert_true "what the user wrote is kept whole" "$(sed -n 3p "$readable" | awk '{ exit !(length > 5000) }' && echo true || echo false)"
 assert_true "and its line count" "$(grep -q 'lines=500' "$FAKE_CLAUDE_CALLS.prompt" && echo true || echo false)"
 : > "$FAKE_CLAUDE_CALLS"
 result="$(desk_step_close "testpass" "$step_json" "$config_json" "$repo" "2026-09-29" "${files[@]}")"

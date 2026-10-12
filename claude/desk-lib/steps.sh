@@ -993,9 +993,14 @@ desk_step_capture_sessions() {
 # call's turn citations are checked against, and at <readable-out> as one
 # plain line per entry for the call to read: the first 8 characters of its
 # uuid, its time and role, then its text, a tool call's name and input, or
-# a tool result's text, newlines flattened. The uuid goes first so it
-# survives the Read tool's cut of a long line, and the line count is the
-# call's `transcript_lines`, so it can read from the end with an offset.
+# a tool result's text, newlines flattened. A tool call's input and a tool
+# result are cut at DESK_TRANSCRIPT_TOOL_CHARS with a marker: one result can
+# run to many thousands of characters, which would make a read of a few
+# hundred lines too large for the Read tool to return. What the user and the
+# session wrote is kept whole. The uuid goes first so it survives the Read
+# tool's own cut of a very long line, and
+# the line count is the call's `transcript_lines`, so it can read from the
+# end with an offset. The citations are checked against the JSON lines.
 # Entries with no uuid (summaries, snapshots) are left out. Prints the
 # readable copy's line count.
 desk_write_transcript_copy() {
@@ -1005,21 +1010,22 @@ desk_write_transcript_copy() {
 	else
 		: > "$jsonl"
 	fi
-	jq -R -r 'fromjson? | select(type == "object" and (.uuid | type) == "string")
+	jq -R -r 'def cut: if length > $max then .[0:$max] + " … [cut]" else . end;
+		fromjson? | select(type == "object" and (.uuid | type) == "string")
 		| (.message.content // "") as $c
 		| (if ($c | type) == "string" then $c
 		   elif ($c | type) == "array" then
 			[$c[] | objects
 			 | if .type == "text" then .text
-			   elif .type == "tool_use" then "[tool " + (.name // "?") + "] " + (.input | tojson)
-			   elif .type == "tool_result" then "[result] " + (
+			   elif .type == "tool_use" then "[tool " + (.name // "?") + "] " + (.input | tojson | cut)
+			   elif .type == "tool_result" then "[result] " + ((
 				if (.content | type) == "string" then .content
 				elif (.content | type) == "array" then ([.content[] | objects | .text // empty] | join(" "))
-				else "" end)
+				else "" end) | cut)
 			   else empty end] | join(" | ")
 		   else "" end) as $text
 		| "\(.uuid[0:8]) \(.timestamp // "") \(.message.role // .type // "?"): \($text | gsub("[\r\n]+"; " "))"' \
-		"$jsonl" > "$readable" 2> /dev/null || : > "$readable"
+		--argjson max "${DESK_TRANSCRIPT_TOOL_CHARS:-300}" "$jsonl" > "$readable" 2> /dev/null || : > "$readable"
 	wc -l < "$readable" | tr -d ' '
 }
 
