@@ -1046,37 +1046,71 @@ local small = { x = s.x + 0.10 * s.w + 10, y = s.y + 0.15 * s.h + 5, w = 0.295 *
 assert_eq("the small two-up is left as it is", "nil", frame_str(DeskWindow.tall_target(wide, small)))
 assert_eq("so is a window anywhere else", "nil", frame_str(DeskWindow.tall_target(wide, { x = 3, y = 40, w = 800, h = 600 })))
 
-local function fake_window(id, frame, scr)
+local function fake_window(id, frame, scr, app_name)
   local w = { set = {} }
   function w:frame() return frame end
   function w:setFrame(f) frame = f; self.set[#self.set + 1] = frame_str(f) end
   function w:id() return id end
   function w:screen() return scr end
+  function w:application() return { name = function() return app_name or "Ghostty" end } end
   return w
 end
+local real_as, real_app_get = hs.osascript.applescript, hs.application.get
+local ghostty_reply = "4242|tab-group-1|tab-group-1"
+hs.application.get = function(name) return name == "Ghostty" and {} or nil end
+hs.osascript.applescript = function(script)
+  if script:find("every terminal whose tty is", 1, true) then return true, ghostty_reply, "" end
+  return false, nil, { OSAScriptErrorMessageKey = "stub" }
+end
+assert_eq("the script looks the terminal up by its /dev tty", true,
+  DeskWindow.terminal_window_script("ttys009"):find('tty is "/dev/ttys009"', 1, true) ~= nil)
+
 local upper = third(1, 0, 0.5, wide)
 local win = fake_window(42, upper, wide)
 hs.window.focusedWindow = function() return win end
-local reply = DeskWindowTall()
-assert_eq("DeskWindowTall stretches it and reports both frames",
-  "42 " .. frame_str(upper) .. " " .. frame_str(third(1, 0, 1, wide)), reply)
 hs.window.get = function(id) return id == 42 and win or nil end
-local nums = {}
-for v in reply:gmatch("%-?%d+") do nums[#nums + 1] = tonumber(v) end
-assert_eq("DeskWindowRestore puts it back while it sits where it was left", true, DeskWindowRestore(table.unpack(nums)))
+assert_eq("DeskWindowTall stretches the window of the terminal on that tty", "tall", DeskWindowTall("ttys009", 4242))
+assert_eq("to its column", frame_str(third(1, 0, 1, wide)), frame_str(win:frame()))
+local sets = #win.set
+assert_eq("asked again while still tall: tall, nothing moved", "tall", DeskWindowTall("ttys009", 4242))
+assert_eq("no second set", sets, #win.set)
+assert_eq("DeskWindowRestore puts it back by terminal, no window id needed", true, DeskWindowRestore("ttys009", 4242))
 assert_eq("at its old frame", frame_str(upper), frame_str(win:frame()))
+assert_eq("and a second restore has nothing to do", false, DeskWindowRestore("ttys009", 4242))
+
 win = fake_window(42, upper, wide)
-DeskWindowTall()
+DeskWindowTall("/dev/ttys009", 4242)
 win:setFrame(third(2, 0, 1, wide))
 local moved = #win.set
-assert_eq("a window moved since is left where the user put it", false, DeskWindowRestore(table.unpack(nums)))
+assert_eq("a window moved since is left where the user put it", false, DeskWindowRestore("ttys009", 4242))
 assert_eq("untouched", moved, #win.set)
-assert_eq("a window gone is no error", false, DeskWindowRestore(7, 0, 0, 1, 1, 0, 0, 1, 1))
-hs.window.focusedWindow = function() return fake_window(9, { x = 3, y = 40, w = 800, h = 600 }, wide) end
-assert_eq("a window at no such placement: none", "none", DeskWindowTall())
+assert_eq("restoring a terminal never stretched is no error", false, DeskWindowRestore("ttys003", 7))
+
+local function left_alone(desc, setup)
+  win = fake_window(42, upper, wide)
+  hs.window.focusedWindow = function() return win end
+  ghostty_reply = "4242|tab-group-1|tab-group-1"
+  setup()
+  assert_eq(desc, "none", DeskWindowTall("ttys009", 4242))
+  assert_eq(desc .. ": nothing moved", 0, #win.set)
+  hs.application.get = function(name) return name == "Ghostty" and {} or nil end
+end
+left_alone("its window not Ghostty's front window", function() ghostty_reply = "4242|tab-group-1|tab-group-2" end)
+left_alone("another pid in the terminal's foreground", function() ghostty_reply = "999|tab-group-1|tab-group-1" end)
+left_alone("no terminal on the tty", function() ghostty_reply = "none" end)
+left_alone("two terminals on the tty", function() ghostty_reply = "many" end)
+left_alone("the focused window another app's", function()
+  hs.window.focusedWindow = function() return fake_window(5, upper, wide, "Safari") end
+end)
+left_alone("Ghostty not running", function() hs.application.get = function() return nil end end)
+left_alone("a window at no placement with a full-height form", function()
+  win = fake_window(42, { x = 3, y = 40, w = 800, h = 600 }, wide)
+  hs.window.focusedWindow = function() return win end
+end)
+assert_eq("no tty: none", "none", DeskWindowTall("", 4242))
 hs.window.focusedWindow = function() return nil end
-assert_eq("no focused window: none", "none", DeskWindowTall())
 hs.window.get = function() return nil end
+hs.osascript.applescript, hs.application.get = real_as, real_app_get
 
 print()
 print(string.format("=== summary: %d passed, %d failed ===", pass, fail))

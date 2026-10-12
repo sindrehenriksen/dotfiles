@@ -1,22 +1,26 @@
 #!/usr/bin/env bash
-# Makes the focused window full height and puts it back, via DeskWindowTall
-# and DeskWindowRestore in hammerspoon/init.lua: the shell-level entry point
-# nvim's desk review overview uses while its list is open.
+# Makes the window of the terminal nvim runs in full height and puts it
+# back, via DeskWindowTall and DeskWindowRestore in hammerspoon/init.lua: the
+# shell-level entry point nvim's desk review overview uses while its list is
+# open. The terminal is named by its tty and the pid in its foreground, the
+# way desk-close-tab.sh names one.
 #
-#   desk-window.sh tall      prints "<id> <x y w h before> <x y w h after>",
-#                            or "none" when the focused window is at no
-#                            placement that has a full-height form
-#   desk-window.sh restore <id> <x y w h before> <x y w h after>
-#                            exits 0 when the window went back, 1 when it was
-#                            gone or had been moved since
+#   desk-window.sh tall <tty> <pid>     prints "tall" when the window is full
+#                                       height now, "none" when Hammerspoon
+#                                       left it (not that terminal's focused
+#                                       window, or at no placement with a
+#                                       full-height form)
+#   desk-window.sh restore <tty> <pid>  exits 0 when the window went back, 1
+#                                       when nothing was stretched for that
+#                                       terminal, or the window was moved since
 #
-# Every argument is an integer, checked before it reaches the Lua call. A
-# hang is killed after DESK_HS_TIMEOUT_SECS and exits 124, as the tab
-# helpers' does.
+# The tty must look like one and the pid be a number, checked before either
+# reaches the Lua call. A hang is killed after DESK_HS_TIMEOUT_SECS and exits
+# 124, as the tab helpers' does.
 set -u
 
 usage() {
-    echo "usage: desk-window.sh tall | restore <id> <x> <y> <w> <h> <x> <y> <w> <h>" >&2
+    echo "usage: desk-window.sh tall|restore <tty> <pid>" >&2
     exit 2
 }
 
@@ -54,19 +58,14 @@ run_hs() {
 }
 
 verb=${1:-}
+[ $# -eq 3 ] || usage
+tty=${2#/dev/}
+pid=$3
+[[ "$tty" =~ ^ttys?[0-9]+$ ]] || usage
+[[ "$pid" =~ ^[0-9]+$ ]] || usage
 case "$verb" in
-    tall)
-        [ $# -eq 1 ] || usage
-        call="DeskWindowTall()"
-        ;;
-    restore)
-        shift
-        [ $# -eq 9 ] || usage
-        for n in "$@"; do
-            [[ "$n" =~ ^-?[0-9]+$ ]] || usage
-        done
-        call="DeskWindowRestore($(IFS=,; printf '%s' "$*"))"
-        ;;
+    tall) call="DeskWindowTall(\"$tty\", $pid)" ;;
+    restore) call="DeskWindowRestore(\"$tty\", $pid)" ;;
     *) usage ;;
 esac
 
@@ -80,13 +79,14 @@ fi
 last_line=$(printf '%s\n' "$out" | tail -n1)
 case "$verb" in
     tall)
-        if [ "$last_line" = "none" ] || [[ "$last_line" =~ ^[0-9]+( -?[0-9]+){8}$ ]]; then
+        if [ "$last_line" = "tall" ] || [ "$last_line" = "none" ]; then
             printf '%s\n' "$last_line"
             exit 0
         fi
         ;;
     *)
         [ "$last_line" = "true" ] && exit 0
+        [ "$last_line" = "false" ] && exit 1
         ;;
 esac
 printf '%s\n' "$out" >&2

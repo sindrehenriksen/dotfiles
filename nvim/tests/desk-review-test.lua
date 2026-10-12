@@ -13,14 +13,17 @@ local snippet = require("desk.snippet")
 local git_safety = dofile((debug.getinfo(1, "S").source:sub(2):match("^(.*)/[^/]+$") or ".") .. "/../../tests/lib/git-safety.lua")
 
 -- The overview stretches the editor's window through desk.window: a stub
--- here, so no test reaches Hammerspoon. Its own section below swaps in
--- replies.
+-- here, so no test reaches Hammerspoon or ps. Its own section below swaps
+-- in other answers.
 local window = require("desk.window")
-local window_reply = "none"
 local window_calls = {}
-window.run = function(args, cb)
-	window_calls[#window_calls + 1] = table.concat(args, " ")
-	cb(true, args[1] == "tall" and window_reply or "")
+local function window_stub(args, cb, sync)
+	window_calls[#window_calls + 1] = table.concat(args, " ") .. (sync and " (sync)" or "")
+	cb(true, args[1] == "tall" and "tall" or "")
+end
+window.run = window_stub
+window.owner_fn = function()
+	return { tty = "ttys009", pid = "4242" }
 end
 
 vim.env.DESK_STATE_DIR = vim.fn.tempname()
@@ -2424,84 +2427,162 @@ do
 			return false
 		end)
 	end
-	local function setup(keep)
+	local function setup()
 		local r = new_repo(BASE)
 		build(r, "2026-10-01", { item("n1"), item("n2") })
 		local nb = open_notes(r)
 		review.attach(nb)
-		if not keep then
-			window.reset()
-			window_calls = {}
-		end
 		return r, nb
+	end
+	local function fresh()
+		window.reset()
+		window.run = window_stub
+		window_calls = {}
 	end
 	local function in_list(keys)
 		vim.api.nvim_set_current_win(vim.fn.getqflist({ winid = 0 }).winid)
 		vim.cmd("normal " .. keys)
 		tick()
 	end
-	local FRAMES = "42 1290 0 1270 700 1290 0 1270 1400"
-	window_reply = "42 1290 0 1270 700 1290 0 1270 1400"
+	local TALL, BACK = "tall ttys009 4242", "restore ttys009 4242"
 
+	fresh()
 	local _, nb = setup()
 	assert_true("overview opens", review.overview(nb))
-	assert_eq("opening it stretches the window", { "tall" }, window_calls)
+	assert_eq("opening it asks Hammerspoon to stretch this nvim's terminal", { TALL }, window_calls)
 	assert_true("reopened over itself", review.overview(nb))
 	tick()
-	assert_eq("reopening it in place neither puts it back nor stretches it again", { "tall" }, window_calls)
+	assert_eq("reopening it in place neither puts it back nor stretches it again", { TALL }, window_calls)
 	in_list("q")
-	assert_eq("q puts it back, with the frames Hammerspoon reported", { "tall", "restore " .. FRAMES }, window_calls)
+	assert_eq("q asks for it back", { TALL, BACK }, window_calls)
 	tick()
 	assert_eq("and once back, nothing more", 2, #window_calls)
 
+	fresh()
 	_, nb = setup()
 	assert_true("overview opens", review.overview(nb))
 	in_list("Q")
-	assert_eq("Q, ending the review, puts it back too", { "tall", "restore " .. FRAMES }, window_calls)
+	assert_eq("Q, ending the review, asks for it back too", { TALL, BACK }, window_calls)
 
+	fresh()
 	_, nb = setup()
 	assert_true("overview opens", review.overview(nb))
 	vim.cmd("cclose")
 	tick()
-	assert_eq("so does a list closed any other way", { "tall", "restore " .. FRAMES }, window_calls)
+	assert_eq("so does a list closed any other way", { TALL, BACK }, window_calls)
 
-	window_reply = "none"
+	-- Hammerspoon left the window alone, or the helper timed out while
+	-- Hammerspoon may still stretch it: either way the close asks it back,
+	-- and Hammerspoon restores only what it stretched.
+	for _i, answer in ipairs({ { true, "none" }, { false, "hs did not return within 6s; killed" } }) do
+		fresh()
+		window.run = function(args, cb)
+			window_calls[#window_calls + 1] = table.concat(args, " ")
+			if args[1] == "tall" then
+				cb(answer[1], answer[2])
+			else
+				cb(false, "")
+			end
+		end
+		_, nb = setup()
+		assert_true("overview opens", review.overview(nb))
+		in_list("q")
+		assert_eq("after " .. answer[2] .. ", the close still asks for it back", { TALL, BACK }, window_calls)
+	end
+
+	-- A queue of one: a call starts only once the last came back.
+	local later = {}
+	local function queued(args, cb, sync)
+		window_calls[#window_calls + 1] = table.concat(args, " ") .. (sync and " (sync)" or "")
+		if sync then
+			cb(true, "")
+		else
+			later[#later + 1] = cb
+		end
+	end
+	local function answer()
+		local cb = table.remove(later, 1)
+		cb(true, "tall")
+	end
+
+	fresh()
+	window.run = queued
 	_, nb = setup()
 	assert_true("overview opens", review.overview(nb))
 	in_list("q")
-	assert_eq("a window at no placement with a full-height form is left alone both ways", { "tall" }, window_calls)
+	assert_eq("closed before the stretch came back: the restore waits for it", { TALL }, window_calls)
+	answer()
+	assert_eq("and goes as soon as it does", { TALL, BACK }, window_calls)
+	answer()
 
-	-- The stretch is async: a list closed before Hammerspoon answers still
-	-- puts the window back once it does.
-	local later
-	window.run = function(args, cb)
-		window_calls[#window_calls + 1] = table.concat(args, " ")
-		if args[1] == "tall" then
-			later = cb
-		else
+	fresh()
+	window.run = queued
+	_, nb = setup()
+	assert_true("overview opens", review.overview(nb))
+	in_list("q")
+	assert_true("reopened before the stretch came back", review.overview(nb))
+	answer()
+	assert_eq("closed and reopened while it was on its way: nothing more to ask", { TALL }, window_calls)
+	in_list("q")
+	assert_eq("then closed: back", { TALL, BACK }, window_calls)
+	answer()
+
+	fresh()
+	window.run = queued
+	_, nb = setup()
+	assert_true("overview opens", review.overview(nb))
+	answer()
+	in_list("q")
+	assert_true("reopened while the restore is on its way", review.overview(nb))
+	assert_eq("the stretch waits for the restore", { TALL, BACK }, window_calls)
+	answer()
+	assert_eq("and follows it, in that order", { TALL, BACK, TALL }, window_calls)
+	answer()
+	in_list("q")
+	answer()
+
+	-- Quitting with the stretch on its way: wait for it, then put it back
+	-- before nvim goes.
+	fresh()
+	window.run = function(args, cb, sync)
+		window_calls[#window_calls + 1] = table.concat(args, " ") .. (sync and " (sync)" or "")
+		if sync then
 			cb(true, "")
+		else
+			vim.defer_fn(function()
+				cb(true, "tall")
+			end, 50)
 		end
 	end
 	_, nb = setup()
 	assert_true("overview opens", review.overview(nb))
+	window.leave()
+	assert_eq("quitting mid-stretch waits for it, then restores before leaving", { TALL, BACK .. " (sync)" }, window_calls)
+
+	fresh()
+	window.owner_fn = function()
+		return nil
+	end
+	_, nb = setup()
+	assert_true("overview opens", review.overview(nb))
 	in_list("q")
-	assert_eq("closed before the stretch came back: nothing to put back yet", { "tall" }, window_calls)
-	later(true, FRAMES)
-	assert_eq("and put back as soon as it does", { "tall", "restore " .. FRAMES }, window_calls)
+	assert_eq("an nvim that can't name its terminal asks nothing", {}, window_calls)
+	window.owner_fn = function()
+		return { tty = "ttys009", pid = "4242" }
+	end
 
 	local said = {}
 	local notify = vim.notify
 	vim.notify = function(m)
 		said[#said + 1] = m
 	end
+	fresh()
 	window.run = function(args, cb)
 		window_calls[#window_calls + 1] = table.concat(args, " ")
 		cb(false, "hs did not return within 6s; killed")
 	end
-	window.reset()
-	window_calls = {}
 	for _ = 1, 2 do
-		nb = select(2, setup(true))
+		nb = select(2, setup())
 		assert_true("overview opens", review.overview(nb))
 		in_list("q")
 	end
@@ -2510,13 +2591,7 @@ do
 		return m:match("couldn't make the window full height") ~= nil
 	end, said)
 	assert_eq("Hammerspoon not answering is said once, not at every open", 1, #warned)
-	assert_eq("and nothing is put back", { "tall", "tall" }, window_calls)
-
-	window.run = function(args, cb)
-		window_calls[#window_calls + 1] = table.concat(args, " ")
-		cb(true, args[1] == "tall" and window_reply or "")
-	end
-	window_reply = "none"
+	fresh()
 end
 
 print("\n=== q and Q in the overview save the notes first ===")

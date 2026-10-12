@@ -25,6 +25,9 @@ local git_safety = dofile((debug.getinfo(1, "S").source:sub(2):match("^(.*)/[^/]
 require("desk.window").run = function(_, cb)
 	cb(true, "none")
 end
+require("desk.window").owner_fn = function()
+	return nil
+end
 
 local pass, fail = 0, 0
 local function assert_eq(desc, expected, actual)

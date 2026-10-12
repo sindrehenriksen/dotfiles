@@ -1,27 +1,38 @@
 -- The review overview's list sits across the top of the editor, which a
 -- terminal window in half a screen column has no room for. While the
--- overview is open its window goes full height, and back when it closes,
--- through desk-window.sh (hammerspoon/, over `hs -c`). Hammerspoon decides
--- whether the window is at a placement with a full-height form, and puts it
--- back only while it is still where it was left. Without the helper on
--- PATH (Linux, or not installed) nothing happens.
+-- overview is open the editor's window goes full height, and back when it
+-- closes, through desk-window.sh (hammerspoon/, over `hs -c`). nvim names
+-- its own terminal by tty and foreground pid; Hammerspoon finds that
+-- terminal's window, decides whether it has a full-height form, keeps the
+-- frame it left, and puts it back only while the window is still where the
+-- stretch left it. Without the helper on PATH (Linux, or not installed), or
+-- when nvim can't name its terminal, nothing happens.
 --
--- Every call goes through M.run, which a test replaces; the default runs
--- the helper async, so opening the list never waits on it.
+-- What the window should be is kept apart from what was last asked of
+-- Hammerspoon. One call runs at a time, and each one, when it comes back,
+-- starts the call that gets the two in line again, so a list closed and
+-- reopened quickly never has its stretch and its restore cross. A stretch
+-- whose answer never came back (the helper timed out while Hammerspoon went
+-- on) still gets its restore: Hammerspoon keeps the frame by terminal, and
+-- restoring one it never stretched does nothing.
+--
+-- Every call goes through M.run, and the terminal is found by M.owner_fn,
+-- both of which a test replaces.
 local M = {}
 
 M.TIMEOUT_MS = 10000
 
--- nil, or the window's state: { phase = "pending", restore_wanted = bool }
--- while the stretch is on its way, { phase = "tall", args = {...} } once
--- Hammerspoon has stretched it.
-local state = nil
+local want = false -- the overview is open
+local asked = false -- Hammerspoon may hold a stretch for this terminal
+local busy = false -- a call is running
+local leaving = false -- nvim is quitting: no call starts but leave's own
 local warned = false
 local leave_installed = false
+local owner_cache = nil
 
 --- The default runner: `desk-window.sh <args...>`, `cb(ok, output)` on the
---- main loop. With `sync`, waits for it (for VimLeavePre, which can't wait
---- on a callback). `ok` false with a nil output means there is no helper.
+--- main loop. With `sync`, waits for it (for VimLeavePre). `ok` false with
+--- a nil output means there is no helper.
 function M.default_run(args, cb, sync)
 	local v = vim.env.DESK_WINDOW_BIN
 	local cmd = (v and v ~= "") and v or "desk-window.sh"
@@ -53,23 +64,77 @@ end
 
 M.run = M.default_run
 
---- For tests: forget any stretched window and the one-time warning.
-function M.reset()
-	state = nil
-	warned = false
+local function ps(pid)
+	local res = vim.system({ "ps", "-o", "tty=,comm=", "-p", tostring(pid) }, { text = true }):wait()
+	return (res.stdout or ""):match("^%s*(%S+)%s+(.-)%s*$")
 end
 
---- The current state, for tests.
-function M.state()
-	return state
-end
-
-local function parse(out)
-	local nums = {}
-	for n in (out or ""):gmatch("%-?%d+") do
-		nums[#nums + 1] = n
+--- The terminal this nvim runs in, as { tty, pid }: the pid in the
+--- terminal's foreground is this process, or since nvim 0.10 its TUI
+--- parent, the one holding the tty. nil when neither holds one.
+function M.default_owner()
+	for _, pid in ipairs({ vim.fn.getpid(), vim.uv.os_getppid() }) do
+		local ok, tty, comm = pcall(ps, pid)
+		if ok and tty and tty:match("^ttys?%d+$") and comm and comm:match("nvim") then
+			return { tty = tty, pid = tostring(pid) }
+		end
 	end
-	return #nums == 9 and nums or nil
+	return nil
+end
+
+M.owner_fn = M.default_owner
+
+local function owner()
+	if owner_cache == nil then
+		owner_cache = M.owner_fn() or false
+	end
+	return owner_cache or nil
+end
+
+--- For tests: forget everything, the terminal included.
+function M.reset()
+	want, asked, busy, leaving, warned, owner_cache = false, false, false, false, false, nil
+end
+
+--- The state, for tests.
+function M.state()
+	return { want = want, asked = asked, busy = busy }
+end
+
+local function warn(out)
+	-- Said once: an overview opened every few minutes should not repeat
+	-- that Hammerspoon is not answering.
+	if out and out ~= "" and not warned then
+		warned = true
+		vim.notify("desk: couldn't make the window full height: " .. out, vim.log.levels.WARN)
+	end
+end
+
+-- Starts the call that brings what was asked in line with what is wanted.
+local function step()
+	if busy or leaving then
+		return
+	end
+	local who = owner()
+	if not who then
+		return
+	end
+	if want and not asked then
+		busy, asked = true, true
+		M.run({ "tall", who.tty, who.pid }, function(ok, out)
+			busy = false
+			if not ok then
+				warn(out)
+			end
+			step()
+		end)
+	elseif not want and asked then
+		busy, asked = true, false
+		M.run({ "restore", who.tty, who.pid }, function()
+			busy = false
+			step()
+		end)
+	end
 end
 
 local function install_leave()
@@ -79,59 +144,38 @@ local function install_leave()
 	leave_installed = true
 	vim.api.nvim_create_autocmd("VimLeavePre", {
 		callback = function()
-			M.restore(true)
+			M.leave()
 		end,
 	})
 end
 
---- Stretches the editor's window, unless it already is or is on its way.
+--- The overview opened: the window should be full height.
 function M.tall()
-	if state then
-		state.restore_wanted = nil
-		return
-	end
 	install_leave()
-	local mine = { phase = "pending" }
-	state = mine
-	M.run({ "tall" }, function(ok, out)
-		if state ~= mine then
-			return
-		end
-		state = nil
-		if not ok then
-			-- Said once: an overview opened every few minutes should not
-			-- repeat that Hammerspoon is not answering.
-			if out and out ~= "" and not warned then
-				warned = true
-				vim.notify("desk: couldn't make the window full height: " .. out, vim.log.levels.WARN)
-			end
-			return
-		end
-		local args = parse(out)
-		if not args then
-			return -- "none": not at a placement with a full-height form
-		end
-		state = { phase = "tall", args = args }
-		if mine.restore_wanted then
-			M.restore()
-		end
-	end)
+	want = true
+	step()
 end
 
---- Puts the window back where M.tall found it. A window gone or moved
---- since is left alone, by Hammerspoon, without a word.
-function M.restore(sync)
-	if not state then
-		return
+--- The overview closed: the window should be back.
+function M.restore()
+	want = false
+	step()
+end
+
+--- nvim is quitting: waits for a call still running, then restores
+--- synchronously, since nothing runs after this.
+function M.leave()
+	want, leaving = false, true
+	if busy then
+		vim.wait(M.TIMEOUT_MS + 1000, function()
+			return not busy
+		end, 20)
 	end
-	if state.phase == "pending" then
-		state.restore_wanted = true
-		return
+	local who = owner()
+	if asked and who and not busy then
+		asked = false
+		M.run({ "restore", who.tty, who.pid }, function() end, true)
 	end
-	local argv = { "restore" }
-	vim.list_extend(argv, state.args)
-	state = nil
-	M.run(argv, function() end, sync)
 end
 
 return M

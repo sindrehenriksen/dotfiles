@@ -125,35 +125,37 @@ assert_eq "a pid that is not a number is a usage error" "2" "$?"
 echo
 echo "=== desk-window.sh ==="
 stub_hs 'exec sleep 30'
-read -r status _ < <(timed "$WINDOW_SH" tall < /dev/null)
+read -r status _ < <(timed "$WINDOW_SH" tall ttys009 4242 < /dev/null)
 assert_eq "tall reports the timeout as a failure" "124" "$status"
-stub_hs 'for a in "$@"; do last=$a; done; printf "%s\n" "$last" > "'"$ROOT"'/expr"; echo "42 10 0 600 400 10 0 600 800"'
-"$WINDOW_SH" tall < /dev/null > "$ROOT/out" 2> /dev/null
+stub_hs 'for a in "$@"; do last=$a; done; printf "%s\n" "$last" > "'"$ROOT"'/expr"; echo tall'
+"$WINDOW_SH" tall /dev/ttys009 4242 < /dev/null > "$ROOT/out" 2> /dev/null
 assert_eq "tall exits 0 on a stretched window" "0" "$?"
-assert_eq "...printing its frames" "42 10 0 600 400 10 0 600 800" "$(cat "$ROOT/out")"
-assert_eq "...having called DeskWindowTall" "DeskWindowTall()" "$(cat "$ROOT/expr")"
-stub_hs 'echo none'
-"$WINDOW_SH" tall < /dev/null > "$ROOT/out" 2> /dev/null
+assert_eq "...printing tall" "tall" "$(cat "$ROOT/out")"
+assert_eq "...having named the terminal by tty and pid" 'DeskWindowTall("ttys009", 4242)' "$(cat "$ROOT/expr")"
+stub_hs 'echo "DeskWindowTall: its window is not Ghostty'"'"'s front window"; echo none'
+"$WINDOW_SH" tall ttys009 4242 < /dev/null > "$ROOT/out" 2> /dev/null
 assert_eq "tall exits 0 on none too" "0" "$?"
 assert_eq "...printing none" "none" "$(cat "$ROOT/out")"
 stub_hs 'echo "*** ERROR: attempt to call a nil value (global DeskWindowTall)"'
-"$WINDOW_SH" tall < /dev/null > "$ROOT/out" 2> "$ROOT/err"
+"$WINDOW_SH" tall ttys009 4242 < /dev/null > "$ROOT/out" 2> "$ROOT/err"
 assert_eq "an answer that is neither is exit 1" "1" "$?"
 assert_eq "...printing nothing to act on" "" "$(cat "$ROOT/out")"
 stub_hs 'for a in "$@"; do last=$a; done; printf "%s\n" "$last" > "'"$ROOT"'/expr"; echo true'
-"$WINDOW_SH" restore 42 10 0 600 400 10 0 600 800 < /dev/null > /dev/null 2>&1
+"$WINDOW_SH" restore ttys009 4242 < /dev/null > /dev/null 2>&1
 assert_eq "restore exits 0 when the window went back" "0" "$?"
-assert_eq "...passing the frames as numbers" "DeskWindowRestore(42,10,0,600,400,10,0,600,800)" "$(cat "$ROOT/expr")"
+assert_eq "...asking by the same terminal" 'DeskWindowRestore("ttys009", 4242)' "$(cat "$ROOT/expr")"
 stub_hs 'echo false'
-"$WINDOW_SH" restore 42 10 0 600 400 10 0 600 800 < /dev/null > /dev/null 2>&1
-assert_eq "restore exits 1 when the window was gone or moved" "1" "$?"
+"$WINDOW_SH" restore ttys009 4242 < /dev/null > /dev/null 2>&1
+assert_eq "restore exits 1 when there was nothing to put back" "1" "$?"
 stub_hs 'printf called > "'"$ROOT"'/called"; echo true'
 rm -f "$ROOT/called"
-"$WINDOW_SH" restore 42 10 0 600 400 10 0 600 'os.exit()' < /dev/null > /dev/null 2>&1
-assert_eq "an argument that is not an integer is a usage error" "2" "$?"
-assert_eq "...that never reaches hs" "false" "$([ -e "$ROOT/called" ] && echo true || echo false)"
-"$WINDOW_SH" restore 42 10 < /dev/null > /dev/null 2>&1
-assert_eq "too few frames is a usage error" "2" "$?"
+"$WINDOW_SH" restore 'ttys009"); os.exit(' 4242 < /dev/null > /dev/null 2>&1
+assert_eq "a tty that is not one is a usage error" "2" "$?"
+"$WINDOW_SH" tall ttys009 'x' < /dev/null > /dev/null 2>&1
+assert_eq "a pid that is not a number is a usage error" "2" "$?"
+"$WINDOW_SH" tall ttys009 < /dev/null > /dev/null 2>&1
+assert_eq "a missing pid is a usage error" "2" "$?"
+assert_eq "...none of them reaching hs" "false" "$([ -e "$ROOT/called" ] && echo true || echo false)"
 
 echo
 echo "=== the flags argument ==="

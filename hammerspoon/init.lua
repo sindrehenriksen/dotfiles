@@ -240,63 +240,6 @@ bind(nil, "e", function() place_two_up("large", "right") end)
 
 picker:bind({}, "escape", function() picker:exit() end)
 
--- Full height for a while, then back: nvim's desk review overview opens a
--- list across the top of the editor, which a terminal in half a column has
--- no room for. desk-window.sh calls these over `hs -c`. DeskWindowTall
--- stretches the focused window when it sits in a half slot (to its column)
--- or in a large two-up placement (to the screen's height, same x and width),
--- and returns "<id> <x y w h before> <x y w h after>", or "none" when the
--- window is anywhere else. DeskWindowRestore puts it back, but only while it
--- is still where DeskWindowTall left it: a window moved meanwhile was moved
--- on purpose.
-DeskWindow = {}
-
-DeskWindow.TALL_SLOT = {
-  upper_L = "full_L", lower_L = "full_L",
-  upper_C = "full_C", lower_C = "full_C",
-  upper_R = "full_R", lower_R = "full_R",
-}
-
--- The full-height frame for a window at `frame` on `screen`, or nil.
-function DeskWindow.tall_target(screen, frame)
-  for from, to in pairs(DeskWindow.TALL_SLOT) do
-    if frames_equal(frame, slot_frame(screen, from)) then
-      return slot_frame(screen, to)
-    end
-  end
-  for _, side in ipairs({ "left", "right" }) do
-    local xf, yf, wf, hf = two_up_rect(screen, "large", side)
-    if frames_equal(frame, target_frame(screen, xf, yf, wf, hf)) then
-      return target_frame(screen, xf, 0, wf, 1)
-    end
-  end
-  return nil
-end
-
-local function rounded(f)
-  local function r(v) return math.floor(v + 0.5) end
-  return string.format("%d %d %d %d", r(f.x), r(f.y), r(f.w), r(f.h))
-end
-
-function DeskWindowTall()
-  local win = hs.window.focusedWindow()
-  if not win then return "none" end
-  local before = win:frame()
-  local target = DeskWindow.tall_target(win:screen(), before)
-  if not target then return "none" end
-  win:setFrame(target)
-  return string.format("%d %s %s", win:id(), rounded(before), rounded(win:frame()))
-end
-
-function DeskWindowRestore(id, x, y, w, h, tx, ty, tw, th)
-  local win = hs.window.get(id)
-  if not win then return false end
-  if not frames_equal(win:frame(), { x = tx, y = ty, w = tw, h = th }) then
-    return false
-  end
-  win:setFrame({ x = x, y = y, w = w, h = h })
-  return true
-end
 
 -- Cross-window directional focus and swap on the Dvorak home row
 -- h/t/n/s = west/north/south/east. Works across screens.
@@ -1501,5 +1444,135 @@ wake_watcher = hs.caffeinate.watcher.new(function(ev)
   if ev == hs.caffeinate.watcher.systemDidWake then reapply_key_remap() end
 end)
 wake_watcher:start()
+
+-- Full height for a while, then back: nvim's desk review overview opens a
+-- list across the top of the editor, which a terminal in half a column has
+-- no room for. desk-window.sh calls these over `hs -c`, naming the terminal
+-- nvim runs in by its tty and the pid in its foreground, the way the tab
+-- helpers name one. DeskWindowTall stretches that terminal's window, and
+-- only when it is Ghostty's front window and the focused one, so a window
+-- it can't be sure of is left alone: a half slot goes to its column, the
+-- large window of a two-window pair to the screen's height at the same x
+-- and width, anything else stays. The frame it left is kept here, by
+-- terminal, so DeskWindowRestore puts it back even when nvim never heard
+-- the stretch come back (a timed-out `hs -t`), and only while the window is
+-- still at the frame the stretch gave it: one moved meanwhile was moved on
+-- purpose. It sits apart from the tab helpers above, which never move or
+-- resize a window (nvim/tests/desk-followup-upper-c-test.sh).
+DeskWindow = { saved = {} }
+
+DeskWindow.TALL_SLOT = {
+  upper_L = "full_L", lower_L = "full_L",
+  upper_C = "full_C", lower_C = "full_C",
+  upper_R = "full_R", lower_R = "full_R",
+}
+
+-- The full-height frame for a window at `frame` on `screen`, or nil.
+function DeskWindow.tall_target(screen, frame)
+  for from, to in pairs(DeskWindow.TALL_SLOT) do
+    if frames_equal(frame, slot_frame(screen, from)) then
+      return slot_frame(screen, to)
+    end
+  end
+  for _, side in ipairs({ "left", "right" }) do
+    local xf, yf, wf, hf = two_up_rect(screen, "large", side)
+    if frames_equal(frame, target_frame(screen, xf, yf, wf, hf)) then
+      return target_frame(screen, xf, 0, wf, 1)
+    end
+  end
+  return nil
+end
+
+-- The AppleScript that finds the terminal on `tty` and the window holding
+-- it: "<foreground pid>|<window id>|<front window id>", or "none" or "many".
+function DeskWindow.terminal_window_script(tty)
+  return table.concat({
+    'tell application "Ghostty"',
+    "set matches to every terminal whose tty is " .. as_string_literal("/dev/" .. DeskTab.normalize_tty(tty)),
+    'if (count of matches) = 0 then return "none"',
+    'if (count of matches) > 1 then return "many"',
+    "set term to item 1 of matches",
+    "set tid to id of term",
+    'set wid to ""',
+    "repeat with w in windows",
+    "repeat with t in tabs of w",
+    "if (id of terminals of t) contains tid then set wid to (id of w) as text",
+    "end repeat",
+    "end repeat",
+    'return ((pid of term) as text) & "|" & wid & "|" & ((id of front window) as text)',
+    "end tell",
+  }, "\n")
+end
+
+function DeskWindow.parse_terminal_window(reply)
+  local pid, wid, front = tostring(reply or ""):match("^(%d+)|([^|]*)|([^|]*)$")
+  if not pid then return nil end
+  return tonumber(pid), wid, front
+end
+
+-- The hs window of the terminal on `tty` whose foreground process is
+-- `pid`, or nil and why.
+function DeskWindow.owner_window(tty, pid)
+  if not hs.application.get("Ghostty") then return nil, "Ghostty is not running" end
+  local ok, result, descriptor = hs.osascript.applescript(DeskWindow.terminal_window_script(tty))
+  if not ok then return nil, "osascript failed: " .. DeskTab.osascript_error(descriptor) end
+  if result == "none" or result == "many" then
+    return nil, (result == "none" and "no" or "more than one") .. " Ghostty terminal on " .. tty
+  end
+  local fg, wid, front = DeskWindow.parse_terminal_window(result)
+  if not fg then return nil, "unexpected reply from Ghostty: " .. tostring(result) end
+  if fg ~= tonumber(pid) then
+    return nil, string.format("the terminal on %s runs pid %d in the foreground, not %s", tty, fg, tostring(pid))
+  end
+  if wid == "" or wid ~= front then return nil, "its window is not Ghostty's front window" end
+  local win = hs.window.focusedWindow()
+  local app = win and win:application()
+  if not (app and app:name() == "Ghostty") then return nil, "Ghostty's window is not the focused one" end
+  return win
+end
+
+local function owner_key(tty, pid)
+  return DeskTab.normalize_tty(tty) .. " " .. tostring(pid)
+end
+
+-- "tall" when the terminal's window is full height now (stretched by this
+-- call or still from an earlier one), "none" when it is left as it is.
+function DeskWindowTall(tty, pid)
+  if type(tty) ~= "string" or tty == "" or tonumber(pid) == nil then
+    print("DeskWindowTall: needs a tty and a pid")
+    return "none"
+  end
+  local key = owner_key(tty, pid)
+  local saved = DeskWindow.saved[key]
+  if saved then
+    local win = hs.window.get(saved.id)
+    if win and frames_equal(win:frame(), saved.tall) then return "tall" end
+    DeskWindow.saved[key] = nil
+  end
+  local win, why = DeskWindow.owner_window(tty, pid)
+  if not win then
+    print("DeskWindowTall: " .. why)
+    return "none"
+  end
+  local before = win:frame()
+  local target = DeskWindow.tall_target(win:screen(), before)
+  if not target then return "none" end
+  win:setFrame(target)
+  DeskWindow.saved[key] = { id = win:id(), before = before, tall = win:frame() }
+  return "tall"
+end
+
+-- True when it put the window back; false when nothing was stretched for
+-- this terminal, the window is gone, or it was moved since.
+function DeskWindowRestore(tty, pid)
+  local key = owner_key(tostring(tty), pid)
+  local saved = DeskWindow.saved[key]
+  DeskWindow.saved[key] = nil
+  if not saved then return false end
+  local win = hs.window.get(saved.id)
+  if not win or not frames_equal(win:frame(), saved.tall) then return false end
+  win:setFrame(saved.before)
+  return true
+end
 
 hs.alert.show("Hammerspoon loaded")
