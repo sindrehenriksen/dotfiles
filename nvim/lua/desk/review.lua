@@ -587,23 +587,41 @@ local function settle_declines(s)
 	return false, "kept the review split: it has unsaved declines"
 end
 
+-- Notes buffers whose takes a save must not record: the overview's `q`
+-- saves mid-review, and a take recorded then would stay recorded through
+-- a `u` in the split. The review's end records them (write_taken_notes,
+-- and the split's wipeout for a review ended without saving).
+local holding_takes = {}
+
+--- Records the takes already on disk in the notes the review took into:
+--- a buffer with nothing unsaved holds them as written.
+local function record_saved_takes(s)
+	for b in pairs(s.took_into or {}) do
+		if vim.api.nvim_buf_is_loaded(b) and not vim.bo[b].modified then
+			M.flush_taken(b)
+		end
+	end
+end
+
 -- The ends that save (`:wq` in the split, the overview's `Q`, `<leader>gq`)
--- write the notes the review took into too: a take lives only in the notes
--- buffer until that is written, so quitting nvim after ending the review
--- would lose it. Pending takes are recorded first, since a write from an
--- autocmd need not run BufWritePost.
--- Saves the notes the review took into, recording the takes, and with
--- `everything` (the review's close keys) every other notes file with
--- unsaved edits too. Each save is desk.autosave's, so none goes over a
--- change on disk. Says in one line what it saved, and why it left any.
+-- write the notes the review took into, and with `everything` (`Q`,
+-- `<leader>gq`) every other notes file with unsaved edits too: a take lives
+-- only in the notes buffer until that is written, so quitting nvim after
+-- ending the review would lose it. Each save is desk.autosave's, so none
+-- goes over a change on disk. The takes are recorded once on disk, here
+-- rather than by BufWritePost, which a write from an autocmd need not run;
+-- one already on disk from the overview's `q` is recorded now too. Says in
+-- one line what it saved, and why it left any.
 local function write_taken_notes(s, everything)
 	local autosave = require("desk.autosave")
 	local took, wrote, left = {}, {}, {}
 	for b in pairs(s.took_into or {}) do
-		if vim.api.nvim_buf_is_loaded(b) and vim.bo[b].modified then
+		if vim.api.nvim_buf_is_loaded(b) and not vim.bo[b].modified then
+			M.flush_taken(b)
+		elseif vim.api.nvim_buf_is_loaded(b) then
 			took[b] = true
-			-- Recorded once on disk, never before: a save held back over a
-			-- change on disk leaves the takes pending, as any unsaved take is.
+			-- A save held back over a change on disk leaves the takes
+			-- pending, as any unsaved take is.
 			local ok, why = autosave.save(b, { known = true })
 			if ok then
 				M.flush_taken(b)
@@ -1311,7 +1329,9 @@ function M.open_review(notes_buf)
 		group = vim.api.nvim_create_augroup("desk_taken_" .. notes_buf, { clear = true }),
 		buffer = notes_buf,
 		callback = function()
-			M.flush_taken(notes_buf)
+			if not holding_takes[notes_buf] then
+				M.flush_taken(notes_buf)
+			end
 			M.refresh_status_line(notes_buf, true)
 		end,
 	})
@@ -1377,6 +1397,7 @@ function M.open_review(notes_buf)
 			if sessions[notes_buf] == nil then
 				pcall(vim.api.nvim_del_augroup_by_name, "desk_review_notes_" .. notes_buf)
 			end
+			record_saved_takes(s)
 			tidy_notes_windows(s)
 			-- The window layout can't change while a buffer is being wiped.
 			vim.schedule(function()
@@ -2719,7 +2740,21 @@ end
 --- desk.autosave saves them, then closes the list. Says what it saved, or
 --- why it left one.
 function M.qf_close_list()
-	local wrote, left = require("desk.autosave").save_all()
+	-- Saved, not yet recorded: the review is still open, and `u` there can
+	-- still undo a take.
+	for nb, s in pairs(sessions) do
+		if vim.api.nvim_buf_is_valid(s.review_buf) then
+			holding_takes[nb] = true
+			for b in pairs(s.took_into or {}) do
+				holding_takes[b] = true
+			end
+		end
+	end
+	local ok, wrote, left = pcall(require("desk.autosave").save_all)
+	holding_takes = {}
+	if not ok then
+		error(wrote)
+	end
 	vim.cmd("cclose")
 	vim.schedule(function()
 		if #wrote > 0 then

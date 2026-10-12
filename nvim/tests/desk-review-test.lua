@@ -2565,6 +2565,52 @@ do
 	assert_eq("the notes are saved", false, vim.bo[nb].modified)
 	assert_true("the review ended", not vim.api.nvim_buf_is_valid(rb))
 
+	local function recorded(r)
+		for _, rec in pairs(ledger.taken_by_id(ledger.read(r))) do
+			if rec.headline == "headline n1" then
+				return true
+			end
+		end
+		return false
+	end
+
+	-- take, q, u in the split, then the review ends: the undone take is
+	-- neither recorded nor lost.
+	r, nb, rb = setup()
+	go_to(vim.fn.bufwinid(rb), rb, "NEWS n1")
+	vim.cmd("normal dp")
+	in_list("q")
+	assert_true("q saved the take to disk", vim.tbl_contains(on_disk(r), "NEWS n1"))
+	assert_true("but did not record it while the review is open", not recorded(r))
+	vim.api.nvim_set_current_win(vim.fn.bufwinid(rb))
+	assert_true("u in the split undoes it", review.undo(rb))
+	assert_true("the take is gone from the notes", not vim.tbl_contains(lines_of(nb), "NEWS n1"))
+	assert_true("overview reopens", review.overview(nb))
+	in_list("Q")
+	assert_true("Q saves the undo", not vim.tbl_contains(on_disk(r), "NEWS n1"))
+	assert_true("and the undone take is never recorded as taken", not recorded(r))
+	assert_true("so the suggestion is still there to review", vim.tbl_contains(proposal.lines_at(r, "refs/desk/proposal", "notes.md"), "NEWS n1"))
+
+	-- take, q, then the review ends: recorded then.
+	r, nb, rb = setup()
+	go_to(vim.fn.bufwinid(rb), rb, "NEWS n1")
+	vim.cmd("normal dp")
+	in_list("q")
+	vim.api.nvim_set_current_win(vim.fn.bufwinid(rb))
+	vim.api.nvim_feedkeys(vim.keycode("<leader>gq"), "x", false)
+	tick()
+	assert_true("the review ended", not vim.api.nvim_buf_is_valid(rb))
+	assert_true("a take q saved is recorded when the review ends", recorded(r))
+
+	r, nb, rb = setup()
+	go_to(vim.fn.bufwinid(rb), rb, "NEWS n1")
+	vim.cmd("normal dp")
+	in_list("q")
+	vim.api.nvim_set_current_win(vim.fn.bufwinid(rb))
+	vim.cmd("quit")
+	tick()
+	assert_true("and when :q ends it, the take being on disk already", recorded(r))
+
 	-- reading.md open with an edit of its own, nothing taken into it.
 	r, nb, rb = setup()
 	local rd = vim.fn.bufadd(r .. "/reading.md")
