@@ -92,8 +92,9 @@ desk_sessions_in_notes() {
 # choose and which leaves the work the notes name unfinished), whose
 # transcript sits under $CLAUDE_CONFIG_DIR/projects (the one the settings
 # file read above governs) and is due for deletion within `warn_days`. Each
-# gains `deletes_at` (epoch), `deletion_date` (local YYYY-MM-DD, today for
-# one already past due) and `days_left`; soonest first.
+# gains `deletes_at` (epoch), `deletion_date` (local YYYY-MM-DD, the real
+# date even for one already past due, since a warning is keyed on it) and
+# `days_left` (0 once due); soonest first.
 desk_retention_candidates() {
 	local cutoff_days="$1" warn_days="$2" repo="$3"
 	shift 3
@@ -121,10 +122,9 @@ desk_retention_candidates() {
 		next unless @st;
 		my $deletes_at = $st[9] + $cutoff * 86400;
 		next if $deletes_at - $now > $warn * 86400;
-		my $shown = $deletes_at > $now ? $deletes_at : $now;
 		$s->{deletes_at} = $deletes_at;
-		$s->{deletion_date} = strftime("%Y-%m-%d", localtime($shown));
-		$s->{days_left} = int(($shown - $now) / 86400);
+		$s->{deletion_date} = strftime("%Y-%m-%d", localtime($deletes_at));
+		$s->{days_left} = $deletes_at > $now ? int(($deletes_at - $now) / 86400) : 0;
 		push @out, $s;
 		END { print $j->encode([sort { $a->{deletes_at} <=> $b->{deletes_at} } @out]) }
 	' "$cutoff_days" "$warn_days" "$(desk_now)"

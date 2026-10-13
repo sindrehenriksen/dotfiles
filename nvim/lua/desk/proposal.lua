@@ -652,8 +652,8 @@ function M.build(repo, pass, scheduled_date, new_items, files)
 		-- run's items above everything carried from earlier runs, and within
 		-- this run in the order its steps staged them. A pass stages once per
 		-- step that suggests anything, so an earlier step's items (the judge's
-		-- news) are already carried when a later step (retention, close)
-		-- builds; the step order in the config decides which reads first.
+		-- news) are already carried when a later step (a capture) builds;
+		-- the step order in the config decides which reads first.
 		local run_prefix = "^" .. vim.pesc(pass .. "-" .. scheduled_date .. "-")
 		local this_run, older = {}, {}
 		for _, e in ipairs(kept) do

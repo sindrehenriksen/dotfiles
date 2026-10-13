@@ -59,8 +59,7 @@ desk_prompt_path() {
 }
 
 # The exact --allowedTools value for a step: its own `tools` array, comma-
-# joined. A judge/close step
-# (the two kinds that only ever legitimately read their own seeded
+# joined. A judge step (which only ever legitimately reads its own seeded
 # scratch files, never anywhere else) whose tools include a bare "Read"
 # gets it scoped instead, to Read(<scratch>/**) — an absolute glob under
 # that call's own scratch dir, passed as $2. Any other step, or a call
@@ -69,7 +68,7 @@ desk_step_allowed_tools() {
 	local step_json="$1" scratch="${2:-}"
 	local kind
 	kind="$(jq -r '.kind // empty' <<< "$step_json")"
-	if [ -n "$scratch" ] && { [ "$kind" = "judge" ] || [ "$kind" = "close" ] || [ "$kind" = "retention" ]; }; then
+	if [ -n "$scratch" ] && [ "$kind" = "judge" ]; then
 		jq -r --arg scratch "$scratch" '
 			(.tools // []) | map(if . == "Read" then "Read(" + $scratch + "/**)" else . end) | join(",")
 		' <<< "$step_json"
@@ -447,12 +446,12 @@ desk_failed_source_reason() {
 # desk_step_model_call <pass> <step_json> <label> <placeholders_json>
 #   [<seed_dir>] [<pinned_args_json>] [<scheduled_date>]
 # Runs one model call for a fetch/judge/ticket_status/write-shaped step.
-# `seed_dir`, when given (only judge/close ever pass one), is where the
+# `seed_dir`, when given (only judge ever pass one), is where the
 # caller already seeded this call's own input files — copied INTO
 # call_scratch (below), this call's own actual cwd, never adopted as the
 # cwd directly: call_scratch's own naming ("$pass-$id", or the kept-runs
 # dir when visible) is relied on elsewhere too, so the directory a
-# judge/close call's own scoped Read (and its prompt's {{scratch}}
+# judge call's own scoped Read (and its prompt's {{scratch}}
 # placeholder) point at is always call_scratch, never seed_dir itself.
 # Writes the raw stream-json to $PASS_SCRATCH/<id>-stream.jsonl and the
 # generic tool_results/tool_uses extraction beside it — downstream, pass-
@@ -512,12 +511,12 @@ desk_step_model_call() {
 
 	tools_csv="$(desk_step_allowed_tools "$step_json" "$call_scratch")"
 
-	# The same judge/close-and-has-Read condition desk_step_allowed_tools
+	# The same judge-and-has-Read condition desk_step_allowed_tools
 	# checks, so the deny hook's own --scratch backstop (deny-unlisted-
 	# tool.sh) gets wired up for exactly the calls whose --allowedTools
 	# just got a Read(...) glob, never trusting that glob alone.
 	local hook_scratch=""
-	if { [ "$kind" = "judge" ] || [ "$kind" = "close" ] || [ "$kind" = "retention" ]; } \
+	if [ "$kind" = "judge" ] \
 		&& jq -e '(.tools // []) | index("Read")' > /dev/null 2>&1 <<< "$step_json"; then
 		hook_scratch="$call_scratch"
 	fi
@@ -581,7 +580,7 @@ desk_step_model_call() {
 		[ "$instructions" = "true" ] && restricted="false"
 		# A restricted call otherwise gets no --settings at all (it needs
 		# none: --allowedTools plus --permission-mode dontAsk already do
-		# the job) — except a judge/close call whose Read is scoped above,
+		# the job) — except a judge call whose Read is scoped above,
 		# and a call whose tools include a pattern such as `Bash(gh run
 		# list:*)`, which loads the whole tool: both get this hook wired in
 		# as the pattern's own second layer.

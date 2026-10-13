@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# A judge/close call's own Read is scoped to that call's own scratch dir —
+# A judge call's own Read is scoped to that call's own scratch dir —
 # desk_step_allowed_tools (claude/desk-lib/steps.sh) turns a bare "Read" in
-# a judge/close step's `tools` into `Read(<scratch>/**)`, an absolute glob,
+# a judge step's `tools` into `Read(<scratch>/**)`, an absolute glob,
 # instead of an unscoped "Read" — those two kinds only ever legitimately
 # read their own seeded scratch files, never anywhere else. Any other kind
 # (fetch here) keeps the old unscoped behavior. "<scratch>" is always
@@ -10,7 +10,7 @@
 # Read refused because `--restricted` confines file tools to the actual
 # cwd, and its own cwd (a properly-named, freshly created scratch dir)
 # differed from the seed dir its Read rule and prompt instead pointed at.
-# A caller's own seed dir (desk_step_judge/desk_step_close, seeding this
+# A caller's own seed dir (desk_step_judge, seeding this
 # call's input files ahead of time) is always copied INTO call_scratch,
 # never adopted as the cwd directly — call_scratch keeps its own
 # "$pass-$id"/kept-runs naming either way (relied on elsewhere: log lines,
@@ -83,7 +83,7 @@ export DESK_LOG_DIR="$STATE/logs"
 export CLAUDE_CONFIG_DIR="$ROOT/claude-config"
 export DESK_CONFIG="$ROOT/config.json"
 echo '{}' > "$DESK_CONFIG"
-# The VISIBLE close call below (case "C2") makes desk_step_model_call call
+# The VISIBLE judge call below (case "C2") makes desk_step_model_call call
 # $DESK_SESSION_RECORDER_BIN directly (model-call.sh's own start/end, never
 # through a real claude process — the fake claude above never touches this
 # at all) — without these two, that real session-recorder.sh would fall
@@ -127,7 +127,7 @@ step_json='{"id":"A","kind":"fetch","tools":["Read"],"connector":false,"timeout"
 result="$(desk_step_model_call "testpass" "$step_json" "fetch" '{}' "")"
 assert_eq "the call reports ok" "ok" "$result"
 assert_eq "--allowedTools stays the plain \"Read\"" "Read" "$(allowed_tools_of "$ARGV_LOG")"
-assert_eq "no --settings at all (a restricted, non-judge/close call needs no deny hook)" \
+assert_eq "no --settings at all (a restricted, non-judge call needs no deny hook)" \
 	"" "$(settings_of "$ARGV_LOG")"
 rm -rf "$PASS_SCRATCH"
 
@@ -169,15 +169,15 @@ assert_eq "--allowedTools scopes Read to cwd, matching where the content actuall
 rm -rf "$PASS_SCRATCH" "$call_cwd"
 
 echo
-echo "=== a non-visible close call copies its own seed dir INTO its own cwd (cwd == scoped Read, not the seed dir) ==="
+echo "=== a non-visible judge call copies its own seed dir INTO its own cwd (cwd == scoped Read, not the seed dir) ==="
 PASS_SCRATCH="$(mktemp -d)"
 : > "$ARGV_LOG"
 : > "$CWD_LOG"
-seed_dir="$ROOT/close-seed-fixture"
+seed_dir="$ROOT/judge-seed-fixture"
 mkdir -p "$seed_dir"
 printf 'a seeded file\n' > "$seed_dir/notes.md"
-step_json='{"id":"C","kind":"close","tools":["Read"],"connector":false,"timeout":30}'
-result="$(desk_step_model_call "testpass" "$step_json" "close" '{}' "$seed_dir")"
+step_json='{"id":"C","kind":"judge","tools":["Read"],"connector":false,"timeout":30}'
+result="$(desk_step_model_call "testpass" "$step_json" "judge" '{}' "$seed_dir")"
 assert_eq "the call reports ok" "ok" "$result"
 call_cwd="$(cat "$CWD_LOG")"
 assert_true "cwd is its OWN dir, never the seed dir itself" \
@@ -185,23 +185,23 @@ assert_true "cwd is its OWN dir, never the seed dir itself" \
 assert_eq "the seed dir's own content was copied into cwd" "a seeded file" "$(cat "$NOTES_CONTENT_LOG")"
 assert_eq "--allowedTools scopes Read to cwd — a --restricted call's Read only ever reaches its real cwd" \
 	"Read($call_cwd/**)" "$(allowed_tools_of "$ARGV_LOG")"
-close_settings="$(settings_of "$ARGV_LOG")"
+judge_settings="$(settings_of "$ARGV_LOG")"
 assert_eq "a --settings file was also passed (the deny hook's own backstop)" \
-	"true" "$([ -n "$close_settings" ] && echo true || echo false)"
+	"true" "$([ -n "$judge_settings" ] && echo true || echo false)"
 assert_eq "that settings file's own hook is scoped to the same cwd" \
 	"$call_cwd" "$(deny_hook_scratch_of "$SETTINGS_CONTENT_LOG")"
 rm -rf "$PASS_SCRATCH" "$call_cwd"
 
 echo
-echo "=== a VISIBLE close call keeps its kept-runs cwd; the seed dir is copied INTO it, same as non-visible ==="
+echo "=== a VISIBLE judge call keeps its kept-runs cwd; the seed dir is copied INTO it, same as non-visible ==="
 PASS_SCRATCH="$(mktemp -d)"
 : > "$ARGV_LOG"
 : > "$CWD_LOG"
-seed_dir="$ROOT/close-seed-visible-fixture"
+seed_dir="$ROOT/judge-seed-visible-fixture"
 mkdir -p "$seed_dir"
 printf 'a seeded file\n' > "$seed_dir/notes.md"
-step_json='{"id":"C2","kind":"close","tools":["Read"],"connector":false,"timeout":30,"visible":true}'
-result="$(desk_step_model_call "visiblepass" "$step_json" "close" '{}' "$seed_dir" "" "2026-09-28")"
+step_json='{"id":"C2","kind":"judge","tools":["Read"],"connector":false,"timeout":30,"visible":true}'
+result="$(desk_step_model_call "visiblepass" "$step_json" "judge" '{}' "$seed_dir" "" "2026-09-28")"
 assert_eq "the call reports ok" "ok" "$result"
 call_cwd="$(cat "$CWD_LOG")"
 kept_dir="$(desk_pass_scratch_dir "visiblepass" "2026-09-28" "C2")"

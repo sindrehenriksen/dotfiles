@@ -29,7 +29,7 @@
 # fields Claude Code adds to its input). Any other extra key still fails
 # the comparison.
 #
-# `--scratch <dir>` (a judge/close call's own second layer under its
+# `--scratch <dir>` (a judge call's own second layer under its
 # scoped `Read(<dir>/**)` --allowedTools entry, steps.sh's
 # desk_step_allowed_tools): when given, a Read call is additionally
 # denied unless its own tool_input.file_path resolves (symlinks and

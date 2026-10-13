@@ -141,7 +141,7 @@ desk_mark_opened_for_user() {
 # own scratch dir owns), optionally also pinning tool_input itself to a
 # pre-computed exact set (the write step's runner-pinned thread ids and
 # label — see deny-unlisted-tool.sh's own `--pinned` doc) and/or scoping
-# a Read call to under a directory (a judge/close call's own
+# a Read call to under a directory (a judge call's own
 # Read(<scratch>/**) --allowedTools entry, backed up here in case that
 # glob alone is ever not enough — see deny-unlisted-tool.sh's own
 # `--scratch` doc). Prints the settings file's path.

@@ -81,8 +81,8 @@ desk_brief_prepare() {
 		   stopped_at: ($s.stopped_at // null), failed: ($s.failed_sources // []),
 		   instructions: $instructions}' > "$run/run.json"
 
-	# What the pass staged itself (captures, retention warnings), and what
-	# it held back over the caps, so the brief can say so.
+	# What the pass staged itself (a capture step's lines), and what it
+	# held back over the caps, so the brief can say so.
 	local open capped='[]'
 	open="$(desk_nvim_cli proposal-open "$repo" 2> /dev/null)"
 	jq -e '.items | type == "array"' > /dev/null 2>&1 <<< "$open" || open='{"items":[]}'

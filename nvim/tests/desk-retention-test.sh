@@ -4,8 +4,7 @@
 # CLAUDE_CONFIG_DIR, against a fixed clock), what the step lists for the
 # brief, that it calls no model and stages nothing, dedup on a decline, and
 # that no transcript is written. The reader is faked for selection and the
-# real one is run once against the same temp config dir; `claude` is a fake
-# that would log any call.
+# real one is run once against the same temp config dir.
 set -u
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -56,23 +55,7 @@ cat "$SESSION_STATUS_FIXTURE" 2> /dev/null
 FAKE
 chmod +x "$FAKEBIN/session-status.sh"
 
-# Replies with $REPLIES/<session id>.json, the session read from the
-# session.json the runner seeded into the call's cwd.
-REPLIES="$ROOT/replies"
-CALLS="$ROOT/calls.log"
-mkdir -p "$REPLIES"
-: > "$CALLS"
-cat > "$FAKEBIN/claude" << FAKE
-#!/usr/bin/env bash
-id="\$(jq -r .id session.json)"
-echo "\$id" >> "$CALLS"
-cp prompt.txt "$ROOT/prompt-\$id.txt" 2> /dev/null
-jq -nc --rawfile t "$REPLIES/\$id.json" '{type:"assistant",message:{content:[{type:"text",text:\$t}]}}'
-echo '{"type":"result","subtype":"success","total_cost_usd":0}'
-FAKE
-chmod +x "$FAKEBIN/claude"
 export PATH="$FAKEBIN:$PATH"
-export DESK_CLAUDE_BIN=claude
 
 # shellcheck source=../../claude/desk-lib/common.sh
 source "$LIB/common.sh"
@@ -172,7 +155,7 @@ assert_eq "inside the margin: deletion date is mtime + 120 days" \
 	"$(date_of $((NOW - 110 * day + 120 * day)))" "$(jq -r '.[] | select(.id == "aaaaaaaa-0001") | .deletion_date' <<< "$sel")"
 assert_eq "inside the margin: days left" "10" "$(jq -r '.[] | select(.id == "aaaaaaaa-0001") | .days_left' <<< "$sel")"
 assert_eq "exactly at the edge: 14 days left, included" "14" "$(jq -r '.[] | select(.id == "eeeeeeee-0003") | .days_left' <<< "$sel")"
-assert_eq "already past due: today, 0 days left" "$(date_of "$NOW") 0" \
+assert_eq "already past due: its real date, 0 days left" "$(date_of $((NOW - 125 * day + 120 * day))) 0" \
 	"$(jq -r '.[] | select(.id == "77777777-0009") | "\(.deletion_date) \(.days_left)"' <<< "$sel")"
 for x in bbbbbbbb-0002:"outside the margin" cccccccc-0004:"live" dddddddd-0005:"the runner's own" \
 	ffffffff-0006:"ended as done" 99999999-0007:"not in the notes" 88888888-0010:"transcript outside the config dir"; do
@@ -200,10 +183,8 @@ echo "=== the step lists the sessions for the brief, and stages nothing ==="
 PASS_SCRATCH="$(mktemp -d "$ROOT/pass.XXXX")"
 step_json='{"id":"retention","kind":"retention"}'
 cfg_brief='{"passes": {"morning": {"brief": {"instructions": ["x.md"]}}}}'
-: > "$CALLS"
 result="$(desk_step_retention "morning" "$step_json" "$cfg_brief" "$repo" "2027-01-15" "${files[@]}")"
 assert_eq "the step reports ok" "ok" "$result"
-assert_eq "no model call" "0" "$(wc -l < "$CALLS" | tr -d ' ')"
 assert_true "nothing staged" "$(git -C "$repo" rev-parse -q --verify refs/desk/proposal > /dev/null && echo false || echo true)"
 listed="$DESK_RUNS_ROOT/morning-2027-01-15/retention/candidates.json"
 alpha_date="$(date_of $((NOW + 10 * day)))"

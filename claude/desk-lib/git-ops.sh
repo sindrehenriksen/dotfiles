@@ -102,7 +102,7 @@ desk_push_notes() {
 	fi
 
 	# refs/desk/ledger may not exist yet (a brand-new repo, or one that's
-	# never had a judge/close step stage anything) — a refspec naming a
+	# never had a pass stage anything) — a refspec naming a
 	# ref that doesn't exist locally fails the ENTIRE push, main included,
 	# so it's only ever added when it's actually there to push.
 	local refspecs=(refs/heads/main:refs/heads/main)
