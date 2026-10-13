@@ -2424,6 +2424,45 @@ function M.overview_open()
 	return info.winid ~= 0 and info.title == M.OVERVIEW_TITLE
 end
 
+-- Whether `a` and `b` are windows stacked one directly above the other in
+-- `layout` (a winlayout() node).
+local function stacked(layout, a, b)
+	if layout[1] == "leaf" then
+		return false
+	end
+	local kids = layout[2]
+	for i, kid in ipairs(kids) do
+		local nxt = kids[i + 1]
+		if layout[1] == "col" and nxt and kid[1] == "leaf" and kid[2] == a and nxt[1] == "leaf" and nxt[2] == b then
+			return true
+		end
+		if stacked(kid, a, b) then
+			return true
+		end
+	end
+	return false
+end
+
+--- Shares the height of the review `s`'s two windows equally between them,
+--- when the split stands as the review opened it: the review directly above
+--- the notes, in the current tab. The rows move between those two only, so
+--- every other window, the overview's list included, keeps its height.
+function M.balance_windows(s)
+	local review_win = vim.fn.bufwinid(s.review_buf)
+	local notes_win = s.notes_win
+	if review_win == -1 or not (notes_win and vim.api.nvim_win_is_valid(notes_win)) then
+		return
+	end
+	if vim.api.nvim_win_get_tabpage(notes_win) ~= vim.api.nvim_get_current_tabpage() then
+		return
+	end
+	if not stacked(vim.fn.winlayout(), review_win, notes_win) then
+		return
+	end
+	local total = vim.api.nvim_win_get_height(review_win) + vim.api.nvim_win_get_height(notes_win)
+	vim.api.nvim_win_set_height(review_win, math.floor(total / 2))
+end
+
 -- The editor's window goes full height while the list is open
 -- (desk.window), and back once it closes, however it closes. A list
 -- reopened in place closes its old window first, so the restore waits a
@@ -3312,6 +3351,41 @@ local function install_leave_autocmd()
 	})
 end
 
+local resize_autocmd_installed = false
+
+-- A resized editor gives every row it gains or loses to its bottom window,
+-- the notes: stretched for the overview they fill with empty rows, and put
+-- back they shrink to almost nothing. The review's two windows share them
+-- instead.
+local function install_resize_autocmd()
+	if resize_autocmd_installed then
+		return
+	end
+	resize_autocmd_installed = true
+	-- Only a change of height moves rows: one the user set by hand outlives
+	-- the window being widened. Taken again once a UI attaches, since the
+	-- size before that is a default rather than one being changed.
+	local lines = vim.o.lines
+	vim.api.nvim_create_autocmd("UIEnter", {
+		callback = function()
+			lines = vim.o.lines
+		end,
+	})
+	vim.api.nvim_create_autocmd("VimResized", {
+		callback = function()
+			if vim.o.lines ~= lines then
+				lines = vim.o.lines
+				for bufnr in pairs(sessions) do
+					local s = live_session(bufnr)
+					if s then
+						M.balance_windows(s)
+					end
+				end
+			end
+		end,
+	})
+end
+
 local qf_autocmd_installed = false
 
 local function install_qf_autocmd()
@@ -3379,6 +3453,7 @@ function M.attach(bufnr)
 	install_qf_autocmd()
 	install_focus_autocmd()
 	install_leave_autocmd()
+	install_resize_autocmd()
 
 	local map = function(lhs, fn, desc)
 		vim.keymap.set("n", lhs, fn, { buffer = bufnr, desc = desc })

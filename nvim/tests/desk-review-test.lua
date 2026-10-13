@@ -2610,6 +2610,77 @@ do
 	fresh()
 end
 
+print("\n=== a resize shares the review's height between its two windows, the list kept at its own ===")
+do
+	-- A real resize needs a UI, which this headless nvim has none of: a
+	-- second nvim runs the review, with a UI attached from here.
+	local here = debug.getinfo(1, "S").source:sub(2):match("^(.*)/[^/]+$")
+	local notes = { "Section A" }
+	for i = 1, 120 do
+		notes[#notes + 1] = "- line " .. i
+	end
+	local r = new_repo(notes)
+	build(r, "2026-10-01", { item("n1", { kind = "add", target = { after = "- line 60" }, after = "- NEW" }) })
+	local ch = vim.fn.jobstart({ vim.v.progpath, "--headless", "--embed", "-u", here .. "/minimal_init.lua" }, { rpc = true })
+	local function R(...)
+		return vim.rpcrequest(ch, ...)
+	end
+	local function lua(code, ...)
+		return R("nvim_exec_lua", code, { ... })
+	end
+	R("nvim_ui_attach", 100, 30, { rgb = true })
+	local function resize(width, height)
+		R("nvim_ui_try_resize", width, height)
+		vim.wait(1000, function()
+			return lua("return vim.o.lines") == height and lua("return vim.o.columns") == width
+		end)
+		lua("vim.cmd('redraw')")
+	end
+	lua([[
+		local window = require("desk.window")
+		window.run = function(_, cb) cb(true, "") end
+		window.owner_fn = function() return nil end
+		local review = require("desk.review")
+		vim.cmd("edit " .. vim.fn.fnameescape(... .. "/notes.md"))
+		local nb = vim.api.nvim_get_current_buf()
+		review.attach(nb)
+		assert(review.overview(nb))
+		_G.qf = vim.fn.getqflist({ winid = 0 }).winid
+		-- Free to resize, so the list keeping its height is the review's doing.
+		vim.wo[_G.qf].winfixheight = false
+		_G.nw = vim.fn.bufwinid(nb)
+		for _, b in ipairs(vim.api.nvim_list_bufs()) do
+			if vim.api.nvim_buf_get_name(b):match("^desk%-review://") then
+				_G.rw = vim.fn.bufwinid(b)
+			end
+		end
+	]], r)
+	local function h(win)
+		return lua("return vim.api.nvim_win_get_height(_G[...])", win)
+	end
+	local function even()
+		return math.abs(h("rw") - h("nw")) <= 1
+	end
+	local qf_height = h("qf")
+	resize(100, 60)
+	assert_true("stretched: the review and the notes share the height", even())
+	assert_eq("and the list keeps its own", qf_height, h("qf"))
+	lua("vim.api.nvim_win_set_height(_G.rw, 8)")
+	resize(120, 60)
+	assert_eq("a resize that keeps the height leaves a height set by hand", 8, h("rw"))
+	lua("vim.cmd('cclose')")
+	resize(120, 30)
+	assert_true("put back with the list closed: shared again", even())
+	lua("vim.api.nvim_set_current_win(_G.rw); vim.cmd('belowright split'); _G.between = vim.api.nvim_get_current_win(); vim.api.nvim_win_set_height(_G.rw, 4)")
+	resize(120, 50)
+	assert_eq("another window between the two: the review keeps its height", 4, h("rw"))
+	lua("vim.api.nvim_win_close(_G.between, true); vim.api.nvim_set_current_win(_G.nw); vim.cmd('wincmd L'); vim.api.nvim_set_current_win(_G.rw); vim.cmd('aboveleft split'); _G.above = vim.api.nvim_get_current_win(); vim.api.nvim_win_set_height(0, 3)")
+	resize(120, 40)
+	assert_eq("side by side: nothing is shared, the window above the review keeps its height", 3, h("above"))
+	lua("vim.cmd('silent! %bwipeout!')")
+	vim.fn.jobstop(ch)
+end
+
 print("\n=== q and Q in the overview save the notes first ===")
 do
 	local function tick()
