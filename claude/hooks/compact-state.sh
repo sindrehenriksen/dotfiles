@@ -6,7 +6,8 @@
 #
 #   git     The worktrees this session or its subagents acted in: the cwd's,
 #           and the one holding each path that an Edit or Write named, that a
-#           Bash command ran in (its cwd, or a `cd` in the command), that a
+#           Bash command ran in (its cwd, or a `cd` in a command that also
+#           changes something there), that a
 #           `git -C` with a changing subcommand (commit, rebase, reset, ...,
 #           not log or status) named, or that `worktree add` created, read
 #           from the transcript and from those under <session>/subagents/. A path is resolved against the
@@ -159,6 +160,17 @@ def git_c_mutating:
         "merge", "mv", "pull", "push", "rebase", "reset", "restore", "revert", "rm", "stash",
         "switch", "tag", "update-ref"))
     | $path;
+# Whether a command changes something where it runs: a changing git
+# subcommand, a redirect into a file, or a command that writes files. A `cd`
+# counts only in such a command, since one made only to read (a plugin's
+# source, another session's worktree) is not working there. Quoted text is
+# blanked first, so a `>` or `git commit` inside a search pattern is not one.
+def mutates:
+    gsub("'[^']*'"; "''") | gsub("\"[^\"]*\""; "\"\"")
+    | test("\\bgit\\s+(-c\\s+\\S+\\s+)*(add|am|apply|branch|checkout|cherry-pick|clean|commit|merge|mv|pull|push|rebase|reset|restore|revert|rm|stash|switch|tag|update-ref)\\b")
+    or test("(^|[^0-9&>])>{1,2}\\s*(?!&|/dev/null)[^\\s;&|]")
+    or test("(^|[;&|(]\\s*|\\s)(touch|mkdir|rm|mv|cp|ln|tee|install)\\s")
+    or test("\\b(sed|perl)\\s+-[A-Za-z]*i");
 select(contains("\"type\":\"tool_use\"")) | fromjson? | select(type == "object")
 | (.cwd // "") as $cwd
 | .message.content[]? | select(type == "object" and .type == "tool_use")
@@ -169,7 +181,7 @@ select(contains("\"type\":\"tool_use\"")) | fromjson? | select(type == "object")
       | ($cwd | select(. != "")),
         ($c | git_c_mutating | expand($vars; $cwd)),
         ($c | worktree_add_path | expand($vars; $cwd)),
-        ($c | scan("(?:^|[;&|(]\\s*)cd\\s+(\"[^\"]*\"|'[^']*'|[^\\s;&|)]+)")[0] | expand($vars; $cwd))
+        ($c | select(mutates) | scan("(?:^|[;&|(]\\s*)cd\\s+(\"[^\"]*\"|'[^']*'|[^\\s;&|)]+)")[0] | expand($vars; $cwd))
   else empty end
 | strings
 JQ
@@ -259,7 +271,7 @@ git_block() {
     done <<<"$roots"
     reap "$DEADLINE" "${names[@]}"
 
-    echo "Worktrees this session or its subagents worked in ($i; the cwd's, and those its transcripts show an Edit or Write in, a Bash command run or cd'd in, a changing git -C, or a worktree add):"
+    echo "Worktrees this session or its subagents worked in ($i; the cwd's, and those its transcripts show an Edit or Write in, a Bash command run in or cd'd into to change something, a changing git -C, or a worktree add):"
     [ -e "$JOBS/acted.failed" ] && echo "  (the transcripts could not be fully read, so this may be incomplete)"
     local branch notes desc
     i=0

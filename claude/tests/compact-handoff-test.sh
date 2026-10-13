@@ -128,8 +128,9 @@ g "$R/outer" commit -q --allow-empty -m outer
 
 # What this session and its subagent did, with HOME as $R: an Edit inside a
 # worktree; a Bash command run with its cwd in one, committing through
-# `git -C` on a variable it set from a ~/ path; a `cd` into a clean one; only
-# reads (`git -C … log`, a Read) of another; an Edit inside a worktree since
+# `git -C` on a variable it set from a ~/ path; a `cd` into a clean one that
+# writes a file there; only reads (`git -C … log`, a `cd` to run log, a Read)
+# of another; an Edit inside a worktree since
 # removed from a repo that still encloses it; a variable nothing sets; one
 # worktree reached both as `../repo-rel` and directly; and a last line cut
 # off mid-write with no newline. Then a subagent's Write, which a missing
@@ -139,7 +140,8 @@ tool() { jq -nc --arg cwd "$1" --arg name "$2" --argjson input "$3" '{type:"assi
 {
     tool "$R" Edit "$(jq -nc --arg p "$R/repo-feature/src/x.py" '{file_path:$p}')"
     tool "$R/repo" Bash '{"command":"W=~/repo-local; git -C $W commit -q -m x"}'
-    tool "$R" Bash '{"command":"cd ~/repo-clean && make"}'
+    tool "$R" Bash '{"command":"cd ~/repo-clean && echo x > out.txt"}'
+    tool "$R" Bash '{"command":"cd ~/repo-untouched && git log --oneline | head -3 2>/dev/null; rg -n \"<leader>g\" .; rg '"'"'git commit'"'"' ."}'
     tool "$R" Bash '{"command":"git -C ~/repo-untouched log -1; git -C ~/repo-untouched -c core.pager=cat status"}'
     tool "$R" Read "$(jq -nc --arg p "$R/repo-untouched/x" '{file_path:$p}')"
     tool "$R" Edit "$(jq -nc --arg p "$R/outer/wt-gone/f.txt" '{file_path:$p}')"
@@ -155,15 +157,15 @@ mkdir -p "$R/t/subagents"
 } >"$R/t/subagents/agent-x.jsonl"
 state() { jq -n --arg cwd "$1" --arg t "${2:-}" '{session_id:"none",cwd:$cwd,transcript_path:$t}' | HOME=$R "$STATE"; }
 out=$(state "$R/repo-feature" "$T")
-check "state: counts the worktrees acted in" '[[ $out == *"Worktrees this session or its subagents worked in (6; the cwd'"'"'s, and those its transcripts show an Edit or Write in, a Bash command run or cd'"'"'d in, a changing git -C, or a worktree add):"* ]]'
+check "state: counts the worktrees acted in" '[[ $out == *"Worktrees this session or its subagents worked in (6; the cwd'"'"'s, and those its transcripts show an Edit or Write in, a Bash command run in or cd'"'"'d into to change something, a changing git -C, or a worktree add):"* ]]'
 check "state: the cwd's worktree comes first" '[ "$(sed -n 3p <<<"$out")" = "  ~/repo-feature  [feature]  ← cwd, 1 commit not on origin/feature" ]'
 check "state: a Bash cwd counts, and a dirty worktree says so" 'grep -qxF "  ~/repo  [main]  dirty: 1 file" <<<"$out"'
 check "state: a changing git -C resolves a variable the command set" 'grep -qxF "  ~/repo-local  [local-only]  2 commits on no remote" <<<"$out"'
-check "state: a cd counts, and a clean, pushed worktree has no note" 'grep -qxF "  ~/repo-clean  [clean]" <<<"$out"'
+check "state: a cd that writes counts, and a clean, pushed worktree has no note" 'grep -qxF "  ~/repo-clean  [clean]" <<<"$out"'
 check "state: a subagent's write counts, after a cut-off line" 'grep -qxF "  ~/repo-sub  [sub]" <<<"$out"'
 check "state: a worktree reached two ways is listed once" '[ "$(grep -c "repo-rel" <<<"$out")" -eq 1 ] && grep -qxF "  ~/repo-rel  [rel]" <<<"$out"'
 check "state: a line cut off mid-write is skipped, not an error" '[[ $out != *"could not be fully read"* ]]'
-check "state: reading a worktree is not acting in it" '[[ $out != *"repo-untouched"* ]]'
+check "state: reading a worktree, by git -C or a cd, is not acting in it" '[[ $out != *"repo-untouched"* ]]'
 check "state: a removed worktree does not land on the repo around it" '[[ $out != *"~/outer"* ]]'
 out=$(state "$R/repo-untouched" "$T")
 check "state: the cwd's worktree counts without a mention" 'grep -qxF "  ~/repo-untouched  [untouched]  ← cwd, dirty: 1 file" <<<"$out"'
