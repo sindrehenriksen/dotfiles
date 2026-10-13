@@ -186,6 +186,7 @@ write_config() { # interval
 			github_repos: ["org/repo"],
 			send: {prompt: "prompts/follow-send.md"},
 			skip: {bot_authors: ["^github-actions", "^Automation", "\\[bot\\]$"], bot_signatures: ["^🤖 Review Bot"]},
+			self: ["Owner Person", "owner1"],
 			preamble: "prompts/follow-preamble.md"}}}' > "$INST/config.json"
 }
 write_config 15
@@ -564,6 +565,30 @@ msg="$(jq -r .message "$FOLLOW_TEST_SENT")"
 assert_contains "the next substantive change goes out" 'new comment by Dev One: "QA found a gap in the plan."' "$msg"
 assert_contains "with the earlier skips in its footer" "1 status move" "$msg"
 assert_eq "and the counts reset after the send" '{}' "$(jq -c --arg s "$SID_A" '.queues[$s].skipped' "$DESK_FOLLOW_STATE_FILE")"
+
+echo
+echo "=== the user's own moves are counted, never sent ==="
+jq --arg s "$SID_A" '.queues[$s].changes = [] | .queues[$s].skipped = {}' "$DESK_FOLLOW_STATE_FILE" > "$ROOT/s" && mv "$ROOT/s" "$DESK_FOLLOW_STATE_FILE"
+own_t="$(date -u -v+2H +%Y-%m-%dT%H:%M:%S.000+0000 2> /dev/null || date -u -d '+2 hour' +%Y-%m-%dT%H:%M:%S.000+0000)"
+issue ABC-1 "In QA" "" "[$(link LNK-7)]" "[$(cmt 907 "github-actions" "Deployed to dev"),$(cmt 908 "Dev One" "QA found a gap in the plan."),$(cmt 909 "Owner Person" "Answered QA: the gap is out of scope." "$own_t")]" | rest > "$FIX/changes-result.json"
+pr 41 "[ABC-1] The owner's PR" "abc-1-own" OPEN h1 | jq -s '.[0].author = {login: "owner1"} | .[0].updatedAt = "2026-10-07T09:00:00Z"' > "$FIX/prs.json"
+echo '{"comments":[],"reviews":[]}' > "$FIX/pr-41.json"
+"$RUN" follow > /dev/null 2>&1
+pr 41 "[ABC-1] The owner's PR, retitled" "abc-1-own" MERGED h2 | jq -s '.[0].author = {login: "owner1"} | .[0].updatedAt = "2026-10-07T10:00:00Z"' > "$FIX/prs.json"
+jq -n --arg t "$own_t" '{comments:[
+		{id:"IC_41a",author:{login:"owner1"},createdAt:$t,body:"Merging now."},
+		{id:"IC_41b",author:{login:"dev1"},createdAt:$t,body:"Please add a test for the retry."}],
+	reviews:[{id:"R_41",author:{login:"owner1"},submittedAt:$t,state:"COMMENTED",body:"Self-review notes."}]}' > "$FIX/pr-41.json"
+: > "$FOLLOW_TEST_SENT"
+"$RUN" follow > /dev/null 2>&1
+msg="$(jq -r .message "$FOLLOW_TEST_SENT")"
+assert_not_contains "the user's own ticket comment is not sent" "Answered QA" "$msg"
+assert_not_contains "nor the user's own PR comment" "Merging now" "$msg"
+assert_not_contains "nor the user's review" "Self-review" "$msg"
+assert_not_contains "nor the moves on the user's own PR" "now merged" "$msg"
+assert_contains "someone else's comment on the user's PR still is" 'comment by dev1: "Please add a test for the retry."' "$msg"
+assert_contains "the footer counts the user's posts" "3 own posts" "$msg"
+assert_contains "and the moves on the user's PR" "1 own PR move" "$msg"
 
 echo
 echo "=== a dry run with a lookback and no state: only what moved ==="

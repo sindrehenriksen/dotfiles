@@ -793,11 +793,11 @@ desk_follow_main() {
 		--argjson now "$now" --argjson jira_since "${jira_since:-$now}" --argjson gh_since "$gh_since" \
 		--argjson baseline_jira "$baseline_jira" --argjson baseline_gh "$baseline_gh" \
 		--argjson queue_max "$(jq -r '.queue_max // 200' <<< "$pass_config")" \
-		--argjson skip "$(jq -c '.skip // {}' <<< "$pass_config")" --argjson lookback "$([ -n "$lookback" ] && echo true || echo false)" '
+		--argjson skip "$(jq -c '.skip // {}' <<< "$pass_config")" --argjson self "$(jq -c '.self // []' <<< "$pass_config")" --argjson lookback "$([ -n "$lookback" ] && echo true || echo false)" '
 		{entries: $entries, state: $state[0], scope_issues: $scope[0], change_issues: $changes[0], prs: $prs[0],
 		 now: $now, jira_since: $jira_since, gh_since: $gh_since,
 		 baseline_jira: $baseline_jira, baseline_gh: $baseline_gh, queue_max: $queue_max,
-		 skip: $skip, lookback: $lookback}' > "$work/diff-input.json"
+		 skip: $skip, self: $self, lookback: $lookback}' > "$work/diff-input.json"
 	new_state="$(jq -c -f "$DESK_FOLLOW_DIFF_JQ" "$work/diff-input.json" 2> "$work/diff.err")" || new_state=""
 	if [ -z "$new_state" ]; then
 		desk_log "$pass" "follow: the diff failed: $(head -c 400 "$work/diff.err")"

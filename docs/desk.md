@@ -341,12 +341,12 @@ desk-follow run [--dry-run] [--lookback-minutes N]    # one run now
 
 | Forwarded | Counted, not listed |
 |---|---|
-| New or edited comments, reviews and PR comments by people | Comments and reviews by bots (`bot comments`, `bot reviews`) |
-| A description edit, a rename or retitle, new commits on a PR | A status or resolution move with nothing else on that ticket (`status moves`); a PR merging, closing, going draft or ready, or changing review decision (`PR state changes`) |
+| New or edited comments, reviews and PR comments by people | Comments and reviews by bots (`bot comments`, `bot reviews`), and the user's own (`own posts`) |
+| A description edit, a rename or retitle, new commits on a PR | A status or resolution move with nothing else on that ticket (`status moves`); a PR merging, closing, going draft or ready, or changing review decision (`PR state changes`); every field move on a PR the user opened (`own PR moves`) |
 | A reassignment, a move to another parent, a link added or removed | Labels (`label changes`), and check results (`check results`) |
 | A ticket created in the window, a new child under a tracked key, a PR opened in the window | A ticket or PR only seen for the first time, with no snapshot to compare (`first-seen tickets`, `first-seen PRs`). This covers a ticket that merely mentions a key, and every ticket in a `--lookback-minutes` run. Its comments in the window are still forwarded. |
 
-A ticket's field changes travel together: when any of them is forwarded, the line carries all of them, the status move included. A post is a bot's when its author matches one of the pass's `skip.bot_authors`, or its body opens with one of `skip.bot_signatures` (a bot posting through a person's account); a person quoting bot output further down is still a person. A run that has only counted changes sends nothing; its counts carry over into the footer of the next message, and reset once that message is confirmed.
+A ticket's field changes travel together: when any of them is forwarded, the line carries all of them, the status move included. A post is the user's when its author is one of the pass's `self` names, and the user's own posts and the moves on the user's own PRs are only counted, since nothing the user did is news to the user's sessions. A ticket's field changes carry no author in a search result, so a reassignment or description edit is forwarded whoever made it, and a change someone else posted on the user's PR still is. A post is a bot's when its author matches one of the pass's `skip.bot_authors`, or its body opens with one of `skip.bot_signatures` (a bot posting through a person's account); a person quoting bot output further down is still a person. A run that has only counted changes sends nothing; its counts carry over into the footer of the next message, and reset once that message is confirmed.
 
 **Delivery.** Changes queue per session. The address is the session's current name, so the message goes only when the session is live and its name resolves back to the same id; a session that isn't running, or whose name another live session shares, keeps its queue and gets everything in one message once it is reachable. The send is one restricted model call whose only tool is SendMessage, with the deny hook pinning `to` and `message` to the resolved name and the runner-built text, so it can reach no other peer. The queue empties only when that exact call ran and its result confirms a delivery (`follow.sh` has the parsing). A call that never ran, or a result of `success: false`, sent nothing: the queue stays and scheduled tries back off, doubling from `interval_minutes` up to four hours (a manual run always tries). A call that ran without a confirming result may have delivered, so after a second such send the changes count as sent, `last_sent` records `confirmed: false`, and the log says so.
 
@@ -372,6 +372,7 @@ A ticket's field changes travel together: when any of them is forwarded, the lin
 | `queue_max` | `200` | Per session; older changes past it are counted, not kept. |
 | `skip.bot_authors` | `[]` | Regexes, case-insensitive, for the author names of automated accounts: a GitHub login, or a Jira display name. |
 | `skip.bot_signatures` | `[]` | Regexes for the opening of a post a bot makes through a person's account, matched against the raw body after leading whitespace. |
+| `self` | `[]` | The user's names and logins (a Jira display name, a GitHub login), matched exactly, case-insensitively: their own posts and the moves on their own PRs are counted, not forwarded. |
 
 ## The ticket digest
 
@@ -384,7 +385,7 @@ A fetch step with a `ticket_digest` key runs the digest's query beside its own w
 **What counts as a change** is the follow pass's diff, run against the digest's own snapshots, with the same `skip` rules and these differences:
 
 - Everything a followed session covers is left to the follow pass: a ticket in a session's scope or under one of its tracked keys, and a PR carrying any such key. The count goes in `left_to_follows`.
-- The user's own comments and reviews (`self`, matched against Jira display names and GitHub logins) are counted, and so are the state moves of a PR the user opened.
+- The user's own comments and reviews and the moves on a PR the user opened are counted as the follow pass counts them, against the digest's own `self`.
 - A PR whose author matches `pr_skip_authors` (a dependency bot) is counted, unless its title or a label matches `pr_keep`.
 - For a PR, opening, ready for review, merging and closing are news, with reviews and comments by people. New commits, a retitle and description edits are counted, as are review-decision changes, labels and checks.
 - A ticket created in the window is counted as `new tickets`, since a new-tickets fetch reports those, and one first seen with no snapshot is counted as the follow pass counts it; its comments in the window are still listed.

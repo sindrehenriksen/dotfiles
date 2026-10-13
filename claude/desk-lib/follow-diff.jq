@@ -18,14 +18,15 @@
 #   skip            {bot_authors, bot_signatures}: regexes for an automated
 #                   account's name, and for the opening of a post a bot makes
 #                   through a person's account
+#   self            the user's names and logins: the user's own posts, and
+#                   every move on a PR the user opened, are counted, not sent
 #   lookback        true for a --lookback-minutes run with no snapshots to
 #                   compare against
 #   ticket_digest   true for the morning pass's ticket digest (ticket-digest.sh)
 #                   rather than the follow pass: no sessions and no queues, and
 #                   it prints {tickets, prs, ticket_events, pr_events} instead
 #                   of a follow state
-#   ticket_digest_rules  the ticket digest's own counting: {self: the user's names and
-#                   logins, whose own posts and PR moves are counted;
+#   ticket_digest_rules  the ticket digest's own counting: {self: as above;
 #                   pr_skip_authors: regexes for PR authors whose PRs are
 #                   counted (dependency bots); pr_keep: a regex on a PR's
 #                   title or labels that keeps one of those PRs anyway}
@@ -367,21 +368,26 @@ def ticket_index:
 	| reduce $all[] as $i ({}; .[$i.key] = ((.[$i.key] // {}) * $i
 		| .text = ([.summary, .desc, (.comments // [])[].body] | map(select(. != null)) | join("\n"))));
 
-# The ticket digest's counting rules, applied to events still forwarded.
-(.ticket_digest_rules.self // []) as $self
+# The user's own moves are counted, by both the follow pass and the ticket
+# digest, and the digest's own counting rules on top, applied to events
+# still forwarded. A ticket's field changes carry no author, so only its
+# comments can be told apart.
+(.ticket_digest_rules.self // .self // []) as $self
 | (.ticket_digest_rules.pr_skip_authors // []) as $pr_skip_authors
 | (.ticket_digest_rules.pr_keep // null) as $pr_keep
 |
 def is_self($who): ($who // "") as $w | any($self[]; ascii_downcase == ($w | ascii_downcase));
 def skip_unless($kind): if .skip == null then .skip = $kind else . end;
-def digest_ticket_rules: if .author != null and is_self(.author) then skip_unless("own posts") else . end;
+def own_ticket_rules: if .author != null and is_self(.author) then skip_unless("own posts") else . end;
+def own_pr_rules:
+	if .author != null then (if is_self(.author) then skip_unless("own posts") else . end)
+	elif is_self(.pr_author) then skip_unless("own PR moves")
+	else . end;
 def digest_pr_rules:
 	if (.pr_author // "") as $a | any($pr_skip_authors[]; . as $re | $a | test($re; "i"))
 		and ($pr_keep == null or (([.title] + .pr_labels) | any(.[]; test($pr_keep; "i"))) | not)
 	then skip_unless("dependency PRs")
-	elif .author != null then (if is_self(.author) then skip_unless("own posts") else . end)
-	elif is_self(.pr_author) then skip_unless("own PR moves")
-	else . end;
+	else own_pr_rules end;
 
 # Snapshots the ticket digest has not seen move for this long are dropped, so its
 # state stays bounded; a ticket that comes back is first-seen again.
@@ -390,13 +396,13 @@ def recent: with_entries(select(((.value.updated | ts) // $now) > $now - 180 * 8
 if $digest then
 	{ tickets: (new_ticket_snapshots | recent),
 	  prs: (if $prs == null then ($state.prs // {}) else new_pr_snapshots end | recent),
-	  ticket_events: [ticket_events[] | digest_ticket_rules],
+	  ticket_events: [ticket_events[] | own_ticket_rules],
 	  pr_events: [pr_events[] | digest_pr_rules] }
 else
 scope_maps as $maps
 | ticket_index as $tix
-| ticket_events as $tev
-| pr_events as $pev
+| [ticket_events[] | own_ticket_rules] as $tev
+| [pr_events[] | own_pr_rules] as $pev
 | (if $change_issues == null and $scope_issues == null then ($state.tickets // {}) else new_ticket_snapshots end) as $tickets
 | ($state.queues // {}) as $queues
 | (reduce ($entries | to_entries[]) as $ent ({};
