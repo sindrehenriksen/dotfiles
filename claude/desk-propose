@@ -38,7 +38,8 @@
 #
 # A staging prints the id the proposal gave each item it staged, which is
 # what `supersedes` and --withdraw take. --list prints every suggestion still
-# waiting on the user, one per line: its id, file and headline.
+# waiting on the user, one per line: its id, file and headline, a deferred
+# one marked so.
 #
 # --withdraw <id>... takes back staged suggestions, by those ids: each is
 # recorded as declined, as a decline in the review
@@ -117,6 +118,11 @@ if [ "$list" = true ]; then
 	open="$(desk_nvim_cli proposal-open "$repo" 2> /dev/null)"
 	jq -e '.items | type == "array"' > /dev/null 2>&1 <<< "$open" || die "could not read the proposal" 1
 	jq -r '.items[] | [.id, .file, .headline] | @tsv' <<< "$open"
+	# A deferred suggestion still waits, though it shows in no review yet.
+	desk_nvim_cli proposal-read "$repo" 2> /dev/null | jq -r --argjson open "$open" '
+		[$open.items[].id] as $shown
+		| (.items // [])[] | select(.deferred == true and (.id as $i | $shown | index($i) | not))
+		| [.id, .file, .headline + " (deferred" + (if .waits_for then ": waits for you to commit a line" else "" end) + ")"] | @tsv'
 	exit 0
 fi
 

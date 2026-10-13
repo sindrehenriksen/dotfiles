@@ -163,6 +163,9 @@ case "$out" in *'waits for you to commit "Monday" in notes.md: Agenda sent (sess
 	*) bad "...and names the line it waits on (got [$out])" ;; esac
 assert_eq "...which is not landed on top, unlike an anchor found nowhere" "  - nothing yet|Weekly|  - posts drafted" \
 	"$(git -C "$repo3" show refs/desk/proposal:notes.md 2> /dev/null | paste -sd'|' -)"
+assert_eq "--list shows the waiting one, marked deferred" \
+	"session-2026-10-07-1-plan	notes.md	Agenda sent (deferred: waits for you to commit a line)" \
+	"$(DESK_CONFIG="$ROOT/config3.json" "$PROPOSE" --list | grep -F 'session-2026-10-07-1-plan')"
 
 echo "=== --withdraw takes a staged suggestion back ==="
 jq -n '[{id: "wd", file: "notes.md", kind: "new", target: "top", before: "", after: "- a suggestion the user says is done", headline: "Done already", source: "notes"}]' > "$ROOT/wd.json"
@@ -189,6 +192,11 @@ out="$("$PROPOSE" --pass morning --date 2026-10-15 "$ROOT/list.json")"
 lid="$(proposal_items | jq -r '.[] | select(.id | endswith("-listme")) | .id')"
 case "$out" in *"  staged $lid: One to list"*) ok "staging prints the id it gave the item" ;; *) bad "staging prints the id it gave the item (got [$out])" ;; esac
 case "$out" in *"staged "*"-ticket"*) bad "...and only this call's (got [$out])" ;; *) ok "...and only this call's" ;; esac
+jq -n '[{id: "listtoo", file: "notes.md", kind: "new", target: "top", before: "", after: "- a second one to list", headline: "Second to list", source: "notes"}]' > "$ROOT/list2.json"
+out2="$("$PROPOSE" --pass morning --date 2026-10-15 "$ROOT/list2.json")"
+lid2="$(proposal_items | jq -r '.[] | select(.id | endswith("-listtoo")) | .id')"
+case "$out2" in *"  staged $lid2: Second to list"*) ok "a second staging the same day prints its own id" ;; *) bad "a second staging the same day prints its own id (got [$out2])" ;; esac
+case "$out2" in *"$lid:"*) bad "...and not the first one's, staged under the same pass and date (got [$out2])" ;; *) ok "...and not the first one's, staged under the same pass and date" ;; esac
 listing="$("$PROPOSE" --list)"
 assert_eq "--list shows it, with its file and headline" "$lid	notes.md	One to list" "$(grep -F "$lid" <<< "$listing")"
 before_sha="$(git -C "$repo" rev-parse refs/desk/proposal)"
