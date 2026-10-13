@@ -183,6 +183,20 @@ assert_eq "the other suggestions still wait" "true" "$(nvim -l "$CLI" proposal-o
 assert_eq "staging the same text again does not bring it back" "" \
 	"$(nvim -l "$CLI" proposal-open "$repo" | jq -r '.items[] | select(.headline == "Done already") | .id')"
 
+echo "=== staging names the ids it staged; --list shows what waits ==="
+jq -n '[{id: "listme", file: "notes.md", kind: "new", target: "top", before: "", after: "- one to list", headline: "One to list", source: "notes"}]' > "$ROOT/list.json"
+out="$("$PROPOSE" --pass morning --date 2026-10-15 "$ROOT/list.json")"
+lid="$(proposal_items | jq -r '.[] | select(.id | endswith("-listme")) | .id')"
+case "$out" in *"  staged $lid: One to list"*) ok "staging prints the id it gave the item" ;; *) bad "staging prints the id it gave the item (got [$out])" ;; esac
+case "$out" in *"staged "*"-ticket"*) bad "...and only this call's (got [$out])" ;; *) ok "...and only this call's" ;; esac
+listing="$("$PROPOSE" --list)"
+assert_eq "--list shows it, with its file and headline" "$lid	notes.md	One to list" "$(grep -F "$lid" <<< "$listing")"
+before_sha="$(git -C "$repo" rev-parse refs/desk/proposal)"
+out="$("$PROPOSE" --withdraw --dry-run "$lid")"
+assert_eq "--withdraw --dry-run says what it would withdraw" "would withdraw $lid: One to list" "$out"
+assert_eq "...and changes nothing" "$before_sha" "$(git -C "$repo" rev-parse refs/desk/proposal)"
+assert_eq "...not even the ledger" "" "$(nvim -l "$CLI" declined-recent "$repo" | jq -r --arg id "$lid" '.items[] | select(.id == $id) | .id')"
+
 echo "=== config and usage ==="
 DESK_CONFIG="" DESK_CONFIG_DEFAULT="$ROOT/none.json" "$PROPOSE" "$ROOT/items.json" > /dev/null 2>&1
 assert_eq "no config is a config error" "2" "$?"
