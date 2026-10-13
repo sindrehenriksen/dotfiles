@@ -67,6 +67,30 @@ desk_follow_resolve_session() {
 
 _desk_follow_valid_key() { [[ "$1" =~ ^[A-Z][A-Z0-9]+-[0-9]+$ ]]; }
 
+# desk_follow_address <session id>: the name a message to that session goes
+# to. Prints its current name and returns 0 only while it is live, one
+# process holds it and the name resolves back to it alone. Otherwise prints
+# why, `not running` or `ambiguous <name>`, and returns 1: the message
+# waits for a later run. The follow pass and the central brief both send
+# through this.
+desk_follow_address() {
+	local sid="$1" hit name live dup back
+	hit="$(_desk_follow_reader resolve "$sid" 2> /dev/null)" || hit=""
+	name="$(jq -r '.name // empty' <<< "$hit" 2> /dev/null)"
+	live="$(jq -r '.live // false' <<< "$hit" 2> /dev/null)"
+	dup="$(jq -r '.duplicate_pids // false' <<< "$hit" 2> /dev/null)"
+	if [ "$live" != "true" ] || [ -z "$name" ]; then
+		printf 'not running'
+		return 1
+	fi
+	back="$(_desk_follow_reader resolve "$name" 2> /dev/null | jq -r '.id // empty' 2> /dev/null)"
+	if [ "$dup" = "true" ] || [ "$back" != "$sid" ]; then
+		printf 'ambiguous %s' "$name"
+		return 1
+	fi
+	printf '%s' "$name"
+}
+
 # desk_follow_intro_text <entry json>: what a session is told when it is
 # made a followed session: the tickets, and to load the desk-follow skill,
 # including what its "Before compacting" section has a handoff carry. The
@@ -88,19 +112,13 @@ desk_follow_intro_text() {
 # ran but went unconfirmed is not queued: it may have landed, and an intro
 # twice is worse than none.
 desk_follow_cli_intro() {
-	local sid="$1" entry="$2" pass="" pass_config="" hit name live dup back msg_file work result verdict
+	local sid="$1" entry="$2" pass="" pass_config="" name msg_file work result verdict
 	desk_resolve_config
 	if [ -n "$DESK_CONFIG" ] && [ -f "$DESK_CONFIG" ]; then
 		pass="$(jq -r '.passes | to_entries[] | select(.value.kind == "follow") | .key' "$DESK_CONFIG" | head -n1)"
 		[ -z "$pass" ] || pass_config="$(jq -c --arg p "$pass" '.passes[$p]' "$DESK_CONFIG")"
 	fi
-	hit="$(_desk_follow_reader resolve "$sid" 2> /dev/null)" || hit=""
-	name="$(jq -r '.name // empty' <<< "$hit" 2> /dev/null)"
-	live="$(jq -r '.live // false' <<< "$hit" 2> /dev/null)"
-	dup="$(jq -r '.duplicate_pids // false' <<< "$hit" 2> /dev/null)"
-	back=""
-	[ -z "$name" ] || back="$(_desk_follow_reader resolve "$name" 2> /dev/null | jq -r '.id // empty' 2> /dev/null)"
-	if [ -n "$pass_config" ] && [ "$live" = "true" ] && [ "$dup" != "true" ] && [ "$back" = "$sid" ]; then
+	if [ -n "$pass_config" ] && name="$(desk_follow_address "$sid")"; then
 		_desk_follow_load_send_libs
 		work="$(desk_scratch_dir "$pass-intro")"
 		msg_file="$work/intro.txt"
@@ -801,7 +819,7 @@ desk_follow_main() {
 	preamble_file="$(desk_prompt_path "$(jq -r '.preamble // "prompts/follow-preamble.md"' <<< "$pass_config")")"
 	max_chars="$(jq -r '.message_max_chars // 8000' <<< "$pass_config")"
 	tz="$(jq -r '.timezone // empty' "$DESK_CONFIG" 2> /dev/null)"
-	local sid entry queue n hit name live dup back
+	local sid entry queue n name
 	while IFS= read -r sid; do
 		[ -n "$sid" ] || continue
 		entry="$(jq -c --arg s "$sid" '.[$s]' <<< "$entries")"
@@ -809,20 +827,14 @@ desk_follow_main() {
 		queue="$(jq -c --argjson st "$new_state" --arg s "$sid" '.since = ($st.last_sent[$s].at // null)' <<< "$queue")"
 		n="$(jq '.changes | length' <<< "$queue")"
 		[ "$n" -gt 0 ] || continue
-		hit="$(_desk_follow_reader resolve "$sid" 2> /dev/null)" || hit=""
-		name="$(jq -r '.name // empty' <<< "$hit" 2> /dev/null)"
-		live="$(jq -r '.live // false' <<< "$hit" 2> /dev/null)"
-		dup="$(jq -r '.duplicate_pids // false' <<< "$hit" 2> /dev/null)"
 		local label
 		label="$(jq -r '.label' <<< "$entry")"
-		if [ "$live" != "true" ] || [ -z "$name" ]; then
-			desk_log "$pass" "follow: $label: $n change(s) queued, the session is not running"
-			held=$((held + 1))
-			continue
-		fi
-		back="$(_desk_follow_reader resolve "$name" 2> /dev/null | jq -r '.id // empty' 2> /dev/null)"
-		if [ "$dup" = "true" ] || [ "$back" != "$sid" ]; then
-			desk_log "$pass" "follow: $label: the name '$name' does not address this session alone — $n change(s) stay queued"
+		if ! name="$(desk_follow_address "$sid")"; then
+			if [ "$name" = "not running" ]; then
+				desk_log "$pass" "follow: $label: $n change(s) queued, the session is not running"
+			else
+				desk_log "$pass" "follow: $label: the name '${name#ambiguous }' does not address this session alone — $n change(s) stay queued"
+			fi
 			held=$((held + 1))
 			continue
 		fi
