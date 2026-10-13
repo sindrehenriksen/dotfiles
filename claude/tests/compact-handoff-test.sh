@@ -96,6 +96,124 @@ check "session-start: says to re-read what is relevant from disk" '[[ $out == *"
 check "session-start: is plain text" '[[ $out != "{"* ]]'
 check "settings: the compact matcher runs session-start" '[ "$(jq -r '"'"'.hooks.SessionStart[] | select(.matcher == "compact") | .hooks[0].command'"'"' "$HERE/../settings.json")" = "\$HOME/dotfiles/claude/hooks/compact-handoff.sh session-start" ]'
 
+# --- the state block (compact-state.sh) ---
+STATE="$HERE/../hooks/compact-state.sh"
+# shellcheck source=../../tests/lib/git-safety.sh
+source "$HERE/../../tests/lib/git-safety.sh"
+desk_test_git_safety_init "$TMP"
+R=$(cd -P "$TMP" && pwd)
+g() { git -C "$@" >/dev/null 2>&1; }
+
+git init -q --bare "$R/remote.git"
+git init -q "$R/repo"
+g "$R/repo" commit -q --allow-empty -m one
+g "$R/repo" remote add origin "$R/remote.git"
+g "$R/repo" push -q -u origin main
+g "$R/repo" worktree add -q -b feature "$R/repo-feature"
+g "$R/repo-feature" push -q -u origin feature
+g "$R/repo-feature" commit -q --allow-empty -m unpushed
+g "$R/repo" worktree add -q -b local-only "$R/repo-local"
+g "$R/repo-local" commit -q --allow-empty -m mine
+g "$R/repo-local" commit -q --allow-empty -m mine-too
+touch "$R/repo/untracked.txt"
+
+state() { jq -n --arg cwd "$1" '{session_id:"none",cwd:$cwd}' | "$STATE"; }
+out=$(state "$R/repo-feature")
+check "state: names the repo by its main worktree" '[[ $out == *"Git worktrees of $R/repo (3):"* ]]'
+check "state: the cwd's worktree comes first" '[ "$(sed -n 3p <<<"$out")" = "  $R/repo-feature  [feature]  ← cwd, 1 commit not on origin/feature" ]'
+check "state: a dirty worktree says so" '[[ $out == *"  $R/repo  [main]  dirty: 1 file"$'"'"'\n'"'"'* ]]'
+check "state: commits with no upstream count against every remote" '[[ $out == *"  $R/repo-local  [local-only]  2 commits on no remote"* ]]'
+check "state: a clean, pushed worktree has no note" '! grep -q "repo  \[main\]  .*not on" <<<"$out"'
+
+for n in 1 2 3 4 5 6 7 8; do g "$R/repo" worktree add -q -b "wt$n" "$R/wt$n"; done
+touch "$R/wt8/dirty.txt"
+out=$(COMPACT_STATE_MAX_WORKTREES=4 state "$R/repo")
+check "state: lists no more worktrees than the bound" '[ "$(grep -c "^  $R/" <<<"$out")" -eq 4 ]'
+check "state: the bound keeps the busy ones" '[[ $out == *"$R/wt8  [wt8]  dirty: 1 file"* && $out == *"$R/repo-local  [local-only]"* ]]'
+check "state: says what the bound cut" '[[ $out == *"(7 more not listed: 7 clean with nothing unpushed; git worktree list shows them)"* ]]'
+
+g "$R/repo" worktree add -q -b broken "$R/broken"
+g "$R/broken" push -q -u origin broken
+echo "gitdir: $R/nowhere" >"$R/broken/.git"
+out=$(state "$R/repo")
+check "state: a worktree whose status fails says so" '[[ $out == *"  $R/broken  [broken]  status failed: "* ]]'
+rm -rf "$R/broken" && g "$R/repo" worktree prune
+
+out=$(state "$R")
+check "state: says when the cwd is not a repo" '[[ $out == *"Git: $R is not in a git repository."* ]]'
+out=$(echo 'not json' | "$STATE"; echo "rc=$?")
+check "state: bad input still exits 0" '[[ $out == *"rc=0" ]]'
+
+mkdir -p "$R/bin"
+printf '#!/bin/sh\necho "$$" > "%s/slow.pid"\nexec sleep 30\n' "$R" >"$R/bin/slow.sh"
+printf '#!/bin/sh\necho partial\necho boom >&2\nexit 3\n' >"$R/bin/fail.sh"
+printf '#!/bin/sh\necho "session $COMPACT_STATE_SESSION_ID in $COMPACT_STATE_CWD"\n' >"$R/bin/good.sh"
+printf '#!/bin/sh\nseq 1 30\n' >"$R/bin/long.sh"
+chmod +x "$R"/bin/*.sh
+start=$SECONDS
+out=$(COMPACT_STATE_TIMEOUT=1 COMPACT_STATE_COMMANDS="$R/bin/slow.sh:$R/bin/fail.sh:$R/bin/good.sh:$R/bin/missing.sh" state "$R/repo")
+took=$((SECONDS - start))
+check "commands: one that runs over is skipped and named" '[[ $out == *"($R/bin/slow.sh skipped: no answer within 1s.)"* ]]'
+check "commands: the slow one does not hold up the rest" '[ "$took" -le 3 ]'
+sleep 0.2
+check "commands: the slow one is killed" '! kill -0 "$(cat "$R/slow.pid")" 2>/dev/null'
+check "commands: a failing one is named with its exit and stderr" '[[ $out == *$'"'"'partial\n'"'"'"($R/bin/fail.sh failed, exit 3: boom)"* ]]'
+check "commands: get the hook input in the environment" '[[ $out == *"session none in $R/repo"* ]]'
+check "commands: a missing one is named, not fatal" '[[ $out == *"($R/bin/missing.sh failed, exit 127"* ]]'
+check "commands: run after the git block" '[[ ${out%%session none*} == *"Git worktrees of"* ]]'
+mkdir -p "$R/home/bin" && cp "$R/bin/good.sh" "$R/home/bin/good.sh"
+out=$(HOME="$R/home" COMPACT_STATE_COMMANDS="~/bin/good.sh" state "$R/repo")
+check "commands: a leading ~/ expands" '[[ $out == *"session none in"* ]]'
+out=$(COMPACT_STATE_COMMANDS="$R/bin/long.sh" state "$R/repo")
+check "commands: output is cut at the line bound" '[[ $out == *$'"'"'\n20\n  (10 more lines cut)'"'"'* && $out != *$'"'"'\n21\n'"'"'* ]]'
+
+# Background agents: an invented session in an invented config dir, with a
+# process record naming this shell, which is an ancestor of the hook.
+C="$R/config"
+sid=sess-1
+mkdir -p "$C/projects/p/$sid/subagents" "$C/sessions"
+meta() { jq -n --arg tu "$2" --arg shape "$3" --arg d "$4" '{agentType:"general-purpose",description:$d,toolUseId:$tu,requestShape:$shape}' >"$C/projects/p/$sid/subagents/agent-$1.meta.json"; touch "$C/projects/p/$sid/subagents/agent-$1.jsonl"; }
+meta adone tu-done background "finished one"
+meta arun tu-run background "still running"
+meta aresumed tu-resumed background "resumed one"
+meta aold tu-old background "from an earlier process"
+meta afg tu-fg none "foreground one"
+jq -n --arg s "$sid" '{sessionId:"other"}' >"$C/sessions/999999.json"
+launch() { jq -nc --arg tu "$1" --arg ts "$2" '{type:"assistant",timestamp:$ts,message:{content:[{type:"tool_use",name:"Agent",id:$tu,input:{}}]}}'; }
+note() { jq -nc --arg id "$1" '{type:"queue-operation",operation:"enqueue",timestamp:"2026-01-01T10:00:00Z",content:("<task-notification>\n<task-id>" + $id + "</task-id>\n<status>completed</status>\n</task-notification>")}'; }
+{
+    launch tu-old 2026-01-01T08:00:00.000Z
+    launch tu-done 2026-01-01T09:00:00.500Z
+    launch tu-run 2026-01-01T09:00:01Z
+    launch tu-resumed 2026-01-01T09:00:02Z
+    launch tu-fg 2026-01-01T09:00:03Z
+    note adone
+    note aresumed
+    # A queued message quoting a notification is not one.
+    jq -nc '{type:"queue-operation",operation:"enqueue",content:"about <task-notification>\n<task-id>arun</task-id>"}'
+    jq -nc '{type:"assistant",timestamp:"2026-01-01T09:30:00Z",message:{content:[{type:"tool_use",name:"SendMessage",id:"tu-send",input:{to:"aresumed",message:"more"}}]}}'
+    printf '{"type":"assistant","truncat'
+} >"$C/projects/p/$sid.jsonl"
+started=$(( $(jq -n '"2026-01-01T08:30:00Z" | fromdateiso8601') * 1000 ))
+jq -n --arg s "$sid" --argjson t "$started" '{sessionId:$s,startedAt:$t}' >"$C/sessions/$$.json"
+agents() { jq -n --arg t "$C/projects/p/$sid.jsonl" --arg s "$sid" --arg cwd "$R" '{session_id:$s,transcript_path:$t,cwd:$cwd}' | "$STATE"; }
+out=$(agents)
+check "agents: lists one launched with no notice since" '[[ $out == *"  arun  still running, last wrote 0m ago"* ]]'
+check "agents: lists one resumed after its notice" '[[ $out == *"  aresumed  resumed one"* ]]'
+check "agents: leaves out one that reported back" '[[ $out != *"finished one"* ]]'
+check "agents: leaves out one from an earlier process" '[[ $out != *"earlier process"* ]]'
+check "agents: leaves out foreground agents" '[[ $out != *"foreground one"* ]]'
+check "agents: counts what it lists" '[[ $out == *"have not reported back (2;"* ]]'
+{ sed '$d' "$C/projects/p/$sid.jsonl"; echo; note arun; jq -nc '{type:"queue-operation",operation:"enqueue",content:"<task-notification>\n<task-id>aresumed</task-id>"}'; } >"$C/projects/p/$sid.jsonl.tmp" && mv "$C/projects/p/$sid.jsonl.tmp" "$C/projects/p/$sid.jsonl"
+out=$(agents)
+check "agents: says none are left once all reported" '[[ $out == *"Background agents started from this session: none still running."* ]]'
+rm "$C/sessions/$$.json"
+out=$(agents)
+check "agents: says so when it cannot find the process" '[[ $out == *"Background agents: not read (no live Claude Code process record for this session)."* ]]'
+
+out=$(jq -n --arg cwd "$R/repo" '{hook_event_name:"SessionStart",source:"compact",cwd:$cwd}' | "$HOOK" session-start)
+check "session-start: appends the state block" '[[ $out == *"re-read it from disk"* && $out == *"Current state, read from disk at"* && $out == *"Git worktrees of $R/repo"* ]]'
+
 out=$(jq -n '{session_id:"s3",compact_summary:"## Summary\nno kick-off"}' | "$HOOK" post)
 check "post: silent without a kick-off" '[ -z "$out" ]'
 

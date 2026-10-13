@@ -19,7 +19,10 @@
 #         nothing for a section the summary lacks or leaves empty.
 #   session-start  (SessionStart, matcher `compact`) Adds context saying the
 #         skill and file text restored after a compaction are copies from when
-#         they were loaded. Plain stdout is added as context for SessionStart.
+#         they were loaded, then compact-state.sh's block of current state
+#         read from disk (git worktrees, background agents, and whatever
+#         COMPACT_STATE_COMMANDS adds). Plain stdout is added as context for
+#         SessionStart.
 #
 # Claude Code shows both hooks' stdout in full after the compaction, and for
 # these two events it ignores `systemMessage`, so `post` prints text, not JSON.
@@ -102,8 +105,11 @@ post() {
 }
 
 session_start() {
-    cat >/dev/null
+    local input
+    input=$(cat)
     echo "Skill and file text restored after this compaction are copies from when they were loaded, and some are truncated. Before acting under a skill or instruction file that is still relevant to the work in hand, re-read it from disk; there is no need to re-read the rest. One that no longer exists no longer applies."
+    echo
+    "$(dirname "${BASH_SOURCE[0]}")/compact-state.sh" <<<"$input"
 }
 
 case "${1:-}" in
