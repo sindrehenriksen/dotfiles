@@ -299,7 +299,7 @@ Run directory: /home/me/work/calls/runs/morning-2026-10-13
 - Judge it by: /home/me/work/calls/runs/morning-2026-10-13/instructions/brief.md, then /home/me/work/calls/runs/morning-2026-10-13/instructions/close.md
 - inputs/: f-private.json, f-web.json, notes.md, open-items.json, reading.md, tickets.json
 - close/: 1 idle session to offer for closing, each in close/<session id>/ with session.json and transcript.txt: old-spike (4 working days idle).
-- Also there: allowed-urls.txt, staged.json, mail-noise.json.
+- Also there: allowed-urls.txt, mail-noise.json.
 ```
 
 **When it cannot go.** The central session is addressed as a followed session is: only while it is live, one process holds it and its name resolves back to it alone. Otherwise the run is left `brief.pending`, as a followed session's news waits in its queue, and every later run of the pass tries again: a later slot the same day, and the next day's run, which sends its own run and every older pending one in one message, oldest first. A pending run directory is never swept. A send that fails waits the same way; one that ran without confirming a delivery is tried once more, then counted as sent (`brief.sent` with `confirmed: false`), as the follow pass counts it. A delivered run has `brief.sent`. Unlike a follow update, nothing tries between the pass's own runs: a brief that missed the pass's last slot of the day waits for the next day's run.

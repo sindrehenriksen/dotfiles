@@ -148,7 +148,10 @@ desk_brief_message() {
 		printf -- '- inputs/: %s\n' "${inputs:-(nothing was seeded)}"
 		[ -z "$close_line" ] || printf '%s\n' "$close_line"
 		[ -z "$retention_line" ] || printf '%s\n' "$retention_line"
-		printf -- '- Also there: allowed-urls.txt, staged.json%s.\n' "$([ -f "$r/mail-noise.json" ] && printf ', mail-noise.json')"
+		# staged.json only when the pass staged or held back anything itself.
+		printf -- '- Also there: allowed-urls.txt%s%s.\n' \
+			"$(jq -e '((.staged // []) + (.held_back // [])) | length > 0' "$r/staged.json" > /dev/null 2>&1 && printf ', staged.json')" \
+			"$([ -f "$r/mail-noise.json" ] && printf ', mail-noise.json')"
 	done
 }
 

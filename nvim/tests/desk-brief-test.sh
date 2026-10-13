@@ -208,6 +208,11 @@ assert_contains "it names the run directory" "Run directory: $R1" "$msg"
 assert_contains "and the instruction files to judge by, in order" "- Judge it by: $R1/instructions/brief.md, then $R1/instructions/close.md" "$msg"
 assert_contains "and the inputs" "- inputs/: f-web.json, notes.md, open-items.json" "$msg"
 assert_contains "and how it went" "- How it went: finished ok." "$msg"
+assert_contains "an empty staged.json goes unmentioned" "- Also there: allowed-urls.txt." "$msg"
+jq -n '{staged: [{headline: "a capture"}], held_back: []}' > "$ROOT/staged-probe.json"
+mkdir -p "$ROOT/probe-run" && cp -R "$R1/." "$ROOT/probe-run/" && cp "$ROOT/staged-probe.json" "$ROOT/probe-run/staged.json"
+assert_contains "one holding something is named" "- Also there: allowed-urls.txt, staged.json." \
+	"$(bash -c 'source "$1/common.sh"; source "$1/brief.sh"; desk_brief_message testpass "$2"' _ "$LIB" "$ROOT/probe-run")"
 
 assert_true "a Monday-only step runs on a Monday" "$(grep -q 'model call: F-mon' "$ROOT/run.out" && echo true || echo false)"
 

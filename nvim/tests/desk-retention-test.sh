@@ -2,7 +2,7 @@
 # claude/desk-lib/retention.sh: the cutoff read from a temp settings file,
 # which sessions are selected (fake transcripts with set mtimes in a temp
 # CLAUDE_CONFIG_DIR, against a fixed clock), what the step lists for the
-# brief, that it calls no model and stages nothing, dedup on a decline, and
+# brief, that it stages nothing, dedup on a decline, and
 # that no transcript is written. The reader is faked for selection and the
 # real one is run once against the same temp config dir.
 set -u
