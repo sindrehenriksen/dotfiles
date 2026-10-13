@@ -20,6 +20,8 @@
 #                   through a person's account
 #   self            the user's names and logins: the user's own posts, and
 #                   every move on a PR the user opened, are counted, not sent
+#   own_field_moves {<ticket key>: true} for tickets whose field moves this
+#                   run are, by their changelog, all the user's own: counted
 #   lookback        true for a --lookback-minutes run with no snapshots to
 #                   compare against
 #   ticket_digest   true for the morning pass's ticket digest (ticket-digest.sh)
@@ -242,7 +244,7 @@ def ticket_events:
 	          ($i | comment_changes({}) | .[] | {key: $i.key, title: $i.summary} + .)
 	      else
 	        (($i | field_changes($prev)) as $f | field_event($f)
-	         | {key: $i.key, title: $i.summary, at: (($i.updated | ts) // $now)} + .),
+	         | {key: $i.key, title: $i.summary, at: (($i.updated | ts) // $now), field: true} + .),
 	          ($i | comment_changes($prev) | .[] | {key: $i.key, title: $i.summary} + .)
 	      end ];
 
@@ -371,9 +373,10 @@ def ticket_index:
 # The user's own moves are counted, by both the follow pass and the ticket
 # digest, and the digest's own counting rules on top, applied to events
 # still forwarded. A ticket's own creation is told apart by its creator and
-# its comments by their author; its field changes carry no author in a
-# search result, so they are forwarded whoever made them.
+# its comments by their author; its field moves, which a search result
+# gives no author, by its changelog (follow.sh's desk_follow_own_field_moves).
 (.ticket_digest_rules.self // .self // []) as $self
+| (.own_field_moves // {}) as $own_field_moves
 | (.ticket_digest_rules.pr_skip_authors // []) as $pr_skip_authors
 | (.ticket_digest_rules.pr_keep // null) as $pr_keep
 |
@@ -382,6 +385,7 @@ def skip_unless($kind): if .skip == null then .skip = $kind else . end;
 def own_ticket_rules:
 	if .author != null and is_self(.author) then skip_unless("own posts")
 	elif .creator != null and is_self(.creator) then skip_unless("own tickets")
+	elif .field == true and $own_field_moves[.key] == true then skip_unless("own field moves")
 	else . end;
 def own_pr_rules:
 	if .author != null then (if is_self(.author) then skip_unless("own posts") else . end)
@@ -418,6 +422,7 @@ scope_maps as $maps
 	     | select($rel != null)
 	     | also_having($sid; $maps; [$ev.key]; ($tix[$ev.key].parent // null)) as $also
 	     | {at: ($ev.at // $now), ref: $ev.key, title: $ev.title, context: $rel, what: $ev.what, skip: $ev.skip}
+	       + (if $ev.field == true then {field_run: $now} else {} end)
 	       + (if ($also | length) > 0 then {also: $also} else {} end) ]
 	   + [ $pev[] | . as $ev
 	       | ([$ev.pr_keys[] | . as $k | select(($scope | index($k)) != null)]) as $hit

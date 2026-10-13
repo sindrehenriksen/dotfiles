@@ -420,6 +420,95 @@ desk_follow_fetch_jira() {
 	fi
 	[ "$ok" = "true" ]
 }
+# The ticket field names a changelog entry must touch to count as one of the
+# moves the diff reports (field_changes in follow-diff.jq).
+DESK_FOLLOW_CHANGELOG_FIELDS='^(status|summary|assignee|resolution|labels|description|link|parent|issueparentassociation)$'
+
+# desk_follow_own_field_moves <pass> <pass_config> <keys json> <since epoch> <out_dir>
+# Which of these tickets' field moves in the window are all the user's
+# own: one restricted read call, its only tool the configured changelog
+# tool (jira.changelog_tool), each call pinned by the deny hook to one of
+# the keys with `expand: changelog`. A ticket counts when its changelog has
+# at least one entry since <since> touching a reported field and every such
+# entry's author is `self_account_id`. Prints {<key>: true} for those; a
+# ticket whose changelog did not come back is left out, so its moves are
+# forwarded as before, and the log names it.
+desk_follow_own_field_moves() {
+	local pass="$1" pass_config="$2" keys="$3" since="$4" out_dir="$5"
+	local jira tool prompt_rel account
+	jira="$(jq -c '.jira // {}' <<< "$pass_config")"
+	tool="$(jq -r '.changelog_tool // empty' <<< "$jira")"
+	prompt_rel="$(jq -r '.changelog_prompt // empty' <<< "$jira")"
+	account="$(jq -r '.self_account_id // empty' <<< "$pass_config")"
+	if [ -z "$tool" ] || [ -z "$prompt_rel" ] || [ -z "$account" ] || [ "$(jq 'length' <<< "$keys")" -eq 0 ]; then
+		echo '{}'
+		return 0
+	fi
+	local scratch pinned settings hook calls out mcp_config model
+	scratch="$(desk_scratch_dir "$pass-changelog")"
+	pinned="$scratch/pinned-args.json"
+	jq -c '[.[] | {issueIdOrKey: ., expand: "changelog", fields: ["summary"]}]' <<< "$keys" > "$pinned"
+	calls="$(jq -r '.[] | tojson' "$pinned")"
+	hook="${DESK_DENY_HOOK_SCRIPT:-$DESK_LIB_DIR/deny-unlisted-tool.sh}"
+	if [ ! -f "$hook" ]; then
+		desk_log "$pass" "follow: deny hook missing ($hook) — no changelog read, the field moves are forwarded"
+		rm -rf "$scratch"
+		echo '{}'
+		return 0
+	fi
+	settings="$scratch/deny-hook-settings.json"
+	jq -n --arg cmd "$(desk_shq "$hook") --pinned $(desk_shq "$pinned") --ignore-keys cloudId,responseContentFormat,actionSource -- $tool" \
+		'{hooks: {PreToolUse: [{hooks: [{type: "command", command: $cmd, timeout: 10}]}]}}' > "$settings"
+	desk_render_prompt "$(desk_prompt_path "$prompt_rel")" "$(jq -n --arg c "$calls" '{calls: $c}')" > "$scratch/prompt.txt"
+	mcp_config="$(jq -r '.mcp_config // empty' <<< "$jira")"
+	if [ -n "$mcp_config" ]; then
+		mcp_config="$(desk_prompt_path "$mcp_config")"
+	else
+		mcp_config="$scratch/empty-mcp.json"
+		printf '%s\n' '{"mcpServers":{}}' > "$mcp_config"
+	fi
+	model="$(jq -r '.model // empty' <<< "$jira")"
+	out="$out_dir/changelog-stream.jsonl"
+	desk_log "$pass" "follow: changelog read for $(jq -r 'join(", ")' <<< "$keys")"
+	(
+		export MAX_MCP_OUTPUT_TOKENS="$(jq -r '.max_output_tokens // 2000' <<< "$jira")"
+		desk_call_model --scratch "$scratch" --prompt-file "$scratch/prompt.txt" \
+			--allowed-tools "$tool" --tools "" --restricted true \
+			--mcp-config "$mcp_config" --strict-mcp-config true --settings "$settings" \
+			--max-budget-usd "$(desk_max_budget_usd)" \
+			${model:+--model "$model"} --spill-dir "$out_dir/changelog-spill" \
+			--timeout "$(jq -r --arg d "$DESK_DEFAULT_TIMEOUT_SECS" '.timeout // ($d | tonumber)' <<< "$jira")" \
+			--config-dir "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" --out "$out"
+	) > /dev/null
+	rm -rf "$scratch"
+	desk_follow_note_cost "$out"
+	desk_extract_tool_uses "$out" > "$out_dir/changelog-uses.jsonl"
+	desk_extract_tool_results "$out" > "$out_dir/changelog-results-raw.jsonl"
+	_desk_follow_resolve_spills "$out_dir/changelog-results-raw.jsonl" "$out_dir/changelog-spill" > "$out_dir/changelog-results.jsonl"
+	local pairs result
+	pairs="$(desk_tool_call_pairs "$out_dir/changelog-uses.jsonl" "$out_dir/changelog-results.jsonl" "$tool")"
+	result="$(jq -c --argjson keys "$keys" --arg me "$account" --argjson since "$since" --arg fields "$DESK_FOLLOW_CHANGELOG_FIELDS" '
+		def ts: try (capture("^(?<d>[0-9-]{10}T[0-9:]{8})(\\.[0-9]+)?(?<z>Z|[+-][0-9]{2}:?[0-9]{2})?$") as $c
+			| (($c.d + "Z") | fromdateiso8601)
+			  - (($c.z // "Z") as $z | if $z == "Z" then 0 else ($z | sub(":"; "")) as $zz
+			     | (($zz[1:3] | tonumber) * 3600 + ($zz[3:5] | tonumber) * 60) * (if $zz[0:1] == "+" then 1 else -1 end) end))
+			catch null;
+		(reduce .[] as $p ({}; ($p.text | try fromjson catch null) as $r
+			| if ($r | type) == "object" and ($r.changelog.histories | type) == "array"
+			  then .[($p.input.issueIdOrKey // "")] = $r.changelog.histories else . end)) as $by
+		| {read: [$keys[] | select($by[.] != null)],
+		   own: (reduce $keys[] as $k ({};
+			[($by[$k] // [])[] | select(((.created | ts) // 0) > $since)
+			 | select(any(.items[]?; (.field // "") | test($fields; "i")))] as $moves
+			| if ($moves | length) > 0 and all($moves[]; .author.accountId == $me) then .[$k] = true else . end))}
+	' <<< "$pairs" 2> /dev/null)"
+	[ -n "$result" ] || result='{"read": [], "own": {}}'
+	local missing
+	missing="$(jq -r --argjson r "$result" '.[] | select(. as $k | $r.read | index($k) | not)' <<< "$keys" | paste -sd, - | sed 's/,/, /g')"
+	[ -z "$missing" ] || desk_log "$pass" "follow: no changelog came back for $missing — their field moves are forwarded"
+	jq -c '.own' <<< "$result"
+}
+
 
 # gh, read-only: `pr list` and `pr view` and nothing else.
 desk_follow_gh() {
@@ -803,6 +892,20 @@ desk_follow_main() {
 	if [ -z "$new_state" ]; then
 		desk_log "$pass" "follow: the diff failed: $(head -c 400 "$work/diff.err")"
 		return 1
+	fi
+	# The tickets whose field moves this run would forward: when their
+	# changelog shows every one of those moves is the user's own, the diff
+	# runs again counting them instead.
+	local field_keys own_moves
+	field_keys="$(jq -c --argjson now "$now" '[(.queues // {})[] | (.changes // [])[] | select(.field_run == $now) | .ref] | unique' <<< "$new_state")"
+	own_moves="$(desk_follow_own_field_moves "$pass" "$pass_config" "$field_keys" "${jira_since:-$now}" "$work")"
+	if [ "$own_moves" != "{}" ] && [ -n "$own_moves" ]; then
+		jq --argjson o "$own_moves" '.own_field_moves = $o' "$work/diff-input.json" > "$work/diff-input2.json"
+		new_state="$(jq -c -f "$DESK_FOLLOW_DIFF_JQ" "$work/diff-input2.json" 2> "$work/diff.err")" || new_state=""
+		if [ -z "$new_state" ]; then
+			desk_log "$pass" "follow: the diff failed: $(head -c 400 "$work/diff.err")"
+			return 1
+		fi
 	fi
 	new_state="$(jq -c --argjson k "$keys_sig" --argjson now "$now" --arg jira_ok "$jira_ok" --arg gh_ok "$gh_ok" \
 		--argjson gh_through "$gh_through" --arg lookback "$lookback" '

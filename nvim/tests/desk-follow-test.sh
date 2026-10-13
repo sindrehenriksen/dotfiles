@@ -138,6 +138,27 @@ if [ "$tools" = "SendMessage" ]; then
 	echo '{"type":"result","subtype":"success","total_cost_usd":0.02}'
 	exit 0
 fi
+if head -n1 prompt.txt | grep -q '^CHANGELOG'; then
+	echo "changelog" >> "$FOLLOW_TEST_CALLS"
+	cmd="$(jq -r '.hooks.PreToolUse[0].hooks[0].command' "$settings")"
+	n=0
+	while IFS= read -r input; do
+		[ -n "$input" ] || continue
+		n=$((n + 1))
+		input="$(jq -c '. + {cloudId: "tickets.example"}' <<< "$input")"
+		emit_use "cl$n" mcp__tickets__getIssue "$input"
+		key="$(jq -r .issueIdOrKey <<< "$input")"
+		if ! jq -cn --argjson i "$input" '{tool_name:"mcp__tickets__getIssue", tool_input:$i}' | bash -c "$cmd" > /dev/null 2>&1; then
+			emit_result "cl$n" "PreToolUse hook denied this call" true
+		elif [ -f "$FOLLOW_TEST_FIX/changelog-$key.json" ]; then
+			emit_text_result "cl$n" "$(cat "$FOLLOW_TEST_FIX/changelog-$key.json")"
+		else
+			emit_result "cl$n" "Issue does not exist or you do not have permission" true
+		fi
+	done < <(sed -n '2,$p' prompt.txt)
+	echo '{"type":"result","subtype":"success","total_cost_usd":0.01}'
+	exit 0
+fi
 echo "fetch" >> "$FOLLOW_TEST_CALLS"
 cp prompt.txt "$FOLLOW_TEST_LAST_PROMPT"
 scope="$(sed -n 's/^SCOPE: //p' prompt.txt)"
@@ -176,13 +197,16 @@ INST="$ROOT/instance"
 mkdir -p "$INST/prompts"
 printf 'SCOPE: {{scope_jql}}\nCHANGES: {{changes_jql}}\nFIELDS: {{changes_fields}}\n' > "$INST/prompts/follow-fetch.md"
 printf 'Send to {{to}}:\n{{message}}\n' > "$INST/prompts/follow-send.md"
+printf 'CHANGELOG\n{{calls}}\n' > "$INST/prompts/follow-changelog.md"
 printf 'STANDING PREAMBLE: end with [needs-you] only when the bar is met.\n' > "$INST/prompts/follow-preamble.md"
 write_config() { # interval
 	jq -n --argjson iv "${1:-15}" '{
 		timezone: "UTC", ticket_search_tool: "x", mail_search_tool: "x", ticket_status_step_id: "x", mail_fetch_step_id: "x",
 		notes_repo: "/nonexistent", files: ["notes.md"],
 		passes: {follow: {kind: "follow", interval_minutes: $iv,
-			jira: {prompt: "prompts/follow-fetch.md", tool: "mcp__tickets__search"},
+			jira: {prompt: "prompts/follow-fetch.md", tool: "mcp__tickets__search",
+				changelog_tool: "mcp__tickets__getIssue", changelog_prompt: "prompts/follow-changelog.md"},
+			self_account_id: "acc-owner",
 			github_repos: ["org/repo"],
 			send: {prompt: "prompts/follow-send.md"},
 			skip: {bot_authors: ["^github-actions", "^Automation", "\\[bot\\]$"], bot_signatures: ["^🤖 Review Bot"]},
@@ -594,6 +618,34 @@ assert_not_contains "nor the moves on the user's own PR" "now merged" "$msg"
 assert_contains "someone else's comment on the user's PR still is" 'comment by dev1: "Please add a test for the retry."' "$msg"
 assert_contains "the footer counts the user's posts" "3 own posts" "$msg"
 assert_contains "and the moves on the user's PR" "1 own PR move" "$msg"
+
+echo
+echo "=== a field move the changelog says is the user's own is counted, never sent ==="
+jq --arg s "$SID_A" '.queues[$s].changes = [] | .queues[$s].skipped = {}' "$DESK_FOLLOW_STATE_FILE" > "$ROOT/s" && mv "$ROOT/s" "$DESK_FOLLOW_STATE_FILE"
+history() { # author-account field to
+	jq -cn --arg a "$1" --arg f "$2" --arg to "$3" --arg t "$own_t" \
+		'{id: "h1", author: {accountId: $a, displayName: "x"}, created: $t, items: [{field: $f, toString: $to}]}'
+}
+changelog() { jq -cs '{key: "x", changelog: {histories: .}, fields: {summary: "s"}}'; }
+{ history acc-owner Rank "Ranked higher"; history acc-owner summary "Renamed by the user"; } | changelog > "$FIX/changelog-ABC-1.json"
+{ history acc-owner description ""; history acc-dev summary "Renamed by a colleague"; } | changelog > "$FIX/changelog-ABC-11.json"
+rm -f "$FIX/changelog-LNK-7.json"
+{
+	issue ABC-1 "In QA" "" "[$(link LNK-7)]" "[]" "" "Renamed by the user"
+	issue ABC-11 "Done" ABC-1 "[]" "[]" "" "Renamed by a colleague"
+	issue LNK-7 "In Progress" "" "[]" "[]" "" "LNK-7 renamed, changelog unreadable"
+} | rest > "$FIX/changes-result.json"
+prs_none
+: > "$FOLLOW_TEST_SENT"
+: > "$CALLS"
+"$RUN" follow > "$ROOT/own-fields.out" 2>&1
+msg="$(jq -r .message "$FOLLOW_TEST_SENT")"
+assert_eq "one changelog read" "1" "$(grep -c '^changelog$' "$CALLS")"
+assert_not_contains "a rename the user made is not sent" "Renamed by the user" "$msg"
+assert_contains "one where a colleague's edit is among the user's is" "Renamed by a colleague" "$msg"
+assert_contains "one whose changelog did not come back is forwarded as before" "LNK-7 renamed, changelog unreadable" "$msg"
+assert_contains "and the log names it" "no changelog came back for LNK-7" "$(cat "$ROOT/own-fields.out")"
+assert_contains "the footer counts the user's field move" "1 own field move" "$msg"
 
 echo
 echo "=== a dry run with a lookback and no state: only what moved ==="
