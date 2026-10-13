@@ -1058,7 +1058,7 @@ local function map_next_change(buf)
 end
 
 -- The keys the notes buffer has only while a review of it is open.
-local NOTES_REVIEW_KEYS = { "do", "]c", "[c", "n", "N", "u", "<leader>gA", "<leader>gD", "<leader>gq" }
+local NOTES_REVIEW_KEYS = { "do", "]c", "[c", "n", "N", "u", "<leader>gA", "<leader>gD", "<leader>gq", "Q" }
 
 local function unmap_notes_keys(notes_buf)
 	if not vim.api.nvim_buf_is_valid(notes_buf) then
@@ -1486,10 +1486,14 @@ function M.open_review(notes_buf)
 	vim.keymap.set("n", "<leader>gR", function()
 		report(M.switch_review(review_buf))
 	end, { buffer = review_buf, desc = "Move the review to the other file once this one has none left" })
+	-- `Q` as well, the overview's own key for it, so the review ends from
+	-- the diff windows with the same key whether or not the list is open.
 	for _, b in ipairs({ review_buf, notes_buf }) do
-		vim.keymap.set("n", "<leader>gq", function()
-			report(M.close_review(s))
-		end, { buffer = b, desc = "End the review (asks about unsaved declines)" })
+		for _, lhs in ipairs({ "<leader>gq", "Q" }) do
+			vim.keymap.set("n", lhs, function()
+				report(M.close_review(s))
+			end, { buffer = b, desc = "End the review (asks about unsaved declines)" })
+		end
 	end
 	map_next_change(review_buf)
 	map_next_change(notes_buf)

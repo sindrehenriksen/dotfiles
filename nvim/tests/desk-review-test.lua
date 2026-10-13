@@ -2888,6 +2888,30 @@ vim.cmd("qa")
 	vim.notify = notify
 end
 
+print("\n=== Q in either diff window ends the review, the overview open or not ===")
+do
+	for _, case in ipairs({ { "the review split", true, true }, { "the notes window", false, true }, { "the review split", true, false }, { "the notes window", false, false } }) do
+		local where, in_split, with_list = case[1], case[2], case[3]
+		local desc = "Q in " .. where .. (with_list and " with the overview open" or "")
+		local r = new_repo(BASE)
+		build(r, "2026-10-01", { item("n1"), item("n2") })
+		local nb = open_notes(r)
+		review.attach(nb)
+		assert_true(desc .. ": the review opens", review.open_review(nb))
+		local rb = review_buf_of(nb)
+		if with_list then
+			assert_true(desc .. ": the overview opens", review.overview(nb))
+		end
+		vim.api.nvim_set_current_win(vim.fn.bufwinid(in_split and rb or nb))
+		vim.api.nvim_feedkeys("Q", "x", false)
+		assert_true(desc .. ": the review is over", not vim.api.nvim_buf_is_valid(rb))
+		assert_true(desc .. ": the list is closed", vim.fn.getqflist({ winid = 0 }).winid == 0)
+		assert_eq(desc .. ": you are in your notes", nb, vim.api.nvim_get_current_buf())
+		assert_true(desc .. ": and Q is nvim's own again there", vim.fn.maparg("Q", "n", false, true).buffer ~= 1)
+	end
+	vim.cmd("silent! %bwipeout!")
+end
+
 print(string.format("\n=== summary: %d passed, %d failed ===", pass, fail))
 if fail > 0 then
 	os.exit(1)
