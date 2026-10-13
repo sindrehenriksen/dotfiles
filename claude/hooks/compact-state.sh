@@ -4,10 +4,15 @@
 # from the summary's account of it. Called by compact-handoff.sh session-start
 # with the SessionStart hook input on stdin; runs by hand the same way.
 #
-#   git     The worktrees this session has worked in: every directory with
-#           a `.git` that holds a path the transcript mentions (absolute, or
-#           under `~/`), plus the cwd's. For each, its branch, how many files
-#           are uncommitted, and how many commits are not on its upstream (or,
+#   git     The worktrees this session or its subagents acted in: the cwd's,
+#           and the one holding each path that an Edit or Write named, that a
+#           Bash command ran in (its cwd), or that a Bash command gave to
+#           `git -C` or `worktree add`, read from the transcript and from
+#           those under <session>/subagents/. A path is resolved against the
+#           command's own simple `NAME=value` assignments, `$HOME` and `~/`;
+#           one it cannot resolve is skipped. Only worktrees under $HOME that
+#           still exist count. For each, its branch, how many files are
+#           uncommitted, and how many commits are not on its upstream (or,
 #           without one, on no remote at all). The cwd's comes first.
 #   agents  Background agents this session started that have not reported
 #           back. Read from Claude Code's own files, which are undocumented:
@@ -57,7 +62,7 @@ spawn() {
     local name=$1
     shift
     set -m
-    ( "$@" </dev/null >"$JOBS/$name.out" 2>"$JOBS/$name.err"; echo $? >"$JOBS/$name.rc" ) &
+    ( "$@" </dev/null >"$JOBS/$name.out" 2>"$JOBS/$name.err"; echo $? >"$JOBS/$name.rc" ) </dev/null >/dev/null 2>&1 &
     echo $! >"$JOBS/$name.pid"
     set +m
 }
@@ -107,18 +112,77 @@ reap() {
     done
 }
 
-# The worktree roots this session has touched: the nearest ancestor holding a
-# `.git` of each home-directory path the transcript mentions, and the cwd's.
-# A trailing slash or full stop is dropped, so `dir/` and a sentence ending in
-# a path count as the path.
+# The paths a session acted in, one per line, from its transcript lines on
+# stdin: the directory of each Edit/Write/NotebookEdit file (a directory, so
+# the existence check below never turns on a file since deleted), and for each
+# Bash command its cwd and what it passed to `git -C` and `worktree add`,
+# expanded where the command itself says what a variable holds.
+read -r -d '' ACTED_JQ <<'JQ'
+def unquote: if test("^\"[^\"]*\"$") or test("^'[^']*'$") then .[1:-1] else . end;
+def tilde: if . == "~" then $home elif startswith("~/") then $home + .[1:] else . end;
+def expand($vars; $cwd):
+    unquote | tilde
+    | gsub("\\$\\{(?<v>[A-Za-z_][A-Za-z0-9_]*)\\}"; "$" + .v)
+    | reduce ([scan("\\$([A-Za-z_][A-Za-z0-9_]*)")[]] | unique[]) as $v (.;
+        if $vars[$v] != null then gsub("\\$" + $v + "(?![A-Za-z0-9_])"; $vars[$v]) else . end)
+    | select(test("[$`*?]") | not)
+    | if startswith("/") then . elif $cwd != "" then $cwd + "/" + . else empty end;
+def assigns:
+    [scan("(?:^|[\\s;&|(])([A-Za-z_][A-Za-z0-9_]*)=(\"[^\"]*\"|'[^']*'|[^\\s;&|)]+)")
+     | {key: .[0], value: (.[1] | unquote | tilde | gsub("\\$HOME(?![A-Za-z0-9_])|\\$\\{HOME\\}"; $home))}]
+    | from_entries + {HOME: $home};
+def worktree_add_path:
+    scan("worktree\\s+add\\s+([^;&|\\n]+)")[0]
+    | [splits("\\s+") | select(. != "")]
+    | reduce .[] as $t ({skip: false, path: null};
+        if .path != null then .
+        elif .skip then .skip = false
+        elif $t == "-b" or $t == "-B" or $t == "--reason" then .skip = true
+        elif $t | startswith("-") then .
+        else .path = $t end)
+    | .path // empty;
+select(contains("\"type\":\"tool_use\"")) | fromjson? | select(type == "object")
+| (.cwd // "") as $cwd
+| .message.content[]? | select(type == "object" and .type == "tool_use")
+| if .name == "Edit" or .name == "Write" or .name == "MultiEdit" then .input.file_path | strings | sub("/[^/]*$"; "")
+  elif .name == "NotebookEdit" then .input.notebook_path | strings | sub("/[^/]*$"; "")
+  elif .name == "Bash" then
+      (.input.command // "") as $c | ($c | assigns) as $vars
+      | ($cwd | select(. != "")),
+        ($c | scan("git\\s+-C\\s+(\"[^\"]*\"|'[^']*'|[^\\s;&|)]+)")[0] | expand($vars; $cwd)),
+        ($c | worktree_add_path | expand($vars; $cwd))
+  else empty end
+| strings
+JQ
+
+# The worktree roots for those paths: for each one under $HOME, the nearest
+# ancestor holding a `.git`, as long as the directory leading from that root
+# towards the path still exists. That is what drops a worktree since removed,
+# whose paths would otherwise land on whatever repo encloses it. The cwd's
+# root comes first; $JOBS/acted.failed marks a transcript it could not read.
 touched_worktrees() {
-    local cwd=$1 transcript=$2 p
+    local cwd=$1 transcript=$2 p child
     git -C "$cwd" rev-parse --show-toplevel 2>/dev/null
     [ -r "$transcript" ] || return 0
-    grep -oE "(~|$HOME)/[A-Za-z0-9._/-]+" "$transcript" 2>/dev/null | sed -e "s|^~/|$HOME/|" -e 's|[./]*$||' | sort -u |
+    # A newline after each file, since the last line of one still being
+    # written has none and would swallow the next file's first.
+    {
+        cat "$transcript"
+        echo
+        compgen -G "${transcript%.jsonl}/subagents/agent-*.jsonl" | while IFS= read -r p; do cat "$p"; echo; done
+    } | jq -R -r --arg home "$HOME" "$ACTED_JQ" >"$JOBS/acted" 2>"$JOBS/acted.err"
+    # Anything on stderr, not the exit code: jq reports only the last input's.
+    [ -s "$JOBS/acted.err" ] && touch "$JOBS/acted.failed"
+    sed -e 's|/\./|/|g' -e 's|\(/\.\)*/*$||' "$JOBS/acted" | sort -u |
         while IFS= read -r p; do
+            case $p in "$HOME"/*) ;; *) continue ;; esac
+            child=""
             while [ "${#p}" -gt "${#HOME}" ]; do
-                if [ -e "$p/.git" ]; then echo "$p"; break; fi
+                if [ -e "$p/.git" ]; then
+                    { [ -z "$child" ] || [ -e "$p/$child" ]; } && echo "$p"
+                    break
+                fi
+                child=${p##*/}
                 p=${p%/*}
             done
         done
@@ -129,7 +193,9 @@ touched_worktrees() {
 # upstream or a gone one, on no remote).
 wt_check() {
     local wt=$1 status head up ab dirty notes=() n
-    status=$(git -C "$wt" status --porcelain=v2 --branch --untracked-files=normal) || return 1
+    # --no-optional-locks: never take index.lock in a worktree another
+    # session may be committing in, least of all one this could then kill.
+    status=$(git --no-optional-locks -C "$wt" status --porcelain=v2 --branch --untracked-files=normal) || return 1
     head=$(sed -n 's/^# branch.head //p' <<<"$status")
     up=$(sed -n 's/^# branch.upstream //p' <<<"$status")
     ab=$(sed -n 's/^# branch.ab +\([0-9]*\) .*/\1/p' <<<"$status")
@@ -150,7 +216,8 @@ git_block() {
     here=$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null)
     roots=$(touched_worktrees "$cwd" "$transcript" | awk '!seen[$0]++')
     if [ -z "$roots" ]; then
-        echo "Worktrees: $(tilde "$cwd") is not in a git repository, and the transcript names no other."
+        echo "Worktrees: $(tilde "$cwd") is not in a git repository, and the transcripts show no other worked in."
+        [ -e "$JOBS/acted.failed" ] && echo "  (the transcripts could not be read)"
         return
     fi
     while IFS= read -r root; do
@@ -160,7 +227,8 @@ git_block() {
     done <<<"$roots"
     reap "$DEADLINE" "${names[@]}"
 
-    echo "Worktrees this session has worked in ($i; read from the paths in its transcript):"
+    echo "Worktrees this session or its subagents worked in ($i; the cwd's, and those its transcripts show an Edit or Write in, a Bash command run in, or given to git -C or worktree add):"
+    [ -e "$JOBS/acted.failed" ] && echo "  (the transcripts could not be read, so this may be incomplete)"
     local branch notes desc
     i=0
     while IFS= read -r root; do
@@ -195,17 +263,44 @@ process_started_at() {
 
 agents_block() {
     local session=$1 transcript=$2
-    [ -n "$session" ] && [ -r "$transcript" ] || return
+    if [ -z "$session" ] || [ ! -r "$transcript" ]; then
+        echo "Background agents: not read (the hook input names no readable transcript)."
+        return
+    fi
     local dir=${transcript%.jsonl} config
-    config=$(cd "$(dirname "$transcript")/../.." 2>/dev/null && pwd) || return
+    config=$(cd "$(dirname "$transcript")/../.." 2>/dev/null && pwd) || {
+        echo "Background agents: not read (no Claude Code config dir above the transcript)."
+        return
+    }
 
-    local metas files
-    files=$(compgen -G "$dir/subagents/agent-*.meta.json") || return
-    # xargs, because a long-lived session can hold more of them than one
-    # command line takes.
-    metas=$(tr '\n' '\0' <<<"$files" | xargs -0 jq -c 'select(.requestShape == "background" and .parentAgentId == null)
-            | {id: (input_filename | capture("agent-(?<i>[^/]+)\\.meta\\.json$").i), d: (.description // ""), tu: (.toolUseId // "")}' 2>/dev/null | jq -sc '.')
-    [ "$metas" = "[]" ] || [ -z "$metas" ] && return
+    local files all metas
+    files=$(compgen -G "$dir/subagents/agent-*.meta.json") || {
+        echo "Background agents started from this session: none."
+        return
+    }
+    # Each file as one line led by its name, then `fromjson?`, so one caught
+    # mid-write costs only itself: jq alone would read the files as one
+    # stream, and they end without a newline. xargs, because a long-lived
+    # session holds more of them than one command line takes.
+    all=$(tr '\n' '\0' <<<"$files" | xargs -0 awk 'FNR == 1 { if (NR > 1) print ""; printf "%s\t", FILENAME } { printf "%s", $0 } END { print "" }' | jq -R -c '
+            index("\t") as $i | .[:$i] as $f | .[$i + 1:] | fromjson? | select(type == "object")
+            | {id: ($f | capture("agent-(?<i>[^/]+)\\.meta\\.json$").i), d: (.description // ""),
+               tu: (.toolUseId // ""), shape: (.requestShape // null), top: (.parentAgentId == null)}' 2>/dev/null | jq -sc '.')
+    # The format checks, so that Claude Code storing these differently reads
+    # as that rather than as no agents.
+    if [ "$(jq '[.[] | select(.tu != "")] | length' <<<"${all:-[]}")" -eq 0 ]; then
+        echo "Background agents: not read ($(wc -l <<<"$files" | tr -d ' ') agent records, none in a recognised format; Claude Code may have changed how it stores them)."
+        return
+    fi
+    if [ "$(jq '[.[] | select(.shape != null)] | length' <<<"$all")" -eq 0 ]; then
+        echo "Background agents: not read (no agent record says whether it ran in the background; Claude Code may have changed how it stores them)."
+        return
+    fi
+    metas=$(jq -c '[.[] | select(.shape == "background" and .top and .tu != "") | {id, d, tu}]' <<<"$all")
+    if [ "$metas" = "[]" ]; then
+        echo "Background agents started from this session: none."
+        return
+    fi
 
     local started
     started=$(process_started_at "$config" "$session")
@@ -231,10 +326,12 @@ agents_block() {
             | if .name == "SendMessage" then {k: "act", id: (.input.to // ""), n: $n, ts: $ts}
               elif $byTu[.id] then {k: "act", id: $byTu[.id], n: $n, ts: $ts}
               else empty end
-          else empty end' "$transcript") || {
-        echo "Background agents: could not read the transcript."
+          else empty end' "$transcript" 2>"$JOBS/events.err")
+    # stderr rather than the exit code, which jq takes from the last input.
+    if [ -s "$JOBS/events.err" ]; then
+        echo "Background agents: could not read the transcript ($(head -1 "$JOBS/events.err" | cut -c1-200))."
         return
-    }
+    fi
     running=$(jq -s -c --argjson metas "$metas" --argjson started "$started" '
         def secs: capture("^(?<b>[^.Z]+)(\\.(?<f>[0-9]+))?Z$") | (.b + "Z" | fromdateiso8601) + ((.f // "0") | "0." + . | tonumber);
         . as $ev
