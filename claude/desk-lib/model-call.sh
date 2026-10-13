@@ -90,6 +90,9 @@ desk_prune_old_runs() {
 		[ -n "$date_epoch" ] || continue
 		age_days=$(( (now - date_epoch) / 86400 ))
 		[ "$age_days" -gt 7 ] || continue
+		# A run whose brief has not reached the central session yet is
+		# what that brief names: it stays until it is delivered.
+		[ -e "$d/brief.pending" ] && continue
 		if [ "$loaded" = "false" ]; then
 			user_cwds="$(_desk_user_started_cwds)"
 			loaded="true"

@@ -42,6 +42,7 @@ source "$DESK_RUN_DIR/desk-lib/retention.sh"
 source "$DESK_RUN_DIR/desk-lib/ticket-digest.sh"
 source "$DESK_RUN_DIR/desk-lib/ticket-search.sh"
 source "$DESK_RUN_DIR/desk-lib/mail-triage.sh"
+source "$DESK_RUN_DIR/desk-lib/brief.sh"
 source "$DESK_RUN_DIR/desk-lib/sleep-inhibit.sh"
 
 pass="${1:-}"
@@ -200,9 +201,11 @@ if [ "$rerun" = "true" ]; then
 	rm -f "$DESK_GUARD_DIR/followup-$pass-$scheduled_date" "$DESK_GUARD_DIR/followup-pending-$pass-$scheduled_date"
 elif desk_guard_already_ran_today "$pass" "$scheduled_date"; then
 	desk_log "$pass" "already ran today (scheduled $scheduled_date): no-op"
-	# The one thing a later slot still does: open a follow-up tab the pass
-	# could not open itself, the screen locked at the time.
+	# What a later slot still does: open a follow-up tab the pass could not
+	# open itself, the screen locked at the time, and send a brief still
+	# waiting for the central session.
 	desk_retry_follow_up_tab "$pass" "$scheduled_date"
+	desk_brief_retry "$pass" "$pass_config" "$config"
 	exit 0
 fi
 
@@ -510,31 +513,7 @@ $(git -C "$repo" show "HEAD:$f" 2> /dev/null)"
 					desk_log "$pass" "judge $id: reply wasn't the pinned {\"items\": [...]} shape — failing the pass"
 					result="failed"
 				else
-					# Only the FETCH steps' own raw tool-results ever seed
-					# the allowed-URL set — never a blanket glob over every
-					# *-tool-results.jsonl in the scratch dir, which would
-					# also sweep up J's own (this judge call's own tool
-					# calls, e.g. a Read of notes.md/f-private.json, can
-					# themselves surface a source's own quoted text or the
-					# model's own prose, never something a real fetch call
-					# actually retrieved). The whole point of this set is
-					# "verifiably came from a fetch", so it's built from
-					# exactly this pass's own fetch step ids, not from
-					# whatever files happen to sit in the scratch dir.
-					mapfile -t fetch_ids < <(jq -r '.steps[] | select(.kind == "fetch") | .id' <<< "$pass_config")
-					results_files=()
-					for fetch_id in "${fetch_ids[@]}"; do
-						f="$PASS_SCRATCH/${fetch_id}-tool-results.jsonl"
-						[ -f "$f" ] && results_files+=("$f")
-					done
-					workspace_url="$(jq -r '.slack_workspace_url // empty' <<< "$config")"
-					allowed_urls="$(desk_allowed_urls "$workspace_url" ${results_files[@]+"${results_files[@]}"})"
-					# The ticket digest's PR links came from gh, read by the
-					# runner itself, never from a model.
-					if [ -s "$PASS_SCRATCH/ticket-digest.json" ]; then
-						allowed_urls="$allowed_urls
-$(jq -r '(.entries // [])[] | .url // empty' "$PASS_SCRATCH/ticket-digest.json" 2> /dev/null)"
-					fi
+					allowed_urls="$(desk_pass_allowed_urls "$pass_config" "$config")"
 					dropped_before="$(jq 'length' "$PASS_SCRATCH/dropped.json" 2> /dev/null || echo 0)"
 					validated_json="$(desk_validate_items "$items_json" "$allowed_urls" "$repo")"
 					while IFS= read -r line; do
@@ -865,6 +844,10 @@ DESK_PASS_WEEKEND_SKIP="false"
 [ "$weekday_only_pass" = "true" ] && [ "$is_weekend" = "true" ] && DESK_PASS_WEEKEND_SKIP="true"
 export DESK_PASS_WEEKEND_SKIP
 desk_open_follow_up_tab "$pass" "$scheduled_date" "$follow_up_step" "$repo" > /dev/null
+# A pass with a brief hands its run to the central session (brief.sh).
+desk_brief_after_pass "$pass" "$pass_config" "$config" "$repo" "$scheduled_date" "$pass_ctx" \
+	"$(jq -c --arg caps "$(desk_caps_string "$(desk_pass_caps_json "$pass" "$pass_config" "$config")")" \
+		'. + {caps: $caps}' <<< "$common_placeholders")" "${files[@]}"
 
 # -----------------------------------------------------------------------
 # The rest of status.json: proposal state/overflow/counts, the ticket cache's own age, and

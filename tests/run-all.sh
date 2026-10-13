@@ -45,6 +45,7 @@ desk_test_safe_env_init "$GUARD_DIR/safe-env"
 # until it's named below, and desk-run-canary.sh is never named at all) --
 
 BASH_SUITES=(
+	nvim/tests/desk-brief-test.sh
 	nvim/tests/desk-capture-sessions-test.sh
 	nvim/tests/desk-cli-test.sh
 	nvim/tests/desk-cli-tokens-test.sh

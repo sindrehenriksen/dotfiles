@@ -674,6 +674,52 @@ desk_step_model_call() {
 desk_step_fetch() { desk_step_model_call "$@"; }
 desk_step_ticket_status() { desk_step_model_call "$@"; }
 
+# desk_input_files_json <step-or-brief json> <files json>: its `input_files`,
+# or the judge's default list when it names none.
+desk_input_files_json() {
+	jq -c --argjson files "$2" '.input_files // (
+		$files + ["sources.json", "f-private.json", "f-web.json",
+		"tickets.json", "sessions.json", "open-items.json", "declined.json"]
+	)' <<< "$1"
+}
+
+# desk_seed_inputs <input_files json> <dest_dir> <ctx_json>: writes every
+# named input into dest_dir, a name through desk_seed_named_file and an
+# object entry through desk_seed_path_file. What a judge call and the
+# central brief read is seeded here, the same way for both.
+desk_seed_inputs() {
+	local input_files_json="$1" dest="$2" ctx="$3" n i entry
+	n="$(jq 'length' <<< "$input_files_json" 2> /dev/null || echo 0)"
+	for ((i = 0; i < n; i++)); do
+		entry="$(jq -c ".[$i]" <<< "$input_files_json")"
+		if jq -e 'type == "object"' > /dev/null 2>&1 <<< "$entry"; then
+			desk_seed_path_file "$entry" "$dest"
+		else
+			desk_seed_named_file "$(jq -r '.' <<< "$entry")" "$dest" "$ctx"
+		fi
+	done
+}
+
+# desk_pass_allowed_urls <pass_config> <config>: every URL a suggestion
+# from this pass may cite, one per line. Only the fetch steps' own raw tool
+# results seed it, never a glob over every *-tool-results.jsonl in the
+# scratch dir, which would sweep in a judge's own calls: the set means
+# "verifiably came from a fetch". The ticket digest's PR links count too,
+# since the runner read them from gh itself.
+desk_pass_allowed_urls() {
+	local pass_config="$1" config="$2" fetch_id f workspace_url
+	local -a results_files=()
+	while IFS= read -r fetch_id; do
+		f="$PASS_SCRATCH/${fetch_id}-tool-results.jsonl"
+		[ -f "$f" ] && results_files+=("$f")
+	done < <(jq -r '.steps[] | select(.kind == "fetch") | .id' <<< "$pass_config")
+	workspace_url="$(jq -r '.slack_workspace_url // empty' <<< "$config")"
+	desk_allowed_urls "$workspace_url" ${results_files[@]+"${results_files[@]}"}
+	if [ -s "$PASS_SCRATCH/ticket-digest.json" ]; then
+		jq -r '(.entries // [])[] | .url // empty' "$PASS_SCRATCH/ticket-digest.json" 2> /dev/null
+	fi
+}
+
 # desk_step_judge <pass> <step_json> <repo> <placeholders_json> <pass_ctx_json> <file>...
 # The judge call's own scratch-dir inputs — named generically
 # via the step's own `input_files` (falling back to that full pinned list
@@ -697,22 +743,7 @@ desk_step_judge() {
 	files_json="$(printf '%s\n' "${files[@]}" | jq -R . | jq -s .)"
 	ctx="$(jq -c --argjson files "$files_json" '. + {files: $files}' <<< "$pass_ctx_json")"
 
-	local input_files_json
-	input_files_json="$(jq -c --argjson files "$files_json" '.input_files // (
-		$files + ["sources.json", "f-private.json", "f-web.json",
-		"tickets.json", "sessions.json", "open-items.json", "declined.json"]
-	)' <<< "$step_json")"
-	local n name i entry
-	n="$(jq 'length' <<< "$input_files_json" 2> /dev/null || echo 0)"
-	for ((i = 0; i < n; i++)); do
-		entry="$(jq -c ".[$i]" <<< "$input_files_json")"
-		if jq -e 'type == "object"' > /dev/null 2>&1 <<< "$entry"; then
-			desk_seed_path_file "$entry" "$seed"
-			continue
-		fi
-		name="$(jq -r '.' <<< "$entry")"
-		desk_seed_named_file "$name" "$seed" "$ctx"
-	done
+	desk_seed_inputs "$(desk_input_files_json "$step_json" "$files_json")" "$seed" "$ctx"
 
 	local scheduled_date
 	scheduled_date="$(jq -r '.scheduled_date // empty' <<< "$pass_ctx_json")"
@@ -1087,49 +1118,36 @@ desk_session_capture_call() {
 	printf '%s' "$items_json"
 }
 
-# What the close step last offered per session, so a session whose
-# transcript and follow state are unchanged since is offered again without
-# a second call: {<session id>: {transcript_stamp, why, items}}, the stamp
-# covering both. The notes are left out of it, since they are committed most
-# days: a replayed note is validated against them instead.
-DESK_CLOSE_OFFERS_FILE="${DESK_CLOSE_OFFERS_FILE:-$DESK_STATE_DIR/close-offers.json}"
-
-# desk_transcript_stamp <path>: the transcript's mtime and size, which
-# change whenever the session writes to it; empty when it is missing.
-desk_transcript_stamp() {
-	[ -n "$1" ] && [ -f "$1" ] || return 0
-	if desk_is_linux; then
-		stat -c '%Y:%s' "$1" 2> /dev/null
-	else
-		stat -f '%m:%z' "$1" 2> /dev/null
-	fi
-}
-
 # desk_step_close <pass> <step_json> <config_json> <repo> <scheduled_date> <file>...
-# The close step closes nothing and stages nothing: it offers. For each live
-# session idle at least `close_after_working_days` (desk_close_candidates)
-# and not on `keep_open`: one call over its transcript, whose reply carries
-# a closure note (the items shape) and `why`, one line on why it looks done
-# or idle. A followed session is a candidate like any other; its reader
-# entry carries `followed`, so the call can weigh whether every ticket it
-# follows is closed. A session whose transcript and follow state have not
-# changed since its last offer gets that offer again, with no call, once
-# its note still validates against the current notes. What survives is offered
-# in the follow-up tab (desk_follow_up_placeholders' `close_offer`), each
-# note written to the run directory as an items file; only on the user's
-# yes there does that session end it with close-session.sh and stage the
-# note with desk-propose. Skips every candidate on the first pass after
-# more than `away_days` days away, so a return from a long absence is not
-# a flood of calls. Prints "ok" once every candidate is processed, "failed"
-# only if the mechanism itself (session-status.sh) breaks.
+# Lists the sessions to offer for closing; it makes no call, closes nothing
+# and stages nothing. The judging is the central session's, when the pass's
+# brief reaches it (brief.sh): for each live session idle at least
+# `close_after_working_days` (desk_close_candidates), not on `keep_open` and
+# not the central session itself, it writes `close/<session id>/` in the run
+# directory, holding `session.json` (the reader entry, with `followed` for a
+# session on the follow list) and `transcript.txt` (desk_write_transcript_copy),
+# and lists them all in `close/candidates.json`. A pass with no brief has
+# nobody to offer them to, so it lists none. Skips every candidate on the
+# first pass after more than `away_days` days away, so a return from a long
+# absence is not a flood of offers. Prints "ok" once every candidate is
+# written, "failed" only if the mechanism itself (session-status.sh) breaks.
 desk_step_close() {
 	local pass="$1" step_json="$2" config_json="$3" repo="$4" scheduled_date="$5"
 	shift 5
 
-	local close_after keep_open away_days
+	local close_dir="$DESK_RUNS_ROOT/$pass-$scheduled_date/close"
+	rm -rf "$close_dir"
+	if ! jq -e --arg p "$pass" '.passes[$p].brief | type == "object"' > /dev/null 2>&1 <<< "$config_json"; then
+		desk_log "$pass" "close: this pass has no brief, so there is nobody to offer sessions to — listing none"
+		echo "ok"
+		return
+	fi
+
+	local close_after keep_open away_days central
 	close_after="$(jq -r '.close_after_working_days // 3' <<< "$config_json")"
 	keep_open="$(jq -c '.keep_open // []' <<< "$config_json")"
 	away_days="$(jq -r '.away_days // 5' <<< "$config_json")"
+	central="$(jq -r '.central_session // empty' <<< "$config_json")"
 
 	local last_done now away_gap
 	now="$(desk_now)"
@@ -1149,57 +1167,31 @@ desk_step_close() {
 		echo "failed"
 		return
 	}
+	candidates="$(jq -c --arg c "$central" '[.[] | select(.id != $c)]' <<< "$candidates")"
 
-	local memo n offer='[]' kept='{}'
-	memo="$(cat "$DESK_CLOSE_OFFERS_FILE" 2> /dev/null)"
-	jq -e 'type == "object"' > /dev/null 2>&1 <<< "$memo" || memo='{}'
+	local n listed='[]' i
 	n="$(jq 'length' <<< "$candidates")"
 	desk_log "$pass" "close: $n candidate(s) idle >= $close_after working days"
-	local offer_dir="$DESK_RUNS_ROOT/$pass-$scheduled_date"
-	mkdir -p "$offer_dir"
-
-	local i
+	mkdir -p "$close_dir"
 	for ((i = 0; i < n; i++)); do
-		local sess id name placeholders items_json why items_file stamp
+		local sess id name dir lines
 		sess="$(jq -c ".[$i]" <<< "$candidates")"
 		id="$(jq -r '.id' <<< "$sess")"
 		name="$(jq -r '.name // .id' <<< "$sess")"
-		stamp="$(desk_transcript_stamp "$(jq -r '.transcript_path // empty' <<< "$sess")")"
-		[ -z "$stamp" ] || stamp="$stamp|$(jq -c '.followed // null' <<< "$sess")"
-		items_json=""
-		if [ -n "$stamp" ] && jq -e --arg id "$id" --arg st "$stamp" '.[$id].transcript_stamp == $st' > /dev/null 2>&1 <<< "$memo"; then
-			why="$(jq -r --arg id "$id" '.[$id].why // ""' <<< "$memo")"
-			# Checked again as a fresh reply would be.
-			items_json="$(desk_validate_items "$(jq -c --arg id "$id" '.[$id].items' <<< "$memo")" "" "$repo")"
-			if [ "$(jq 'length' <<< "$items_json" 2> /dev/null || echo 0)" -gt 0 ]; then
-				desk_log "$pass" "close: $name unchanged since its last offer — offered again, no call"
-			else
-				items_json=""
-			fi
-		fi
-		if [ -z "$items_json" ]; then
-			placeholders="$(jq -n --arg sn "$name" --arg sid "$id" --arg today "$(date +%F)" \
-				'{session_name: $sn, session_id: $sid, today: $today}')"
-			items_json="$(desk_session_capture_call "$pass" "$step_json" "$repo" "$scheduled_date" \
-				"$sess" "close-$id" "close:$name" "$placeholders")" || continue
-			why="$(desk_extract_final_text "$PASS_SCRATCH/close-$id-stream.jsonl" \
-				| jq -r 'if type == "object" then (.why // "") else "" end | tostring' 2> /dev/null \
-				| tr '\000-\037' ' ' | sed 's/^ *//; s/ *$//')"
-		fi
-		kept="$(jq -c --arg id "$id" --arg st "$stamp" --arg why "$why" --argjson items "$items_json" \
-			'.[$id] = {transcript_stamp: $st, why: $why, items: $items}' <<< "$kept")"
-		items_file="$offer_dir/close-$id.items.json"
-		jq -n --argjson items "$items_json" '{items: $items}' > "$items_file"
-		offer="$(jq -c --argjson s "$sess" --arg why "$why" --arg f "$items_file" --argjson items "$items_json" '
+		dir="$close_dir/$id"
+		mkdir -p "$dir"
+		printf '%s\n' "$sess" > "$dir/session.json"
+		# The raw copy is only scratch: nothing checks citations against it
+		# now that the central session writes the note.
+		lines="$(desk_write_transcript_copy "$(jq -r '.transcript_path // empty' <<< "$sess")" \
+			"$dir/transcript.txt" "${PASS_SCRATCH:-$dir}/close-$id-transcript.jsonl")"
+		[ -n "${PASS_SCRATCH:-}" ] || rm -f "$dir/close-$id-transcript.jsonl"
+		listed="$(jq -c --argjson s "$sess" --arg dir "$dir" --argjson lines "${lines:-0}" '
 			. + [{session_id: $s.id, name: ($s.name // $s.id), idle_working_days: $s.idle_working_days,
-			      followed: ($s.followed != null), why: $why, note: ([$items[].after] | join("\n")), items_file: $f}]
-		' <<< "$offer")"
-		desk_log "$pass" "close: offering to close $name"
+			      followed: ($s.followed // null), transcript_lines: $lines, dir: $dir}]' <<< "$listed")"
+		desk_log "$pass" "close: listing $name to offer for closing"
 	done
-	# Only this pass's candidates are kept: a session that came back into
-	# use, or ended, starts afresh next time.
-	desk_write_atomic "$DESK_CLOSE_OFFERS_FILE" "$kept"
-	[ -z "${PASS_SCRATCH:-}" ] || printf '%s\n' "$offer" > "$PASS_SCRATCH/close-offer.json"
+	printf '%s\n' "$listed" > "$close_dir/candidates.json"
 	echo "ok"
 }
 
@@ -1495,7 +1487,7 @@ desk_follow_up_run_status() {
 			elif .mail_triage then "mailbox listing for mail triage"
 			elif .kind == "write" and $triage then "mail triage: marking the fetched digests read and trashing automated mail"
 			else {commit_push: "commit of the notes", fetch: "fetch", judge: "judge, which proposes the suggestions",
-				write: "marking the fetched mail read", capture: "session capture", close: "offering idle sessions to close",
+				write: "marking the fetched mail read", capture: "session capture", close: "listing idle sessions to offer for closing",
 				retention: "transcript deletion warnings", open_tab: "tab"}[.kind] // .kind end) + ")"]
 		| join(", ")' "$DESK_CONFIG" 2> /dev/null)"
 	local summary
@@ -1573,8 +1565,7 @@ desk_follow_up_settings_arg() {
 # proposal) as `items` and `item_count`, `open_note`, a line about older
 # items still waiting, `capped` and `near_misses`, JSON arrays of what
 # the pass held back, `chat_notes`, the news the judge left for this
-# conversation rather than the notes, `close_offer`, the sessions the close
-# step offers to close, and `dropped`, the items it threw out
+# conversation rather than the notes, and `dropped`, the items it threw out
 # because their source URL was in no fetch result.
 desk_follow_up_placeholders() {
 	local pass="$1" scheduled_date="$2" repo="${3:-}"
@@ -1585,7 +1576,7 @@ desk_follow_up_placeholders() {
 	fi
 	# What the pass held back: items over the caps, and candidates the judge
 	# put just below the bar. Both are `[]` when there were none.
-	local capped='[]' near='[]' dropped='[]' mail_noise='{}' mail_offer='[]' chat='[]' close_offer='[]'
+	local capped='[]' near='[]' dropped='[]' mail_noise='{}' mail_offer='[]' chat='[]'
 	if [ -n "${PASS_SCRATCH:-}" ]; then
 		# The mail triage's noise as the write step acted on it (or, dry,
 		# would have), and what the judge offers for the user to trash.
@@ -1600,13 +1591,11 @@ desk_follow_up_placeholders() {
 		jq -e 'type == "array"' > /dev/null 2>&1 <<< "$near" || near='[]'
 		chat="$(cat "$PASS_SCRATCH/chat-notes.json" 2> /dev/null)"
 		jq -e 'type == "array"' > /dev/null 2>&1 <<< "$chat" || chat='[]'
-		close_offer="$(cat "$PASS_SCRATCH/close-offer.json" 2> /dev/null)"
-		jq -e 'type == "array"' > /dev/null 2>&1 <<< "$close_offer" || close_offer='[]'
 		dropped="$(cat "$PASS_SCRATCH/dropped.json" 2> /dev/null)"
 		jq -e 'type == "array"' > /dev/null 2>&1 <<< "$dropped" || dropped='[]'
 	fi
 	jq -c --arg prefix "$pass-$scheduled_date-" --arg today "$(date +%F)" --arg pass "$pass" --arg scheduled_date "$scheduled_date" \
-		--argjson capped "$capped" --argjson near "$near" --argjson dropped "$dropped" --argjson chat "$chat" --argjson close_offer "$close_offer" \
+		--argjson capped "$capped" --argjson near "$near" --argjson dropped "$dropped" --argjson chat "$chat" \
 		--argjson mail_noise "$mail_noise" --argjson mail_offer "$mail_offer" \
 		--arg run_status "$(desk_follow_up_run_status "$pass")" '
 		[.items[] | select(.id | startswith($prefix))] as $mine
@@ -1625,7 +1614,6 @@ desk_follow_up_placeholders() {
 			capped: ($capped | tojson),
 			near_misses: ($near | tojson),
 			chat_notes: ($chat | tojson),
-			close_offer: ($close_offer | tojson),
 			dropped: ($dropped | tojson),
 			mail_noise: ($mail_noise | tojson),
 			mail_offer: ($mail_offer | tojson)

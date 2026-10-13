@@ -174,10 +174,11 @@ exit 1
 FAKE
 chmod +x "$FAKEBIN/session-status.sh"
 cfg4="$ROOT/config4.json"
+# The close step lists sessions only for a pass with a brief.
 jq --arg prompt "$prompt" '.passes.testpass.steps = [
-	{id: "close", kind: "close", prompt: $prompt, tools: ["Read"], connector: false, timeout: 30},
+	{id: "close", kind: "close"},
 	{id: "J", kind: "judge", prompt: $prompt, tools: ["Read"], connector: false, timeout: 30}
-]' "$cfg" > "$cfg4"
+] | .passes.testpass.brief = {instructions: [$prompt]}' "$cfg" > "$cfg4"
 DESK_CONFIG="$cfg4" "$DESK_RUN" testpass > "$ROOT/run4.out" 2>&1
 assert_eq "desk-run exits 0" "0" "$?"
 assert_true "J still ran" "$([ -s "$J_CALLS" ] && echo true || echo false)"

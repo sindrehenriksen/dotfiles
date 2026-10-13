@@ -49,28 +49,19 @@ Mail the pass judged no longer useful (answered, covered in the notes, done or s
 {{mail_offer}}
 ```
 
-Sessions the pass offers to close, none of them closed or noted yet, `[]` when none: each with its `name`, `session_id`, how many whole working days it has been idle, whether it is `followed` (it follows tickets for the user, which the `why` weighs), `why` it looks done or idle, the closure `note` it would stage, and the `items_file` holding that note:
-
-```json
-{{close_offer}}
-```
-
 Write, in this order:
 
 1. One or two sentences on what the pass found overall. If it suggested nothing and left no news for this conversation, say that in one line ("Nothing new since the last pass; nothing for you today.") and name what was checked, from what you read in this conversation: the sources, the tickets, the sessions.
 2. If any step failed or did not run, say which, in plain words, why, as the status gives it, what still ran, and what that means for the user. Nothing reruns the pass today: what a failed source would have brought is covered by the next pass, and the user can ask you here to look into the failure. Where the status says a step ran dry-run or left something undone, say so in one line, as what it would have done, never as done: it would mark the digests read.
-3. Only if the offered sessions are not `[]`: a line each, with the session's name, how long it has been idle and why it looks done or idle; for a followed one, add in a few words that closing it holds its tickets' news until it is resumed. Then ask which to close. Nothing is closed or noted until the user says.
-4. Only if the runner threw anything out: one plain sentence on how many, a few words on each, and that the runner dropped them because their source link could not be checked against what the fetch returned. Don't guess at another reason.
-5. Only if the mail triage lists threads: under `would_trash`, say that it ran as a dry run and trashed nothing, then list every mail it would trash, sender and subject, grouped under the rule that matched, so the user can check the rules; under `trashed`, one line on how many it trashed, by rule. Mention `held_over_cap` only when it is more than 0.
-6. Only if the offered mail is not `[]`: one line on how many and what (a few words each), and ask whether to trash them.
-7. Each suggestion in turn, in a short paragraph or bullet: what it is, why it was suggested, and how it relates to what the user has going in their notes, briefly reminding them what that was rather than leaning on a name or key alone. Keep any doubt the source carried.
-8. Only if the news for this conversation is not `[]`: a short bullet each, its text with its source as a labelled link, and where it has a `home`, a few words on where it could go. It is not in the notes: offer to stage any of it there with `desk-propose` if the user wants it kept.
-9. Only if anything was held back over the caps: one sentence, not a list, on how many, a few words on each, and an offer to show or propose any of them. Then the same, in one sentence, for what fell just below the bar. Say nothing about a list that is empty.
-10. Any questions whose answer would change a suggestion or what the next pass looks for. Leave this out if there are none.
+3. Only if the runner threw anything out: one plain sentence on how many, a few words on each, and that the runner dropped them because their source link could not be checked against what the fetch returned. Don't guess at another reason.
+4. Only if the mail triage lists threads: under `would_trash`, say that it ran as a dry run and trashed nothing, then list every mail it would trash, sender and subject, grouped under the rule that matched, so the user can check the rules; under `trashed`, one line on how many it trashed, by rule. Mention `held_over_cap` only when it is more than 0.
+5. Only if the offered mail is not `[]`: one line on how many and what (a few words each), and ask whether to trash them.
+6. Each suggestion in turn, in a short paragraph or bullet: what it is, why it was suggested, and how it relates to what the user has going in their notes, briefly reminding them what that was rather than leaning on a name or key alone. Keep any doubt the source carried.
+7. Only if the news for this conversation is not `[]`: a short bullet each, its text with its source as a labelled link, and where it has a `home`, a few words on where it could go. It is not in the notes: offer to stage any of it there with `desk-propose` if the user wants it kept.
+8. Only if anything was held back over the caps: one sentence, not a list, on how many, a few words on each, and an offer to show or propose any of them. Then the same, in one sentence, for what fell just below the bar. Say nothing about a list that is empty.
+9. Any questions whose answer would change a suggestion or what the next pass looks for. Leave this out if there are none.
 
 If the user says yes to the offered mail, trash exactly those threads with the Gmail trash-thread tool, one call per `thread_id` on the list, all of them or only the ones the user names, and nothing else; then say in one line what went. Never trash a thread without that yes, and never one that is not on the list.
-
-If the user says to close some or all of the offered sessions, then for each one they named, and no other: run `close-session.sh <session_id>`, and once it reports the session closed, stage its closure note with `desk-propose --pass {{pass}} --date {{scheduled_date}} <items_file>`. Then say in a line what closed and what was staged, and pass on in its own words anything `close-session.sh` refused or left open. Never close a session without that yes.
 
 If the user later asks for one of the held-back ones to be proposed, stage it with `desk-propose` (`desk-propose --help` has the item shape), as a suggestion they review like any other, never by editing their notes.
 

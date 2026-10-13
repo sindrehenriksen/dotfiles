@@ -1,14 +1,13 @@
 #!/usr/bin/env bash
-# claude/desk-lib/steps.sh's desk_step_close, which only offers: an idle
-# session is offered with its closure note and why, nothing is signaled,
-# recorded or staged; a followed session is offered like any other, its
-# follow state passed to the call; the call reads a readable copy of the
-# whole transcript with its line count; an unchanged transcript is offered
-# again without a call; keep_open, an invalid turn citation and the
-# away_days valve each keep a session out of the offer. session-status.sh,
-# session-recorder.sh and the tab helper are faked; the sessions are sleeps
-# this script starts and owns, run under the name `claude`, and none may be
-# signaled.
+# claude/desk-lib/steps.sh's desk_step_close, which only lists: an idle
+# session gets close/<id>/ in the run directory with its reader entry and a
+# readable copy of its whole transcript, and a line in candidates.json;
+# no call is made and nothing is signaled, recorded or staged. A followed
+# session is listed like any other, its follow state with it; keep_open,
+# the central session, a pass with no brief and the away_days valve each
+# keep a session out. session-status.sh, session-recorder.sh and the tab
+# helper are faked; the sessions are sleeps this script starts and owns, run
+# under the name `claude`, and none may be signaled.
 set -u
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -143,17 +142,10 @@ source "$LIB/lock.sh"
 # shellcheck source=../../claude/desk-lib/steps.sh
 source "$LIB/steps.sh"
 
-printf 'session {{session_name}} lines={{transcript_lines}}\n' > "$ROOT/close-prompt.md"
-step_json='{"id":"close","kind":"close","prompt":"close-prompt.md","tools":["Read"],"connector":false,"timeout":30}'
-config_json='{"close_after_working_days": 3, "keep_open": ["kept-session"], "away_days": 5}'
-
-write_items_reply() {
-	# $1 = the exact turn-mark to embed (or "" for none)
-	local mark="$1"
-	jq -cn --arg after "closure notes${mark:+ $mark}" '
-		{type:"assistant",message:{content:[{type:"text",text:({why:"its PR merged and nothing is left",items:[{id:"c1",file:"notes.md",kind:"new",target:"top",before:"",after:$after,source:"session:11111111-1111-4111-8111-111111111111",headline:"h"}]} | tojson)}]}}
-	' > "$FAKE_CLAUDE_ITEMS_FILE"
-}
+step_json='{"id":"close","kind":"close"}'
+CENTRAL=99999999-9999-4999-8999-999999999999
+config_json="$(jq -cn --arg c "$CENTRAL" '{close_after_working_days: 3, keep_open: ["kept-session"], away_days: 5,
+	central_session: $c, passes: {testpass: {brief: {instructions: ["x.md"]}}}}')"
 
 spawn_throwaway() {
 	# Redirected away from the caller's stdout, so $(spawn_throwaway)
@@ -163,8 +155,8 @@ spawn_throwaway() {
 	echo $!
 }
 
-# A long transcript, the cited turn its very first entry: a copy of only its
-# end would lose it.
+# A long transcript, its first entry multi-line, then a long tool result
+# and a long user message.
 transcript="$ROOT/transcript.jsonl"
 {
 	printf '{"uuid":"aaaaaaaa-0000-0000-0000-000000000000","type":"user","message":{"role":"user","content":"start the work\\nplease"}}\n'
@@ -179,71 +171,50 @@ session_line() { # <id> <name> <pid>
 	jq -cn --arg id "$1" --arg name "$2" --argjson pid "$3" --arg tp "$transcript" \
 		'{id:$id, name:$name, live:true, has_start_event:true, last_activity:0, pid:$pid, transcript_path:$tp}'
 }
-offer() { jq -c "$1" "$PASS_SCRATCH/close-offer.json" 2> /dev/null; }
+listed() { jq -c "$1" "$DESK_RUNS_ROOT/testpass-$2/close/candidates.json" 2> /dev/null; }
 
-echo "=== an idle session is offered, with its note and why, and nothing is done to it ==="
+echo "=== an idle session is listed with its transcript, and nothing is done to it ==="
 rm -rf "$STATE"
 mkdir -p "$STATE"
 : > "$RECORDER_LOG"
+: > "$FAKE_CLAUDE_CALLS"
 PASS_SCRATCH="$(mktemp -d)"
 pid1="$(spawn_throwaway)"
 pid_kept="$(spawn_throwaway)"
+pid_central="$(spawn_throwaway)"
 { session_line 11111111-1111-4111-8111-111111111111 a-session "$pid1"
-  session_line 12121212-1212-4121-8121-121212121212 kept-session "$pid_kept"; } > "$SESSION_STATUS_FIXTURE"
-write_items_reply "[turn aaaaaaaa]"
+  session_line 12121212-1212-4121-8121-121212121212 kept-session "$pid_kept"
+  session_line "$CENTRAL" central "$pid_central"; } > "$SESSION_STATUS_FIXTURE"
 result="$(desk_step_close "testpass" "$step_json" "$config_json" "$repo" "2026-09-28" "${files[@]}")"
 assert_eq "the step reports ok" "ok" "$result"
 sleep 1
 assert_true "the session is still alive" "$(kill -0 "$pid1" 2> /dev/null && echo true || echo false)"
 assert_true "session-recorder was never called" "$([ ! -s "$RECORDER_LOG" ] && echo true || echo false)"
 assert_true "nothing was staged" "$(git -C "$repo" rev-parse -q --verify refs/desk/proposal > /dev/null && echo false || echo true)"
-assert_eq "it is offered, with why" '["a-session","its PR merged and nothing is left"]' "$(offer '[.[] | .name, .why]')"
-assert_eq "the note has its turn mark stripped" "closure notes" "$(offer '.[0].note' | jq -r .)"
-items_file="$(offer '.[0].items_file' | jq -r .)"
-assert_eq "its items file is beside the run, ready for desk-propose" "$DESK_RUNS_ROOT/testpass-2026-09-28/close-11111111-1111-4111-8111-111111111111.items.json" "$items_file"
-assert_eq "and holds the note" "closure notes" "$(jq -r '.items[0].after' "$items_file" 2> /dev/null)"
-assert_eq "a keep_open session is not offered" "1" "$(offer 'length')"
-readable="$PASS_SCRATCH/close-11111111-1111-4111-8111-111111111111-seed/transcript.txt"
-assert_eq "the call gets a readable copy of the whole transcript" "500" "$(wc -l < "$readable" | tr -d ' ')"
+assert_eq "no model call was made" "0" "$(wc -l < "$FAKE_CLAUDE_CALLS" | tr -d ' ')"
+assert_eq "only the idle session is listed: not keep_open, not the central session" '["a-session"]' "$(listed '[.[].name]' 2026-09-28)"
+dir="$DESK_RUNS_ROOT/testpass-2026-09-28/close/11111111-1111-4111-8111-111111111111"
+assert_eq "its line names its directory, line count and idle days" "[\"$dir\",500,true]" \
+	"$(listed '[.[0].dir, .[0].transcript_lines, (.[0].idle_working_days >= 3)]' 2026-09-28)"
+assert_eq "its directory holds the reader entry" "a-session" "$(jq -r '.name' "$dir/session.json" 2> /dev/null)"
+readable="$dir/transcript.txt"
+assert_eq "and a readable copy of the whole transcript" "500" "$(wc -l < "$readable" | tr -d ' ')"
 assert_eq "its first entry, uuid first, newlines flattened" "aaaaaaaa  user: start the work please" "$(head -n 1 "$readable")"
 assert_true "a long tool result is cut, so a read of many lines stays readable" \
 	"$(sed -n 2p "$readable" | awk '{ exit !(length < 1000) }' && sed -n 2p "$readable" | grep -q '\[cut\]$' && echo true || echo false)"
 assert_true "what the user wrote is kept whole" "$(sed -n 3p "$readable" | awk '{ exit !(length > 5000) }' && echo true || echo false)"
-assert_true "and its line count" "$(grep -q 'lines=500' "$FAKE_CLAUDE_CALLS.prompt" && echo true || echo false)"
-: > "$FAKE_CLAUDE_CALLS"
-result="$(desk_step_close "testpass" "$step_json" "$config_json" "$repo" "2026-09-29" "${files[@]}")"
-assert_eq "the next pass, transcript unchanged: offered again" '["a-session","its PR merged and nothing is left"]' "$(offer '[.[] | .name, .why]')"
-assert_eq "with no call" "0" "$(wc -l < "$FAKE_CLAUDE_CALLS" | tr -d ' ')"
-assert_eq "its items file is written for that day too" "closure notes" \
-	"$(jq -r '.items[0].after' "$DESK_RUNS_ROOT/testpass-2026-09-29/close-11111111-1111-4111-8111-111111111111.items.json" 2> /dev/null)"
-printf '{"uuid":"bbbbbbbb-0000-0000-0000-000000000000","type":"user","message":{"role":"user","content":"more"}}\n' >> "$transcript"
-result="$(desk_step_close "testpass" "$step_json" "$config_json" "$repo" "2026-09-30" "${files[@]}")"
-assert_eq "a changed transcript gets a fresh call" "1" "$(wc -l < "$FAKE_CLAUDE_CALLS" | tr -d ' ')"
-: > "$FAKE_CLAUDE_CALLS"
-result="$(desk_step_close "testpass" "$step_json" "$config_json" "$repo" "2026-10-01" "${files[@]}")"
-assert_eq "unchanged again: no call" "0" "$(wc -l < "$FAKE_CLAUDE_CALLS" | tr -d ' ')"
-printf 'Section A\nSection B\n' > "$repo/notes.md"
-git -C "$repo" commit -q -am "notes moved on"
-result="$(desk_step_close "testpass" "$step_json" "$config_json" "$repo" "2026-10-02" "${files[@]}")"
-assert_eq "notes committed since, the note still valid: offered again, no call" "0" "$(wc -l < "$FAKE_CLAUDE_CALLS" | tr -d ' ')"
-jq -n '{entries: {"11111111-1111-4111-8111-111111111111": {label: "now followed", keys: ["ABC-9"], related: [], added_at: 0}}}' > "$STATE/follow.json"
-result="$(desk_step_close "testpass" "$step_json" "$config_json" "$repo" "2026-10-02" "${files[@]}")"
-assert_eq "a follow added to the idle session since: a fresh call" "1" "$(wc -l < "$FAKE_CLAUDE_CALLS" | tr -d ' ')"
-rm -f "$STATE/follow.json"
-desk_step_close "testpass" "$step_json" "$config_json" "$repo" "2026-10-02" "${files[@]}" > /dev/null
-: > "$FAKE_CLAUDE_CALLS"
-jq '.[] |= (.items[0].kind = "edit" | .items[0].target = {at: "x"} | .items[0].before = "x")' "$DESK_CLOSE_OFFERS_FILE" > "$ROOT/offers.tmp" \
-	&& mv "$ROOT/offers.tmp" "$DESK_CLOSE_OFFERS_FILE"
-result="$(desk_step_close "testpass" "$step_json" "$config_json" "$repo" "2026-10-03" "${files[@]}" 2> /dev/null)"
-assert_eq "a replayed note that no longer validates gets a fresh call" "1" "$(wc -l < "$FAKE_CLAUDE_CALLS" | tr -d ' ')"
-kill "$pid1" "$pid_kept" 2> /dev/null
+assert_true "the raw transcript copy stays in the pass's scratch" "$([ ! -e "$dir/transcript.jsonl" ] && ls "$PASS_SCRATCH" | grep -q 'close-.*-transcript.jsonl' && echo true || echo false)"
+kill "$pid1" 2> /dev/null
+result="$(desk_step_close "testpass" "$step_json" "$config_json" "$repo" "2026-09-28" "${files[@]}")"
+assert_eq "a run again that day starts from a clean list" "[]" "$(listed '.' 2026-09-28)"
+assert_true "and the old directory is gone" "$([ ! -d "$dir" ] && echo true || echo false)"
+kill "$pid_kept" "$pid_central" 2> /dev/null
 rm -rf "$PASS_SCRATCH"
 
 echo
-echo "=== a followed session is offered like any other, its follow state passed to the call ==="
+echo "=== a followed session is listed like any other, its follow state with it ==="
 rm -rf "$STATE"
 mkdir -p "$STATE"
-: > "$FAKE_CLAUDE_CALLS"
 PASS_SCRATCH="$(mktemp -d)"
 pid2="$(spawn_throwaway)"
 pid3="$(spawn_throwaway)"
@@ -253,50 +224,42 @@ jq -n '{entries: {
 jq -n '{all_closed: {"33333333-3333-4333-8333-333333333333": 1791100000}}' > "$STATE/follow-state.json"
 { session_line 22222222-2222-4222-8222-222222222222 followed-open "$pid2"
   session_line 33333333-3333-4333-8333-333333333333 followed-done "$pid3"; } > "$SESSION_STATUS_FIXTURE"
-write_items_reply "[turn aaaaaaaa]"
 result="$(desk_step_close "testpass" "$step_json" "$config_json" "$repo" "2026-09-29" "${files[@]}")"
 assert_eq "the step reports ok" "ok" "$result"
-assert_eq "both are offered, marked followed" '[["followed-open",true],["followed-done",true]]' "$(offer '[.[] | [.name, .followed]]')"
-assert_eq "the call sees whether everything it follows is closed" "1791100000" \
-	"$(jq -r '.followed.all_closed_since' "$PASS_SCRATCH/close-33333333-3333-4333-8333-333333333333-seed/session.json" 2> /dev/null)"
-: > "$FAKE_CLAUDE_CALLS"
-result="$(desk_step_close "testpass" "$step_json" "$config_json" "$repo" "2026-09-30" "${files[@]}")"
-assert_eq "the next pass, nothing changed: no calls" "0" "$(wc -l < "$FAKE_CLAUDE_CALLS" | tr -d ' ')"
-jq '.all_closed["22222222-2222-4222-8222-222222222222"] = 1791200000' "$STATE/follow-state.json" > "$ROOT/fs.tmp" && mv "$ROOT/fs.tmp" "$STATE/follow-state.json"
-result="$(desk_step_close "testpass" "$step_json" "$config_json" "$repo" "2026-10-01" "${files[@]}")"
-assert_eq "a follow whose tickets have all closed since gets a fresh call" "1" "$(wc -l < "$FAKE_CLAUDE_CALLS" | tr -d ' ')"
+assert_eq "both are listed with their follow" '[["followed-open","open epic",null],["followed-done","done epic",1791100000]]' \
+	"$(listed '[.[] | [.name, .followed.label, .followed.all_closed_since]]' 2026-09-29)"
+assert_eq "the session's own entry carries it too" "1791100000" \
+	"$(jq -r '.followed.all_closed_since' "$DESK_RUNS_ROOT/testpass-2026-09-29/close/33333333-3333-4333-8333-333333333333/session.json" 2> /dev/null)"
 kill "$pid2" "$pid3" 2> /dev/null
 rm -rf "$PASS_SCRATCH"
 
 echo
-echo "=== an invalid turn citation keeps a session out of the offer ==="
+echo "=== a pass with no brief lists nobody ==="
 rm -rf "$STATE"
 mkdir -p "$STATE"
 PASS_SCRATCH="$(mktemp -d)"
 pid4="$(spawn_throwaway)"
 session_line 44444444-4444-4444-8444-444444444444 d-session "$pid4" > "$SESSION_STATUS_FIXTURE"
-write_items_reply "[turn fabricate]"
-result="$(desk_step_close "testpass" "$step_json" "$config_json" "$repo" "2026-09-30" "${files[@]}")"
+result="$(desk_step_close "otherpass" "$step_json" "$config_json" "$repo" "2026-09-30" "${files[@]}")"
 assert_eq "the step still reports ok" "ok" "$result"
-assert_eq "nothing is offered" "0" "$(offer 'length')"
+assert_true "and writes no list" "$([ ! -e "$DESK_RUNS_ROOT/otherpass-2026-09-30/close" ] && echo true || echo false)"
 kill "$pid4" 2> /dev/null
 rm -rf "$PASS_SCRATCH"
 
 echo
-echo "=== away_days: the first pass after a long gap offers nothing ==="
+echo "=== away_days: the first pass after a long gap lists nobody ==="
 rm -rf "$STATE"
 mkdir -p "$STATE"
-: > "$FAKE_CLAUDE_CALLS"
 PASS_SCRATCH="$(mktemp -d)"
 long_ago=$(( $(desk_now) - 20 * 86400 ))
 desk_status_set_result "testpass" "ok" "" "[]" "" > /dev/null
 jq --argjson t "$long_ago" '.passes.testpass |= (.last_run = $t | .last_ok_run = $t | .last_done_run = $t)' \
-	"$DESK_STATUS_FILE" > "$DESK_STATUS_FILE.tmp" && mv "$DESK_STATUS_FILE.tmp" "$DESK_STATUS_FILE"
+	"$DESK_STATUS_FILE" > "$DESK_STATUS_FILE.tmp" && mv -f "$DESK_STATUS_FILE.tmp" "$DESK_STATUS_FILE"
 pid5="$(spawn_throwaway)"
 session_line 55555555-5555-4555-8555-555555555555 e-session "$pid5" > "$SESSION_STATUS_FIXTURE"
 result="$(desk_step_close "testpass" "$step_json" "$config_json" "$repo" "2026-10-01" "${files[@]}")"
 assert_eq "the step reports ok" "ok" "$result"
-assert_eq "no call was made" "0" "$(wc -l < "$FAKE_CLAUDE_CALLS" | tr -d ' ')"
+assert_true "nothing is listed" "$([ ! -e "$DESK_RUNS_ROOT/testpass-2026-10-01/close/candidates.json" ] && echo true || echo false)"
 kill "$pid5" 2> /dev/null
 rm -rf "$PASS_SCRATCH"
 
