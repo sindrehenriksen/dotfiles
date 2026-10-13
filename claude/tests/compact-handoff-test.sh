@@ -92,6 +92,7 @@ check "post: waiting without a kick-off still shows" '[[ $out == *"Approve the m
 
 out=$(echo '{"hook_event_name":"SessionStart","source":"compact"}' | "$HOOK" session-start)
 check "session-start: says to re-read from disk" '[[ $out == *"re-read it from disk"* && $out == *"no longer exists no longer applies"* ]]'
+check "session-start: limits re-reading to what is relevant" '[[ $out == *"still relevant to the work in hand"* ]]'
 check "session-start: is plain text" '[[ $out != "{"* ]]'
 check "settings: the compact matcher runs session-start" '[ "$(jq -r '"'"'.hooks.SessionStart[] | select(.matcher == "compact") | .hooks[0].command'"'"' "$HERE/../settings.json")" = "\$HOME/dotfiles/claude/hooks/compact-handoff.sh session-start" ]'
 

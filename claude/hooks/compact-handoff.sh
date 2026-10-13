@@ -103,7 +103,7 @@ post() {
 
 session_start() {
     cat >/dev/null
-    echo "Skill and file text restored after this compaction are copies from when they were loaded, and some are truncated. Before acting under a skill or instruction file, re-read it from disk. One that no longer exists no longer applies."
+    echo "Skill and file text restored after this compaction are copies from when they were loaded, and some are truncated. Before acting under a skill or instruction file that is still relevant to the work in hand, re-read it from disk; there is no need to re-read the rest. One that no longer exists no longer applies."
 }
 
 case "${1:-}" in
