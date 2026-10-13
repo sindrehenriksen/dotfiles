@@ -9,8 +9,9 @@
 # sends every pending run in one message, oldest first; a failed send keeps
 # it pending, and an unconfirmed one is tried once more, then counted as
 # sent; idle sessions reach the message through the close step's list; a
-# pending run outlives the seven-day sweep. A step with `weekdays` runs
-# only on those days. No live model call.
+# pending run outlives the seven-day sweep; a shared name or none holds a
+# brief; a failed pass still briefs; a weekend slot of a weekdays-only pass
+# makes none of its own. A step with `weekdays` runs only on those days. No live model call.
 set -u
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -272,6 +273,37 @@ m="$(jq -rs '.[-1].message' "$BRIEF_TEST_SENT")"
 assert_contains "the message lists the idle session, never the central one" \
 	"- close/: 1 idle session to offer for closing, each in close/<session id>/ with session.json and transcript.txt: idle-one (" "$m"
 assert_true "its directory is there" "$([ -f "$R5/close/$IDLE/session.json" ] && [ -f "$R5/close/$IDLE/transcript.txt" ] && echo true || echo false)"
+
+echo
+echo "=== a name that does not address the central session alone, or none, holds the brief ==="
+sessions << EOF
+$CENTRAL central-x true
+eeeeeeee-0000-4000-8000-000000000003 central-x true
+EOF
+run 2026-10-13
+assert_true "a shared name holds it, saying why" \
+	"$(grep -q "brief: the name 'central-x' does not address the central session alone" "$ROOT/run.out" && [ -f "$DESK_RUNS_ROOT/testpass-2026-10-13/brief.pending" ] && echo true || echo false)"
+jq -cn --arg id "$CENTRAL" '{id:$id, name:"", live:true, has_start_event:true, last_activity:0, duplicate_pids:false}' > "$FIX/sessions.jsonl"
+run 2026-10-14
+assert_true "a live session with no name is logged as that, not as not running" \
+	"$(grep -q 'brief: the central session is running but has no name to send to' "$ROOT/run.out" && echo true || echo false)"
+
+echo
+echo "=== a failed pass still briefs, saying where it stopped ==="
+sessions <<< "$CENTRAL central-x true"
+jq '.passes.testpass.steps += [{id: "X", kind: "no-such-kind"}, {id: "F-after", kind: "fetch", prompt: "web.md", tools: [], connector: false, timeout: 30}]' "$cfg" > "$ROOT/cfg-fail.json"
+DESK_CONFIG="$ROOT/cfg-fail.json" DESK_NOW="$(day 2026-10-15)" TZ=UTC "$DESK_RUN" testpass > "$ROOT/run.out" 2>&1
+assert_eq "the pass reads failed" "failed" "$(jq -r '.result' "$DESK_RUNS_ROOT/testpass-2026-10-15/run.json" 2> /dev/null)"
+m="$(jq -rs '.[-1].message' "$BRIEF_TEST_SENT")"
+assert_contains "and its brief says where it stopped" "- How it went: failed at step X, so the steps after it did not run." "$m"
+assert_contains "the held ones go with it, oldest first" "oldest first: 2026-10-13, 2026-10-14, 2026-10-15" "$m"
+
+echo
+echo "=== a weekend slot of a weekdays-only pass makes no brief of its own ==="
+jq '.passes.testpass.weekdays_only = true' "$cfg" > "$ROOT/cfg-wk.json"
+DESK_CONFIG="$ROOT/cfg-wk.json" DESK_NOW="$(day 2026-10-17)" TZ=UTC "$DESK_RUN" testpass > "$ROOT/run.out" 2>&1
+assert_true "no run directory brief for the Saturday" "$([ ! -e "$DESK_RUNS_ROOT/testpass-2026-10-17/brief.pending" ] && [ ! -e "$DESK_RUNS_ROOT/testpass-2026-10-17/brief.sent" ] && echo true || echo false)"
+assert_true "and the log says why" "$(grep -q 'brief: weekend slot' "$ROOT/run.out" && echo true || echo false)"
 
 echo
 echo "=== a pending run outlives the seven-day sweep; a delivered one does not ==="
