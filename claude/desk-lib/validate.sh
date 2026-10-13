@@ -240,54 +240,6 @@ desk_validate_items() {
 }
 
 # ---------------------------------------------------------------------------
-# A close call's own extra check: its turn citations are verified by the
-# runner and stripped. The exact format: each bullet ends with "[turn <first 8 chars of a
-# transcript entry's uuid>]". An item citing a uuid prefix absent from the
-# transcript tail it was actually given is dropped (a fabricated citation
-# is worse than none); every citation marker is stripped from before/after
-# before an item is kept, valid or not — the marker itself never belongs
-# in the user's notes.
-# ---------------------------------------------------------------------------
-_DESK_TURN_MARK_GREP='\[turn [A-Za-z0-9]+\]'
-_DESK_TURN_MARK_SED='s/ *\[turn [A-Za-z0-9]+\]//g'
-
-desk_verify_and_strip_turn_citations() {
-	local items_json="$1" transcript_tail_file="$2"
-	local valid_prefixes=""
-	if [ -f "$transcript_tail_file" ]; then
-		valid_prefixes="$(jq -r '.uuid? // empty | .[0:8]' "$transcript_tail_file" 2> /dev/null)"
-	fi
-
-	local n out
-	out="[]"
-	n="$(jq 'length' <<< "$items_json" 2> /dev/null || echo 0)"
-	local i
-	for ((i = 0; i < n; i++)); do
-		local item before after combined citations ok
-		item="$(jq -c ".[$i]" <<< "$items_json")"
-		before="$(jq -r '.before // ""' <<< "$item")"
-		after="$(jq -r '.after // ""' <<< "$item")"
-		combined="$before"$'\n'"$after"
-		citations="$(grep -oE "$_DESK_TURN_MARK_GREP" <<< "$combined" 2> /dev/null \
-			| sed -E 's/\[turn ([A-Za-z0-9]+)\]/\1/')"
-		ok="true"
-		if [ -n "$citations" ]; then
-			local cite
-			while IFS= read -r cite; do
-				[ -n "$cite" ] || continue
-				grep -qxF -- "$cite" <<< "$valid_prefixes" 2> /dev/null || ok="false"
-			done <<< "$citations"
-		fi
-		before="$(sed -E "$_DESK_TURN_MARK_SED" <<< "$before")"
-		after="$(sed -E "$_DESK_TURN_MARK_SED" <<< "$after")"
-		item="$(jq -c --arg b "$before" --arg a "$after" '.before = $b | .after = $a' <<< "$item")"
-		[ "$ok" = "true" ] || continue
-		out="$(jq -c --argjson it "$item" '. + [$it]' <<< "$out")"
-	done
-	printf '%s' "$out"
-}
-
-# ---------------------------------------------------------------------------
 # Caps: per-tier maximums. Only tiered items (news, via `tier`) are ever
 # capped; anything else (edits, removals, closure notes) passes straight
 # through uncounted.

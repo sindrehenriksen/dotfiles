@@ -1065,63 +1065,6 @@ desk_write_transcript_copy() {
 	wc -l < "$readable" | tr -d ' '
 }
 
-# desk_session_capture_call <pass> <step_json> <repo> <scheduled_date>
-#   <session_json> <call_id> <label> <placeholders_json>
-# The one per-session capture call the close and retention kinds share: seeds
-# the call's cwd with `session.json` (the reader entry), a readable copy of
-# the session's whole transcript (`transcript.txt`, desk_write_transcript_copy),
-# which the call reads as far back as it needs, its line count as the
-# `transcript_lines` placeholder, and the marked captures file for placement; makes the call under the
-# step's own tools and prompt with the step id replaced by `call_id`; and
-# turns the reply into items: the pinned shape, every turn citation checked
-# against the transcript it was given and stripped, then the generic
-# validation (no URL is allowed, since a capture call has no fetch
-# results). Prints the items as a JSON array and returns 0 when at least
-# one survives; logs why and returns 1 otherwise. The reply's final text
-# stays in $PASS_SCRATCH/<call_id>-stream.jsonl for a caller that reads
-# more of it. The transcript itself is only ever read here (copied): a
-# write to it would move its mtime, which is what Claude Code's retention
-# sweep measures.
-desk_session_capture_call() {
-	local pass="$1" step_json="$2" repo="$3" scheduled_date="$4" sess="$5" call_id="$6" label="$7" placeholders="$8"
-	local transcript_path captures
-	transcript_path="$(jq -r '.transcript_path // empty' <<< "$sess")"
-	captures="${DESK_CAPTURES_FILE:-notes.md}"
-
-	# Copied into the call's own cwd by desk_step_model_call, which is the one
-	# directory a scoped Read can reach.
-	local seed="$PASS_SCRATCH/$call_id-seed" tail_copy="$PASS_SCRATCH/$call_id-transcript.jsonl" lines
-	mkdir -p "$seed"
-	echo "$sess" > "$seed/session.json"
-	lines="$(desk_write_transcript_copy "$transcript_path" "$seed/transcript.txt" "$tail_copy")"
-	placeholders="$(jq -c --arg n "${lines:-0}" '. + {transcript_lines: $n}' <<< "$placeholders")"
-	# The marked copy, as J gets: the marks keep a line the call echoes back
-	# from carrying them into the notes.
-	desk_write_marked_head_copy "$repo" "$captures" "$seed/$captures"
-
-	local call_step call_result
-	call_step="$(jq -c --arg id "$call_id" '.id = $id' <<< "$step_json")"
-	call_result="$(desk_step_model_call "$pass" "$call_step" "$label" "$placeholders" "$seed" "" "$scheduled_date")"
-	desk_log "$pass" "$label: call -> $call_result"
-	[ "$call_result" = "ok" ] || return 1
-
-	local final_text items_json
-	final_text="$(desk_extract_final_text "$PASS_SCRATCH/$call_id-stream.jsonl")"
-	items_json="$(jq -c 'if type == "object" and has("items") then .items else . end' \
-		<<< "$final_text" 2> /dev/null)"
-	if [ -z "$items_json" ] || ! jq -e 'type == "array"' > /dev/null 2>&1 <<< "$items_json"; then
-		desk_log "$pass" "$label: reply wasn't the pinned items shape — no capture"
-		return 1
-	fi
-	items_json="$(desk_verify_and_strip_turn_citations "$items_json" "$tail_copy")"
-	items_json="$(desk_validate_items "$items_json" "" "$repo")"
-	if [ "$(jq 'length' <<< "$items_json")" -eq 0 ]; then
-		desk_log "$pass" "$label: no valid capture item (invalid citation, or none returned)"
-		return 1
-	fi
-	printf '%s' "$items_json"
-}
-
 # desk_step_close <pass> <step_json> <config_json> <repo> <scheduled_date> <file>...
 # Lists the sessions to offer for closing; it makes no call, closes nothing
 # and stages nothing. The judging is the central session's, when the pass's
@@ -1492,7 +1435,7 @@ desk_follow_up_run_status() {
 			elif .kind == "write" and $triage then "mail triage: marking the fetched digests read and trashing automated mail"
 			else {commit_push: "commit of the notes", fetch: "fetch", judge: "judge, which proposes the suggestions",
 				write: "marking the fetched mail read", capture: "session capture", close: "listing idle sessions to offer for closing",
-				retention: "transcript deletion warnings", open_tab: "tab"}[.kind] // .kind end) + ")"]
+				retention: "listing sessions whose transcripts near deletion", open_tab: "tab"}[.kind] // .kind end) + ")"]
 		| join(", ")' "$DESK_CONFIG" 2> /dev/null)"
 	local summary
 	summary="$(desk_status_read | jq -r --arg p "$pass" --arg steps "$steps" '

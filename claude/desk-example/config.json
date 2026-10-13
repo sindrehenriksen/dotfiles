@@ -15,7 +15,6 @@
   "close_after_working_days": 3,
   "keep_open": ["scratchpad"],
   "away_days": 5,
-  "retention_warn_days": 14,
 
   "caps": {
     "daily": { "act": 3, "worth_knowing": 3, "wildcard": 1 },
@@ -65,14 +64,6 @@
           "visible": true,
           "input_files": ["notes.md", "reading.md", "sources.json", "f-web.json", "open-items.json", "declined.json"],
           "timeout": 600
-        },
-        {
-          "id": "retention",
-          "kind": "retention",
-          "prompt": "prompts/retention.md",
-          "tools": ["Read"],
-          "connector": false,
-          "timeout": 300
         }
       ]
     },

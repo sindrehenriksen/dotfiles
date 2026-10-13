@@ -273,6 +273,11 @@ m="$(jq -rs '.[-1].message' "$BRIEF_TEST_SENT")"
 assert_contains "the message lists the idle session, never the central one" \
 	"- close/: 1 idle session to offer for closing, each in close/<session id>/ with session.json and transcript.txt: idle-one (" "$m"
 assert_true "its directory is there" "$([ -f "$R5/close/$IDLE/session.json" ] && [ -f "$R5/close/$IDLE/transcript.txt" ] && echo true || echo false)"
+mkdir -p "$R5/retention"
+jq -cn '[{session_id: "x", name: "old-spike", deletion_date: "2026-10-20", days_left: 8, dir: "d"}]' > "$R5/retention/candidates.json"
+assert_contains "the retention step's list reaches the message" \
+	"- retention/: 1 session the notes name whose transcripts Claude Code deletes soon, each in retention/<session id>/ with session.json and transcript.txt: old-spike (deleted 2026-10-20)." \
+	"$(bash -c 'source "$1/common.sh"; source "$1/brief.sh"; desk_brief_message testpass "$2"' _ "$LIB" "$R5")"
 
 echo
 echo "=== a name that does not address the central session alone, or none, holds the brief ==="

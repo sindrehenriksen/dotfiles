@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# The retention kind: a warning, through the normal review, for each session
-# the notes still name whose transcript Claude Code is about to delete.
+# The retention kind: lists, for the pass's brief, each session the notes
+# still name whose transcript Claude Code is about to delete. The central
+# session decides what of each, if anything, belongs in the notes, and
+# stages it itself; nothing here writes to the notes.
 #
 # Claude Code deletes a transcript once it is older than `cleanupPeriodDays`
 # (default 30), in a background sweep after a session starts; its docs say
@@ -143,83 +145,28 @@ desk_retention_label() {
 	fi
 }
 
-# desk_retention_finish_item <item_json> <head_text_file> <deletion_date>
-# The checks on a capture call's item that only the runner can make. A
-# `move` raises the user's own entry, so it must remove exactly lines that
-# sit together in the committed notes and carry every one of them to the top
-# unchanged (the first may gain the date, any may lose its indent);
-# otherwise it becomes a `new` item on top holding just the added lines, and
-# the user's entry stays where it was. Any kind other than `move` or `new`
-# lands on top as `new`. The deletion date is appended to the first line
-# when the text doesn't already carry it.
-desk_retention_finish_item() {
-	local item_json="$1" head_file="$2" deletion_date="$3"
-	printf '%s' "$item_json" | perl -MJSON::PP -e '
-		my ($head_file, $date) = @ARGV;
-		my $j = JSON::PP->new->canonical;
-		my $item = $j->decode(do { local $/; <STDIN> });
-		my $head = do { local $/; open(my $fh, "<", $head_file) or die; <$fh> } // "";
-		my $kind = $item->{kind} // "";
-		my $before = $item->{before} // "";
-		$before =~ s/\n+\z//;
-		my @after = split /\n/, ($item->{after} // ""), -1;
-		s/[ \t]+\z// for @after;
-		pop @after while @after && $after[-1] eq "";
-		my $strip = sub { my $l = shift; $l =~ s/^\s+//; $l };
-
-		my $move_ok = 0;
-		if ($kind eq "move" && $before ne "") {
-			my @b = split /\n/, $before, -1;
-			if (index("\n$head\n", "\n$before\n") >= 0) {
-				$move_ok = 1;
-				my $k = 0;
-				for my $bl (@b) {
-					my $want = $strip->($bl);
-					$k++ while $k < @after && index($strip->($after[$k]), $want) != 0;
-					if ($k >= @after) { $move_ok = 0; last }
-					$k++;
-				}
-			}
-			if ($move_ok) {
-				$item->{target} = [{ at => $b[0] }, "top"];
-				$item->{before} = $before;
-			} else {
-				my %own = map { ($strip->($_) => 1) } @b;
-				my @kept = grep { !$own{$strip->($_)} } @after[1 .. $#after];
-				@after = (@after ? ($after[0]) : (), @kept);
-			}
-		}
-		if (!$move_ok) {
-			$item->{kind} = "new";
-			$item->{target} = "top";
-			$item->{before} = "";
-		}
-		@after = ("") unless @after;
-		$after[0] .= " (transcript deleted $date unless resumed)" if index(join("\n", @after), $date) < 0;
-		$item->{after} = join("\n", @after);
-		print $j->encode($item);
-	' "$head_file" "$deletion_date"
-}
-
-# desk_step_retention <pass> <step_json> <config_json> <repo> <scheduled_date>
-#   <caps_json> <file>...
-# Per candidate, soonest deletion first: one capture call (the close kind's,
-# desk_session_capture_call) over the end of its transcript, whose item
-# raises the session's entry to the top of the notes, or adds a line there,
-# with a few bullets on where it stood and the deletion date. Items carry
-# tier `act` and are capped like a judge's under the pass's caps entry
-# before any call is made; the overflow is named in the follow-up summary
-# (desk_record_capped) and its count goes to $PASS_SCRATCH/<id>-overflow.json
-# for the status file. A warning
-# already proposed, taken or declined for the same session and deletion date
-# is never repeated. Prints "ok", or "failed" when the settings, the reader,
-# the notes or the ledger can't be read.
+# desk_step_retention <pass> <step_json> <config_json> <repo> <scheduled_date> <file>...
+# No model call. Per candidate (desk_retention_candidates), soonest deletion
+# first, writes `retention/<session id>/` in the run directory: `session.json`
+# (the reader entry with `label`, `deletion_date` and `days_left`) and
+# `transcript.txt` (desk_write_transcript_copy), and lists them all in
+# `retention/candidates.json`. A session whose warning for that deletion date
+# the ledger already holds (an item with its `session_id` and `capture_kind`
+# `retention:<date>`, proposed, taken or declined) is not listed again. A pass
+# with no brief has nobody to decide, so it lists none. Prints "ok", or
+# "failed" when the settings, the reader, the notes or the ledger can't be
+# read.
 desk_step_retention() {
-	local pass="$1" step_json="$2" config_json="$3" repo="$4" scheduled_date="$5" caps_json="$6"
-	shift 6
+	local pass="$1" step_json="$2" config_json="$3" repo="$4" scheduled_date="$5"
+	shift 5
 	local files=("$@")
-	local step_id
-	step_id="$(jq -r '.id' <<< "$step_json")"
+	local dir="$DESK_RUNS_ROOT/$pass-$scheduled_date/retention"
+	rm -rf "$dir"
+	if ! jq -e --arg p "$pass" '.passes[$p].brief | type == "object"' > /dev/null 2>&1 <<< "$config_json"; then
+		desk_log "$pass" "retention: this pass has no brief, so there is nobody to decide on the warnings — listing none"
+		echo "ok"
+		return
+	fi
 
 	local cutoff warn
 	cutoff="$(desk_cleanup_period_days)" || {
@@ -233,13 +180,12 @@ desk_step_retention() {
 		return
 	fi
 
-	local candidates
+	local candidates ledger_state
 	candidates="$(desk_retention_candidates "$cutoff" "$warn" "$repo" "${files[@]}")" || {
 		desk_log "$pass" "retention: reading the sessions or the notes failed"
 		echo "failed"
 		return
 	}
-	local ledger_state
 	ledger_state="$(desk_nvim_cli ledger-state "$repo")" || {
 		desk_log "$pass" "retention: ledger-state failed"
 		echo "failed"
@@ -250,68 +196,25 @@ desk_step_retention() {
 		  | select([$ledger.items[] | select(.session_id == $s.id
 		      and .capture_kind == ("retention:" + $s.deletion_date))] | length == 0) ]
 	' <<< "$candidates")"
-	local n
+	local n i listed='[]'
 	n="$(jq 'length' <<< "$candidates")"
 	desk_log "$pass" "retention: $n session(s) in the notes due for deletion within ${warn}d (cleanupPeriodDays $cutoff)"
-
-	# Capped before the calls, so an overflowing one costs no model call.
-	local stubs="[]" i sess label
+	mkdir -p "$dir"
 	for ((i = 0; i < n; i++)); do
-		sess="$(jq -c ".[$i]" <<< "$candidates")"
-		label="$(desk_retention_label "$sess")"
-		stubs="$(jq -c --argjson s "$sess" --arg h "$label: transcript deleted $(jq -r '.deletion_date' <<< "$sess")" \
-			'. + [{tier: "act", headline: $h, source: ("session:" + $s.id), session_id: $s.id}]' <<< "$stubs")"
-	done
-	local capped kept_ids
-	capped="$(desk_apply_caps "$stubs" "$caps_json")"
-	desk_record_capped "$(jq -c '.overflow' <<< "$capped")"
-	kept_ids="$(jq -c '[.kept[].session_id]' <<< "$capped")"
-	jq -c '{act: 0, worth_knowing: 0, wildcard: 0} + ([.overflow[] | .tier] | group_by(.) | map({(.[0]): length}) | add // {})' \
-		<<< "$capped" > "$PASS_SCRATCH/$step_id-overflow.json"
-
-	local captures head_file
-	captures="${DESK_CAPTURES_FILE:-notes.md}"
-	head_file="$PASS_SCRATCH/$step_id-head.txt"
-	git -C "$repo" show "HEAD:$captures" > "$head_file" 2> /dev/null || : > "$head_file"
-
-	local items="[]"
-	for ((i = 0; i < n; i++)); do
-		local id date days placeholders reply item
+		local sess id label sdir lines
 		sess="$(jq -c ".[$i]" <<< "$candidates")"
 		id="$(jq -r '.id' <<< "$sess")"
-		jq -e --arg id "$id" 'index($id) != null' > /dev/null <<< "$kept_ids" || continue
 		label="$(desk_retention_label "$sess")"
-		date="$(jq -r '.deletion_date' <<< "$sess")"
-		days="$(jq -r '.days_left' <<< "$sess")"
-		placeholders="$(jq -n --arg sn "$label" --arg sid "$id" --arg today "$(date +%F)" \
-			--arg dd "$date" --arg dl "$days" \
-			'{session_name: $sn, session_id: $sid, today: $today, deletion_date: $dd, days_left: $dl}')"
-		reply="$(desk_session_capture_call "$pass" "$step_json" "$repo" "$scheduled_date" \
-			"$sess" "retention-$id" "retention:$label" "$placeholders")" || continue
-		item="$(desk_retention_finish_item "$(jq -c '.[0]' <<< "$reply")" "$head_file" "$date")" || continue
-		item="$(jq -c --arg cf "$captures" --arg sid "$id" --arg ck "retention:$date" \
-			--arg h "$label: transcript deleted $date" '
-			.file = $cf | .source = ("session:" + $sid) | .headline = $h | .tier = "act"
-			| .session_id = $sid | .capture_kind = $ck
-		' <<< "$item")"
-		items="$(jq -c --argjson it "$item" '. + [$it]' <<< "$items")"
+		sdir="$dir/$id"
+		mkdir -p "$sdir"
+		jq -c --arg l "$label" '. + {label: $l}' <<< "$sess" > "$sdir/session.json"
+		lines="$(desk_write_transcript_copy "$(jq -r '.transcript_path // empty' <<< "$sess")" \
+			"$sdir/transcript.txt" "${PASS_SCRATCH:-$sdir}/retention-$id-transcript.jsonl")"
+		[ -n "${PASS_SCRATCH:-}" ] || rm -f "$sdir/retention-$id-transcript.jsonl"
+		listed="$(jq -c --argjson s "$sess" --arg l "$label" --arg d "$sdir" --argjson lines "${lines:-0}" '
+			. + [{session_id: $s.id, name: $l, deletion_date: $s.deletion_date, days_left: $s.days_left,
+			      transcript_lines: $lines, dir: $d}]' <<< "$listed")"
 	done
-
-	local kept_n
-	kept_n="$(jq 'length' <<< "$items")"
-	if [ "$kept_n" -eq 0 ]; then
-		echo "ok"
-		return
-	fi
-	items="$(desk_validate_items "$items" "" "$repo")"
-	local items_file sha
-	items_file="$PASS_SCRATCH/$step_id-items.json"
-	jq -n --argjson items "$items" '{items: $items}' > "$items_file"
-	if ! sha="$(desk_stage_and_write_proposal "$repo" "$pass" "$scheduled_date" "$items_file" "${files[@]}")" || [ -z "$sha" ]; then
-		desk_log "$pass" "retention: staging failed"
-		echo "failed"
-		return
-	fi
-	desk_log "$pass" "retention: staged $kept_n warning(s)"
+	printf '%s\n' "$listed" > "$dir/candidates.json"
 	echo "ok"
 }

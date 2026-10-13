@@ -206,6 +206,14 @@ assert_eq "--withdraw --dry-run says what it would withdraw" "would withdraw $li
 assert_eq "...and changes nothing" "$before_sha" "$(git -C "$repo" rev-parse refs/desk/proposal)"
 assert_eq "...not even the ledger" "" "$(nvim -l "$CLI" declined-recent "$repo" | jq -r --arg id "$lid" '.items[] | select(.id == $id) | .id')"
 
+echo "=== a retention warning keeps the fields its dedup reads ==="
+jq -n '[{id: "ret", file: "notes.md", kind: "new", target: "top", before: "", after: "old-spike (transcript deleted 2026-10-20 unless resumed)", headline: "old-spike: transcript deleted 2026-10-20", source: "session:abcd", session_id: "abcd", capture_kind: "retention:2026-10-20"}]' > "$ROOT/ret.json"
+"$PROPOSE" --pass morning --date 2026-10-16 "$ROOT/ret.json" > /dev/null
+assert_eq "session_id and capture_kind reach the proposal" "abcd retention:2026-10-20" \
+	"$(proposal_items | jq -r '.[] | select(.id | endswith("-ret")) | "\(.session_id) \(.capture_kind)"')"
+assert_eq "...where the ledger state reads them" "abcd" \
+	"$(nvim -l "$CLI" ledger-state "$repo" | jq -r '.items[] | select(.capture_kind == "retention:2026-10-20") | .session_id')"
+
 echo "=== config and usage ==="
 DESK_CONFIG="" DESK_CONFIG_DEFAULT="$ROOT/none.json" "$PROPOSE" "$ROOT/items.json" > /dev/null 2>&1
 assert_eq "no config is a config error" "2" "$?"

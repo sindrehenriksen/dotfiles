@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # claude/desk-lib/retention.sh: the cutoff read from a temp settings file,
 # which sessions are selected (fake transcripts with set mtimes in a temp
-# CLAUDE_CONFIG_DIR, against a fixed clock), the item a capture reply becomes,
-# the move guard, caps, dedup on a decline, and that no transcript is written.
-# The reader is faked for selection and the real one is run once against the
-# same temp config dir; `claude` is a fake that replies per session.
+# CLAUDE_CONFIG_DIR, against a fixed clock), what the step lists for the
+# brief, that it calls no model and stages nothing, dedup on a decline, and
+# that no transcript is written. The reader is faked for selection and the
+# real one is run once against the same temp config dir; `claude` is a fake
+# that would log any call.
 set -u
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -195,71 +196,44 @@ assert_true "an unrecorded transcript named in the notes is selected" \
 rm -f "$real_tp"
 
 echo
-echo "=== the step: items, guard, caps, dedup ==="
-reply() { # id item-json
-	jq -cn --argjson it "$2" '{items: [$it]}' > "$REPLIES/$1.json"
-}
-alpha_date="$(date_of $((NOW + 10 * day)))"
-reply aaaaaaaa-0001 "$(jq -cn --arg d "$alpha_date" '{id:"r1", file:"notes.md", kind:"move",
-	target:[{at:"- alpha-work: the thing"}, "top"],
-	before:"- alpha-work: the thing\n  - waiting on review",
-	after:("- alpha-work: the thing (transcript deleted " + $d + " unless resumed)\n  - waiting on review\n  - review requested, nothing merged yet [turn aaaaaaaa]"),
-	source:"session:x", headline:"h"}')"
-# A move that rewrites the user's line: guarded into a new item on top.
-reply 0000aaaa-0008 '{"id":"r1","file":"notes.md","kind":"move","target":[{"at":"- an unnamed one: 0000aaaa"},"top"],"before":"- an unnamed one: 0000aaaa","after":"- unnamed: rewritten\n  - where it stood [turn 0000aaaa]","source":"session:x","headline":"h"}'
-reply eeeeeeee-0003 '{"id":"r1","file":"notes.md","kind":"new","target":"top","before":"","after":"edge-work\n  - it stood here [turn eeeeeeee]","source":"session:x","headline":"h"}'
-reply 77777777-0009 '{"id":"r1","file":"notes.md","kind":"new","target":"top","before":"","after":"past-work\n  - done-ish [turn 77777777]","source":"session:x","headline":"h"}'
-
-
+echo "=== the step lists the sessions for the brief, and stages nothing ==="
 PASS_SCRATCH="$(mktemp -d "$ROOT/pass.XXXX")"
-step_json='{"id":"retention","kind":"retention","prompt":"prompt.md","tools":["Read"],"timeout":30}'
-printf 'session {{session_name}} {{session_id}} deleted {{deletion_date}} in {{days_left}}d, today {{today}}\n' > "$ROOT/prompt.md"
-result="$(desk_step_retention "morning" "$step_json" '{}' "$repo" "2027-01-15" '{"act": 3}' "${files[@]}")"
+step_json='{"id":"retention","kind":"retention"}'
+cfg_brief='{"passes": {"morning": {"brief": {"instructions": ["x.md"]}}}}'
+: > "$CALLS"
+result="$(desk_step_retention "morning" "$step_json" "$cfg_brief" "$repo" "2027-01-15" "${files[@]}")"
 assert_eq "the step reports ok" "ok" "$result"
-assert_eq "three calls under an act cap of 3, soonest first" "77777777-0009 0000aaaa-0008 aaaaaaaa-0001" "$(tr '\n' ' ' < "$CALLS" | sed 's/ $//')"
-assert_eq "the overflow is counted for status" '{"act":1,"worth_knowing":0,"wildcard":0}' "$(cat "$PASS_SCRATCH/retention-overflow.json")"
-assert_true "the overflow is held back for the follow-up summary" \
-	"$(jq -e 'any(.[]; .headline | startswith("edge-work: transcript deleted"))' "$PASS_SCRATCH/capped.json" > /dev/null 2>&1 && echo true || echo false)"
-assert_true "the prompt got every placeholder" \
-	"$(grep -qx "session alpha-work aaaaaaaa-0001 deleted $alpha_date in 10d, today $(date +%F)" "$ROOT/prompt-aaaaaaaa-0001.txt" && echo true || echo false)"
-
-proposal="$(git -C "$repo" show refs/desk/proposal:proposal.json 2> /dev/null)"
-alpha="$(jq -c '.items[] | select(.session_id == "aaaaaaaa-0001")' <<< "$proposal")"
-assert_eq "the move keeps its kind and anchors on its own first line" 'move [{"at":"- alpha-work: the thing"},"top"]' \
-	"$(jq -c -r '"\(.kind) \(.target | tojson)"' <<< "$alpha")"
-assert_eq "tier, kind of capture, headline" "act retention:$alpha_date alpha-work: transcript deleted $alpha_date" \
-	"$(jq -r '"\(.tier) \(.capture_kind) \(.headline)"' <<< "$alpha")"
-assert_true "the deletion date is in the text, the turn mark is not" \
-	"$(jq -r .after <<< "$alpha" | grep -qF "$alpha_date" && ! jq -r .after <<< "$alpha" | grep -q '\[turn' && echo true || echo false)"
-unnamed="$(jq -c '.items[] | select(.session_id == "0000aaaa-0008")' <<< "$proposal")"
-assert_eq "a move that rewrites the user's line lands as new on top" "new \"top\" " \
-	"$(jq -r '"\(.kind) \(.target | tojson) \(.before)"' <<< "$unnamed")"
-assert_eq "...keeping its first line and added bullets, with the date appended" \
-	"- unnamed: rewritten (transcript deleted $(date_of $((NOW + 9 * day))) unless resumed)|  - where it stood" \
-	"$(jq -r '.after | split("\n") | join("|")' <<< "$unnamed")"
-past="$(jq -c '.items[] | select(.session_id == "77777777-0009")' <<< "$proposal")"
-assert_eq "an item without the date gets it on its first line" "past-work (transcript deleted $(date_of "$NOW") unless resumed)" \
-	"$(jq -r '.after | split("\n")[0]' <<< "$past")"
-applied="$(git -C "$repo" show refs/desk/proposal:notes.md)"
-assert_eq "applied, the alpha entry sits on top once" "1" "$(grep -c 'alpha-work: the thing' <<< "$applied")"
-assert_true "...and is gone from where it was" "$(sed -n '/^Inbox/,$p' <<< "$applied" | grep -q 'alpha-work' && echo false || echo true)"
+assert_eq "no model call" "0" "$(wc -l < "$CALLS" | tr -d ' ')"
+assert_true "nothing staged" "$(git -C "$repo" rev-parse -q --verify refs/desk/proposal > /dev/null && echo false || echo true)"
+listed="$DESK_RUNS_ROOT/morning-2027-01-15/retention/candidates.json"
+alpha_date="$(date_of $((NOW + 10 * day)))"
+assert_eq "every candidate is listed, soonest first, with no cap" \
+	"77777777-0009 0000aaaa-0008 aaaaaaaa-0001 eeeeeeee-0003" "$(jq -r '[.[].session_id] | join(" ")' "$listed")"
+assert_eq "each with its label, deletion date and days left" "alpha-work $alpha_date 10" \
+	"$(jq -r '.[] | select(.session_id == "aaaaaaaa-0001") | "\(.name) \(.deletion_date) \(.days_left)"' "$listed")"
+assert_eq "an unnamed one by its auto title and short id" "Some auto title · 0000aaaa" \
+	"$(jq -r '.[] | select(.session_id == "0000aaaa-0008") | .name' "$listed")"
+adir="$(jq -r '.[] | select(.session_id == "aaaaaaaa-0001") | .dir' "$listed")"
+assert_true "its directory holds the reader entry and a readable transcript" \
+	"$(jq -e '.label == "alpha-work" and .deletion_date != null' "$adir/session.json" > /dev/null && grep -q 'aaaaaaaa' "$adir/transcript.txt" && echo true || echo false)"
+result="$(desk_step_retention "otherpass" "$step_json" "$cfg_brief" "$repo" "2027-01-15" "${files[@]}")"
+assert_true "a pass with no brief lists none" "$([ "$result" = ok ] && [ ! -e "$DESK_RUNS_ROOT/otherpass-2027-01-15/retention" ] && echo true || echo false)"
 
 echo
-echo "=== a repeat pass, and a decline, bring nothing back ==="
+echo "=== a warning the ledger already holds is not listed again ==="
 cat > "$ROOT/decline.lua" << LUA
 package.path = "$REPO_ROOT/nvim/lua/?.lua;" .. package.path
 local ledger = require("desk.ledger")
 local items = vim.json.decode(io.open("$ROOT/decline.json"):read("a"))
 assert(ledger.record_declines("$repo", items))
 LUA
-jq -c '[.items[] | select(.session_id == "aaaaaaaa-0001")]' <<< "$proposal" > "$ROOT/decline.json"
+jq -cn --arg d "$alpha_date" '[{id: "morning-2027-01-15-1-r1", file: "notes.md", kind: "new", target: "top", before: "",
+	after: "alpha-work (transcript deleted \($d) unless resumed)", source: "session:aaaaaaaa-0001", headline: "alpha-work: transcript deleted \($d)",
+	session_id: "aaaaaaaa-0001", capture_kind: ("retention:" + $d)}]' > "$ROOT/decline.json"
 nvim --headless -u NONE -l "$ROOT/decline.lua" > /dev/null 2>&1
-: > "$CALLS"
-result="$(desk_step_retention "morning" "$step_json" '{}' "$repo" "2027-01-16" '{"act": 3}' "${files[@]}")"
-assert_eq "the repeat step reports ok" "ok" "$result"
-assert_eq "only the overflowed session is called now" "eeeeeeee-0003" "$(tr '\n' ' ' < "$CALLS" | sed 's/ $//')"
-assert_eq "the declined session's warning is not proposed again" "0" \
-	"$(git -C "$repo" show refs/desk/proposal:proposal.json | jq '[.items[] | select(.session_id == "aaaaaaaa-0001")] | length')"
+desk_step_retention "morning" "$step_json" "$cfg_brief" "$repo" "2027-01-16" "${files[@]}" > /dev/null
+assert_eq "the declined session is left out" "77777777-0009 0000aaaa-0008 eeeeeeee-0003" \
+	"$(jq -r '[.[].session_id] | join(" ")' "$DESK_RUNS_ROOT/morning-2027-01-16/retention/candidates.json")"
 
 echo
 echo "=== nothing wrote to a transcript ==="

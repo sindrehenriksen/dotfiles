@@ -10,7 +10,8 @@
 # the instruction files rendered under instructions/, the URLs a suggestion
 # may cite in allowed-urls.txt, how the run went in run-status.txt and
 # run.json, what the pass staged itself in staged.json, the mail triage's
-# noise in mail-noise.json, and beside them the close step's close/. Then it
+# noise in mail-noise.json, and beside them the close step's close/ and the
+# retention step's retention/. Then it
 # marks the run `brief.pending` and delivers.
 #
 # Delivery is the follow pass's: the address check (desk_follow_address) and
@@ -120,7 +121,7 @@ desk_brief_message() {
 		printf '%s %s %s passes are ready for you to judge, oldest first: %s. The earlier ones could not be delivered when they ran. Not from the user.\n' \
 			"$DESK_BRIEF_MARKER" "${#runs[@]}" "$pass" "$dates"
 	fi
-	local instr inputs close_line
+	local instr inputs close_line retention_line
 	for r in "${runs[@]}"; do
 		instr="$(jq -r '(.instructions // []) | join(", then ")' "$r/run.json" 2> /dev/null)"
 		inputs="$(for f in "$r/inputs"/*; do [ -f "$f" ] && basename "$f"; done | paste -sd ',' - | sed 's/,/, /g')"
@@ -132,6 +133,11 @@ desk_brief_message() {
 					+ ([.[] | "\(.name) (\(.idle_working_days) working days idle\(if .followed then ", followed" else "" end))"] | join(", ")) + "."
 				end' "$r/close/candidates.json" 2> /dev/null)"
 		fi
+		retention_line=""
+		if [ -f "$r/retention/candidates.json" ] && [ "$(jq 'length' "$r/retention/candidates.json" 2> /dev/null)" != "0" ]; then
+			retention_line="$(jq -r '"- retention/: \(length) session\(if length == 1 then "" else "s" end) the notes name whose transcripts Claude Code deletes soon, each in retention/<session id>/ with session.json and transcript.txt: "
+				+ ([.[] | "\(.name) (deleted \(.deletion_date))"] | join(", ")) + "."' "$r/retention/candidates.json" 2> /dev/null)"
+		fi
 		printf '\nRun directory: %s\n' "$r"
 		jq -r '"- How it went: " + (
 			if .result == "ok" then "finished ok."
@@ -141,6 +147,7 @@ desk_brief_message() {
 		printf -- '- Judge it by: %s\n' "${instr:-(no instruction file was written)}"
 		printf -- '- inputs/: %s\n' "${inputs:-(nothing was seeded)}"
 		[ -z "$close_line" ] || printf '%s\n' "$close_line"
+		[ -z "$retention_line" ] || printf '%s\n' "$retention_line"
 		printf -- '- Also there: allowed-urls.txt, staged.json%s.\n' "$([ -f "$r/mail-noise.json" ] && printf ', mail-noise.json')"
 	done
 }

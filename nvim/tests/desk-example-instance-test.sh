@@ -69,10 +69,8 @@ echo '{"type":"result","subtype":"success","total_cost_usd":0}'
 FAKE
 chmod +x "$FAKEBIN/claude"
 
-# One session, unrecorded and named in the notes with a
-# transcript 25 days old, inside the retention margin under the default
-# 30-day cleanup: the retention step makes its one call. The follow-up tab
-# resolves nothing, an ordinary "ok".
+# One session, unrecorded and named in the notes with a transcript 25 days
+# old. The follow-up tab resolves nothing, an ordinary "ok".
 OLD_TRANSCRIPT="$FAKE_HOME/.claude/projects/-example/0e0e0e0e-0000-0000-0000-000000000000.jsonl"
 mkdir -p "$(dirname "$OLD_TRANSCRIPT")"
 printf '%s\n' '{"uuid":"0e0e0e0e-1111","type":"user","message":{"role":"user","content":"hi"}}' > "$OLD_TRANSCRIPT"
@@ -146,7 +144,7 @@ done
 echo
 echo "=== rendered prompts ==="
 n_calls="$(find "$CALLS" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')"
-assert_eq "one model call per model step (F-web, J, one retention call)" "3" "$n_calls"
+assert_eq "one model call per model step (F-web, J)" "2" "$n_calls"
 for rec in "$CALLS"/*; do
 	[ -d "$rec" ] || continue
 	assert_true "call $(basename "$rec"): prompt is non-empty" "$([ -s "$rec/prompt.txt" ] && echo true || echo false)"

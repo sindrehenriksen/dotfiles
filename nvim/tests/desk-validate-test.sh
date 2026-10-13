@@ -4,8 +4,7 @@
 # genuinely appears in a call's raw tool_results survives (Slack rebuilt
 # from channel+ts, Gmail/WebSearch literal), control/ANSI characters and
 # modelines are stripped from item text, tier caps overflow to a dated
-# brief, and 16:30's turn citations are checked against a real transcript
-# tail and always stripped. Every raw tool_result here is a hand-built
+# brief. Every raw tool_result here is a hand-built
 # fixture, never a live call.
 set -u
 
@@ -275,26 +274,6 @@ assert_eq "home keeps no URL" 'the Models section [url removed]' "$(jq -r '.[0].
 assert_eq "an empty home is left out" "false" "$(jq '.[1] | has("home")' <<< "$chat")"
 assert_eq "the dropped note is recorded for the summary" "From an unchecked page" "$(jq -r '.[-1].headline' "$PASS_SCRATCH/dropped.json")"
 assert_eq "a reply without chat_notes has none" "[]" "$(desk_chat_notes '{"items": []}' "")"
-
-echo
-echo "=== desk_verify_and_strip_turn_citations ==="
-tail_file="$ROOT/transcript.jsonl"
-cat > "$tail_file" <<'JSONL'
-{"uuid":"aaaaaaaa-1111-2222-3333-444444444444","type":"assistant"}
-{"uuid":"bbbbbbbb-1111-2222-3333-444444444444","type":"user"}
-JSONL
-citation_items='[
-  {"id":"c1","after":"stood: did the thing [turn aaaaaaaa]","before":""},
-  {"id":"c2","after":"stood: fabricated [turn ffffffff]","before":""},
-  {"id":"c3","after":"no citation at all","before":""}
-]'
-out="$(desk_verify_and_strip_turn_citations "$citation_items" "$tail_file")"
-assert_eq "the valid and uncited items survive, the fabricated one is dropped" "2" "$(jq 'length' <<< "$out")"
-assert_true "c1 survives" "$(jq -e '[.[].id] | index("c1")' > /dev/null 2>&1 <<< "$out" && echo true || echo false)"
-assert_true "c2 (fabricated citation) is dropped" \
-	"$(jq -e '[.[].id] | index("c2")' > /dev/null 2>&1 <<< "$out" && echo false || echo true)"
-assert_true "the citation marker itself is stripped from surviving text" \
-	"$(jq -r '.[] | select(.id == "c1") | .after' <<< "$out" | grep -q '\[turn' && echo false || echo true)"
 
 echo
 echo "=== summary: $pass passed, $fail failed ==="
