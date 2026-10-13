@@ -299,6 +299,16 @@
             "timeout": 5
           }
         ]
+      },
+      {
+        "matcher": "compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/dotfiles/claude/hooks/compact-handoff.sh session-start",
+            "timeout": 5
+          }
+        ]
       }
     ],
     "SessionEnd": [
