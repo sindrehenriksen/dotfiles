@@ -299,9 +299,21 @@ assert_contains "and its brief says where it stopped" "- How it went: failed at 
 assert_contains "the held ones go with it, oldest first" "oldest first: 2026-10-13, 2026-10-14, 2026-10-15" "$m"
 
 echo
-echo "=== a weekend slot of a weekdays-only pass makes no brief of its own ==="
+echo "=== a rerun clears the run's old judgement, so it is judged again ==="
+echo '{"items": []}' > "$DESK_RUNS_ROOT/testpass-2026-10-15/judgement.json"
+DESK_CONFIG="$ROOT/cfg-fail.json" DESK_NOW="$(day 2026-10-15)" TZ=UTC "$DESK_RUN" testpass --rerun > "$ROOT/run.out" 2>&1
+assert_true "the old judgement.json is gone" "$([ ! -e "$DESK_RUNS_ROOT/testpass-2026-10-15/judgement.json" ] && echo true || echo false)"
+
+echo
+echo "=== a weekend slot of a weekdays-only pass makes no brief of its own, but sends one waiting ==="
+sessions <<< "$CENTRAL central-x false"
+run 2026-10-16
+sessions <<< "$CENTRAL central-x true"
+before="$(sent_n)"
 jq '.passes.testpass.weekdays_only = true' "$cfg" > "$ROOT/cfg-wk.json"
 DESK_CONFIG="$ROOT/cfg-wk.json" DESK_NOW="$(day 2026-10-17)" TZ=UTC "$DESK_RUN" testpass > "$ROOT/run.out" 2>&1
+assert_eq "the Saturday run sends the Friday brief that waited" "$((before + 1))" "$(sent_n)"
+assert_contains "naming that run" "Run directory: $DESK_RUNS_ROOT/testpass-2026-10-16" "$(jq -rs '.[-1].message' "$BRIEF_TEST_SENT")"
 assert_true "no run directory brief for the Saturday" "$([ ! -e "$DESK_RUNS_ROOT/testpass-2026-10-17/brief.pending" ] && [ ! -e "$DESK_RUNS_ROOT/testpass-2026-10-17/brief.sent" ] && echo true || echo false)"
 assert_true "and the log says why" "$(grep -q 'brief: weekend slot' "$ROOT/run.out" && echo true || echo false)"
 
