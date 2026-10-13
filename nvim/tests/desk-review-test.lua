@@ -2591,6 +2591,22 @@ do
 		return m:match("couldn't make the window full height") ~= nil
 	end, said)
 	assert_eq("Hammerspoon not answering is said once, not at every open", 1, #warned)
+
+	-- A helper that was never linked into PATH (install_symlinks.sh not run)
+	-- must be said, where it expected, not silently skipped.
+	local missing = vim.fn.tempname() .. "/desk-window.sh"
+	vim.env.DESK_WINDOW_BIN = missing
+	local replies = {}
+	local expected = window.helper_expected
+	for _, want in ipairs({ true, false }) do
+		window.helper_expected = want
+		window.default_run({ "tall", "ttys009", "4242" }, function(ok_, out)
+			replies[#replies + 1] = { ok_, out ~= nil and out:find(missing, 1, true) ~= nil }
+		end)
+	end
+	window.helper_expected = expected
+	vim.env.DESK_WINDOW_BIN = nil
+	assert_eq("a missing helper is named where the dotfiles install it, and silent elsewhere", { { false, true }, { false, false } }, replies)
 	fresh()
 end
 

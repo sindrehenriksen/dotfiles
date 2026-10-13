@@ -5,8 +5,10 @@
 -- its own terminal by tty and foreground pid; Hammerspoon finds that
 -- terminal's window, decides whether it has a full-height form, keeps the
 -- frame it left, and puts it back only while the window is still where the
--- stretch left it. Without the helper on PATH (Linux, or not installed), or
--- when nvim can't name its terminal, nothing happens.
+-- stretch left it. Without the helper on PATH, or when nvim can't name its
+-- terminal, nothing happens; on macOS, where install_symlinks.sh puts the
+-- helper on PATH, a missing one is said once, since a Hammerspoon-driven
+-- stretch that silently never runs looks like a stretch that doesn't work.
 --
 -- What the window should be is kept apart from what was last asked of
 -- Hammerspoon. One call runs at a time, and each one, when it comes back,
@@ -21,6 +23,9 @@
 local M = {}
 
 M.TIMEOUT_MS = 10000
+-- Where the helper is installed by the dotfiles, so a missing one is a fault
+-- worth saying rather than "not this platform".
+M.helper_expected = vim.uv.os_uname().sysname == "Darwin"
 
 local want = false -- the overview is open
 local asked = false -- Hammerspoon may hold a stretch for this terminal
@@ -37,7 +42,7 @@ function M.default_run(args, cb, sync)
 	local v = vim.env.DESK_WINDOW_BIN
 	local cmd = (v and v ~= "") and v or "desk-window.sh"
 	if vim.fn.executable(cmd) ~= 1 then
-		cb(false, nil)
+		cb(false, M.helper_expected and (cmd .. " is not on PATH (install_symlinks.sh links it)") or nil)
 		return
 	end
 	local argv = { cmd }
