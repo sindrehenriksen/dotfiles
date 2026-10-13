@@ -248,6 +248,51 @@ on(LOOSE, "an anchor quoted with the runner's agent mark still finds its line", 
 	it("b", "add", { under = "Alpha  <<agent-suggested>>" }, "", "- a2"),
 }, { "- WK: loose one", "- WK: loose two", "", "Alpha", "- a1", "- a2", "", "Bravo", "- b1" })
 
+print("=== a quoted line matches a committed one apart from trailing whitespace and the agent mark ===")
+-- Committed lines that end in whitespace, quoted without it: bare, and with
+-- the mark appended the way a judge echoes its input copy.
+local TRAILING = { "Alpha ", "- a1 ", "- a2", "", "Bravo", "- b1\t" }
+for _, quote in ipairs({
+	{ "bare", function(l)
+		return l
+	end },
+	{ "marked", function(l)
+		return l .. "  <<agent-suggested>>"
+	end },
+}) do
+	local q = quote[2]
+	on(TRAILING, "an edit replaces its line in place (" .. quote[1] .. ")", {
+		it("ed", "edit", { at = q("- a1") }, q("- a1"), "- A1"),
+	}, { "Alpha ", "- A1", "- a2", "", "Bravo", "- b1\t" })
+	on(TRAILING, "a removal removes its line (" .. quote[1] .. ")", {
+		it("rm", "remove", { at = q("- a1") }, q("- a1")),
+	}, { "Alpha ", "- a2", "", "Bravo", "- b1\t" })
+	on(TRAILING, "a move leaves its line and lands at its anchor (" .. quote[1] .. ")", {
+		it("mv", "move", { { at = q("- a1") }, { under = "Bravo" } }, q("- a1"), "- a1"),
+	}, { "Alpha ", "- a2", "", "Bravo", "- b1\t", "- a1" })
+	on(TRAILING, "a merge leaves its lines and lands after its anchor (" .. quote[1] .. ")", {
+		it("mg", "merge", { { at = q("- a1") }, { after = q("- b1") } }, q("- a1") .. "\n" .. q("- a2"), "- a1 and a2"),
+	}, { "Alpha ", "", "Bravo", "- b1\t", "- a1 and a2" })
+	on(TRAILING, "an insertion lands under its heading (" .. quote[1] .. ")", {
+		it("ad", "add", { under = q("Alpha") }, "", "- a3"),
+	}, { "Alpha ", "- a1 ", "- a2", "- a3", "", "Bravo", "- b1\t" })
+end
+-- Two lines that differ only in trailing whitespace: an exact quote is the
+-- line it quotes, wherever the other one stands.
+local TWINS = { "Alpha", "- a1", "- a1 ", "- a2" }
+on(TWINS, "an exact quote picks its own line over an earlier loose match", {
+	it("ed", "edit", { at = "- a1 " }, "- a1 ", "- A1"),
+}, { "Alpha", "- a1", "- A1", "- a2" })
+on(TWINS, "and lands an insertion under it", {
+	it("ad", "add", { after = "- a1 " }, "", "- a1b"),
+}, { "Alpha", "- a1", "- a1 ", "- a1b", "- a2" })
+on({ "Alpha", "ok", "ok ", "- a2" }, "a quote too short to search on is found by its exact lines first", {
+	it("rm", "remove", { at = "ok " }, "ok "),
+}, { "Alpha", "ok", "- a2" })
+on(TRAILING, "an exact quote with the mark appended still finds its line", {
+	it("ed", "edit", { at = "- a1   <<agent-suggested>>" }, "- a1   <<agent-suggested>>", "- A1"),
+}, { "Alpha ", "- A1", "- a2", "", "Bravo", "- b1\t" })
+
 print(string.format("\n=== summary: %d passed, %d failed ===", pass, fail))
 if fail > 0 then
 	os.exit(1)

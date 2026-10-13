@@ -85,12 +85,14 @@ function M.is_heading(lines, i)
 	return not bullet or (lines[i + 1] ~= nil and lines[i + 1]:match("^%s+%S") ~= nil)
 end
 
---- The first line index (1-indexed) whose content equals `quote` exactly
---- (plain comparison, never a pattern), or nil if it's too short to trust
---- or doesn't appear. Ambiguity (more than one exact match) resolves to the
---- first — a genuinely repeated heading-less line is rare.
+--- The first line index (1-indexed) whose content is `quote` (as
+--- desk.snippet.same_line compares them: trailing whitespace and the agent
+--- mark aside, never a pattern), or nil if it's too short to trust or
+--- doesn't appear. Ambiguity (more than one match) resolves to the
+--- first exact one, else the first — a genuinely repeated heading-less line
+--- is rare.
 function M.find_line(lines, quote)
-	if not quote or #quote < MIN_QUOTE_LEN then
+	if not quote or #snippet.line_key(quote) < MIN_QUOTE_LEN then
 		return nil
 	end
 	for i, line in ipairs(lines) do
@@ -98,20 +100,22 @@ function M.find_line(lines, quote)
 			return i
 		end
 	end
+	for i, line in ipairs(lines) do
+		if snippet.same_line(line, quote) then
+			return i
+		end
+	end
 	return nil
 end
 
--- The mark the runner appends to a taken suggestion's lines in the copies a
--- call reads (claude/desk-lib/steps.sh, DESK_AGENT_MARK). The runner strips
--- it from an item's anchors; this keeps an item staged before it did from
--- landing on top for a line it quoted with the mark.
-local AGENT_MARK = "  <<agent-suggested>>"
-
+-- The runner strips the agent mark from an item's anchors, and every
+-- comparison ignores it; stripping it here too keeps it out of a quote shown
+-- to the user (the line an item waits on).
 local function unmarked(quote)
 	if type(quote) ~= "string" then
 		return quote
 	end
-	return (quote:gsub(vim.pesc(AGENT_MARK), ""))
+	return snippet.unmark(quote)
 end
 
 --- Parses one wire-shape anchor — the string `"top"`, or a single-key table `{under=...}` |
@@ -164,17 +168,20 @@ end
 ---
 --- `before` (an `at` anchor's own lines) stands in for a quote too short or
 --- blank to search on, such as a line `ok`: the first place those lines sit
---- together, nil when they don't.
+--- together exactly, else the first they sit together at all, nil when they
+--- don't.
 function M.find_anchor(lines, anchor, before)
 	if not anchor or anchor.kind == "top" then
 		return 0
 	end
 	if anchor.kind == "at" and before and #before > 0 then
 		local q = anchor.quote
-		if type(q) ~= "string" or #q < MIN_QUOTE_LEN or is_blank(q) then
-			for pos = 1, #lines - #before + 1 do
-				if snippet.lines_match_at(lines, pos, before) then
-					return pos - 1
+		if type(q) ~= "string" or #snippet.line_key(q) < MIN_QUOTE_LEN then
+			for _, exact in ipairs({ true, false }) do
+				for pos = 1, #lines - #before + 1 do
+					if snippet.lines_match_at(lines, pos, before, exact) then
+						return pos - 1
+					end
 				end
 			end
 			return nil

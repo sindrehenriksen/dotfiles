@@ -451,7 +451,7 @@ function M.open_items(repo)
 	return out
 end
 
-local canon = ledger.canon
+local canon = ledger.canon_target
 
 local in_place_kind = { edit = true, remove = true, move = true, merge = true }
 
@@ -505,7 +505,7 @@ local function waits_for(item, head, work)
 	local before = snippet.split_lines(item.before or "")
 	if in_place_kind[item.kind] and #before > 0 and not M.contains(head, before) and M.contains(work, before) then
 		for _, l in ipairs(before) do
-			if not vim.tbl_contains(head, l) then
+			if not M.contains(head, { l }) then
 				return l
 			end
 		end

@@ -7,6 +7,7 @@
 -- exclusion). This module reads it and appends to it through the
 -- compare-and-swap-with-retry helper.
 local git = require("desk.git")
+local snippet = require("desk.snippet")
 
 local M = {}
 
@@ -142,8 +143,34 @@ function M.canon(v)
 	return "{" .. table.concat(parts, ",") .. "}"
 end
 
+-- Whitespace collapsed, and the agent mark off each line, as placement
+-- reads a quote.
 local function norm_text(t)
-	return ((t or ""):gsub("%s+", " "):gsub("^ ", ""):gsub(" $", ""))
+	local lines = vim.tbl_map(snippet.unmark, (snippet.split_lines(t or "")))
+	return (table.concat(lines, "\n"):gsub("%s+", " "):gsub("^ ", ""):gsub(" $", ""))
+end
+
+--- `target` as canon writes it, each quoted line read as placement compares
+--- it (desk.snippet.line_key), so two quotes of one line are one target.
+function M.canon_target(target)
+	if type(target) == "string" then
+		return M.canon(snippet.line_key(target))
+	end
+	if type(target) ~= "table" then
+		return M.canon(target)
+	end
+	if vim.islist(target) then
+		local parts = {}
+		for _, x in ipairs(target) do
+			parts[#parts + 1] = M.canon_target(x)
+		end
+		return "[" .. table.concat(parts, ",") .. "]"
+	end
+	local keyed = {}
+	for k, v in pairs(target) do
+		keyed[k] = type(v) == "string" and snippet.line_key(v) or v
+	end
+	return M.canon(keyed)
 end
 
 --- What an item says, independent of its id: file, kind, target and the
@@ -154,7 +181,7 @@ function M.content_key(item)
 	return table.concat({
 		item.file or "",
 		item.kind or "",
-		M.canon(item.target == nil and "" or item.target),
+		M.canon_target(item.target == nil and "" or item.target),
 		norm_text(item.before),
 		norm_text(item.after),
 	}, "\31")

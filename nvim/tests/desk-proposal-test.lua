@@ -290,6 +290,23 @@ do
 	assert_eq("only the newer edit remains", { "second edit" }, vim.tbl_map(function(it) return it.headline end, proposal.read(r).items))
 end
 
+print("\n=== two quotes of one line are one target: a supersede and a decline see through trailing whitespace and the mark ===")
+do
+	local function edit(id, at, after, headline)
+		return item(id, { kind = "edit", target = { at = at }, before = at, after = after, source = "notes", headline = headline })
+	end
+	local r = new_repo({ "Section A", "  - ping Kari " })
+	proposal.build(r, "morning", "2026-10-01", { edit("e1", "  - ping Kari", "  - ping Kari today", "first edit") }, FILES)
+	local _, st = proposal.build(r, "morning", "2026-10-02", { edit("e2", "  - ping Kari   <<agent-suggested>>", "  - ping Kari tomorrow", "second edit") }, FILES)
+	assert_eq("the carried edit quoted without the space is superseded by one quoting it marked", 1, st.superseded)
+	assert_eq("only the newer edit remains", { "second edit" }, vim.tbl_map(function(it)
+		return it.headline
+	end, proposal.read(r).items))
+	ledger.record_declines(r, proposal.read(r).items)
+	local _, st2 = proposal.build(r, "morning", "2026-10-03", { edit("e3", "  - ping Kari ", "  - ping Kari tomorrow", "regenerated") }, FILES)
+	assert_eq("a declined edit regenerated with the line quoted exactly is blocked", { 0, 0 }, { st2.new, #proposal.read(r).items })
+end
+
 print("\n=== presence is judged at the anchored occurrence, not anywhere in the file ===")
 do
 	-- an add whose line exists elsewhere is still proposed
@@ -554,6 +571,24 @@ do
 		end
 	end
 	assert_eq("...and none still carries deferred or waits_for", {}, leftover)
+end
+
+print("=== an item quoting a line without its trailing whitespace, marked, acts on that line ===")
+do
+	-- A committed line ending in a space, quoted the way a judge echoes its
+	-- marked input copy: the space gone, the mark appended.
+	local r = new_repo({ "Section A", "- a1", "- stale line ", "", "Section B", "- b1 ", "- b2" })
+	local function q(l)
+		return l .. "  <<agent-suggested>>"
+	end
+	local _, st = proposal.build(r, "morning", "2026-10-01", {
+		item("ed", { kind = "edit", target = { at = q("- stale line") }, before = q("- stale line"), after = "- fresh line", source = "notes" }),
+		item("rm", { kind = "remove", target = { at = q("- b1") }, before = q("- b1"), after = "", source = "notes" }),
+	}, FILES)
+	assert_eq("both are staged and applied", { 2, 2, 0 }, { st.new, st.applied, st.deferred })
+	assert_eq("the edit replaces its line in place, and the removal removes its own", {
+		"Section A", "- a1", "- fresh line", "", "Section B", "- b2",
+	}, tip_lines(r, "notes.md"))
 end
 
 print(string.format("\n=== summary: %d passed, %d failed ===", pass, fail))

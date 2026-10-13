@@ -33,12 +33,40 @@ function M.join_lines(lines, trailing_nl)
 	return text
 end
 
---- True if lines[pos .. pos + #snippet - 1] equals `snippet` exactly,
---- position and line count both — never a scan for the snippet elsewhere.
+-- The mark the runner appends to a taken suggestion's lines in the copies a
+-- call reads (claude/desk-lib/steps.sh, DESK_AGENT_MARK), with whatever
+-- whitespace precedes it: a line that already ended in a space reaches the
+-- call with three spaces before the mark, and a model echoing it need not
+-- keep the count.
+local AGENT_MARK_PAT = "%s*<<agent%-suggested>>%s*$"
+
+--- `line` without the agent mark.
+function M.unmark(line)
+	return (line:gsub(AGENT_MARK_PAT, ""))
+end
+
+--- `line` as quotes are compared: without the agent mark and without
+--- trailing whitespace, which a model quoting a line cannot be relied on to
+--- reproduce and which the user cannot see.
+function M.line_key(line)
+	return (M.unmark(line):gsub("%s+$", ""))
+end
+
+--- Whether two lines are the same line, as every comparison of a snippet
+--- with the text makes it (lines_match_at, so placement and the checks for
+--- an item already applied, taken or removed alike): equal once each is
+--- read as line_key reads it.
+function M.same_line(a, b)
+	return a == b or (a ~= nil and b ~= nil and M.line_key(a) == M.line_key(b))
+end
+
+--- True if lines[pos .. pos + #snippet - 1] equals `snippet` (each line as
+--- same_line compares them, or exactly with `exact`), position and line
+--- count both — never a scan for the snippet elsewhere.
 --- An empty snippet always matches (a zero-width point) at any `pos` from
 --- 1 to #lines + 1, which is what lets a pure insertion or a pure removal
 --- (`before`/`after` of length 0) share this one check.
-function M.lines_match_at(lines, pos, snippet)
+function M.lines_match_at(lines, pos, snippet, exact)
 	if pos == nil or pos < 1 then
 		return false
 	end
@@ -49,7 +77,8 @@ function M.lines_match_at(lines, pos, snippet)
 		return false
 	end
 	for i = 1, #snippet do
-		if lines[pos + i - 1] ~= snippet[i] then
+		local line = lines[pos + i - 1]
+		if line ~= snippet[i] and (exact or not M.same_line(line, snippet[i])) then
 			return false
 		end
 	end
