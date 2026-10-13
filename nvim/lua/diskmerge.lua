@@ -157,8 +157,10 @@ end
 -- Without this the first `:w` after a merge stops on "changed since reading
 -- it": nvim keeps the read time apart from the timestamp the event updates,
 -- and nothing short of reloading the file moves it. So that one write runs
--- as `:w!`, the merge having shown what is on disk. Once, then ordinary
--- writes again, nested so the usual write autocommands still run.
+-- as `:w!`, the merge having shown what is on disk, but only while the disk
+-- still holds what it showed: after a third writer the write is a plain one,
+-- so nvim's own warning stops it. Once, then ordinary writes again, nested
+-- so the usual write autocommands still run.
 local function write_past_mtime_check(buf)
 	local group = vim.api.nvim_create_augroup("diskmerge_write_" .. buf, { clear = true })
 	vim.api.nvim_create_autocmd("BufWriteCmd", {
@@ -178,7 +180,21 @@ local function write_past_mtime_check(buf)
 			local own = full(args.file) == full(vim.api.nvim_buf_get_name(buf))
 			vim.api.nvim_buf_call(buf, function()
 				if own then
-					vim.cmd("write!")
+					local disk = M.read_disk(buf)
+					if disk and hash(disk) == vim.b[buf].diskmerge_seen then
+						vim.cmd("write!")
+					else
+						pcall(vim.cmd, vim.v.cmdbang == 1 and "write!" or "write")
+						write_past_mtime_check(buf)
+						-- Declined, nvim takes the change as seen and checktime
+						-- would never show it: the split shows it now instead.
+						if vim.bo[buf].modified and disk then
+							pending[buf] = pending[buf] or {}
+							vim.schedule(function()
+								M.try_open(buf)
+							end)
+						end
+					end
 				else
 					vim.cmd((vim.v.cmdbang == 1 and "write! " or "write ") .. vim.fn.fnameescape(args.file))
 					write_past_mtime_check(buf)

@@ -185,6 +185,28 @@ vim.cmd("buffer " .. buf)
 settle()
 assert_eq("shown, its merge opens", { "theirs" }, diskmerge.scratch_for(buf) and lines(diskmerge.scratch_for(buf)))
 
+-- --- a third writer after the merge showed theirs: no forced write ----------
+
+do
+	local p3, b3, w3 = fresh({ "one" })
+	vim.api.nvim_buf_set_lines(b3, 0, -1, false, { "mine" })
+	write(p3, { "theirs" })
+	vim.cmd("checktime")
+	settle()
+	assert_eq("the merge shows theirs", { "theirs" }, diskmerge.scratch_for(b3) and lines(diskmerge.scratch_for(b3)))
+	write(p3, { "a third writer" })
+	vim.api.nvim_set_current_win(w3)
+	-- nvim's own changed-since-reading question, answered no.
+	vim.api.nvim_feedkeys("n", "t", false)
+	pcall(vim.cmd, "silent write")
+	assert_eq("a write after a change the merge has not shown is not forced over it", { "a third writer" }, vim.fn.readfile(p3))
+	assert_eq("the buffer keeps mine", { "mine" }, lines(b3))
+	settle()
+	assert_eq("declined, the merge shows the third writer's", { "a third writer" }, lines(diskmerge.scratch_for(b3)))
+	vim.cmd("silent write")
+	assert_eq("and the write after that goes through", { "mine" }, vim.fn.readfile(p3))
+end
+
 finished = true
 print(string.format("\n=== summary: %d passed, %d failed ===", pass, fail))
 os.exit(fail == 0 and 0 or 1)
