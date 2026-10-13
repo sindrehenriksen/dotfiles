@@ -31,6 +31,7 @@ check "pre: carries both prompt sections" '[[ $out == *"keep-list guidance"* && 
 check "pre: stops before Delivering" '[[ $out != *"fence guidance"* ]]'
 check "pre: asks for the kick-off section" '[[ $out == *"## Suggested kick-off"* ]]'
 check "pre: asks for the waiting-on-you section" '[[ $out == *"## Waiting on you"* ]]'
+check "pre: keeps the kick-off from restating it" '[[ $out == *"does not restate those items"* ]]'
 
 out=$(echo '{"trigger":"manual","custom_instructions":"handoff prompt"}' | "$HOOK" pre)
 check "pre: adds nothing to given instructions" '[ -z "$out" ]'
@@ -91,8 +92,7 @@ out=$(jq -n --arg s "$summary" '{session_id:"w3",compact_summary:$s}' | "$HOOK" 
 check "post: waiting without a kick-off still shows" '[[ $out == *"Approve the merge."* && $out != *"Suggested kick-off"* ]]'
 
 out=$(echo '{"hook_event_name":"SessionStart","source":"compact"}' | "$HOOK" session-start)
-check "session-start: says to re-read from disk" '[[ $out == *"re-read it from disk"* && $out == *"no longer exists no longer applies"* ]]'
-check "session-start: limits re-reading to what is relevant" '[[ $out == *"still relevant to the work in hand"* ]]'
+check "session-start: says to re-read what is relevant from disk" '[[ $out == *"still relevant to the work in hand, re-read it from disk"* ]]'
 check "session-start: is plain text" '[[ $out != "{"* ]]'
 check "settings: the compact matcher runs session-start" '[ "$(jq -r '"'"'.hooks.SessionStart[] | select(.matcher == "compact") | .hooks[0].command'"'"' "$HERE/../settings.json")" = "\$HOME/dotfiles/claude/hooks/compact-handoff.sh session-start" ]'
 

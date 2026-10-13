@@ -37,12 +37,12 @@ local owner_cache = nil
 
 --- The default runner: `desk-window.sh <args...>`, `cb(ok, output)` on the
 --- main loop. With `sync`, waits for it (for VimLeavePre). `ok` false with
---- a nil output means there is no helper.
+--- a nil output means there is no helper and none was expected (not macOS).
 function M.default_run(args, cb, sync)
 	local v = vim.env.DESK_WINDOW_BIN
 	local cmd = (v and v ~= "") and v or "desk-window.sh"
 	if vim.fn.executable(cmd) ~= 1 then
-		cb(false, M.helper_expected and (cmd .. " is not on PATH (install_symlinks.sh links it)") or nil)
+		cb(false, M.helper_expected and (cmd .. " not found or not executable (install_symlinks.sh links it onto PATH)") or nil)
 		return
 	end
 	local argv = { cmd }

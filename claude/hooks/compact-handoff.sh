@@ -63,7 +63,7 @@ pre() {
     cat <<EOF
 Write this summary per Prompt 1 below. End it with a section headed exactly \`$HEADING\`:
 a kick-off per Prompt 2, in plain text, for the user to edit and send. Nothing in it is acted on until they do.
-Before it, a section headed exactly \`$WAITING\`: what is waiting on the user (open decisions, pending gos, things for them to try or review), one line each, or empty if nothing is. The earlier conversation is cleared from their screen, so this is where they see it again.
+Before it, a section headed exactly \`$WAITING\`: what the user must do or decide (open decisions, pending gos, things for them to try or review), one line each, or empty if nothing is. The earlier conversation is cleared from their screen, so this is where they see it again. The kick-off does not restate those items.
 
 $guidance
 EOF
