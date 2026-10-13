@@ -570,7 +570,10 @@ echo
 echo "=== the user's own moves are counted, never sent ==="
 jq --arg s "$SID_A" '.queues[$s].changes = [] | .queues[$s].skipped = {}' "$DESK_FOLLOW_STATE_FILE" > "$ROOT/s" && mv "$ROOT/s" "$DESK_FOLLOW_STATE_FILE"
 own_t="$(date -u -v+2H +%Y-%m-%dT%H:%M:%S.000+0000 2> /dev/null || date -u -d '+2 hour' +%Y-%m-%dT%H:%M:%S.000+0000)"
-issue ABC-1 "In QA" "" "[$(link LNK-7)]" "[$(cmt 907 "github-actions" "Deployed to dev"),$(cmt 908 "Dev One" "QA found a gap in the plan."),$(cmt 909 "Owner Person" "Answered QA: the gap is out of scope." "$own_t")]" | rest > "$FIX/changes-result.json"
+{
+	issue ABC-1 "In QA" "" "[$(link LNK-7)]" "[$(cmt 907 "github-actions" "Deployed to dev"),$(cmt 908 "Dev One" "QA found a gap in the plan."),$(cmt 909 "Owner Person" "Answered QA: the gap is out of scope." "$own_t")]"
+	issue ABC-15 "To Do" ABC-1 | jq -c --arg t "$own_t" '.fields.created = $t | .fields.creator = {displayName: "Owner Person"} | .fields.summary = "A child the user filed"'
+} | rest > "$FIX/changes-result.json"
 pr 41 "[ABC-1] The owner's PR" "abc-1-own" OPEN h1 | jq -s '.[0].author = {login: "owner1"} | .[0].updatedAt = "2026-10-07T09:00:00Z"' > "$FIX/prs.json"
 echo '{"comments":[],"reviews":[]}' > "$FIX/pr-41.json"
 "$RUN" follow > /dev/null 2>&1
@@ -583,6 +586,8 @@ jq -n --arg t "$own_t" '{comments:[
 "$RUN" follow > /dev/null 2>&1
 msg="$(jq -r .message "$FOLLOW_TEST_SENT")"
 assert_not_contains "the user's own ticket comment is not sent" "Answered QA" "$msg"
+assert_not_contains "nor a ticket the user created" "A child the user filed" "$msg"
+assert_contains "which the footer counts" "1 own ticket" "$msg"
 assert_not_contains "nor the user's own PR comment" "Merging now" "$msg"
 assert_not_contains "nor the user's review" "Self-review" "$msg"
 assert_not_contains "nor the moves on the user's own PR" "now merged" "$msg"

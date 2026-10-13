@@ -233,7 +233,7 @@ def ticket_events:
 	        # The ticket digest has no follow for a ticket to be new to, and a
 	        # ticket created in its window is the new-tickets fetch's to report.
 	        ((($i.created | ts) // 0) > $jira_since) as $created
-	        | { key: $i.key, title: $i.summary, at: (($i.updated | ts) // $now),
+	        | { key: $i.key, title: $i.summary, at: (($i.updated | ts) // $now), creator: ($i.creator // null),
 	            skip: (if $digest then (if $created then "new tickets" else "first-seen tickets" end)
 	                   elif $created or (($i.parent != null) and (all_keys | index($i.parent)) != null and ($lookback | not))
 	                   then null else "first-seen tickets" end),
@@ -370,15 +370,19 @@ def ticket_index:
 
 # The user's own moves are counted, by both the follow pass and the ticket
 # digest, and the digest's own counting rules on top, applied to events
-# still forwarded. A ticket's field changes carry no author, so only its
-# comments can be told apart.
+# still forwarded. A ticket's own creation is told apart by its creator and
+# its comments by their author; its field changes carry no author in a
+# search result, so they are forwarded whoever made them.
 (.ticket_digest_rules.self // .self // []) as $self
 | (.ticket_digest_rules.pr_skip_authors // []) as $pr_skip_authors
 | (.ticket_digest_rules.pr_keep // null) as $pr_keep
 |
 def is_self($who): ($who // "") as $w | any($self[]; ascii_downcase == ($w | ascii_downcase));
 def skip_unless($kind): if .skip == null then .skip = $kind else . end;
-def own_ticket_rules: if .author != null and is_self(.author) then skip_unless("own posts") else . end;
+def own_ticket_rules:
+	if .author != null and is_self(.author) then skip_unless("own posts")
+	elif .creator != null and is_self(.creator) then skip_unless("own tickets")
+	else . end;
 def own_pr_rules:
 	if .author != null then (if is_self(.author) then skip_unless("own posts") else . end)
 	elif is_self(.pr_author) then skip_unless("own PR moves")

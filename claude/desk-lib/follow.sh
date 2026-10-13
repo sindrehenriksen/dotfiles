@@ -254,7 +254,7 @@ desk_follow_interval_minutes() {
 # --- fetching ------------------------------------------------------------------
 
 DESK_FOLLOW_SCOPE_FIELDS='["summary","status","issuetype","parent","issuelinks","assignee","labels","resolution","updated","created"]'
-DESK_FOLLOW_CHANGE_FIELDS='["summary","status","issuetype","parent","issuelinks","assignee","labels","resolution","updated","created","comment","description"]'
+DESK_FOLLOW_CHANGE_FIELDS='["summary","status","issuetype","parent","issuelinks","assignee","labels","resolution","updated","created","creator","comment","description"]'
 
 # One Jira search result issue to the shape follow-diff.jq reads.
 _DESK_FOLLOW_NORM_ISSUE='
@@ -271,6 +271,7 @@ _DESK_FOLLOW_NORM_ISSUE='
 	    done: (($f.status.statusCategory.key // "") == "done"),
 	    type: ($f.issuetype.name // null),
 	    assignee: ($f.assignee.displayName // null),
+	    creator: ($f.creator.displayName // null),
 	    parent: ($f.parent.key // null),
 	    resolution: ($f.resolution.name // null),
 	    labels: (($f.labels // []) | sort),
