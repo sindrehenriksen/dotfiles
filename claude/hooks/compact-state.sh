@@ -4,12 +4,11 @@
 # from the summary's account of it. Called by compact-handoff.sh session-start
 # with the SessionStart hook input on stdin; runs by hand the same way.
 #
-#   git     The repo at the input's `cwd`, if it is one: every worktree with
-#           its branch, which are dirty, and how many commits each has that
-#           are not on its upstream (or, without one, on no remote at all).
-#           The cwd's worktree comes first, then the dirty and unpushed ones,
-#           then the rest, up to COMPACT_STATE_MAX_WORKTREES (default 10);
-#           the line after says how many were left out and what they hold.
+#   git     The worktrees this session has worked in: every directory with
+#           a `.git` that holds a path the transcript mentions (absolute, or
+#           under `~/`), plus the cwd's. For each, its branch, how many files
+#           are uncommitted, and how many commits are not on its upstream (or,
+#           without one, on no remote at all). The cwd's comes first.
 #   agents  Background agents this session started that have not reported
 #           back. Read from Claude Code's own files, which are undocumented:
 #           <session>/subagents/agent-<id>.meta.json marks an agent started in
@@ -26,24 +25,19 @@
 #           a workspace's own additions, mirroring COMPACT_HANDOFF_LAYERS.
 #           Each runs with no arguments, stdin from /dev/null, and
 #           COMPACT_STATE_SESSION_ID, COMPACT_STATE_TRANSCRIPT and
-#           COMPACT_STATE_CWD set from the hook input; its stdout is appended,
-#           cut at COMPACT_STATE_MAX_LINES (default 20) lines. All of them run
-#           at once, each limited to COMPACT_STATE_TIMEOUT seconds (default
-#           2); one that runs over is killed and named, one that fails is
-#           named with its exit code and first line of stderr.
+#           COMPACT_STATE_CWD set from the hook input; its stdout is
+#           appended in full, since a command whose output is too long needs
+#           fixing rather than cropping. One that fails is named with its exit
+#           code and first line of stderr.
 #
-# The whole block stays well inside the hook's 5 s timeout: the git reads and
-# the commands run in parallel under the same limit. Nothing here makes the
-# hook fail; a read that fails says so in the block.
+# Nothing is bounded but time: the reads and the commands run in parallel
+# under one failsafe, COMPACT_STATE_TIMEOUT seconds (default 20, inside the
+# hook's own 30 in settings.json), and whatever is still running then is
+# killed and named. Nothing here makes the hook fail; a read that fails says
+# so in the block.
 set -u
 
-TIMEOUT="${COMPACT_STATE_TIMEOUT:-2}"
-MAX_WT="${COMPACT_STATE_MAX_WORKTREES:-10}"
-MAX_LINES="${COMPACT_STATE_MAX_LINES:-20}"
-MAX_AGENTS=8
-# Worktrees past this many are listed but not checked, so a repo with very
-# many cannot spend the time budget on status calls.
-MAX_CHECKED=40
+TIMEOUT="${COMPACT_STATE_TIMEOUT:-20}"
 
 JOBS=$(mktemp -d) || exit 0
 trap 'rm -rf "$JOBS"' EXIT
@@ -113,140 +107,75 @@ reap() {
     done
 }
 
-# Prints at most MAX_LINES lines of a file, and a line saying how many it cut.
-capped() {
-    local n
-    n=$(wc -l <"$1" | tr -d ' ')
-    head -n "$MAX_LINES" "$1"
-    [ "$n" -gt "$MAX_LINES" ] && echo "  ($((n - MAX_LINES)) more lines cut)"
+# The worktree roots this session has touched: the nearest ancestor holding a
+# `.git` of each home-directory path the transcript mentions, and the cwd's.
+# A trailing slash or full stop is dropped, so `dir/` and a sentence ending in
+# a path count as the path.
+touched_worktrees() {
+    local cwd=$1 transcript=$2 p
+    git -C "$cwd" rev-parse --show-toplevel 2>/dev/null
+    [ -r "$transcript" ] || return 0
+    grep -oE "(~|$HOME)/[A-Za-z0-9._/-]+" "$transcript" 2>/dev/null | sed -e "s|^~/|$HOME/|" -e 's|[./]*$||' | sort -u |
+        while IFS= read -r p; do
+            while [ "${#p}" -gt "${#HOME}" ]; do
+                if [ -e "$p/.git" ]; then echo "$p"; break; fi
+                p=${p%/*}
+            done
+        done
 }
 
-# Prints a worktree's count of uncommitted files, then its count of commits on
-# no remote: needed only for a branch with no upstream to count against,
-# which the for-each-ref in git_block covers in one call.
+# One worktree's line, from a single `status --porcelain=v2 --branch`: its
+# branch, uncommitted files, and commits not on its upstream (or, with no
+# upstream or a gone one, on no remote).
 wt_check() {
-    local wt=$1 ref=$2 status
-    status=$(git -C "$wt" status --porcelain --untracked-files=normal) || return 1
-    if [ -n "$status" ]; then wc -l <<<"$status" | tr -d ' '; else echo 0; fi
-    if [ -n "$ref" ]; then git -C "$wt" rev-list --count "$ref" --not --remotes || return 1; else echo; fi
+    local wt=$1 status head up ab dirty notes=() n
+    status=$(git -C "$wt" status --porcelain=v2 --branch --untracked-files=normal) || return 1
+    head=$(sed -n 's/^# branch.head //p' <<<"$status")
+    up=$(sed -n 's/^# branch.upstream //p' <<<"$status")
+    ab=$(sed -n 's/^# branch.ab +\([0-9]*\) .*/\1/p' <<<"$status")
+    dirty=$(grep -vc '^#' <<<"$status")
+    [ "$dirty" -gt 0 ] && notes+=("dirty: $(plural "$dirty" file)")
+    if [ -n "$ab" ]; then
+        [ "$ab" -gt 0 ] && notes+=("$(plural "$ab" commit) not on $up")
+    else
+        n=$(git -C "$wt" rev-list --count HEAD --not --remotes) || return 1
+        [ "$n" -gt 0 ] && notes+=("$(plural "$n" commit) on no remote${up:+ (upstream $up gone)}")
+        [ "$n" -eq 0 ] && [ -n "$up" ] && notes+=("upstream $up gone")
+    fi
+    printf '%s\t%s\n' "$head" "$(join ${notes[@]+"${notes[@]}"})"
 }
 
 git_block() {
-    local cwd=$1 top
-    top=$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null) || {
-        echo "Git: $(tilde "$cwd") is not in a git repository."
-        return
-    }
-
-    local list
-    if ! list=$(git -C "$cwd" worktree list --porcelain 2>&1); then
-        echo "Git: could not list worktrees of $(tilde "$top"): ${list%%$'\n'*}"
+    local cwd=$1 transcript=$2 here roots root i=0 names=()
+    here=$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null)
+    roots=$(touched_worktrees "$cwd" "$transcript" | awk '!seen[$0]++')
+    if [ -z "$roots" ]; then
+        echo "Worktrees: $(tilde "$cwd") is not in a git repository, and the transcript names no other."
         return
     fi
-
-    # path<TAB>branch<TAB>flag, one per worktree; branch is `(detached)` or
-    # `(bare)` when there is none.
-    local rows
-    rows=$(awk '
-        /^worktree / { if (p != "") print p "\t" b "\t" f; p = substr($0, 10); b = ""; f = "" }
-        /^branch /   { b = substr($0, 8); sub(/^refs\/heads\//, "", b) }
-        /^detached/  { b = "(detached)" }
-        /^bare/      { b = "(bare)" }
-        /^prunable/  { f = "prunable" }
-        END          { if (p != "") print p "\t" b "\t" f }' <<<"$list")
-
-    # branch<TAB>upstream<TAB>track for every local branch, in one call.
-    local tracks
-    tracks=$(git -C "$cwd" for-each-ref --format='%(refname:short)%09%(upstream:short)%09%(upstream:track,nobracket)' refs/heads 2>/dev/null)
-
-    local i=0 path branch flag up track names=()
-    while IFS=$'\t' read -r path branch flag; do
+    while IFS= read -r root; do
         i=$((i + 1))
-        [ "$i" -gt "$MAX_CHECKED" ] && break
-        [ "$flag" = prunable ] || [ "$branch" = "(bare)" ] && continue
-        up=$(awk -F'\t' -v b="$branch" '$1 == b { print $2 }' <<<"$tracks")
-        local ref=""
-        if [ -z "$up" ] || [ "$(awk -F'\t' -v b="$branch" '$1 == b { print $3 }' <<<"$tracks")" = gone ]; then
-            case $branch in
-                "(bare)") ref="" ;;
-                "(detached)") ref=HEAD ;;
-                *) ref="refs/heads/$branch" ;;
-            esac
-        fi
-        spawn "wt$i" wt_check "$path" "$ref"
+        spawn "wt$i" wt_check "$root"
         names+=("wt$i")
-    done <<<"$rows"
-    [ "${#names[@]}" -gt 0 ] && reap "$DEADLINE" "${names[@]}"
+    done <<<"$roots"
+    reap "$DEADLINE" "${names[@]}"
 
-    # One line per worktree, with a sort key: 0 the cwd's, 1 dirty, unpushed
-    # or unknown, 2 clean and pushed.
-    local lines="" key note dirty local_only total=0
+    echo "Worktrees this session has worked in ($i; read from the paths in its transcript):"
+    local branch notes desc
     i=0
-    while IFS=$'\t' read -r path branch flag; do
+    while IFS= read -r root; do
         i=$((i + 1))
-        total=$((total + 1))
-        note=()
-        key=2
-        if [ "$i" -gt "$MAX_CHECKED" ]; then
-            note+=("not checked")
-            key=3
-        elif [ "$flag" = prunable ]; then
-            note+=("missing on disk")
-            key=1
-        elif [ "$branch" = "(bare)" ]; then
-            :
-        elif [ ! -e "$JOBS/wt$i.rc" ]; then
-            note+=("not read in ${TIMEOUT}s")
-            key=1
+        if [ ! -e "$JOBS/wt$i.rc" ]; then
+            desc="  $(tilde "$root")  not read in ${TIMEOUT}s"
         elif [ "$(cat "$JOBS/wt$i.rc")" != 0 ]; then
-            note+=("status failed: $(head -1 "$JOBS/wt$i.err")")
-            key=1
+            desc="  $(tilde "$root")  status failed: $(head -1 "$JOBS/wt$i.err")"
         else
-            dirty=$(sed -n 1p "$JOBS/wt$i.out")
-            local_only=$(sed -n 2p "$JOBS/wt$i.out")
-            [ "${dirty:-0}" -gt 0 ] && { note+=("dirty: $(plural "$dirty" file)"); key=1; }
-            up=$(awk -F'\t' -v b="$branch" '$1 == b { print $2 }' <<<"$tracks")
-            track=$(awk -F'\t' -v b="$branch" '$1 == b { print $3 }' <<<"$tracks")
-            if [ -n "$up" ] && [ "$track" != gone ]; then
-                if [[ $track =~ ahead\ ([0-9]+) ]]; then
-                    note+=("$(plural "${BASH_REMATCH[1]}" commit) not on $up")
-                    key=1
-                fi
-            elif [ -n "$local_only" ] && [ "$local_only" -gt 0 ]; then
-                note+=("$(plural "$local_only" commit) on no remote${up:+ (upstream $up gone)}")
-                key=1
-            elif [ "$track" = gone ]; then
-                note+=("upstream $up gone")
-            fi
+            IFS=$'\t' read -r branch notes <"$JOBS/wt$i.out"
+            [ "$root" = "$here" ] && notes="← cwd${notes:+, $notes}"
+            desc="  $(tilde "$root")  [$branch]${notes:+  $notes}"
         fi
-        [ "$path" = "$top" ] && { key=0; note=("← cwd" ${note[@]+"${note[@]}"}); }
-        local desc=""
-        [ "${#note[@]}" -gt 0 ] && desc=$(join "${note[@]}")
-        lines+="$key"$'\t'"  $(tilde "$path")  [$branch]${desc:+  $desc}"$'\n'
-    done <<<"$rows"
-
-    # The first worktree listed is the main one, which names the repo.
-    echo "Git worktrees of $(tilde "${rows%%$'\t'*}") ($total):"
-    local sorted shown cut_busy=0 cut_clean=0 cut_unchecked=0 n=0
-    sorted=$(printf '%s' "$lines" | sort -s -t$'\t' -k1,1)
-    while IFS=$'\t' read -r key shown; do
-        [ -z "$key" ] && continue
-        n=$((n + 1))
-        if [ "$n" -le "$MAX_WT" ]; then
-            echo "$shown"
-        else
-            case $key in
-                0|1) cut_busy=$((cut_busy + 1)) ;;
-                2) cut_clean=$((cut_clean + 1)) ;;
-                3) cut_unchecked=$((cut_unchecked + 1)) ;;
-            esac
-        fi
-    done <<<"$sorted"
-    local cut=()
-    [ "$cut_busy" -gt 0 ] && cut+=("$cut_busy dirty, unpushed or unread")
-    [ "$cut_clean" -gt 0 ] && cut+=("$cut_clean clean with nothing unpushed")
-    [ "$cut_unchecked" -gt 0 ] && cut+=("$cut_unchecked not checked")
-    [ "${#cut[@]}" -gt 0 ] && echo "  ($(( cut_busy + cut_clean + cut_unchecked )) more not listed: $(join "${cut[@]}"); git worktree list shows them)"
+        echo "$desc"
+    done <<<"$roots"
 }
 
 # The pid file of the Claude Code process running this hook: the nearest
@@ -335,8 +264,7 @@ agents_block() {
             age=", last wrote ${age}m ago"
         fi
         echo "  $id  $desc$age"
-    done < <(jq -r --argjson max "$MAX_AGENTS" '.[:$max][] | [.id, .d] | @tsv' <<<"$running")
-    [ "$count" -gt "$MAX_AGENTS" ] && echo "  ($((count - MAX_AGENTS)) more not listed)"
+    done < <(jq -r '.[] | [.id, .d] | @tsv' <<<"$running")
 }
 
 main() {
@@ -365,7 +293,7 @@ main() {
     spawn agents agents_block "$session" "$transcript"
 
     echo "Current state, read from disk at $(date +%H:%M) just now. Where the summary says otherwise, this is the one that is true:"
-    git_block "$cwd"
+    git_block "$cwd" "$transcript"
 
     reap "$DEADLINE" agents ${names[@]+"${names[@]}"}
     if [ -e "$JOBS/agents.rc" ]; then
@@ -376,9 +304,9 @@ main() {
     local rc err
     for i in ${names[@]+"${!names[@]}"}; do
         cmd=${labels[$i]}
-        [ -s "$JOBS/${names[$i]}.out" ] && capped "$JOBS/${names[$i]}.out"
+        cat "$JOBS/${names[$i]}.out"
         if [ ! -e "$JOBS/${names[$i]}.rc" ]; then
-            echo "($(tilde "$cmd") skipped: no answer within ${TIMEOUT}s.)"
+            echo "($(tilde "$cmd") killed: still running after ${TIMEOUT}s.)"
         else
             rc=$(cat "$JOBS/${names[$i]}.rc")
             if [ "$rc" != 0 ]; then

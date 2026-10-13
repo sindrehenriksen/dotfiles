@@ -18,8 +18,9 @@
 #         them as plain text, the kick-off to copy, edit and send. Prints
 #         nothing for a section the summary lacks or leaves empty.
 #   session-start  (SessionStart, matcher `compact`) Adds context saying the
-#         skill and file text restored after a compaction are copies from when
-#         they were loaded, then compact-state.sh's block of current state
+#         session was just compacted and where its full transcript is, that
+#         the skill and file text restored are copies from when they were
+#         loaded, then compact-state.sh's block of current state
 #         read from disk (git worktrees, background agents, and whatever
 #         COMPACT_STATE_COMMANDS adds). Plain stdout is added as context for
 #         SessionStart.
@@ -105,8 +106,13 @@ post() {
 }
 
 session_start() {
-    local input
+    local input transcript
     input=$(cat)
+    transcript=$(jq -r '.transcript_path // ""' <<<"$input" 2>/dev/null)
+    printf '%s' "This session was just compacted: the conversation above is a summary of it, not the conversation itself."
+    [ -n "$transcript" ] && printf ' %s' "For a specific the summary lacks, the full pre-compaction conversation is in its transcript, $transcript; search it with rg or jq rather than guess, and do not read the whole file into context."
+    echo
+    echo
     echo "Skill and file text restored after this compaction are copies from when they were loaded, and some are truncated. Before acting under a skill or instruction file that is still relevant to the work in hand, re-read it from disk; there is no need to re-read the rest. One that no longer exists no longer applies."
     echo
     "$(dirname "${BASH_SOURCE[0]}")/compact-state.sh" <<<"$input"

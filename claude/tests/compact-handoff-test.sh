@@ -117,30 +117,43 @@ g "$R/repo-local" commit -q --allow-empty -m mine
 g "$R/repo-local" commit -q --allow-empty -m mine-too
 touch "$R/repo/untracked.txt"
 
-state() { jq -n --arg cwd "$1" '{session_id:"none",cwd:$cwd}' | "$STATE"; }
-out=$(state "$R/repo-feature")
-check "state: names the repo by its main worktree" '[[ $out == *"Git worktrees of $R/repo (3):"* ]]'
-check "state: the cwd's worktree comes first" '[ "$(sed -n 3p <<<"$out")" = "  $R/repo-feature  [feature]  ← cwd, 1 commit not on origin/feature" ]'
-check "state: a dirty worktree says so" '[[ $out == *"  $R/repo  [main]  dirty: 1 file"$'"'"'\n'"'"'* ]]'
-check "state: commits with no upstream count against every remote" '[[ $out == *"  $R/repo-local  [local-only]  2 commits on no remote"* ]]'
-check "state: a clean, pushed worktree has no note" '! grep -q "repo  \[main\]  .*not on" <<<"$out"'
+g "$R/repo" worktree add -q -b untouched "$R/repo-untouched"
+touch "$R/repo-untouched/dirty.txt"
 
-for n in 1 2 3 4 5 6 7 8; do g "$R/repo" worktree add -q -b "wt$n" "$R/wt$n"; done
-touch "$R/wt8/dirty.txt"
-out=$(COMPACT_STATE_MAX_WORKTREES=4 state "$R/repo")
-check "state: lists no more worktrees than the bound" '[ "$(grep -c "^  $R/" <<<"$out")" -eq 4 ]'
-check "state: the bound keeps the busy ones" '[[ $out == *"$R/wt8  [wt8]  dirty: 1 file"* && $out == *"$R/repo-local  [local-only]"* ]]'
-check "state: says what the bound cut" '[[ $out == *"(7 more not listed: 7 clean with nothing unpushed; git worktree list shows them)"* ]]'
+# The transcript names worktrees as an absolute path inside one, under `~/`,
+# and with a trailing slash; HOME is $R so all three count.
+T="$R/t.jsonl"
+jq -nc --arg a "$R/repo-feature/src/x.py" --arg c "$R/repo/" \
+    '{type:"assistant",message:{content:[{type:"tool_use",name:"Read",input:{file_path:$a}},{type:"text",text:("see ~/repo-local. and " + $c)}]}}' >"$T"
+state() { jq -n --arg cwd "$1" --arg t "${2:-}" '{session_id:"none",cwd:$cwd,transcript_path:$t}' | HOME=$R "$STATE"; }
+out=$(state "$R/repo-feature" "$T")
+check "state: counts the worktrees the transcript names" '[[ $out == *"Worktrees this session has worked in (3; read from the paths in its transcript):"* ]]'
+check "state: the cwd's worktree comes first" '[ "$(sed -n 3p <<<"$out")" = "  ~/repo-feature  [feature]  ← cwd, 1 commit not on origin/feature" ]'
+check "state: a dirty worktree says so" '[[ $out == *"  ~/repo  [main]  dirty: 1 file"$'"'"'\n'"'"'* ]]'
+check "state: a ~/ path with a full stop finds its worktree" '[[ $out == *"  ~/repo-local  [local-only]  2 commits on no remote"* ]]'
+check "state: leaves out a worktree the transcript never names" '[[ $out != *"repo-untouched"* ]]'
+check "state: a clean, pushed worktree has no note" '[[ $out != *"[main]  "*"not on"* ]]'
+out=$(state "$R/repo-untouched" "$T")
+check "state: the cwd's worktree counts without a mention" 'grep -qxF "  ~/repo-untouched  [untouched]  ← cwd, dirty: 1 file" <<<"$out"'
+
+: >"$R/many.jsonl"
+for n in 1 2 3 4 5 6 7 8 9 10 11 12; do
+    g "$R/repo" worktree add -q -b "wt$n" "$R/wt$n"
+    echo "\"$R/wt$n\"" >>"$R/many.jsonl"
+done
+out=$(state "$R" "$R/many.jsonl")
+check "state: lists every named worktree, with no cap" '[ "$(grep -c "^  ~/wt" <<<"$out")" -eq 12 ]'
 
 g "$R/repo" worktree add -q -b broken "$R/broken"
 g "$R/broken" push -q -u origin broken
 echo "gitdir: $R/nowhere" >"$R/broken/.git"
-out=$(state "$R/repo")
-check "state: a worktree whose status fails says so" '[[ $out == *"  $R/broken  [broken]  status failed: "* ]]'
+echo "$R/broken" >"$R/broken.jsonl"
+out=$(state "$R" "$R/broken.jsonl")
+check "state: a worktree whose status fails says so" '[[ $out == *"  ~/broken  status failed: "* ]]'
 rm -rf "$R/broken" && g "$R/repo" worktree prune
 
 out=$(state "$R")
-check "state: says when the cwd is not a repo" '[[ $out == *"Git: $R is not in a git repository."* ]]'
+check "state: says when there is no worktree to show" '[[ $out == *"Worktrees: ~ is not in a git repository, and the transcript names no other."* ]]'
 out=$(echo 'not json' | "$STATE"; echo "rc=$?")
 check "state: bad input still exits 0" '[[ $out == *"rc=0" ]]'
 
@@ -148,24 +161,24 @@ mkdir -p "$R/bin"
 printf '#!/bin/sh\necho "$$" > "%s/slow.pid"\nexec sleep 30\n' "$R" >"$R/bin/slow.sh"
 printf '#!/bin/sh\necho partial\necho boom >&2\nexit 3\n' >"$R/bin/fail.sh"
 printf '#!/bin/sh\necho "session $COMPACT_STATE_SESSION_ID in $COMPACT_STATE_CWD"\n' >"$R/bin/good.sh"
-printf '#!/bin/sh\nseq 1 30\n' >"$R/bin/long.sh"
+printf '#!/bin/sh\nseq 1 300\n' >"$R/bin/long.sh"
 chmod +x "$R"/bin/*.sh
 start=$SECONDS
 out=$(COMPACT_STATE_TIMEOUT=1 COMPACT_STATE_COMMANDS="$R/bin/slow.sh:$R/bin/fail.sh:$R/bin/good.sh:$R/bin/missing.sh" state "$R/repo")
 took=$((SECONDS - start))
-check "commands: one that runs over is skipped and named" '[[ $out == *"($R/bin/slow.sh skipped: no answer within 1s.)"* ]]'
-check "commands: the slow one does not hold up the rest" '[ "$took" -le 3 ]'
+check "commands: one still running at the failsafe is killed and named" '[[ $out == *"(~/bin/slow.sh killed: still running after 1s.)"* ]]'
+check "commands: the failsafe holds the hook to its limit" '[ "$took" -le 3 ]'
 sleep 0.2
 check "commands: the slow one is killed" '! kill -0 "$(cat "$R/slow.pid")" 2>/dev/null'
-check "commands: a failing one is named with its exit and stderr" '[[ $out == *$'"'"'partial\n'"'"'"($R/bin/fail.sh failed, exit 3: boom)"* ]]'
+check "commands: a failing one is named with its exit and stderr" '[[ $out == *$'"'"'partial\n'"'"'"(~/bin/fail.sh failed, exit 3: boom)"* ]]'
 check "commands: get the hook input in the environment" '[[ $out == *"session none in $R/repo"* ]]'
-check "commands: a missing one is named, not fatal" '[[ $out == *"($R/bin/missing.sh failed, exit 127"* ]]'
-check "commands: run after the git block" '[[ ${out%%session none*} == *"Git worktrees of"* ]]'
-mkdir -p "$R/home/bin" && cp "$R/bin/good.sh" "$R/home/bin/good.sh"
-out=$(HOME="$R/home" COMPACT_STATE_COMMANDS="~/bin/good.sh" state "$R/repo")
+check "commands: a missing one is named, not fatal" '[[ $out == *"(~/bin/missing.sh failed, exit 127"* ]]'
+check "commands: run after the git block" '[[ ${out%%session none*} == *"Worktrees this session"* ]]'
+out=$(COMPACT_STATE_COMMANDS="~/bin/good.sh" state "$R/repo")
 check "commands: a leading ~/ expands" '[[ $out == *"session none in"* ]]'
 out=$(COMPACT_STATE_COMMANDS="$R/bin/long.sh" state "$R/repo")
-check "commands: output is cut at the line bound" '[[ $out == *$'"'"'\n20\n  (10 more lines cut)'"'"'* && $out != *$'"'"'\n21\n'"'"'* ]]'
+check "commands: output is kept in full" '[[ $out == *$'"'"'\n299\n300'"'"'* && $out != *"cut"* ]]'
+check "settings: the hook timeout exceeds the failsafe" '[ "$(jq '"'"'.hooks.SessionStart[] | select(.matcher == "compact") | .hooks[0].timeout'"'"' "$HERE/../settings.json")" -gt "$(sed -n '"'"'s/^TIMEOUT="\${COMPACT_STATE_TIMEOUT:-\([0-9]*\)}"$/\1/p'"'"' "$STATE")" ]'
 
 # Background agents: an invented session in an invented config dir, with a
 # process record naming this shell, which is an ancestor of the hook.
@@ -211,8 +224,11 @@ rm "$C/sessions/$$.json"
 out=$(agents)
 check "agents: says so when it cannot find the process" '[[ $out == *"Background agents: not read (no live Claude Code process record for this session)."* ]]'
 
-out=$(jq -n --arg cwd "$R/repo" '{hook_event_name:"SessionStart",source:"compact",cwd:$cwd}' | "$HOOK" session-start)
-check "session-start: appends the state block" '[[ $out == *"re-read it from disk"* && $out == *"Current state, read from disk at"* && $out == *"Git worktrees of $R/repo"* ]]'
+out=$(jq -n --arg cwd "$R/repo" --arg t "$T" '{hook_event_name:"SessionStart",source:"compact",cwd:$cwd,transcript_path:$t}' | HOME=$R "$HOOK" session-start)
+check "session-start: opens by saying the session was compacted" '[ "$(head -1 <<<"$out")" = "This session was just compacted: the conversation above is a summary of it, not the conversation itself. For a specific the summary lacks, the full pre-compaction conversation is in its transcript, $T; search it with rg or jq rather than guess, and do not read the whole file into context." ]'
+check "session-start: appends the state block" '[[ $out == *"re-read it from disk"* && $out == *"Current state, read from disk at"* && $out == *"Worktrees this session has worked in"* ]]'
+out=$(jq -n '{source:"compact"}' | HOME=$R "$HOOK" session-start)
+check "session-start: without a transcript, names none" '[ "$(head -1 <<<"$out")" = "This session was just compacted: the conversation above is a summary of it, not the conversation itself." ]'
 
 out=$(jq -n '{session_id:"s3",compact_summary:"## Summary\nno kick-off"}' | "$HOOK" post)
 check "post: silent without a kick-off" '[ -z "$out" ]'
