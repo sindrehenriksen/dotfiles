@@ -137,6 +137,10 @@ bfd:close()
 assert_eq("invalid JSON returns nil", nil, status.read(bad_tmp))
 os.remove(bad_tmp)
 
+assert_eq("deferred suggestions are counted, after the proposal's", "morning: ok · proposal pending (2 untaken) · 1 deferred", status.summary(clean, { untaken = 2, deferred = 1 }))
+assert_eq("and shown with nothing else waiting", "morning: ok · 3 deferred", status.summary(clean, { untaken = 0, deferred = 3 }))
+assert_eq("even with no status file", "1 deferred", status.summary(nil, { deferred = 1 }))
+
 print()
 print(string.format("=== summary: %d passed, %d failed ===", pass, fail))
 os.exit(fail == 0 and 0 or 1)

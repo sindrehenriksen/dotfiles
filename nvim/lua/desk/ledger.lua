@@ -243,8 +243,12 @@ function M.declined(records)
 			if type(rec.item) == "table" then
 				keys[M.content_key(rec.item)] = true
 			end
-			for _, u in ipairs(M.item_urls(rec)) do
-				sources[u] = true
+			-- A settled decline (the runner's, its lines gone) passes no
+			-- judgement on its source: a later suggestion from it comes through.
+			if not rec.settled then
+				for _, u in ipairs(M.item_urls(rec)) do
+					sources[u] = true
+				end
 			end
 		end
 	end
@@ -284,7 +288,7 @@ end
 function M.taken_sources(records)
 	local out = {}
 	for _, rec in ipairs(records) do
-		if rec.type == "taken" then
+		if rec.type == "taken" and not rec.settled then
 			for _, u in ipairs(M.item_urls(rec)) do
 				out[u] = true
 			end
@@ -294,7 +298,10 @@ function M.taken_sources(records)
 end
 
 --- Records `items` as declined. Items already declined are skipped.
-function M.record_declines(repo_dir, items)
+--- `reason`, when the runner rather than the user declines them, says why,
+--- and marks the decline settled: it blocks the item by id and content only,
+--- never by source.
+function M.record_declines(repo_dir, items, reason)
 	local declined = M.declined(M.read(repo_dir)).ids
 	local records = {}
 	for _, item in ipairs(items) do
@@ -307,6 +314,8 @@ function M.record_declines(repo_dir, items)
 				also_sources = item.also_sources,
 				headline = item.headline,
 				at = os.time(),
+				reason = reason,
+				settled = reason ~= nil or nil,
 				item = item,
 			}
 		end
@@ -327,8 +336,10 @@ function M.restore_declined(repo_dir, id)
 	return M.append(repo_dir, { type = "restore", id = id, at = os.time(), item = rec.item }) ~= nil
 end
 
---- Records `items` as taken (skipping any already recorded).
-function M.record_taken(repo_dir, items)
+--- Records `items` as taken (skipping any already recorded). `settled`: the
+--- runner counts them done (a removal whose line is gone), which says nothing
+--- about their source, so it blocks no later suggestion from it.
+function M.record_taken(repo_dir, items, settled)
 	local have = M.taken_by_id(M.read(repo_dir))
 	local records = {}
 	for _, item in ipairs(items) do
@@ -347,6 +358,7 @@ function M.record_taken(repo_dir, items)
 				session_id = item.session_id,
 				capture_kind = item.capture_kind,
 				at = os.time(),
+				settled = settled or nil,
 			}
 		end
 	end

@@ -2950,7 +2950,7 @@ function M.list_declined_recently(bufnr, days)
 	local qf_items = {}
 	for _, rec in ipairs(entries) do
 		qf_items[#qf_items + 1] =
-			{ text = string.format("%s (%s)", rec.headline or rec.id, M.format_source(rec.source, tokens_config)) }
+			{ text = string.format("%s (%s)", rec.headline or rec.id, M.format_source(rec.source, tokens_config)) .. (rec.reason and (": " .. rec.reason) or "") }
 	end
 	vim.fn.setqflist({}, " ", {
 		title = M.DECLINED_TITLE,
@@ -3337,17 +3337,21 @@ end
 --- The notes buffer's status line. While a review of it is open the
 --- proposal's count is that review's, live and recorded (`status.live_count`);
 --- otherwise it is the recorded one over every file, which moves only on a
---- save or a commit.
+--- save or a commit. Either way the suggestions deferred to a later pass are
+--- counted after it.
 function M.status_line(bufnr, left)
 	local opts
 	local s = live_session(bufnr)
+	local repo = s and s.repo or (bufnr and M.repo_context(bufnr))
 	if s then
 		opts = { left = left or M.left(s), saved = s.saved or M.recount_saved(s) }
-	else
-		local repo = bufnr and M.repo_context(bufnr)
-		if repo then
-			opts = { untaken = #proposal.open_items(repo) }
-		end
+	elseif repo then
+		opts = { untaken = #proposal.open_items(repo) }
+	end
+	if opts and repo then
+		opts.deferred = #vim.tbl_filter(function(item)
+			return item.deferred == true
+		end, proposal.read_items(repo))
 	end
 	return status.summary(status.read(), opts)
 end

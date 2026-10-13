@@ -213,13 +213,29 @@ end, proposal.read(repo2).items))
 print("\n=== an item that does not apply cleanly is carried flagged deferred, not shown ===")
 local repo3 = new_repo({ "Section A", "  keep" })
 proposal.build(repo3, "morning", "2026-10-01", {
-	item("e", { kind = "edit", target = { at = "  keep" }, before = "  keep\n  other", after = "  changed", source = "" }),
+	item("e1", { kind = "edit", target = { at = "  keep" }, before = "  keep", after = "  kept", source = "" }),
+	item("e2", { kind = "edit", target = { at = "  keep" }, before = "  keep", after = "  changed", source = "" }),
 }, FILES)
 local d = proposal.read(repo3)
-assert_eq("one item", 1, #d.items)
-assert_true("flagged deferred", d.items[1].deferred == true)
-assert_eq("not counted as open", 0, #proposal.open_items(repo3))
-assert_eq("the tree is just the user's HEAD text", { "Section A", "  keep" }, tip_lines(repo3, "notes.md"))
+assert_eq("two items", 2, #d.items)
+assert_true("the second edit of the same line flagged deferred", d.items[2].deferred == true)
+assert_eq("not counted as open", 1, #proposal.open_items(repo3))
+assert_eq("the tree has only the first", { "Section A", "  kept" }, tip_lines(repo3, "notes.md"))
+
+print("\n=== an edit whose lines are gone is declined, with a reason, not carried ===")
+do
+	local r = new_repo({ "Section A", "  keep" })
+	local _, st = proposal.build(r, "morning", "2026-10-01", {
+		item("e", { kind = "edit", target = { at = "  keep" }, before = "  keep\n  other", after = "  changed", source = "" }),
+	}, FILES)
+	assert_eq("it is not in the proposal", { 0, 0, 1 }, { #proposal.read(r).items, st.deferred, #st.declined_gone })
+	local rec = ledger.declined(ledger.read(r)).ids[proposal.read(r).items[1] and "" or st.declined_gone[1].id]
+	assert_eq("it is recorded declined, saying why", "the lines it changes are no longer in your notes", rec and rec.reason)
+	local _, st2 = proposal.build(r, "morning", "2026-10-02", {
+		item("e", { kind = "edit", target = { at = "  keep" }, before = "  keep\n  other", after = "  changed", source = "" }),
+	}, FILES)
+	assert_eq("and a regenerated copy is blocked", { 0, 0 }, { st2.new, #proposal.read(r).items })
+end
 
 print("\n=== a removal is taken when its before is gone from HEAD ===")
 local repo4 = new_repo({ "Section A", "  stale", "  keep" })
@@ -305,6 +321,83 @@ do
 	ledger.record_declines(r, proposal.read(r).items)
 	local _, st2 = proposal.build(r, "morning", "2026-10-03", { edit("e3", "  - ping Kari ", "  - ping Kari tomorrow", "regenerated") }, FILES)
 	assert_eq("a declined edit regenerated with the line quoted exactly is blocked", { 0, 0 }, { st2.new, #proposal.read(r).items })
+end
+
+print("\n=== an edit whose line can't be found never lands on top: declined when gone, deferred while uncommitted ===")
+do
+	local r = new_repo({ "Section A", "- a1" })
+	local ed = item("ed", { kind = "edit", target = { at = "- a2" }, before = "- a2", after = "- a2 edited", source = "notes" })
+	local _, st = proposal.build(r, "morning", "2026-10-01", { ed }, FILES)
+	assert_eq("gone from HEAD and the working copy, it is declined", { 0, 1 }, { st.deferred, #st.declined_gone })
+	assert_eq("and nothing of it is in the proposal's text", { "Section A", "- a1" }, tip_lines(r, "notes.md"))
+	local r2 = new_repo({ "Section A", "- a1" })
+	write(r2, "notes.md", { "Section A", "- a1", "- a2" })
+	local ed2 = item("ed2", { kind = "edit", target = { at = "- a2" }, before = "- a2", after = "- a2 edited", source = "notes" })
+	local _, st2 = proposal.build(r2, "morning", "2026-10-01", { ed2 }, FILES)
+	assert_eq("only uncommitted, it waits for the line", { 0, 1 }, { #st2.declined_gone, #st2.waiting })
+	commit_all(r2, "the line is committed")
+	local _, st3 = proposal.build(r2, "morning", "2026-10-02", {}, FILES)
+	assert_eq("the next pass carries it and edits the line in place", { 0, { "Section A", "- a1", "- a2 edited" } }, { st3.deferred, tip_lines(r2, "notes.md") })
+	local rm = item("rm", { kind = "remove", target = { at = "- a9" }, before = "- a9", after = "", source = "notes" })
+	local _, st4 = proposal.build(r2, "morning", "2026-10-03", { rm }, FILES)
+	assert_eq("a removal of a line already gone is taken as done, not proposed", { 0, 1 }, { st4.new, st4.skipped })
+end
+
+print("\n=== a settlement passes no judgement on a source: the same link still comes through ===")
+do
+	local r = new_repo({ "Section A", "- a1", "- a2" })
+	local _, st = proposal.build(r, "morning", "2026-10-01", {
+		item("ed", { kind = "edit", target = { at = "- gone" }, before = "- gone", after = "- edited", source = "https://example.invalid/one" }),
+		item("hold", { kind = "edit", target = { at = "- a2" }, before = "- a2", after = "- a2 edited", source = "notes" }),
+		item("rm", { kind = "remove", target = { at = "- a2" }, before = "- a2", after = "", source = "https://example.invalid/two" }),
+	}, FILES)
+	assert_eq("the edit of a gone line is declined, the removal of a held one deferred", { 1, 1 }, { #st.declined_gone, st.deferred })
+	write(r, "notes.md", { "Section A", "- a1" })
+	commit_all(r, "the user removed the line")
+	local _, st2 = proposal.build(r, "morning", "2026-10-02", {}, FILES)
+	assert_eq("its line gone, the removal is settled as done", 1, #st2.done_gone)
+	local _, st3 = proposal.build(r, "morning", "2026-10-03", {
+		item("n1", { kind = "add", target = { under = "Section A" }, after = "- more on one", source = "https://example.invalid/one" }),
+		item("n2", { kind = "add", target = { under = "Section A" }, after = "- more on two", source = "https://example.invalid/two" }),
+	}, FILES)
+	assert_eq("later suggestions from both links are proposed", 2, st3.new)
+end
+
+print("\n=== a move or merge whose before is gone is settled as declined; one that can't act yet stays deferred ===")
+do
+	for _, kind in ipairs({ "move", "merge" }) do
+		local r = new_repo({ "Section A", "- a1", "", "Section B", "- b1" })
+		local _, st = proposal.build(r, "morning", "2026-10-01", {
+			item("gone", { kind = kind, target = { { at = "- c1" }, { under = "Section A" } }, before = "- c1", after = "- c1", source = "notes" }),
+			item("ed", { kind = "edit", target = { at = "- b1" }, before = "- b1", after = "- b1 edited", source = "notes" }),
+			item("held", { kind = kind, target = { { at = "- b1" }, { under = "Section A" } }, before = "- b1", after = "- b1", source = "notes" }),
+		}, FILES)
+		assert_eq("a " .. kind .. " of a gone line is declined, and one of a line another item holds is deferred", { 1, 1 }, { #st.declined_gone, st.deferred })
+	end
+end
+
+print("\n=== a deferred removal whose line goes is done, not carried ===")
+do
+	local r = new_repo({ "Section A", "- a1", "- a2" })
+	local _, st = proposal.build(r, "morning", "2026-10-01", {
+		item("ed", { kind = "edit", target = { at = "- a2" }, before = "- a2", after = "- a2 edited", source = "notes" }),
+		item("rm", { kind = "remove", target = { at = "- a2" }, before = "- a2", after = "", source = "notes" }),
+	}, FILES)
+	assert_eq("the removal of a line another item holds is deferred", 1, st.deferred)
+	write(r, "notes.md", { "Section A", "- a1" })
+	commit_all(r, "the user removed the line")
+	local _, st2 = proposal.build(r, "morning", "2026-10-02", {}, FILES)
+	local taken = ledger.taken_by_id(ledger.read(r))
+	local rm_id
+	for id in pairs(taken) do
+		if id:match("rm$") then
+			rm_id = id
+		end
+	end
+	assert_eq("its line gone, the removal counts as done and is not carried", { true, 0 }, { rm_id ~= nil, #vim.tbl_filter(function(it)
+		return it.kind == "remove"
+	end, proposal.read(r).items) })
+	assert_eq("and nothing is left deferred", 0, st2.deferred)
 end
 
 print("\n=== presence is judged at the anchored occurrence, not anywhere in the file ===")

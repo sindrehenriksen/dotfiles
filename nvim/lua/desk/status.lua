@@ -136,9 +136,11 @@ end
 --- applies, which only moves when a pass runs. `opts.left` and `opts.saved`,
 --- while a review is open, are that review's live and recorded counts, and
 --- replace the proposal segment with `live_count`'s text, shown even at zero.
+--- `opts.deferred` counts the suggestions held over to a later pass, which no
+--- review shows.
 function M.summary(status, opts)
 	if not status then
-		if opts and ((opts.untaken or 0) > 0 or opts.left ~= nil) then
+		if opts and ((opts.untaken or 0) > 0 or opts.left ~= nil or (opts.deferred or 0) > 0) then
 			status = {}
 		else
 			return ""
@@ -150,6 +152,10 @@ function M.summary(status, opts)
 	end
 	for _, s in ipairs(proposal_segments(status, opts)) do
 		segments[#segments + 1] = s
+	end
+	-- Shown even with nothing else waiting, so no suggestion waits unseen.
+	if opts and (opts.deferred or 0) > 0 then
+		segments[#segments + 1] = string.format("%d deferred", opts.deferred)
 	end
 	for _, s in ipairs(counts_segments(status)) do
 		segments[#segments + 1] = s

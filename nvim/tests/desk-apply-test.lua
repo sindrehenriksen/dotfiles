@@ -137,12 +137,12 @@ run("stale multi-line edit beside an insertion", {
 }, {
 	"# Heading A", "- a1", "- a3", "- a2", "- a3", "", "# Heading B", "- b1",
 }, { ed = "deferred" })
-run("stale remove whose quote is gone lands nothing and loses nothing", {
+run("stale remove whose quote is gone is deferred and loses nothing", {
 	it("ins", "add", { after = "- a1" }, "", "- INSERTED"),
 	it("rm", "remove", { at = "- gone" }, "- gone", ""),
 }, {
 	"# Heading A", "- a1", "- INSERTED", "- a2", "- a3", "", "# Heading B", "- b1",
-})
+}, { rm = "deferred" })
 
 print("\n=== blank lines between sections: a moved section, and blank lines at an after's edges ===")
 local SECTIONS = { "Alpha", "- a1", "", "Bravo", "- b1", "", "Charlie", "- c1" }
@@ -201,17 +201,25 @@ on(SHORT, "an edit of it rewrites it in place", {
 on({ "Status", "", "- a1", "", "- a2" }, "a blank first line, with more under it", {
 	it("rm", "remove", { at = "" }, "\n- a2"),
 }, { "Status", "", "- a1" })
-on(SHORT, "and one that isn't there removes nothing, as a gone quote does", {
-	it("gone", "remove", { at = "no" }, "no"),
-}, SHORT)
+do
+	local got, results = apply.apply_file(vim.deepcopy(SHORT), { it("gone", "remove", { at = "no" }, "no") })
+	assert_eq("and one that isn't there removes nothing, and is deferred as a gone quote is", { SHORT, "deferred" }, { got, results.gone })
+end
 
-print("\n=== a move or merge whose before is gone is deferred, never landed ===")
+print("\n=== an edit, removal, move or merge whose line is gone is deferred, never landed ===")
 for _, kind in ipairs({ "move", "merge" }) do
 	local got, results = apply.apply_file(vim.deepcopy(SECTIONS), {
 		it("mv", kind, { { at = "Delta" }, { after = "Alpha" } }, "Delta\n- d1", "Delta\n- d1"),
 	})
 	assert_eq("a " .. kind .. " of a deleted section is deferred", "deferred", results.mv)
 	assert_eq("and its text is not put back", SECTIONS, got)
+end
+for _, kind in ipairs({ "edit", "remove" }) do
+	local got, results, on_top = apply.apply_file(vim.deepcopy(SECTIONS), {
+		it("ed", kind, { at = "- d1" }, "- d1", kind == "edit" and "- d1 edited" or ""),
+	})
+	assert_eq("an " .. kind .. " of a deleted line is deferred", "deferred", results.ed)
+	assert_eq("and nothing of it lands on top", { SECTIONS, false }, { got, on_top.ed == true })
 end
 
 print("\n=== a new section is set off by blank lines, as the notes' own are ===")

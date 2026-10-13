@@ -539,7 +539,10 @@ end
 --- the configured files. Returns the new sha and a stats table, or nil, err:
 --- `deferred` counts items left out for a conflict or an anchor gone,
 --- `waiting` lists those left out until the user commits a line
---- (`{id, file, headline, line, new}`), which they carry as `waits_for`.
+--- (`{id, file, headline, line, new}`), which they carry as `waits_for`;
+--- `done_gone` and `declined_gone` the items whose `before` is gone,
+--- recorded taken (a removal) or declined (an edit, move or merge) and
+--- left out.
 function M.build(repo, pass, scheduled_date, new_items, files)
 	local head = head_sha(repo)
 	if not head then
@@ -689,12 +692,30 @@ function M.build(repo, pass, scheduled_date, new_items, files)
 				table.insert(by_file[item.file], item)
 			end
 		end
+		-- An edit, removal, move or merge whose `before` is in neither HEAD nor
+		-- the working copy is never coming back: a removal of it is done, and
+		-- any other is declined, all left out of the proposal rather than
+		-- carried unseen from pass to pass. One whose lines are still there
+		-- (held by another item at the same spot, or found elsewhere than its
+		-- anchor) stays deferred.
+		local gone, done_gone, declined_gone = {}, {}, {}
+		local function line_gone(item)
+			if not in_place_kind[item.kind] then
+				return false
+			end
+			local before = snippet.split_lines(item.before or "")
+			local work = work_lines[item.file]
+			return #before > 0 and not M.contains(head_lines[item.file], before) and not (work and M.contains(work, before))
+		end
 		local applied_n, deferred_n = 0, 0
 		for _, f in ipairs(files) do
 			local new_lines, results = apply.apply_file(head_lines[f], by_file[f] or {})
 			for _, item in ipairs(by_file[f] or {}) do
 				if results[item.id] == "applied" then
 					applied_n = applied_n + 1
+				elseif line_gone(item) then
+					gone[item.id] = true
+					table.insert(item.kind == "remove" and done_gone or declined_gone, item)
 				else
 					item.deferred = true
 					deferred_n = deferred_n + 1
@@ -712,6 +733,9 @@ function M.build(repo, pass, scheduled_date, new_items, files)
 				deferred_n = deferred_n + 1
 			end
 		end
+		items = vim.tbl_filter(function(item)
+			return not gone[item.id]
+		end, items)
 
 		local json_blob = git.hash_object_write(repo, vim.json.encode({ items = items, head = head, pass = pass }))
 		if not json_blob then
@@ -742,11 +766,19 @@ function M.build(repo, pass, scheduled_date, new_items, files)
 			restored = restored_ids,
 			superseded = superseded,
 			skipped = #named - #fresh,
+			done_gone = done_gone,
+			declined_gone = declined_gone,
 		}
 		return vim.trim(commit)
 	end)
 	if not sha then
 		return nil, err
+	end
+	if #stats.done_gone > 0 then
+		ledger.record_taken(repo, stats.done_gone, true)
+	end
+	if #stats.declined_gone > 0 then
+		ledger.record_declines(repo, stats.declined_gone, "the lines it changes are no longer in your notes")
 	end
 	if #stats.restored > 0 then
 		local marks = {}

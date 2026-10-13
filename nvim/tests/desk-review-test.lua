@@ -2888,6 +2888,21 @@ vim.cmd("qa")
 	vim.notify = notify
 end
 
+print("\n=== the status line counts the suggestions deferred to a later pass ===")
+do
+	local r = new_repo({ "Section A", "  keep" })
+	build(r, "2026-10-01", {
+		item("e1", { kind = "edit", target = { at = "  keep" }, before = "  keep", after = "  kept", source = "notes" }),
+		item("e2", { kind = "edit", target = { at = "  keep" }, before = "  keep", after = "  changed", source = "notes" }),
+	})
+	local nb = open_notes(r)
+	review.attach(nb)
+	assert_true("with no review open", review.status_line(nb):match("1 deferred") ~= nil)
+	assert_true("review opens", review.open_review(nb))
+	assert_true("and with one", review.status_line(nb):match("1 left %(1 saved%) · 1 deferred") ~= nil)
+	vim.cmd("silent! %bwipeout!")
+end
+
 print("\n=== Q in either diff window ends the review, the overview open or not ===")
 do
 	for _, case in ipairs({ { "the review split", true, true }, { "the notes window", false, true }, { "the review split", true, false }, { "the notes window", false, false } }) do

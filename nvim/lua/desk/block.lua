@@ -163,8 +163,8 @@ end
 --- not the end of its block.
 ---
 --- Returns nil when the anchor can't be resolved (a bad quote, or one that
---- doesn't appear) — the caller puts the item on top
---- and counts it.
+--- doesn't appear): an insertion's caller then puts it on top
+--- (find_after_anchor), and an edit, removal, move or merge is deferred.
 ---
 --- `before` (an `at` anchor's own lines) stands in for a quote too short or
 --- blank to search on, such as a line `ok`: the first place those lines sit

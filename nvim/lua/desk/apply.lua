@@ -12,15 +12,19 @@
 -- no hunk to take. That's a genuine content conflict (the user's edits sit at that
 -- spot), retried against the user's text at the next pass.
 --
--- An anchor that doesn't resolve AT ALL — its quote is simply gone — is a
--- different failure: there's no longer anywhere specific to identify a
--- conflict against, so rather than defer it forever (a dead end nothing
--- ever surfaces again), it lands at the top of the file instead, same as a
--- plain "top"-anchored item, and is counted as applied. See desk.block.find_after_anchor, which the insertion-
--- shaped half of every kind below goes through for this; a before-shaped
--- leave/removal anchor keeps its own distinct nil (bad anchor vs. content
--- conflict) via resolve_leave, below. A move or merge whose leaving side is
--- gone is deferred instead: its text is what the user deleted or reworded.
+-- An insertion's anchor that doesn't resolve AT ALL — its quote is simply
+-- gone — is a different failure: there's no longer anywhere specific to
+-- identify a conflict against, so rather than defer it forever (a dead end
+-- nothing ever surfaces again), it lands at the top of the file instead,
+-- same as a plain "top"-anchored item, and is counted as applied. See
+-- desk.block.find_after_anchor, which the insertion-shaped half of every
+-- kind below goes through for this; a before-shaped leave/removal anchor
+-- keeps its own distinct nil (bad anchor vs. content conflict) via
+-- resolve_leave, below. An edit, removal, move or merge whose own line is
+-- gone is deferred instead: its text is what the user deleted or reworded,
+-- and an edit's new text on top would stand beside the line it was meant to
+-- replace. desk.proposal settles an edit or removal whose lines are gone
+-- for good, as declined or done, rather than carrying it.
 -- An item whose anchor is only in the user's uncommitted text never gets
 -- here: desk.proposal holds it back until that line is committed.
 local block = require("desk.block")
@@ -235,14 +239,7 @@ function M.apply_file(lines, items)
 		elseif item.kind == "edit" or item.kind == "remove" then
 			local before_lines = snippet.split_lines(item.before)
 			local pos, status = resolve_leave(lines, leave_anchor, before_lines)
-			if status == "bad_anchor" then
-				-- Nowhere left to edit in place: land like a plain
-				-- insertion at the top instead (nothing for remove,
-				-- whose `after` is always empty anyway).
-				put(0, item.kind == "edit" and snippet.split_lines(item.after) or {}, false)
-				results[item.id] = "applied"
-				landed_on_top[item.id] = true
-			elseif status == "content_mismatch" or not free(pos + 1, #before_lines) then
+			if status ~= "resolved" or not free(pos + 1, #before_lines) then
 				results[item.id] = "deferred"
 			else
 				claim(pos + 1, #before_lines)
