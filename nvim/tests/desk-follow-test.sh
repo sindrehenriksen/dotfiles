@@ -178,13 +178,19 @@ export FOLLOW_TEST_CALLS="$CALLS" FOLLOW_TEST_FIX="$FIX" FOLLOW_TEST_SENT="$ROOT
 : > "$FOLLOW_TEST_SENT"
 export DESK_CLAUDE_BIN="$FAKEBIN/claude"
 
-# gh: `pr list` replies $FIX/prs.json, `pr view N` replies $FIX/pr-N.json.
+# gh: `pr list` replies $FIX/prs.json, `pr view N` replies $FIX/pr-N.json,
+# keeping only the fields its --json asks for, as gh does.
 cat > "$FAKEBIN/gh" << FAKE
 #!/usr/bin/env bash
 echo "gh \$*" >> "$CALLS"
+fields=""
+args=("\$@")
+for ((i = 0; i < \${#args[@]}; i++)); do [ "\${args[\$i]}" = --json ] && fields="\${args[\$((i + 1))]}"; done
 case "\$1 \$2" in
 	"pr list") cat "$FIX/prs.json" ;;
-	"pr view") cat "$FIX/pr-\$3.json" 2> /dev/null || echo '{"comments":[],"reviews":[]}' ;;
+	"pr view")
+		{ cat "$FIX/pr-\$3.json" 2> /dev/null || echo '{"comments":[],"reviews":[]}'; } \
+			| jq -c --arg f "\$fields" '(\$f | split(",")) as \$want | with_entries(select(.key as \$k | \$want | index(\$k)))' ;;
 	*) exit 9 ;;
 esac
 FAKE
@@ -614,10 +620,14 @@ assert_contains "an older ticket of the user that someone moved under the epic i
 assert_contains "and one the user created that someone else changed in the window is" "A ticket of the user that a colleague already edited" "$msg1"
 { pr 41 "[ABC-1] The owner's PR" "abc-1-own" MERGED h1; pr 42 "[ABC-1] The owner's other PR" "abc-1-two" OPEN h3
   pr 43 "[ABC-1] A new PR of the owner's that dev1 pushed to" "abc-1-three" OPEN h5 | jq -c --arg t "$own_t" '.createdAt = $t'
-  pr 44 "[ABC-1] A new PR of the owner's alone" "abc-1-four" OPEN h6 | jq -c --arg t "$own_t" '.createdAt = $t'; } \
+  pr 44 "[ABC-1] A new PR of the owner's alone" "abc-1-four" OPEN h6 | jq -c --arg t "$own_t" '.createdAt = $t'
+  pr 45 "[ABC-1] A new PR of the owner's with unreadable commits" "abc-1-five" OPEN h7 | jq -c --arg t "$own_t" '.createdAt = $t'
+  pr 46 "[ABC-1] A new PR of the owner's with an authorless commit" "abc-1-six" OPEN h8 | jq -c --arg t "$own_t" '.createdAt = $t'; } \
 	| jq -s 'map(.author = {login: "owner1"} | .updatedAt = "2026-10-07T10:00:00Z")' > "$FIX/prs.json"
 jq -n --arg t "$own_t" '{comments: [], reviews: [], commits: [{committedDate: $t, authors: [{login: "owner1"}]}, {committedDate: $t, authors: [{login: "dev1"}]}]}' > "$FIX/pr-43.json"
-jq -n --arg t "$own_t" '{comments: [], reviews: [], commits: [{committedDate: $t, authors: [{login: "owner1"}]}]}' > "$FIX/pr-44.json"
+jq -n --arg t "$own_t" '{comments: [], reviews: [], commits: [{committedDate: $t, authors: [{login: "owner1"}, {login: "claude"}]}]}' > "$FIX/pr-44.json"
+echo '{"comments":[],"reviews":[]}' > "$FIX/pr-45.json"
+jq -n --arg t "$own_t" '{comments: [], reviews: [], commits: [{committedDate: $t, authors: []}]}' > "$FIX/pr-46.json"
 jq -n --arg t "$own_t" '{comments:[
 		{id:"IC_41a",author:{login:"owner1"},createdAt:$t,body:"Merging now."},
 		{id:"IC_41b",author:{login:"dev1"},createdAt:$t,body:"Please add a test for the retry."}],
@@ -634,7 +644,9 @@ assert_not_contains "nor the moves on the user's own PR" "now merged" "$msg"
 assert_contains "someone else's comment on the user's PR still is" 'comment by dev1: "Please add a test for the retry."' "$msg"
 assert_contains "and so are new commits on the user's PR, which may be someone else's" "new commits (head h1 → h3)" "$msg"
 assert_contains "a PR the user opened that someone else committed to is forwarded" "A new PR of the owner's that dev1 pushed to" "$msg"
-assert_not_contains "one the user opened and alone committed to is not" "A new PR of the owner's alone" "$msg"
+assert_not_contains "one the user opened and alone authored, a co-author trailer aside, is not" "A new PR of the owner's alone" "$msg"
+assert_contains "one whose commits could not be read is forwarded" "A new PR of the owner's with unreadable commits" "$msg"
+assert_contains "and one with a commit that names no author" "A new PR of the owner's with an authorless commit" "$msg"
 assert_contains "the footer counts the user's PR posts" "2 own posts" "$msg"
 assert_contains "and the user's PR merging, as any PR state change" "1 PR state change" "$msg"
 assert_contains "the user's own new PR is counted as theirs" "1 own PR move" "$msg"
@@ -679,6 +691,16 @@ issue ABC-1 "In QA" "" "[$(link LNK-7)]" "[]" "" "Renamed by the user, again" | 
 "$RUN" follow > /dev/null 2>&1
 assert_eq "no changelog read" "0" "$(grep -c '^changelog$' "$CALLS")"
 assert_contains "the rename goes out as before" "Renamed by the user, again" "$(jq -r .message "$FOLLOW_TEST_SENT")"
+off_t="$(date -u -v+3H +%Y-%m-%dT%H:%M:%S.000+0000 2> /dev/null || date -u -d '+3 hour' +%Y-%m-%dT%H:%M:%S.000+0000)"
+{
+	issue ABC-1 "In QA" "" "[$(link LNK-7)]" "[$(cmt 950 "Dev One" "Still on track." "$off_t")]" "" "Renamed by the user, again"
+	issue ABC-18 "To Do" ABC-1 | jq -c --arg t "$off_t" '.fields.created = $t | .fields.creator = {displayName: "Owner Person"} | .fields.summary = "A ticket the user filed, no changelog read"'
+} | rest > "$FIX/changes-result.json"
+: > "$FOLLOW_TEST_SENT"
+"$RUN" follow > /dev/null 2>&1
+msg="$(jq -r .message "$FOLLOW_TEST_SENT")"
+assert_not_contains "with no changelog read, a ticket the user created is counted on its creator alone" "A ticket the user filed, no changelog read" "$msg"
+assert_contains "which the footer counts" "1 own ticket" "$msg"
 write_config 15
 
 echo

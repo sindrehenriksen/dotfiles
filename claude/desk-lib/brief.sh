@@ -176,7 +176,7 @@ desk_brief_deliver() {
 		if [ "$name" = "not running" ]; then
 			desk_log "$pass" "brief: the central session is not running — $dates waits for the next run of this pass"
 		elif [ "$name" = "unnamed" ]; then
-			desk_log "$pass" "brief: the central session is running but has no name to send to — $dates waits for the first run of this pass after it is named"
+			desk_log "$pass" "brief: the central session is running but has no name to send to — $dates waits for the first run of this pass after it is named, a later slot or a run by hand"
 		else
 			desk_log "$pass" "brief: the name '${name#ambiguous }' does not address the central session alone — $dates waits for the next run of this pass"
 		fi

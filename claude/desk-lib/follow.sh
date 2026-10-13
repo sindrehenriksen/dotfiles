@@ -433,9 +433,10 @@ desk_follow_fetch_jira() {
 # has at least one entry since <since> and every such entry, whatever field
 # it touches, is by `self_account_id`, and "clean" when it has none; an entry
 # whose time cannot be read counts as in the window. So anything
-# unrecognised costs an extra forward, never a hidden change. Prints {<key>: true} for those; a
-# ticket whose changelog did not come back is left out, so its moves are
-# forwarded as before, and the log names it.
+# unrecognised costs an extra forward, never a hidden change. Prints
+# {<key>: "own" | "clean"}; a ticket whose changelog did not come back, or
+# that someone else touched, is left out, so its moves are forwarded as
+# before, and the log names one that did not come back.
 desk_follow_changelog_configured() { # pass_config
 	jq -e '(.self_account_id // "") != "" and (.jira.changelog_tool // "") != ""
 		and (.jira.changelog_prompt // "") != "" and (.jira.cloud_id // "") != ""' > /dev/null 2>&1 <<< "$1"
@@ -951,7 +952,7 @@ desk_follow_main() {
 			if [ "$name" = "not running" ]; then
 				desk_log "$pass" "follow: $label: $n change(s) queued, the session is not running"
 			elif [ "$name" = "unnamed" ]; then
-				desk_log "$pass" "follow: $label: the session is running but has no name to send to — $n change(s) stay queued for the first scheduled run after it is named"
+				desk_log "$pass" "follow: $label: the session is running but has no name to send to — $n change(s) stay queued for the first run after it is named, scheduled or by hand"
 			else
 				desk_log "$pass" "follow: $label: the name '${name#ambiguous }' does not address this session alone — $n change(s) stay queued"
 			fi

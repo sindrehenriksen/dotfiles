@@ -199,6 +199,7 @@ case "$out2" in *"  staged $lid2: Second to list"*) ok "a second staging the sam
 case "$out2" in *"$lid:"*) bad "...and not the first one's, staged under the same pass and date (got [$out2])" ;; *) ok "...and not the first one's, staged under the same pass and date" ;; esac
 listing="$("$PROPOSE" --list)"
 assert_eq "--list shows it, with its file and headline" "$lid	notes.md	One to list" "$(grep -F "$lid" <<< "$listing")"
+assert_eq "...once, though it is also in the proposal's full list" "1" "$(grep -cF "$lid" <<< "$listing")"
 before_sha="$(git -C "$repo" rev-parse refs/desk/proposal)"
 out="$("$PROPOSE" --withdraw --dry-run "$lid")"
 assert_eq "--withdraw --dry-run says what it would withdraw" "would withdraw $lid: One to list" "$out"

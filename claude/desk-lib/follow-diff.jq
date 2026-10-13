@@ -18,8 +18,11 @@
 #   skip            {bot_authors, bot_signatures}: regexes for an automated
 #                   account's name, and for the opening of a post a bot makes
 #                   through a person's account
-#   self            the user's names and logins: the user's own posts, and
-#                   every move on a PR the user opened, are counted, not sent
+#   self            the user's names and logins: the user's own posts, a
+#                   ticket the user created in the window, and a PR the user
+#                   opened in the window that only the user committed to are
+#                   counted, not sent; on an older PR of the user's, only its
+#                   state moves are
 #   own_check       "off" (no changelog read: a ticket the user created in
 #                   the window is counted on its creator alone), "pending"
 #                   (the first diff of a run that reads changelogs: such a
@@ -403,7 +406,9 @@ def own_ticket_rules:
 def others_committed:
 	if .opened != true then false
 	elif .commits == null then true
-	else any(.commits[]; any((.authors // [null])[]; . == null or (is_self(.) | not))) end;
+	# Each commit by its author, the first entry: gh lists co-authors from
+	# the commit's trailers after it. No author counts as someone else.
+	else any(.commits[]; (.authors // [])[0] as $a | $a == null or (is_self($a) | not)) end;
 def own_pr_rules:
 	if .author != null then (if is_self(.author) then skip_unless("own posts") else . end)
 	# On the user's own PR, a state move (merged, closed, draft, ready) is the
