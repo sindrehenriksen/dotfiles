@@ -45,7 +45,7 @@ desk_brief_prepare() {
 	run="$(desk_brief_run_dir "$pass" "$scheduled_date")"
 	mkdir -p "$run"
 	rm -rf "$run/inputs" "$run/instructions"
-	rm -f "$run/brief.pending" "$run/brief.sent" "$run/brief-message.txt"
+	rm -f "$run/brief.pending" "$run/brief.sent" "$run/brief-message.txt" "$run/judgement.json" "$run/judgement.draft.json"
 	mkdir -p "$run/inputs" "$run/instructions"
 
 	files_json="$(printf '%s\n' "${files[@]}" | jq -R . | jq -cs .)"
@@ -176,7 +176,7 @@ desk_brief_deliver() {
 		if [ "$name" = "not running" ]; then
 			desk_log "$pass" "brief: the central session is not running — $dates waits for the next run of this pass"
 		elif [ "$name" = "unnamed" ]; then
-			desk_log "$pass" "brief: the central session is running but has no name to send to — $dates waits until it is named"
+			desk_log "$pass" "brief: the central session is running but has no name to send to — $dates waits for the first run of this pass after it is named"
 		else
 			desk_log "$pass" "brief: the name '${name#ambiguous }' does not address the central session alone — $dates waits for the next run of this pass"
 		fi

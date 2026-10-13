@@ -20,8 +20,15 @@
 #                   through a person's account
 #   self            the user's names and logins: the user's own posts, and
 #                   every move on a PR the user opened, are counted, not sent
-#   own_field_moves {<ticket key>: true} for tickets whose field moves this
-#                   run are, by their changelog, all the user's own: counted
+#   own_check       "off" (no changelog read: a ticket the user created in
+#                   the window is counted on its creator alone), "pending"
+#                   (the first diff of a run that reads changelogs: such a
+#                   ticket is forwarded and marked for the read) or "done"
+#   own_field_moves with "done", {<ticket key>: "own" | "clean"} from the
+#                   changelog read: "own" when every entry in the window is
+#                   the user's, "clean" when there is none. Field moves count
+#                   as the user's only on "own"; a ticket the user created
+#                   in the window on either
 #   lookback        true for a --lookback-minutes run with no snapshots to
 #                   compare against
 #   ticket_digest   true for the morning pass's ticket digest (ticket-digest.sh)
@@ -329,6 +336,7 @@ def pr_events:
 	        # was already open when it came into scope) is counted.
 	        ((($p.created | ts) // 0) > $gh_since) as $opened
 	        | $base + {at: (($p.updated | ts) // $now), skip: (if $opened then null else "first-seen PRs" end),
+	                   opened: $opened, commits: $p.commits,
 	                   what: ((if $opened then "opened" else "new under the follow" end)
 	                          + " (\($p.state | ascii_downcase)\(if $p.draft then ", draft" else "" end), branch \($p.branch))")},
 	          ($p | pr_comment_changes({}) | .[] | $base + .)
@@ -377,6 +385,7 @@ def ticket_index:
 # gives no author, by its changelog (follow.sh's desk_follow_own_field_moves).
 (.ticket_digest_rules.self // .self // []) as $self
 | (.own_field_moves // {}) as $own_field_moves
+| (.own_check // "off") as $own_check
 | (.ticket_digest_rules.pr_skip_authors // []) as $pr_skip_authors
 | (.ticket_digest_rules.pr_keep // null) as $pr_keep
 |
@@ -384,16 +393,26 @@ def is_self($who): ($who // "") as $w | any($self[]; ascii_downcase == ($w | asc
 def skip_unless($kind): if .skip == null then .skip = $kind else . end;
 def own_ticket_rules:
 	if .author != null and is_self(.author) then skip_unless("own posts")
-	elif .creator != null and is_self(.creator) then skip_unless("own tickets")
-	elif .field == true and $own_field_moves[.key] == true then skip_unless("own field moves")
+	elif .creator != null and is_self(.creator) then
+		if $own_check == "off" or ($own_check == "done" and ($own_field_moves[.key] | IN("own", "clean")))
+		then skip_unless("own tickets")
+		elif $own_check == "pending" then .field = true
+		else . end
+	elif .field == true and $own_check == "done" and $own_field_moves[.key] == "own" then skip_unless("own field moves")
 	else . end;
+def others_committed:
+	if .opened != true then false
+	elif .commits == null then true
+	else any(.commits[]; any((.authors // [null])[]; . == null or (is_self(.) | not))) end;
 def own_pr_rules:
 	if .author != null then (if is_self(.author) then skip_unless("own posts") else . end)
 	# On the user's own PR, a state move (merged, closed, draft, ready) is the
 	# user's; new commits, a retitle or a description edit may be someone
-	# else's, so the follow pass forwards an event carrying one. The ticket
-	# digest counts those as PR updates anyway.
-	elif is_self(.pr_author) and ($digest or ((.kinds // []) | index("update") | not)) then skip_unless("own PR moves")
+	# else's, so the follow pass forwards an event carrying one, and the
+	# user's newly opened PR when anyone else has committed to it (or its
+	# commits could not be read). The ticket digest counts those as PR
+	# updates anyway.
+	elif is_self(.pr_author) and ($digest or (((.kinds // []) | index("update") | not) and (others_committed | not))) then skip_unless("own PR moves")
 	else . end;
 def digest_pr_rules:
 	if (.pr_author // "") as $a | any($pr_skip_authors[]; . as $re | $a | test($re; "i"))

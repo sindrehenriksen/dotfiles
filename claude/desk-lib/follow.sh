@@ -429,13 +429,17 @@ desk_follow_fetch_jira() {
 # Which of these tickets' field moves in the window are all the user's
 # own: one restricted read call, its only tool the configured changelog
 # tool (jira.changelog_tool), each call pinned by the deny hook to one of
-# the keys with `expand: changelog`. A ticket counts when its changelog has
-# at least one entry since <since> and every such entry, whatever field it
-# touches, is by `self_account_id`; an entry whose time cannot be read counts
-# as in the window. So anything unrecognised costs an extra forward, never a
-# hidden change. Prints {<key>: true} for those; a
+# the keys with `expand: changelog`. A ticket is "own" when its changelog
+# has at least one entry since <since> and every such entry, whatever field
+# it touches, is by `self_account_id`, and "clean" when it has none; an entry
+# whose time cannot be read counts as in the window. So anything
+# unrecognised costs an extra forward, never a hidden change. Prints {<key>: true} for those; a
 # ticket whose changelog did not come back is left out, so its moves are
 # forwarded as before, and the log names it.
+desk_follow_changelog_configured() { # pass_config
+	jq -e '(.self_account_id // "") != "" and (.jira.changelog_tool // "") != ""
+		and (.jira.changelog_prompt // "") != "" and (.jira.cloud_id // "") != ""' > /dev/null 2>&1 <<< "$1"
+}
 desk_follow_own_field_moves() {
 	local pass="$1" pass_config="$2" keys="$3" since="$4" out_dir="$5"
 	local jira tool prompt_rel account cloud
@@ -503,7 +507,10 @@ desk_follow_own_field_moves() {
 		| {read: [$keys[] | select($by[.] != null)],
 		   own: (reduce $keys[] as $k ({};
 			[($by[$k] // [])[] | select(((.created | ts) // ($since + 1)) > $since)] as $moves
-			| if ($moves | length) > 0 and all($moves[]; .author.accountId == $me) then .[$k] = true else . end))}
+			| if $by[$k] == null then .
+			  elif ($moves | length) == 0 then .[$k] = "clean"
+			  elif all($moves[]; .author.accountId == $me) then .[$k] = "own"
+			  else . end))}
 	' <<< "$pairs" 2> /dev/null)"
 	[ -n "$result" ] || result='{"read": [], "own": {}}'
 	local missing
@@ -571,7 +578,7 @@ desk_follow_fetch_prs() {
 			       pass: ([$c[] | select(((.conclusion // .state // "") | pass_c))] | length),
 			       fail: ([$c[] | select(((.conclusion // .state // "") | fail_c)) | (.name // .context // "check")] | unique),
 			       pending: ([$c[] | select((.status // "COMPLETED") != "COMPLETED" or IN(.state; "PENDING", "EXPECTED"))] | length) },
-			     comments: null }]' <<< "$listed")"
+			     comments: null, commits: null }]' <<< "$listed")"
 		all="$(jq -c --argjson a "$all" '$a + .' <<< "$listed")"
 	done
 	if [ "$with_comments" = "true" ]; then
@@ -585,14 +592,16 @@ desk_follow_fetch_prs() {
 			[ "$prev_updated" = "$pr_updated" ] && continue
 			num="$(jq -r .number <<< "$pr")"
 			repo_of="$(jq -r .repo <<< "$pr")"
-			view="$(desk_follow_gh pr view "$num" --repo "$repo_of" --json comments,reviews 2> /dev/null)" || continue
+			view="$(desk_follow_gh pr view "$num" --repo "$repo_of" --json comments,reviews,commits 2> /dev/null)" || continue
 			jq -e . > /dev/null 2>&1 <<< "$view" || continue
 			all="$(jq -c --argjson i "$i" --argjson v "$view" '
 				.[$i].comments = (
 					[($v.comments // [])[] | {id: ("c" + (.id // .url // .createdAt | tostring)), kind: "comment",
 					   author: (.author.login // "someone"), at: .createdAt, body: (.body // "")}]
 					+ [($v.reviews // [])[] | {id: ("r" + (.id // .submittedAt | tostring)), kind: "review",
-					   author: (.author.login // "someone"), at: .submittedAt, state: (.state // "COMMENTED"), body: (.body // "")}])' <<< "$all")"
+					   author: (.author.login // "someone"), at: .submittedAt, state: (.state // "COMMENTED"), body: (.body // "")}])
+				| .[$i].commits = (if ($v.commits | type) == "array"
+					then [$v.commits[] | {at: (.committedDate // null), authors: [(.authors // [])[] | .login // null]}] else null end)' <<< "$all")"
 		done
 	fi
 	printf '%s\n' "$all" > "$out"
@@ -886,11 +895,13 @@ desk_follow_main() {
 		--argjson now "$now" --argjson jira_since "${jira_since:-$now}" --argjson gh_since "$gh_since" \
 		--argjson baseline_jira "$baseline_jira" --argjson baseline_gh "$baseline_gh" \
 		--argjson queue_max "$(jq -r '.queue_max // 200' <<< "$pass_config")" \
-		--argjson skip "$(jq -c '.skip // {}' <<< "$pass_config")" --argjson self "$(jq -c '.self // []' <<< "$pass_config")" --argjson lookback "$([ -n "$lookback" ] && echo true || echo false)" '
+		--argjson skip "$(jq -c '.skip // {}' <<< "$pass_config")" --argjson self "$(jq -c '.self // []' <<< "$pass_config")" \
+		--arg cl "$(desk_follow_changelog_configured "$pass_config" && echo yes || echo no)" --argjson lookback "$([ -n "$lookback" ] && echo true || echo false)" '
 		{entries: $entries, state: $state[0], scope_issues: $scope[0], change_issues: $changes[0], prs: $prs[0],
 		 now: $now, jira_since: $jira_since, gh_since: $gh_since,
 		 baseline_jira: $baseline_jira, baseline_gh: $baseline_gh, queue_max: $queue_max,
-		 skip: $skip, self: $self, lookback: $lookback}' > "$work/diff-input.json"
+		 skip: $skip, self: $self, lookback: $lookback,
+		 own_check: (if $cl == "yes" then "pending" else "off" end)}' > "$work/diff-input.json"
 	new_state="$(jq -c -f "$DESK_FOLLOW_DIFF_JQ" "$work/diff-input.json" 2> "$work/diff.err")" || new_state=""
 	if [ -z "$new_state" ]; then
 		desk_log "$pass" "follow: the diff failed: $(head -c 400 "$work/diff.err")"
@@ -903,7 +914,7 @@ desk_follow_main() {
 	field_keys="$(jq -c --argjson now "$now" '[(.queues // {})[] | (.changes // [])[] | select(.field_run == $now) | .ref] | unique' <<< "$new_state")"
 	own_moves="$(desk_follow_own_field_moves "$pass" "$pass_config" "$field_keys" "${jira_since:-$now}" "$work")"
 	if [ "$own_moves" != "{}" ] && [ -n "$own_moves" ]; then
-		jq --argjson o "$own_moves" '.own_field_moves = $o' "$work/diff-input.json" > "$work/diff-input2.json"
+		jq --argjson o "$own_moves" '.own_field_moves = $o | .own_check = "done"' "$work/diff-input.json" > "$work/diff-input2.json"
 		new_state="$(jq -c -f "$DESK_FOLLOW_DIFF_JQ" "$work/diff-input2.json" 2> "$work/diff.err")" || new_state=""
 		if [ -z "$new_state" ]; then
 			desk_log "$pass" "follow: the diff failed: $(head -c 400 "$work/diff.err")"
@@ -940,7 +951,7 @@ desk_follow_main() {
 			if [ "$name" = "not running" ]; then
 				desk_log "$pass" "follow: $label: $n change(s) queued, the session is not running"
 			elif [ "$name" = "unnamed" ]; then
-				desk_log "$pass" "follow: $label: the session is running but has no name to send to — $n change(s) stay queued until it is named"
+				desk_log "$pass" "follow: $label: the session is running but has no name to send to — $n change(s) stay queued for the first scheduled run after it is named"
 			else
 				desk_log "$pass" "follow: $label: the name '${name#ambiguous }' does not address this session alone — $n change(s) stay queued"
 			fi

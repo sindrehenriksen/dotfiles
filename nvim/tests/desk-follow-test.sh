@@ -145,6 +145,7 @@ if head -n1 prompt.txt | grep -q '^CHANGELOG'; then
 	while IFS= read -r input; do
 		[ -n "$input" ] || continue
 		n=$((n + 1))
+		printf '%s\n' "$input" >> "$FOLLOW_TEST_FIX/changelog-inputs.jsonl"
 		emit_use "cl$n" mcp__tickets__getIssue "$input"
 		key="$(jq -r .issueIdOrKey <<< "$input")"
 		if ! jq -cn --argjson i "$input" '{tool_name:"mcp__tickets__getIssue", tool_input:$i}' | bash -c "$cmd" > /dev/null 2>&1; then
@@ -597,7 +598,10 @@ own_t="$(date -u -v+2H +%Y-%m-%dT%H:%M:%S.000+0000 2> /dev/null || date -u -d '+
 	issue ABC-1 "In QA" "" "[$(link LNK-7)]" "[$(cmt 907 "github-actions" "Deployed to dev"),$(cmt 908 "Dev One" "QA found a gap in the plan."),$(cmt 909 "Owner Person" "Answered QA: the gap is out of scope." "$own_t")]"
 	issue ABC-15 "To Do" ABC-1 | jq -c --arg t "$own_t" '.fields.created = $t | .fields.creator = {displayName: "Owner Person"} | .fields.summary = "A child the user filed"'
 	issue ABC-16 "To Do" ABC-1 | jq -c '.fields.creator = {displayName: "Owner Person"} | .fields.summary = "An old ticket of the user, moved under the epic"'
+	issue ABC-17 "To Do" ABC-1 | jq -c --arg t "$own_t" '.fields.created = $t | .fields.creator = {displayName: "Owner Person"} | .fields.summary = "A ticket of the user that a colleague already edited"'
 } | rest > "$FIX/changes-result.json"
+jq -cn '{key: "ABC-15", changelog: {histories: []}}' > "$FIX/changelog-ABC-15.json"
+jq -cn --arg t "$own_t" '{key: "ABC-17", changelog: {histories: [{id: "h9", author: {accountId: "acc-dev"}, created: $t, items: [{field: "assignee", toString: "Dev Two"}]}]}}' > "$FIX/changelog-ABC-17.json"
 { pr 41 "[ABC-1] The owner's PR" "abc-1-own" OPEN h1; pr 42 "[ABC-1] The owner's other PR" "abc-1-two" OPEN h1; } \
 	| jq -s 'map(.author = {login: "owner1"} | .updatedAt = "2026-10-07T09:00:00Z")' > "$FIX/prs.json"
 echo '{"comments":[],"reviews":[]}' > "$FIX/pr-41.json"
@@ -607,8 +611,13 @@ echo '{"comments":[],"reviews":[]}' > "$FIX/pr-42.json"
 msg1="$(jq -rs '.[-1].message // ""' "$FOLLOW_TEST_SENT")"
 assert_not_contains "a ticket the user created in the window is not sent" "A child the user filed" "$msg1"
 assert_contains "an older ticket of the user that someone moved under the epic is" "An old ticket of the user, moved under the epic" "$msg1"
-{ pr 41 "[ABC-1] The owner's PR" "abc-1-own" MERGED h1; pr 42 "[ABC-1] The owner's other PR" "abc-1-two" OPEN h3; } \
+assert_contains "and one the user created that someone else changed in the window is" "A ticket of the user that a colleague already edited" "$msg1"
+{ pr 41 "[ABC-1] The owner's PR" "abc-1-own" MERGED h1; pr 42 "[ABC-1] The owner's other PR" "abc-1-two" OPEN h3
+  pr 43 "[ABC-1] A new PR of the owner's that dev1 pushed to" "abc-1-three" OPEN h5 | jq -c --arg t "$own_t" '.createdAt = $t'
+  pr 44 "[ABC-1] A new PR of the owner's alone" "abc-1-four" OPEN h6 | jq -c --arg t "$own_t" '.createdAt = $t'; } \
 	| jq -s 'map(.author = {login: "owner1"} | .updatedAt = "2026-10-07T10:00:00Z")' > "$FIX/prs.json"
+jq -n --arg t "$own_t" '{comments: [], reviews: [], commits: [{committedDate: $t, authors: [{login: "owner1"}]}, {committedDate: $t, authors: [{login: "dev1"}]}]}' > "$FIX/pr-43.json"
+jq -n --arg t "$own_t" '{comments: [], reviews: [], commits: [{committedDate: $t, authors: [{login: "owner1"}]}]}' > "$FIX/pr-44.json"
 jq -n --arg t "$own_t" '{comments:[
 		{id:"IC_41a",author:{login:"owner1"},createdAt:$t,body:"Merging now."},
 		{id:"IC_41b",author:{login:"dev1"},createdAt:$t,body:"Please add a test for the retry."}],
@@ -624,8 +633,11 @@ assert_not_contains "nor the user's review" "Self-review" "$msg"
 assert_not_contains "nor the moves on the user's own PR" "now merged" "$msg"
 assert_contains "someone else's comment on the user's PR still is" 'comment by dev1: "Please add a test for the retry."' "$msg"
 assert_contains "and so are new commits on the user's PR, which may be someone else's" "new commits (head h1 → h3)" "$msg"
+assert_contains "a PR the user opened that someone else committed to is forwarded" "A new PR of the owner's that dev1 pushed to" "$msg"
+assert_not_contains "one the user opened and alone committed to is not" "A new PR of the owner's alone" "$msg"
 assert_contains "the footer counts the user's PR posts" "2 own posts" "$msg"
 assert_contains "and the user's PR merging, as any PR state change" "1 PR state change" "$msg"
+assert_contains "the user's own new PR is counted as theirs" "1 own PR move" "$msg"
 
 echo
 echo "=== a field move the changelog says is the user's own is counted, never sent ==="
@@ -655,6 +667,19 @@ assert_contains "one where a colleague's entry is among the user's is, whatever 
 assert_contains "one whose changelog did not come back is forwarded as before" "LNK-7 renamed, changelog unreadable" "$msg"
 assert_contains "and the log names it" "no changelog came back for LNK-7" "$(cat "$ROOT/own-fields.out")"
 assert_contains "the footer counts the user's field move" "1 own field move" "$msg"
+assert_eq "every changelog call carries the configured site" '["tickets.example"]' "$(jq -cs '[.[].cloudId] | unique' "$FIX/changelog-inputs.jsonl")"
+
+echo
+echo "=== with no cloud_id configured, no changelog is read and field moves are forwarded ==="
+jq 'del(.passes.follow.jira.cloud_id)' "$INST/config.json" > "$ROOT/c" && mv "$ROOT/c" "$INST/config.json"
+jq --arg s "$SID_A" '.queues[$s].changes = [] | .queues[$s].skipped = {}' "$DESK_FOLLOW_STATE_FILE" > "$ROOT/s" && mv "$ROOT/s" "$DESK_FOLLOW_STATE_FILE"
+issue ABC-1 "In QA" "" "[$(link LNK-7)]" "[]" "" "Renamed by the user, again" | rest > "$FIX/changes-result.json"
+: > "$FOLLOW_TEST_SENT"
+: > "$CALLS"
+"$RUN" follow > /dev/null 2>&1
+assert_eq "no changelog read" "0" "$(grep -c '^changelog$' "$CALLS")"
+assert_contains "the rename goes out as before" "Renamed by the user, again" "$(jq -r .message "$FOLLOW_TEST_SENT")"
+write_config 15
 
 echo
 echo "=== a dry run with a lookback and no state: only what moved ==="
