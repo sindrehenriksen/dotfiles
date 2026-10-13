@@ -9,7 +9,8 @@
 # sends every pending run in one message, oldest first; a failed send keeps
 # it pending, and an unconfirmed one is tried once more, then counted as
 # sent; idle sessions reach the message through the close step's list; a
-# pending run outlives the seven-day sweep. No live model call.
+# pending run outlives the seven-day sweep. A step with `weekdays` runs
+# only on those days. No live model call.
 set -u
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -161,6 +162,7 @@ jq -n --arg repo "$repo" --arg central "$CENTRAL" '{
 			steps: [
 				{id: "commit-push", kind: "commit_push"},
 				{id: "F-web", kind: "fetch", prompt: "web.md", tools: ["WebSearch"], connector: false, timeout: 30},
+				{id: "F-mon", kind: "fetch", prompt: "web.md", tools: [], connector: false, timeout: 30, weekdays: [1]},
 				{id: "close", kind: "close"}
 			],
 			brief: {
@@ -206,6 +208,8 @@ assert_contains "and the instruction files to judge by, in order" "- Judge it by
 assert_contains "and the inputs" "- inputs/: f-web.json, notes.md, open-items.json" "$msg"
 assert_contains "and how it went" "- How it went: finished ok." "$msg"
 
+assert_true "a Monday-only step runs on a Monday" "$(grep -q 'model call: F-mon' "$ROOT/run.out" && echo true || echo false)"
+
 echo
 echo "=== a later run the same day, the central session live: it is sent ==="
 sessions <<< "$CENTRAL central-x true"
@@ -224,6 +228,9 @@ echo "=== a renamed central session is still found by its id ==="
 sessions <<< "$CENTRAL central-renamed true"
 run 2026-10-06
 assert_eq "sent to its new name" "central-renamed" "$(jq -rs '.[-1].to' "$BRIEF_TEST_SENT")"
+assert_true "a Monday-only step is skipped on a Tuesday" \
+	"$(grep -q 'step F-mon (fetch): skipped (it runs on weekdays 1 only)' "$ROOT/run.out" && ! grep -q 'model call: F-mon' "$ROOT/run.out" && echo true || echo false)"
+assert_eq "and the pass is not partial for it" "ok" "$(jq -r '.passes.testpass.result' "$DESK_STATUS_FILE")"
 
 echo
 echo "=== a run of a new day sends every pending run in one message, oldest first ==="

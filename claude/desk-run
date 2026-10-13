@@ -412,6 +412,12 @@ for ((i = 0; i < steps_len; i++)); do
 		desk_log "$pass" "step $id ($kind): skipped (weekend — model steps run weekdays only)"
 		continue
 	fi
+	# A step with `weekdays` runs only on those days of the slot's date.
+	step_weekdays="$(jq -c '.weekdays // empty' <<< "$step_json")"
+	if [ -n "$step_weekdays" ] && ! jq -e --argjson d "$scheduled_dow" 'index($d) != null' > /dev/null 2>&1 <<< "$step_weekdays"; then
+		desk_log "$pass" "step $id ($kind): skipped (it runs on weekdays $(jq -r 'join(", ")' <<< "$step_weekdays") only)"
+		continue
+	fi
 
 	result="failed"
 	case "$kind" in
