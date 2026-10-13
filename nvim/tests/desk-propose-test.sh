@@ -164,6 +164,25 @@ case "$out" in *'waits for you to commit "Monday" in notes.md: Agenda sent (sess
 assert_eq "...which is not landed on top, unlike an anchor found nowhere" "  - nothing yet|Weekly|  - posts drafted" \
 	"$(git -C "$repo3" show refs/desk/proposal:notes.md 2> /dev/null | paste -sd'|' -)"
 
+echo "=== --withdraw takes a staged suggestion back ==="
+jq -n '[{id: "wd", file: "notes.md", kind: "new", target: "top", before: "", after: "- a suggestion the user says is done", headline: "Done already", source: "notes"}]' > "$ROOT/wd.json"
+"$PROPOSE" --pass morning --date 2026-10-13 "$ROOT/wd.json" > /dev/null
+wid="$(proposal_items | jq -r '.[] | select(.id | endswith("-wd")) | .id')"
+before_sha="$(git -C "$repo" rev-parse refs/desk/proposal)"
+err="$("$PROPOSE" --withdraw "$wid" no-such-id 2>&1 > /dev/null)"
+assert_eq "an id the proposal does not hold fails the call" "1" "$?"
+case "$err" in *"no suggestion no-such-id"*) ok "...naming it" ;; *) bad "...naming it (got [$err])" ;; esac
+assert_eq "...and withdraws nothing" "$before_sha" "$(git -C "$repo" rev-parse refs/desk/proposal)"
+out="$("$PROPOSE" --withdraw "$wid")"
+assert_eq "withdrawing succeeds" "0" "$?"
+case "$out" in "withdrew 1: "*) ok "...and says so" ;; *) bad "...and says so (got [$out])" ;; esac
+assert_eq "the suggestion is gone from the open proposal" "" "$(nvim -l "$CLI" proposal-open "$repo" | jq -r --arg id "$wid" '.items[] | select(.id == $id) | .id')"
+assert_eq "it is recorded as declined" "$wid" "$(nvim -l "$CLI" declined-recent "$repo" | jq -r --arg id "$wid" '.items[] | select(.id == $id) | .id')"
+assert_eq "the other suggestions still wait" "true" "$(nvim -l "$CLI" proposal-open "$repo" | jq '[.items[].id] | any(endswith("-ticket"))')"
+"$PROPOSE" --pass morning --date 2026-10-14 "$ROOT/wd.json" > /dev/null
+assert_eq "staging the same text again does not bring it back" "" \
+	"$(nvim -l "$CLI" proposal-open "$repo" | jq -r '.items[] | select(.headline == "Done already") | .id')"
+
 echo "=== config and usage ==="
 DESK_CONFIG="" DESK_CONFIG_DEFAULT="$ROOT/none.json" "$PROPOSE" "$ROOT/items.json" > /dev/null 2>&1
 assert_eq "no config is a config error" "2" "$?"
