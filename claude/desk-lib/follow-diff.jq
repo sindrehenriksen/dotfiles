@@ -235,7 +235,7 @@ def ticket_events:
 	        # The ticket digest has no follow for a ticket to be new to, and a
 	        # ticket created in its window is the new-tickets fetch's to report.
 	        ((($i.created | ts) // 0) > $jira_since) as $created
-	        | { key: $i.key, title: $i.summary, at: (($i.updated | ts) // $now), creator: ($i.creator // null),
+	        | { key: $i.key, title: $i.summary, at: (($i.updated | ts) // $now), creator: (if $created then $i.creator else null end),
 	            skip: (if $digest then (if $created then "new tickets" else "first-seen tickets" end)
 	                   elif $created or (($i.parent != null) and (all_keys | index($i.parent)) != null and ($lookback | not))
 	                   then null else "first-seen tickets" end),
@@ -334,7 +334,7 @@ def pr_events:
 	          ($p | pr_comment_changes({}) | .[] | $base + .)
 	      else
 	        (($p | pr_field_changes($prev) | if $digest then map(digest_pr_split) else . end) as $f
-	         | field_event($f) | $base + {at: (($p.updated | ts) // $now)} + .),
+	         | field_event($f) | $base + {at: (($p.updated | ts) // $now), kinds: [$f[].kind // empty]} + .),
 	          ($p | pr_comment_changes($prev) | .[] | $base + .)
 	      end ];
 
@@ -389,7 +389,11 @@ def own_ticket_rules:
 	else . end;
 def own_pr_rules:
 	if .author != null then (if is_self(.author) then skip_unless("own posts") else . end)
-	elif is_self(.pr_author) then skip_unless("own PR moves")
+	# On the user's own PR, a state move (merged, closed, draft, ready) is the
+	# user's; new commits, a retitle or a description edit may be someone
+	# else's, so the follow pass forwards an event carrying one. The ticket
+	# digest counts those as PR updates anyway.
+	elif is_self(.pr_author) and ($digest or ((.kinds // []) | index("update") | not)) then skip_unless("own PR moves")
 	else . end;
 def digest_pr_rules:
 	if (.pr_author // "") as $a | any($pr_skip_authors[]; . as $re | $a | test($re; "i"))

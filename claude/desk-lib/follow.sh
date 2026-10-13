@@ -70,7 +70,8 @@ _desk_follow_valid_key() { [[ "$1" =~ ^[A-Z][A-Z0-9]+-[0-9]+$ ]]; }
 # desk_follow_address <session id>: the name a message to that session goes
 # to. Prints its current name and returns 0 only while it is live, one
 # process holds it and the name resolves back to it alone. Otherwise prints
-# why, `not running` or `ambiguous <name>`, and returns 1: the message
+# why, `not running`, `unnamed` (live, with no name to address it by) or
+# `ambiguous <name>`, and returns 1: the message
 # waits for a later run. The follow pass and the central brief both send
 # through this.
 desk_follow_address() {
@@ -79,8 +80,12 @@ desk_follow_address() {
 	name="$(jq -r '.name // empty' <<< "$hit" 2> /dev/null)"
 	live="$(jq -r '.live // false' <<< "$hit" 2> /dev/null)"
 	dup="$(jq -r '.duplicate_pids // false' <<< "$hit" 2> /dev/null)"
-	if [ "$live" != "true" ] || [ -z "$name" ]; then
+	if [ "$live" != "true" ]; then
 		printf 'not running'
+		return 1
+	fi
+	if [ -z "$name" ]; then
+		printf 'unnamed'
 		return 1
 	fi
 	back="$(_desk_follow_reader resolve "$name" 2> /dev/null | jq -r '.id // empty' 2> /dev/null)"
@@ -420,34 +425,33 @@ desk_follow_fetch_jira() {
 	fi
 	[ "$ok" = "true" ]
 }
-# The ticket field names a changelog entry must touch to count as one of the
-# moves the diff reports (field_changes in follow-diff.jq).
-DESK_FOLLOW_CHANGELOG_FIELDS='^(status|summary|assignee|resolution|labels|description|link|parent|issueparentassociation)$'
-
 # desk_follow_own_field_moves <pass> <pass_config> <keys json> <since epoch> <out_dir>
 # Which of these tickets' field moves in the window are all the user's
 # own: one restricted read call, its only tool the configured changelog
 # tool (jira.changelog_tool), each call pinned by the deny hook to one of
 # the keys with `expand: changelog`. A ticket counts when its changelog has
-# at least one entry since <since> touching a reported field and every such
-# entry's author is `self_account_id`. Prints {<key>: true} for those; a
+# at least one entry since <since> and every such entry, whatever field it
+# touches, is by `self_account_id`; an entry whose time cannot be read counts
+# as in the window. So anything unrecognised costs an extra forward, never a
+# hidden change. Prints {<key>: true} for those; a
 # ticket whose changelog did not come back is left out, so its moves are
 # forwarded as before, and the log names it.
 desk_follow_own_field_moves() {
 	local pass="$1" pass_config="$2" keys="$3" since="$4" out_dir="$5"
-	local jira tool prompt_rel account
+	local jira tool prompt_rel account cloud
 	jira="$(jq -c '.jira // {}' <<< "$pass_config")"
 	tool="$(jq -r '.changelog_tool // empty' <<< "$jira")"
+	cloud="$(jq -r '.cloud_id // empty' <<< "$jira")"
 	prompt_rel="$(jq -r '.changelog_prompt // empty' <<< "$jira")"
 	account="$(jq -r '.self_account_id // empty' <<< "$pass_config")"
-	if [ -z "$tool" ] || [ -z "$prompt_rel" ] || [ -z "$account" ] || [ "$(jq 'length' <<< "$keys")" -eq 0 ]; then
+	if [ -z "$tool" ] || [ -z "$prompt_rel" ] || [ -z "$account" ] || [ -z "$cloud" ] || [ "$(jq 'length' <<< "$keys")" -eq 0 ]; then
 		echo '{}'
 		return 0
 	fi
 	local scratch pinned settings hook calls out mcp_config model
 	scratch="$(desk_scratch_dir "$pass-changelog")"
 	pinned="$scratch/pinned-args.json"
-	jq -c '[.[] | {issueIdOrKey: ., expand: "changelog", fields: ["summary"]}]' <<< "$keys" > "$pinned"
+	jq -c --arg c "$cloud" '[.[] | {cloudId: $c, issueIdOrKey: ., expand: "changelog", fields: ["summary"]}]' <<< "$keys" > "$pinned"
 	calls="$(jq -r '.[] | tojson' "$pinned")"
 	hook="${DESK_DENY_HOOK_SCRIPT:-$DESK_LIB_DIR/deny-unlisted-tool.sh}"
 	if [ ! -f "$hook" ]; then
@@ -457,7 +461,7 @@ desk_follow_own_field_moves() {
 		return 0
 	fi
 	settings="$scratch/deny-hook-settings.json"
-	jq -n --arg cmd "$(desk_shq "$hook") --pinned $(desk_shq "$pinned") --ignore-keys cloudId,responseContentFormat,actionSource -- $tool" \
+	jq -n --arg cmd "$(desk_shq "$hook") --pinned $(desk_shq "$pinned") --ignore-keys responseContentFormat,actionSource -- $tool" \
 		'{hooks: {PreToolUse: [{hooks: [{type: "command", command: $cmd, timeout: 10}]}]}}' > "$settings"
 	desk_render_prompt "$(desk_prompt_path "$prompt_rel")" "$(jq -n --arg c "$calls" '{calls: $c}')" > "$scratch/prompt.txt"
 	mcp_config="$(jq -r '.mcp_config // empty' <<< "$jira")"
@@ -487,7 +491,7 @@ desk_follow_own_field_moves() {
 	_desk_follow_resolve_spills "$out_dir/changelog-results-raw.jsonl" "$out_dir/changelog-spill" > "$out_dir/changelog-results.jsonl"
 	local pairs result
 	pairs="$(desk_tool_call_pairs "$out_dir/changelog-uses.jsonl" "$out_dir/changelog-results.jsonl" "$tool")"
-	result="$(jq -c --argjson keys "$keys" --arg me "$account" --argjson since "$since" --arg fields "$DESK_FOLLOW_CHANGELOG_FIELDS" '
+	result="$(jq -c --argjson keys "$keys" --arg me "$account" --argjson since "$since" '
 		def ts: try (capture("^(?<d>[0-9-]{10}T[0-9:]{8})(\\.[0-9]+)?(?<z>Z|[+-][0-9]{2}:?[0-9]{2})?$") as $c
 			| (($c.d + "Z") | fromdateiso8601)
 			  - (($c.z // "Z") as $z | if $z == "Z" then 0 else ($z | sub(":"; "")) as $zz
@@ -498,8 +502,7 @@ desk_follow_own_field_moves() {
 			  then .[($p.input.issueIdOrKey // "")] = $r.changelog.histories else . end)) as $by
 		| {read: [$keys[] | select($by[.] != null)],
 		   own: (reduce $keys[] as $k ({};
-			[($by[$k] // [])[] | select(((.created | ts) // 0) > $since)
-			 | select(any(.items[]?; (.field // "") | test($fields; "i")))] as $moves
+			[($by[$k] // [])[] | select(((.created | ts) // ($since + 1)) > $since)] as $moves
 			| if ($moves | length) > 0 and all($moves[]; .author.accountId == $me) then .[$k] = true else . end))}
 	' <<< "$pairs" 2> /dev/null)"
 	[ -n "$result" ] || result='{"read": [], "own": {}}'
@@ -936,6 +939,8 @@ desk_follow_main() {
 		if ! name="$(desk_follow_address "$sid")"; then
 			if [ "$name" = "not running" ]; then
 				desk_log "$pass" "follow: $label: $n change(s) queued, the session is not running"
+			elif [ "$name" = "unnamed" ]; then
+				desk_log "$pass" "follow: $label: the session is running but has no name to send to — $n change(s) stay queued until it is named"
 			else
 				desk_log "$pass" "follow: $label: the name '${name#ambiguous }' does not address this session alone — $n change(s) stay queued"
 			fi
