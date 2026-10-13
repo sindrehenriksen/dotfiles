@@ -6,9 +6,10 @@
 #
 #   git     The worktrees this session or its subagents acted in: the cwd's,
 #           and the one holding each path that an Edit or Write named, that a
-#           Bash command ran in (its cwd), or that a Bash command gave to
-#           `git -C` or `worktree add`, read from the transcript and from
-#           those under <session>/subagents/. A path is resolved against the
+#           Bash command ran in (its cwd, or a `cd` in the command), that a
+#           `git -C` with a changing subcommand (commit, rebase, reset, ...,
+#           not log or status) named, or that `worktree add` created, read
+#           from the transcript and from those under <session>/subagents/. A path is resolved against the
 #           command's own simple `NAME=value` assignments, `$HOME` and `~/`;
 #           one it cannot resolve is skipped. Only worktrees under $HOME that
 #           still exist count. For each, its branch, how many files are
@@ -141,6 +142,23 @@ def worktree_add_path:
         elif $t | startswith("-") then .
         else .path = $t end)
     | .path // empty;
+# The path a `git -C <path> <subcommand>` names, when the subcommand changes
+# the worktree, its index or its refs: reads such as log, status or diff do
+# not count, since a session reads other sessions' worktrees all the time.
+def git_c_mutating:
+    scan("git\\s+-C\\s+(\"[^\"]*\"|'[^']*'|[^\\s;&|)]+)\\s+([^;&|\\n]*)")
+    | .[0] as $path
+    | [.[1] | splits("\\s+") | select(. != "")]
+    | reduce .[] as $t ({skip: false, sub: null};
+        if .sub != null then .
+        elif .skip then .skip = false
+        elif $t == "-c" or $t == "-C" then .skip = true
+        elif $t | startswith("-") then .
+        else .sub = $t end)
+    | select(.sub | IN("add", "am", "apply", "branch", "checkout", "cherry-pick", "clean", "commit",
+        "merge", "mv", "pull", "push", "rebase", "reset", "restore", "revert", "rm", "stash",
+        "switch", "tag", "update-ref"))
+    | $path;
 select(contains("\"type\":\"tool_use\"")) | fromjson? | select(type == "object")
 | (.cwd // "") as $cwd
 | .message.content[]? | select(type == "object" and .type == "tool_use")
@@ -149,31 +167,40 @@ select(contains("\"type\":\"tool_use\"")) | fromjson? | select(type == "object")
   elif .name == "Bash" then
       (.input.command // "") as $c | ($c | assigns) as $vars
       | ($cwd | select(. != "")),
-        ($c | scan("git\\s+-C\\s+(\"[^\"]*\"|'[^']*'|[^\\s;&|)]+)")[0] | expand($vars; $cwd)),
-        ($c | worktree_add_path | expand($vars; $cwd))
+        ($c | git_c_mutating | expand($vars; $cwd)),
+        ($c | worktree_add_path | expand($vars; $cwd)),
+        ($c | scan("(?:^|[;&|(]\\s*)cd\\s+(\"[^\"]*\"|'[^']*'|[^\\s;&|)]+)")[0] | expand($vars; $cwd))
   else empty end
 | strings
 JQ
+
+# The acted-in paths from the transcript and its subagents' transcripts. A
+# newline after each file, since the last line of one still being written has
+# none and would swallow the next file's first.
+scan_acted() {
+    local transcript=$1 p
+    {
+        cat "$transcript"
+        echo
+        compgen -G "${transcript%.jsonl}/subagents/agent-*.jsonl" | while IFS= read -r p; do cat "$p"; echo; done
+    } | jq -R -r --arg home "$HOME" "$ACTED_JQ"
+}
 
 # The worktree roots for those paths: for each one under $HOME, the nearest
 # ancestor holding a `.git`, as long as the directory leading from that root
 # towards the path still exists. That is what drops a worktree since removed,
 # whose paths would otherwise land on whatever repo encloses it. The cwd's
-# root comes first; $JOBS/acted.failed marks a transcript it could not read.
+# root comes first. The scan runs as a job under the failsafe; $JOBS/acted.failed
+# marks one that failed or did not finish.
 touched_worktrees() {
     local cwd=$1 transcript=$2 p child
     git -C "$cwd" rev-parse --show-toplevel 2>/dev/null
-    [ -r "$transcript" ] || return 0
-    # A newline after each file, since the last line of one still being
-    # written has none and would swallow the next file's first.
-    {
-        cat "$transcript"
-        echo
-        compgen -G "${transcript%.jsonl}/subagents/agent-*.jsonl" | while IFS= read -r p; do cat "$p"; echo; done
-    } | jq -R -r --arg home "$HOME" "$ACTED_JQ" >"$JOBS/acted" 2>"$JOBS/acted.err"
+    [ -n "$transcript" ] || return 0
+    spawn acted scan_acted "$transcript"
+    reap "$DEADLINE" acted
     # Anything on stderr, not the exit code: jq reports only the last input's.
-    [ -s "$JOBS/acted.err" ] && touch "$JOBS/acted.failed"
-    sed -e 's|/\./|/|g' -e 's|\(/\.\)*/*$||' "$JOBS/acted" | sort -u |
+    [ -e "$JOBS/acted.rc" ] && [ ! -s "$JOBS/acted.err" ] || touch "$JOBS/acted.failed"
+    sed -e 's|/\./|/|g' -e 's|\(/\.\)*/*$||' "$JOBS/acted.out" | sort -u |
         while IFS= read -r p; do
             case $p in "$HOME"/*) ;; *) continue ;; esac
             child=""
@@ -214,10 +241,15 @@ wt_check() {
 git_block() {
     local cwd=$1 transcript=$2 here roots root i=0 names=()
     here=$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null)
-    roots=$(touched_worktrees "$cwd" "$transcript" | awk '!seen[$0]++')
+    # Canonical, so `../x` and `x` are one worktree and the cwd's is marked.
+    roots=$(touched_worktrees "$cwd" "$transcript" | while IFS= read -r root; do (cd -P "$root" 2>/dev/null && pwd); done | awk '!seen[$0]++')
     if [ -z "$roots" ]; then
-        echo "Worktrees: $(tilde "$cwd") is not in a git repository, and the transcripts show no other worked in."
-        [ -e "$JOBS/acted.failed" ] && echo "  (the transcripts could not be read)"
+        if [ -z "$transcript" ]; then
+            echo "Worktrees: none ($(tilde "$cwd") is not in a git repository, and the hook input names no transcript)."
+        else
+            echo "Worktrees: none ($(tilde "$cwd") is not in a git repository, and its transcripts show no other worked in)."
+        fi
+        [ -e "$JOBS/acted.failed" ] && echo "  (the transcripts could not be fully read)"
         return
     fi
     while IFS= read -r root; do
@@ -227,8 +259,8 @@ git_block() {
     done <<<"$roots"
     reap "$DEADLINE" "${names[@]}"
 
-    echo "Worktrees this session or its subagents worked in ($i; the cwd's, and those its transcripts show an Edit or Write in, a Bash command run in, or given to git -C or worktree add):"
-    [ -e "$JOBS/acted.failed" ] && echo "  (the transcripts could not be read, so this may be incomplete)"
+    echo "Worktrees this session or its subagents worked in ($i; the cwd's, and those its transcripts show an Edit or Write in, a Bash command run or cd'd in, a changing git -C, or a worktree add):"
+    [ -e "$JOBS/acted.failed" ] && echo "  (the transcripts could not be fully read, so this may be incomplete)"
     local branch notes desc
     i=0
     while IFS= read -r root; do
@@ -263,7 +295,10 @@ process_started_at() {
 
 agents_block() {
     local session=$1 transcript=$2
-    if [ -z "$session" ] || [ ! -r "$transcript" ]; then
+    if [ -z "$session" ]; then
+        echo "Background agents: not read (the hook input names no session)."
+        return
+    elif [ ! -f "$transcript" ] || [ ! -r "$transcript" ]; then
         echo "Background agents: not read (the hook input names no readable transcript)."
         return
     fi
@@ -285,15 +320,12 @@ agents_block() {
     all=$(tr '\n' '\0' <<<"$files" | xargs -0 awk 'FNR == 1 { if (NR > 1) print ""; printf "%s\t", FILENAME } { printf "%s", $0 } END { print "" }' | jq -R -c '
             index("\t") as $i | .[:$i] as $f | .[$i + 1:] | fromjson? | select(type == "object")
             | {id: ($f | capture("agent-(?<i>[^/]+)\\.meta\\.json$").i), d: (.description // ""),
-               tu: (.toolUseId // ""), shape: (.requestShape // null), top: (.parentAgentId == null)}' 2>/dev/null | jq -sc '.')
-    # The format checks, so that Claude Code storing these differently reads
-    # as that rather than as no agents.
+               tu: (.toolUseId // ""), shape: (.requestShape // "foreground"), top: (.parentAgentId == null)}' 2>/dev/null | jq -sc '.')
+    # The format check, so that Claude Code storing these differently reads
+    # as that rather than as no agents. A record with no requestShape is a
+    # foreground agent's, which is how Claude Code writes those.
     if [ "$(jq '[.[] | select(.tu != "")] | length' <<<"${all:-[]}")" -eq 0 ]; then
         echo "Background agents: not read ($(wc -l <<<"$files" | tr -d ' ') agent records, none in a recognised format; Claude Code may have changed how it stores them)."
-        return
-    fi
-    if [ "$(jq '[.[] | select(.shape != null)] | length' <<<"$all")" -eq 0 ]; then
-        echo "Background agents: not read (no agent record says whether it ran in the background; Claude Code may have changed how it stores them)."
         return
     fi
     metas=$(jq -c '[.[] | select(.shape == "background" and .top and .tu != "") | {id, d, tu}]' <<<"$all")

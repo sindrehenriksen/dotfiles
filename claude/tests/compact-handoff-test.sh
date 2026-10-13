@@ -122,24 +122,31 @@ touch "$R/repo-untouched/dirty.txt"
 g "$R/repo" worktree add -q -b clean "$R/repo-clean"
 g "$R/repo-clean" push -q -u origin clean
 g "$R/repo" worktree add -q -b sub "$R/repo-sub"
+g "$R/repo" worktree add -q -b rel "$R/repo-rel"
 git init -q "$R/outer"
 g "$R/outer" commit -q --allow-empty -m outer
 
 # What this session and its subagent did, with HOME as $R: an Edit inside a
-# worktree, a Bash command run with its cwd in one and giving `git -C` a
-# variable it set from a ~/ path, one naming a clean worktree, a Read (not
-# acting), an Edit inside a worktree since removed from a repo that still
-# encloses it, a variable nothing sets, then a subagent's Write and a last
-# line cut off mid-write.
+# worktree; a Bash command run with its cwd in one, committing through
+# `git -C` on a variable it set from a ~/ path; a `cd` into a clean one; only
+# reads (`git -C … log`, a Read) of another; an Edit inside a worktree since
+# removed from a repo that still encloses it; a variable nothing sets; one
+# worktree reached both as `../repo-rel` and directly; and a last line cut
+# off mid-write with no newline. Then a subagent's Write, which a missing
+# newline between transcripts would swallow, and its own cut-off line.
 T="$R/t.jsonl"
 tool() { jq -nc --arg cwd "$1" --arg name "$2" --argjson input "$3" '{type:"assistant",cwd:$cwd,message:{content:[{type:"tool_use",name:$name,input:$input}]}}'; }
 {
     tool "$R" Edit "$(jq -nc --arg p "$R/repo-feature/src/x.py" '{file_path:$p}')"
-    tool "$R/repo" Bash '{"command":"W=~/repo-local; git -C $W status"}'
-    tool "$R" Bash '{"command":"git -C \"~/repo-clean\" log -1"}'
+    tool "$R/repo" Bash '{"command":"W=~/repo-local; git -C $W commit -q -m x"}'
+    tool "$R" Bash '{"command":"cd ~/repo-clean && make"}'
+    tool "$R" Bash '{"command":"git -C ~/repo-untouched log -1; git -C ~/repo-untouched -c core.pager=cat status"}'
     tool "$R" Read "$(jq -nc --arg p "$R/repo-untouched/x" '{file_path:$p}')"
     tool "$R" Edit "$(jq -nc --arg p "$R/outer/wt-gone/f.txt" '{file_path:$p}')"
-    tool "$R" Bash '{"command":"git -C $NOWHERE status"}'
+    tool "$R" Bash '{"command":"git -C $NOWHERE commit"}'
+    tool "$R/repo" Bash '{"command":"git -C ../repo-rel rebase main"}'
+    tool "$R" Edit "$(jq -nc --arg p "$R/repo-rel/f" '{file_path:$p}')"
+    printf '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"%s/repo-untouched/z' "$R"
 } >"$T"
 mkdir -p "$R/t/subagents"
 {
@@ -148,22 +155,27 @@ mkdir -p "$R/t/subagents"
 } >"$R/t/subagents/agent-x.jsonl"
 state() { jq -n --arg cwd "$1" --arg t "${2:-}" '{session_id:"none",cwd:$cwd,transcript_path:$t}' | HOME=$R "$STATE"; }
 out=$(state "$R/repo-feature" "$T")
-check "state: counts the worktrees acted in" '[[ $out == *"Worktrees this session or its subagents worked in (5; the cwd'"'"'s, and those its transcripts show an Edit or Write in, a Bash command run in, or given to git -C or worktree add):"* ]]'
+check "state: counts the worktrees acted in" '[[ $out == *"Worktrees this session or its subagents worked in (6; the cwd'"'"'s, and those its transcripts show an Edit or Write in, a Bash command run or cd'"'"'d in, a changing git -C, or a worktree add):"* ]]'
 check "state: the cwd's worktree comes first" '[ "$(sed -n 3p <<<"$out")" = "  ~/repo-feature  [feature]  ← cwd, 1 commit not on origin/feature" ]'
 check "state: a Bash cwd counts, and a dirty worktree says so" 'grep -qxF "  ~/repo  [main]  dirty: 1 file" <<<"$out"'
-check "state: git -C resolves a variable the command set" 'grep -qxF "  ~/repo-local  [local-only]  2 commits on no remote" <<<"$out"'
-check "state: a clean, pushed worktree has no note" 'grep -qxF "  ~/repo-clean  [clean]" <<<"$out"'
-check "state: a subagent's write counts" 'grep -qxF "  ~/repo-sub  [sub]" <<<"$out"'
-check "state: a line cut off mid-write is skipped, not an error" '[[ $out != *"could not be read"* ]]'
-check "state: a Read is not acting" '[[ $out != *"repo-untouched"* ]]'
+check "state: a changing git -C resolves a variable the command set" 'grep -qxF "  ~/repo-local  [local-only]  2 commits on no remote" <<<"$out"'
+check "state: a cd counts, and a clean, pushed worktree has no note" 'grep -qxF "  ~/repo-clean  [clean]" <<<"$out"'
+check "state: a subagent's write counts, after a cut-off line" 'grep -qxF "  ~/repo-sub  [sub]" <<<"$out"'
+check "state: a worktree reached two ways is listed once" '[ "$(grep -c "repo-rel" <<<"$out")" -eq 1 ] && grep -qxF "  ~/repo-rel  [rel]" <<<"$out"'
+check "state: a line cut off mid-write is skipped, not an error" '[[ $out != *"could not be fully read"* ]]'
+check "state: reading a worktree is not acting in it" '[[ $out != *"repo-untouched"* ]]'
 check "state: a removed worktree does not land on the repo around it" '[[ $out != *"~/outer"* ]]'
 out=$(state "$R/repo-untouched" "$T")
 check "state: the cwd's worktree counts without a mention" 'grep -qxF "  ~/repo-untouched  [untouched]  ← cwd, dirty: 1 file" <<<"$out"'
+out=$(state "$R/repo/../repo-rel" "$T")
+check "state: the cwd is marked however it is spelled" 'grep -qxF "  ~/repo-rel  [rel]  ← cwd" <<<"$out"'
+out=$(state "$R/repo" "$R/t")
+check "state: an unreadable transcript says so" '[[ $out == *"(the transcripts could not be fully read, so this may be incomplete)"* ]]'
 
 : >"$R/many.jsonl"
 for n in 1 2 3 4 5 6 7 8 9 10 11 12; do
     g "$R/repo" worktree add -q -b "wt$n" "$R/wt$n"
-    tool "$R" Bash "$(jq -nc --arg c "git -C $R/wt$n status" '{command:$c}')" >>"$R/many.jsonl"
+    tool "$R" Bash "$(jq -nc --arg c "git -C $R/wt$n commit -m x" '{command:$c}')" >>"$R/many.jsonl"
 done
 out=$(state "$R" "$R/many.jsonl")
 check "state: lists every worktree acted in, with no cap" '[ "$(grep -c "^  ~/wt" <<<"$out")" -eq 12 ]'
@@ -181,9 +193,12 @@ check "state: a worktree whose status fails says so" '[[ $out == *"  ~/broken  s
 rm -rf "$R/broken" && g "$R/repo" worktree prune
 
 out=$(state "$R")
-check "state: says when there is no worktree to show" '[[ $out == *"Worktrees: ~ is not in a git repository, and the transcripts show no other worked in."* ]]'
+check "state: says when there is no worktree and no transcript" '[[ $out == *"Worktrees: none (~ is not in a git repository, and the hook input names no transcript)."* ]]'
+: >"$R/empty.jsonl"
+out=$(state "$R" "$R/empty.jsonl")
+check "state: says when the transcripts show no worktree" '[[ $out == *"Worktrees: none (~ is not in a git repository, and its transcripts show no other worked in)."* ]]'
 out=$(echo 'not json' | "$STATE")
-check "state: bad input still prints the block" '[[ $out == *"Current state, read from disk"* && $out == *"Background agents: not read (the hook input names no readable transcript)."* ]]'
+check "state: bad input still prints the block" '[[ $out == *"Current state, read from disk"* && $out == *"Background agents: not read (the hook input names no session)."* ]]'
 
 mkdir -p "$R/bin"
 printf '#!/bin/sh\necho "$$" > "%s/slow.pid"\nexec sleep 30\n' "$R" >"$R/bin/slow.sh"
@@ -227,6 +242,9 @@ meta aold tu-old background "from an earlier process"
 # A foreground agent's record carries no requestShape at all.
 meta afg tu-fg "" "foreground one"
 meta anested tu-nested background "an agent's own agent" arun
+# Caught mid-write, and first in the listing, so it would end a read that
+# took the files as one stream.
+printf '{"agentType":"general-purpose","toolUseId":"tu-0' >"$C/projects/p/$sid/subagents/agent-a000.meta.json"
 launch() { jq -nc --arg tu "$1" --arg ts "$2" '{type:"assistant",timestamp:$ts,message:{content:[{type:"tool_use",name:"Agent",id:$tu,input:{}}]}}'; }
 note() { jq -nc --arg id "$1" '{type:"queue-operation",operation:"enqueue",timestamp:"2026-01-01T10:00:00Z",content:("<task-notification>\n<task-id>" + $id + "</task-id>\n<status>completed</status>\n</task-notification>")}'; }
 {
@@ -255,6 +273,7 @@ check "agents: leaves out one from an earlier process" '[[ $out != *"earlier pro
 check "agents: leaves out foreground agents" '[[ $out != *"foreground one"* ]]'
 check "agents: leaves out an agent's own agents" '[[ $out != *"own agent"* ]]'
 check "agents: counts what it lists" '[[ $out == *"have not reported back (2;"* ]]'
+check "agents: a record caught mid-write costs only itself" '[[ $out == *"  arun  "* && $out == *"  aresumed  "* ]]'
 { sed '$d' "$C/projects/p/$sid.jsonl"; note arun; jq -nc '{type:"queue-operation",operation:"enqueue",content:"<task-notification>\n<task-id>aresumed</task-id>"}'; } >"$C/projects/p/$sid.jsonl.tmp" && mv "$C/projects/p/$sid.jsonl.tmp" "$C/projects/p/$sid.jsonl"
 out=$(agents)
 check "agents: says none are left once all reported" '[[ $out == *"Background agents started from this session: none still running."* ]]'
@@ -277,7 +296,10 @@ out=$(fmtrun odd)
 check "agents: says when records are in no recognised format" '[[ $out == *"Background agents: not read (1 agent records, none in a recognised format; Claude Code may have changed how it stores them)."* ]]'
 fmt noshape && echo '{"toolUseId":"t1","description":"d"}' >"$C/projects/p/noshape/subagents/agent-q.meta.json"
 out=$(fmtrun noshape)
-check "agents: says when no record says how it ran" '[[ $out == *"Background agents: not read (no agent record says whether it ran in the background;"* ]]'
+check "agents: a record with no requestShape is a foreground agent" '[[ $out == *"Background agents started from this session: none."* ]]'
+fmtrun_t() { jq -n --arg cwd "$R" '{session_id:"x",transcript_path:"",cwd:$cwd}' | "$STATE"; }
+out=$(fmtrun_t)
+check "agents: says when the input names no transcript" '[[ $out == *"Background agents: not read (the hook input names no readable transcript)."* ]]'
 
 out=$(jq -n --arg cwd "$R/repo" --arg t "$T" '{hook_event_name:"SessionStart",source:"compact",cwd:$cwd,transcript_path:$t}' | HOME=$R "$HOOK" session-start)
 check "session-start: opens by saying the session was compacted" '[ "$(head -1 <<<"$out")" = "This session was just compacted: the conversation above is a summary of it, not the conversation itself. For a specific the summary lacks, the full pre-compaction conversation is in its transcript, $T; search it with rg or jq rather than guess, and do not read the whole file into context." ]'
