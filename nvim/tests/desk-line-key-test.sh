@@ -54,6 +54,7 @@ at_check() { desk_item_at_problem "$(jq -cn --arg at "$1" --arg b "$2" '{target:
 assert_eq "an at and a before marked with different whitespace agree" "" \
 	"$(at_check '- a1  <<agent-suggested>>' $'- a1   <<agent-suggested>>\n  - under it')"
 assert_eq "an at with a trailing space matches a before without it" "" "$(at_check '- a1 ' '- a1')"
+assert_eq "a mark mid-line goes with the whitespace before it, as desk_line_key drops it" "" "$(at_check '- a1   <<agent-suggested>> more' '- a1 more')"
 assert_eq "another line is still refused" 'its at line "- b1" is not the first line of before ("- a1")' "$(at_check '- b1' '- a1')"
 
 echo "=== desk_write_marked_head_copy ==="

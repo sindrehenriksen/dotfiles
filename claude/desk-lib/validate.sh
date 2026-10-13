@@ -143,7 +143,7 @@ desk_item_at_problem() {
 	# whitespace before it, and trailing whitespace trimmed.
 	jq -r --arg mark "${DESK_AGENT_MARK:-  <<agent-suggested>>}" '
 		($mark | sub("^\\s+"; "")) as $m
-		| def unmark: split("\n") | map(split($m) | join("") | sub("\\s+$"; "")) | join("\n");
+		| def unmark: split("\n") | map(split($m) | (.[:-1] | map(sub("\\s+$"; ""))) + .[-1:] | join("") | sub("\\s+$"; "")) | join("\n");
 		(.target | if type == "array" then .[0] else . end | if type == "object" then .at else null end) as $at
 		| if $at == null then empty
 		  elif ($at | type) != "string" then "its at must be a line of text"
