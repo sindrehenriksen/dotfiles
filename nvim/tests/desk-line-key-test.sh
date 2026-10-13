@@ -54,8 +54,24 @@ at_check() { desk_item_at_problem "$(jq -cn --arg at "$1" --arg b "$2" '{target:
 assert_eq "an at and a before marked with different whitespace agree" "" \
 	"$(at_check '- a1  <<agent-suggested>>' $'- a1   <<agent-suggested>>\n  - under it')"
 assert_eq "an at with a trailing space matches a before without it" "" "$(at_check '- a1 ' '- a1')"
-assert_eq "a mark mid-line goes with the whitespace before it, as desk_line_key drops it" "" "$(at_check '- a1   <<agent-suggested>> more' '- a1 more')"
+assert_eq "a mark mid-line is part of the line, as placement reads it" "" "$(at_check '- a1   <<agent-suggested>> more' '- a1   <<agent-suggested>> more ')"
 assert_eq "another line is still refused" 'its at line "- b1" is not the first line of before ("- a1")' "$(at_check '- b1' '- a1')"
+
+echo "=== the runner's line rule is placement's (snippet.line_key) ==="
+cases="$ROOT/line-cases.txt"
+printf '%s\n' '- plain' '- trailing  ' $'- tab\t' '- marked  <<agent-suggested>>' '- spaced end   <<agent-suggested>>  ' \
+	'- mid <<agent-suggested>> line' '<<agent-suggested>>' '  indented line ' > "$cases"
+lua_keys="$(nvim -l /dev/stdin "$HERE/../lua" "$cases" <<'LUA'
+package.path = arg[1] .. "/?.lua;" .. package.path
+local snippet = require("desk.snippet")
+for l in io.lines(arg[2]) do io.write(snippet.line_key(l), "\n") end
+LUA
+)"
+assert_eq "desk_line_key gives every case the key snippet.line_key gives it" "$lua_keys" "$(desk_line_key < "$cases")"
+jq_keys="$(while IFS= read -r l; do
+	desk_item_at_problem "$(jq -cn --arg at "$l" --arg b "$(printf '%s' "$lua_keys" | sed -n "$(grep -nxF -- "$l" "$cases" | head -n1 | cut -d: -f1)p")" '{target: {at: $at}, before: $b}')"
+done < "$cases")"
+assert_eq "and the at check counts each case equal to its key" "" "$(grep -v 'shorter than three' <<< "$jq_keys" | sed '/^$/d')"
 
 echo "=== desk_write_marked_head_copy ==="
 desk_nvim_cli() { [ "$1" = taken-lines ] && jq -cn '{lines: ["  - a taken line ending in a space"]}'; }

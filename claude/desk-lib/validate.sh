@@ -139,11 +139,15 @@ desk_before_is_committed() {
 # line of the notes, so it must be at least three characters, and it must be
 # the first line of `before`, since that is where the lines it names start.
 desk_item_at_problem() {
-	# Compared as desk_line_key compares (common.sh): the mark gone with any
-	# whitespace before it, and trailing whitespace trimmed.
+	# Compared as desk_line_key compares (common.sh): the mark at the end of
+	# the line gone with the whitespace before it, and trailing whitespace
+	# trimmed.
 	jq -r --arg mark "${DESK_AGENT_MARK:-  <<agent-suggested>>}" '
 		($mark | sub("^\\s+"; "")) as $m
-		| def unmark: split("\n") | map(split($m) | (.[:-1] | map(sub("\\s+$"; ""))) + .[-1:] | join("") | sub("\\s+$"; "")) | join("\n");
+		| def unmark: split("\n") | map(
+			(rindex($m)) as $i
+			| (if $i != null and (.[($i + ($m | length)):] | test("^\\s*$")) then .[:$i] else . end)
+			| sub("\\s+$"; "")) | join("\n");
 		(.target | if type == "array" then .[0] else . end | if type == "object" then .at else null end) as $at
 		| if $at == null then empty
 		  elif ($at | type) != "string" then "its at must be a line of text"

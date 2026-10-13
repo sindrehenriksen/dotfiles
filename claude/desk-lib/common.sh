@@ -173,10 +173,12 @@ desk_write_atomic() {
 }
 
 # desk_line_key: each line on stdin as it is compared with a quoted one:
-# the agent mark dropped together with any whitespace before it, and
-# trailing whitespace dropped, so a quote of a taken line ending in a space
-# still matches it. The same rule the review's own matching uses.
+# the agent mark at the end of the line dropped together with the
+# whitespace around it, then trailing whitespace dropped, so a quote of a
+# taken line ending in a space still matches it. The rule of
+# nvim/lua/desk/snippet.lua's line_key, which placement uses;
+# desk-line-key-test.sh checks the two agree.
 desk_line_key() {
 	DESK_MARK="$(sed 's/^[[:space:]]*//' <<< "${DESK_AGENT_MARK:-  <<agent-suggested>>}")" \
-		perl -pe 'BEGIN { $m = quotemeta($ENV{DESK_MARK}) } s/\s*$m//g; s/[ \t\r]+$//'
+		perl -pe 'BEGIN { $m = quotemeta($ENV{DESK_MARK}) } s/[ \t\r]*$m[ \t\r]*$//; s/[ \t\r]+$//'
 }

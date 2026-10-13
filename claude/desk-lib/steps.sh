@@ -203,7 +203,7 @@ desk_write_marked_head_copy() {
 	DESK_TAKEN="$marked_lines" DESK_MARK_TEXT="$DESK_AGENT_MARK" perl -ne '
 		BEGIN {
 			($m = $ENV{DESK_MARK_TEXT}) =~ s/^\s+//; $m = quotemeta($m);
-			sub key { my $l = shift; $l =~ s/\s*$m//g; $l =~ s/[ \t\r]+$//; $l }
+			sub key { my $l = shift; $l =~ s/[ \t\r]*$m[ \t\r]*$//; $l =~ s/[ \t\r]+$//; $l }
 			%taken = map { key($_) => 1 } grep { length } split /\n/, $ENV{DESK_TAKEN};
 		}
 		chomp; my $k = key($_);
