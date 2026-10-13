@@ -3190,6 +3190,30 @@ function M.notes_files()
 	return { "notes.md", "reading.md" }
 end
 
+-- Whether every open buffer of `repo`'s notes files may be saved now
+-- (desk.autosave.check): nothing is saved, committed or recorded while any
+-- of them has a change on disk it has not merged, since the save would put
+-- back what the other writer changed and the commit would record that.
+-- Returns ok, why, and the buffers with the file each holds.
+local function notes_writable(repo)
+	local autosave = require("desk.autosave")
+	local bufs, file_of = {}, {}
+	for _, f in ipairs(M.notes_files()) do
+		local b = vim.fn.bufnr(repo .. "/" .. f)
+		if b ~= -1 and vim.api.nvim_buf_is_loaded(b) then
+			bufs[#bufs + 1] = b
+			file_of[b] = f
+		end
+	end
+	for _, b in ipairs(bufs) do
+		local ok, why = autosave.check(b, { known = true })
+		if not ok then
+			return false, why
+		end
+	end
+	return true, nil, bufs, file_of
+end
+
 --- The commit key: saves every open buffer of the notes files and commits
 --- each file that has changes, in one commit with a message saying what
 --- changed in each (`commit_message_files`), then records any suggestion
@@ -3199,18 +3223,18 @@ function M.commit(bufnr)
 	if not repo then
 		return false, file
 	end
-	local bufs, flushed = {}, {}
-	for _, f in ipairs(M.notes_files()) do
-		local b = vim.fn.bufnr(repo .. "/" .. f)
-		if b ~= -1 and vim.api.nvim_buf_is_loaded(b) then
-			bufs[#bufs + 1] = b
-			-- Recorded before the save, which would otherwise record them unseen.
-			flushed[f] = select(2, M.flush_taken(b))
-			if vim.bo[b].modified then
-				vim.api.nvim_buf_call(b, function()
-					vim.cmd("silent write")
-				end)
-			end
+	local autosave = require("desk.autosave")
+	local ok_all, why_not, bufs, file_of = notes_writable(repo)
+	if not ok_all then
+		return false, why_not
+	end
+	local flushed = {}
+	for _, b in ipairs(bufs) do
+		-- Recorded before the save, which would otherwise record them unseen.
+		flushed[file_of[b]] = select(2, M.flush_taken(b))
+		local ok, why = autosave.save(b, { known = true })
+		if not ok then
+			return false, why
 		end
 	end
 	local changes, paths = {}, {}
@@ -3245,11 +3269,18 @@ end
 
 --- The commit key in the review split: saves the split (its declines), then
 --- commits the notes as the key there does, so the user can commit from
---- where they work.
+--- where they work. Refused before anything is recorded when the notes
+--- can't be saved.
 function M.commit_from_review(review_buf)
 	local s = session_for_review_buf(review_buf)
 	if not s then
 		return false, "not a desk review buffer"
+	end
+	-- Checked before the split's declines are recorded, so a refused commit
+	-- records nothing.
+	local writable, why = notes_writable(s.repo)
+	if not writable then
+		return false, why
 	end
 	if vim.bo[review_buf].modified then
 		local ok, n_or_err = M.save_review(s)

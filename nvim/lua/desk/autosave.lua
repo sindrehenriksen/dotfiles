@@ -49,11 +49,12 @@ function M.is_notes(buf)
 	return vim.api.nvim_buf_is_valid(buf) and vim.b[buf].desk_attached == true and vim.bo[buf].buftype == ""
 end
 
---- Saves notes buffer `buf` when that is safe. Returns true when it was
---- written or had nothing to write, else false and why, in a line.
---- `opts.known`: the caller knows it is a notes file (the review loads the
---- other one without showing it, so it may not be attached yet).
-function M.save(buf, opts)
+--- Whether notes buffer `buf` may be written now: true when it may (or has
+--- nothing to write), else false and why, in a line. Runs checktime first,
+--- so a change on disk is seen before it is judged. `opts.known`: the caller
+--- knows it is a notes file (the review loads the other one without showing
+--- it, so it may not be attached yet).
+function M.check(buf, opts)
 	local notes = opts and opts.known and vim.api.nvim_buf_is_valid(buf) and vim.bo[buf].buftype == "" or M.is_notes(buf)
 	if not (notes and vim.api.nvim_buf_is_loaded(buf)) then
 		return false, "not a notes file"
@@ -70,7 +71,7 @@ function M.save(buf, opts)
 	end
 	local dm = diskmerge()
 	if dm and dm.conflict and dm.conflict(buf) then
-		return false, name(buf) .. " changed on disk: not saved until it is merged"
+		return false, name(buf) .. " changed on disk: not saved until it is merged (in the merge split, :w saves the merge and q ends it)"
 	end
 	local disk = read_disk(buf)
 	if not disk then
@@ -83,13 +84,23 @@ function M.save(buf, opts)
 	if known and h ~= known and h ~= vim.b[buf].diskmerge_seen then
 		return false, name(buf) .. " changed on disk: not saved until it is merged"
 	end
+	return true
+end
+
+--- Saves notes buffer `buf` when that is safe (M.check). Returns true when
+--- it was written or had nothing to write, else false and why, in a line.
+function M.save(buf, opts)
+	local ok, why = M.check(buf, opts)
+	if not ok or not vim.bo[buf].modified then
+		return ok, why
+	end
 	-- `write!`: the file is what this buffer last saw, so a changed
 	-- timestamp alone is no reason to stop on nvim's changed-since-reading
 	-- prompt.
-	local ok, err = pcall(vim.api.nvim_buf_call, buf, function()
+	local wrote, err = pcall(vim.api.nvim_buf_call, buf, function()
 		vim.cmd("silent write!")
 	end)
-	if not ok then
+	if not wrote then
 		return false, string.format("couldn't save %s: %s", name(buf), (tostring(err):gsub("^Vim:", "")))
 	end
 	return true

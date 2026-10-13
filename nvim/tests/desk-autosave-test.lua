@@ -283,6 +283,127 @@ do
 	assert_true("the review's own close saves it", vim.tbl_contains(vim.fn.readfile(r .. "/notes.md"), "  during review"))
 end
 
+print("\n=== a change on disk while a review is open: no way out of the review writes over it ===")
+do
+	local THEIRS = { "Section A", "  theirs", "Section B", "  other" }
+	local function key(k)
+		vim.api.nvim_feedkeys(vim.keycode(k), "x", false)
+		settle()
+	end
+	local paths = {
+		{ "␣gc in the notes", function(_, nb)
+			vim.api.nvim_set_current_win(vim.fn.bufwinid(nb))
+			key("<leader>gc")
+		end },
+		{ "␣gc in the review", function(rb)
+			vim.api.nvim_set_current_win(vim.fn.bufwinid(rb))
+			key("<leader>gc")
+		end },
+		{ "q in the overview", function(_, nb)
+			assert(review.overview(nb))
+			key("q")
+		end },
+		{ "Q in the overview", function(_, nb)
+			assert(review.overview(nb))
+			key("Q")
+		end },
+		{ "␣gq", function(_, nb)
+			vim.api.nvim_set_current_win(vim.fn.bufwinid(nb))
+			key("<leader>gq")
+		end },
+		{ ":q in the review", function(rb)
+			vim.api.nvim_set_current_win(vim.fn.bufwinid(rb))
+			vim.cmd("q")
+			settle()
+		end },
+		{ ":wq in the review", function(rb)
+			vim.api.nvim_set_current_win(vim.fn.bufwinid(rb))
+			vim.cmd("wq")
+			settle()
+		end },
+		{ "␣gc once Q has ended the review and the merge is open", function(_, nb)
+			assert(review.overview(nb))
+			key("Q")
+			assert(diskmerge.scratch_for(nb), "the merge opened")
+			vim.api.nvim_set_current_win(vim.fn.bufwinid(nb))
+			key("<leader>gc")
+		end },
+		{ "nvim quitting", function()
+			finished = true
+			vim.api.nvim_exec_autocmds("VimLeavePre", {})
+			finished = false
+			settle()
+		end },
+	}
+	for _, path in ipairs(paths) do
+		local r = new_repo()
+		assert(proposal.build(r, "morning", "2026-10-01", {
+			{ id = "n1", file = "notes.md", kind = "new", target = "top", before = "", after = "NEWS n1", source = "https://example.invalid/n1", headline = "headline n1" },
+			{ id = "n2", file = "notes.md", kind = "add", target = { under = "Section B" }, before = "", after = "  NEWS n2", source = "https://example.invalid/n2", headline = "headline n2" },
+		}, { "notes.md", "reading.md" }))
+		local nb = open(r .. "/notes.md")
+		assert(review.open_review(nb))
+		local rb = vim.api.nvim_get_current_buf()
+		vim.api.nvim_win_set_cursor(0, { 1, 0 })
+		vim.cmd("normal dp")
+		assert(vim.tbl_contains(vim.api.nvim_buf_get_lines(nb, 0, -1, false), "NEWS n1"), "the take landed")
+		local head = select(2, git.run(r, { "rev-parse", "HEAD" }))
+		write_disk(r .. "/notes.md", THEIRS)
+		-- Seen, as coming back to nvim sees it: the disk merge waits for the
+		-- review to end, and nvim takes the new timestamp as known, so a
+		-- plain write would no longer stop on it.
+		vim.cmd("checktime")
+		settle()
+		path[2](rb, nb)
+		assert_eq(path[1] .. ": their change stays on disk", THEIRS, vim.fn.readfile(r .. "/notes.md"))
+		assert_eq(path[1] .. ": nothing is committed", head, select(2, git.run(r, { "rev-parse", "HEAD" })))
+		assert_true(path[1] .. ": the take stays in the buffer", vim.tbl_contains(vim.api.nvim_buf_get_lines(nb, 0, -1, false), "NEWS n1"))
+		pcall(diskmerge.close, nb)
+		vim.bo[nb].modified = false
+	end
+end
+
+print("\n=== the other notes file's unmerged change stops ␣gc before anything is saved or recorded ===")
+do
+	local ledger = require("desk.ledger")
+	for _, from in ipairs({ "the notes", "the review" }) do
+		local r = new_repo()
+		assert(proposal.build(r, "morning", "2026-10-01", {
+			{ id = "n1", file = "notes.md", kind = "new", target = "top", before = "", after = "NEWS n1", source = "https://example.invalid/n1", headline = "headline n1" },
+			{ id = "n2", file = "notes.md", kind = "add", target = { under = "Section B" }, before = "", after = "  NEWS n2", source = "https://example.invalid/n2", headline = "headline n2" },
+		}, { "notes.md", "reading.md" }))
+		local nb = open(r .. "/notes.md")
+		-- reading.md loaded with an edit of its own, its file changed under it.
+		local rd = vim.fn.bufadd(r .. "/reading.md")
+		vim.fn.bufload(rd)
+		vim.b[rd].desk_attached = true
+		vim.api.nvim_buf_set_lines(rd, 0, -1, false, { "- mine" })
+		write_disk(r .. "/reading.md", { "- theirs" })
+		assert(review.open_review(nb))
+		local rb = vim.api.nvim_get_current_buf()
+		vim.api.nvim_win_set_cursor(0, { 1, 0 })
+		vim.cmd("normal dp")
+		local n2 = vim.fn.search("NEWS n2", "n")
+		vim.api.nvim_win_set_cursor(0, { n2, 0 })
+		assert(review.decline(rb))
+		local head = select(2, git.run(r, { "rev-parse", "HEAD" }))
+		vim.api.nvim_set_current_win(vim.fn.bufwinid(from == "the notes" and nb or rb))
+		said = {}
+		vim.api.nvim_feedkeys(vim.keycode("<leader>gc"), "x", false)
+		settle()
+		local desc = "␣gc in " .. from
+		assert_eq(desc .. ": notes.md is not saved", BASE, vim.fn.readfile(r .. "/notes.md"))
+		assert_eq(desc .. ": reading.md keeps theirs", { "- theirs" }, vim.fn.readfile(r .. "/reading.md"))
+		assert_eq(desc .. ": nothing is committed", head, select(2, git.run(r, { "rev-parse", "HEAD" })))
+		local records = ledger.read(r)
+		assert_eq(desc .. ": nothing is recorded taken or declined", { 0, 0 }, { #vim.tbl_keys(ledger.taken_by_id(records)), #vim.tbl_keys(ledger.declined(records).ids) })
+		assert_true(desc .. ": it says why, and how to finish the merge", said_matching("^desk: reading%.md changed on disk: not saved until it is merged %(in the merge split, :w saves the merge and q ends it%)$") == 1)
+		vim.bo[rb].modified = false
+		vim.bo[nb].modified = false
+		vim.bo[rd].modified = false
+	end
+end
+
 finished = true
 print(string.format("\n=== summary: %d passed, %d failed ===", pass, fail))
 if fail > 0 then
