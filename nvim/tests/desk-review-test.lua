@@ -2610,7 +2610,7 @@ do
 	fresh()
 end
 
-print("\n=== a resize shares the review's height between its two windows, the list kept at its own ===")
+print("\n=== a resize fills the review: its two windows share the height, and their text reaches the last row ===")
 do
 	-- A real resize needs a UI, which this headless nvim has none of: a
 	-- second nvim runs the review, with a UI attached from here.
@@ -2629,6 +2629,7 @@ do
 		return R("nvim_exec_lua", code, { ... })
 	end
 	R("nvim_ui_attach", 100, 30, { rgb = true })
+	local diffopt = lua("return vim.o.diffopt")
 	local function resize(width, height)
 		R("nvim_ui_try_resize", width, height)
 		vim.wait(1000, function()
@@ -2661,10 +2662,38 @@ do
 	local function even()
 		return math.abs(h("rw") - h("nw")) <= 1
 	end
+	-- Whether the window's text, from its top line on, takes every row: no
+	-- empty `~` rows under a fold that ends the view.
+	local function filled(win)
+		return lua([[
+			local win = _G[...]
+			local top = vim.fn.line("w0", win)
+			return vim.api.nvim_win_text_height(win, { start_row = top - 1 }).all >= vim.api.nvim_win_get_height(win)
+		]], win)
+	end
+	local function context()
+		return tonumber(lua("return vim.o.diffopt"):match("context:(%d+)") or "6")
+	end
+	local function covers()
+		return context() >= math.max(h("rw"), h("nw"))
+	end
 	local qf_height = h("qf")
 	resize(100, 60)
 	assert_true("stretched: the review and the notes share the height", even())
 	assert_eq("and the list keeps its own", qf_height, h("qf"))
+	assert_true("the diff context is at least their height", covers())
+	lua("vim.api.nvim_set_current_win(_G.qf); vim.cmd('normal! gg'); require('desk.review').qf_preview()")
+	assert_true("the review's text reaches its last row", filled("rw"))
+	assert_true("so does the notes'", filled("nw"))
+	-- The review the taller now, so only its own window can account for the
+	-- context.
+	lua("vim.api.nvim_set_current_win(_G.rw); vim.cmd('resize +6'); vim.cmd('redraw')")
+	vim.wait(1000, covers)
+	assert_true("a height changed inside nvim refits it", covers())
+	lua("vim.cmd('tabnew'); vim.cmd('redraw')")
+	assert_true("so does entering a tab without the review, which leaves it fitted", covers())
+	lua("vim.cmd('tabclose')")
+	lua("vim.opt.diffopt:append('iwhite')")
 	lua("vim.api.nvim_win_set_height(_G.rw, 8)")
 	resize(120, 60)
 	assert_eq("a resize that keeps the height leaves a height set by hand", 8, h("rw"))
@@ -2678,6 +2707,7 @@ do
 	resize(120, 40)
 	assert_eq("side by side: nothing is shared, the window above the review keeps its height", 3, h("above"))
 	lua("vim.cmd('silent! %bwipeout!')")
+	assert_eq("the review gone, the user's diffopt is back, with the change they made meanwhile", diffopt .. ",iwhite", lua("return vim.o.diffopt"))
 	vim.fn.jobstop(ch)
 end
 

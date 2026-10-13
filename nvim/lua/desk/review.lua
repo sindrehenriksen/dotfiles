@@ -1324,6 +1324,7 @@ function M.open_review(notes_buf)
 	set_winhl(notes_win, M.NOTES_WINHL)
 	s.notes_win = notes_win
 	watch_notes_window(s, notes_win)
+	M.fit_diff_context()
 
 	vim.api.nvim_create_autocmd("BufWritePost", {
 		group = vim.api.nvim_create_augroup("desk_taken_" .. notes_buf, { clear = true }),
@@ -1399,6 +1400,7 @@ function M.open_review(notes_buf)
 			end
 			record_saved_takes(s)
 			tidy_notes_windows(s)
+			M.fit_diff_context()
 			-- The window layout can't change while a buffer is being wiped.
 			vim.schedule(function()
 				return_home(s)
@@ -2463,6 +2465,77 @@ function M.balance_windows(s)
 	vim.api.nvim_win_set_height(review_win, math.floor(total / 2))
 end
 
+-- The user's 'diffopt' while open reviews have its context widened, and
+-- the value last written over it.
+local saved_diffopt, written_diffopt
+
+local function context_of(parts)
+	for _, part in ipairs(parts) do
+		local n = part:match("^context:(%d+)$")
+		if n then
+			return tonumber(n)
+		end
+	end
+end
+
+--- Fits the diff context to the review's windows: at least as many lines as
+--- the tallest of them, so the unchanged text folded away past a suggestion
+--- starts below the window's last row rather than ending the view in one
+--- fold line and empty rows, while text further off stays folded. 'diffopt'
+--- is global, so the user's own value comes back once no review is open, a
+--- change they make to it meanwhile included, and a context of theirs that
+--- is already wider is kept.
+function M.fit_diff_context()
+	if saved_diffopt and vim.o.diffopt ~= written_diffopt then
+		-- Changed by the user since: theirs now, but for the context this
+		-- wrote, which stands for their own.
+		local widened = context_of(vim.split(written_diffopt, ","))
+		local parts = {}
+		for _, part in ipairs(vim.split(vim.o.diffopt, ",", { trimempty = true })) do
+			if part == "context:" .. tostring(widened) then
+				local own = context_of(vim.split(saved_diffopt, ","))
+				if own then
+					parts[#parts + 1] = "context:" .. own
+				end
+			else
+				parts[#parts + 1] = part
+			end
+		end
+		saved_diffopt = table.concat(parts, ",")
+	end
+	local tallest = 0
+	for bufnr in pairs(sessions) do
+		local s = live_session(bufnr)
+		if s then
+			local wins = vim.fn.win_findbuf(s.review_buf)
+			if s.notes_win and vim.api.nvim_win_is_valid(s.notes_win) then
+				wins[#wins + 1] = s.notes_win
+			end
+			for _, win in ipairs(wins) do
+				tallest = math.max(tallest, vim.api.nvim_win_get_height(win))
+			end
+		end
+	end
+	if tallest == 0 then
+		if saved_diffopt and vim.o.diffopt ~= saved_diffopt then
+			vim.o.diffopt = saved_diffopt
+		end
+		saved_diffopt, written_diffopt = nil, nil
+		return
+	end
+	saved_diffopt = saved_diffopt or vim.o.diffopt
+	local parts = vim.tbl_filter(function(part)
+		return part:match("^context:%d+$") == nil
+	end, vim.split(saved_diffopt, ",", { trimempty = true }))
+	local own = context_of(vim.split(saved_diffopt, ",")) or 6 -- 6: Vim's own default
+	parts[#parts + 1] = "context:" .. math.max(own, tallest)
+	local want = table.concat(parts, ",")
+	if vim.o.diffopt ~= want then
+		vim.o.diffopt = want
+	end
+	written_diffopt = want
+end
+
 -- The editor's window goes full height while the list is open
 -- (desk.window), and back once it closes, however it closes. A list
 -- reopened in place closes its old window first, so the restore waits a
@@ -3356,7 +3429,7 @@ local resize_autocmd_installed = false
 -- A resized editor gives every row it gains or loses to its bottom window,
 -- the notes: stretched for the overview they fill with empty rows, and put
 -- back they shrink to almost nothing. The review's two windows share them
--- instead.
+-- instead, and the diff context follows their height whatever changes it.
 local function install_resize_autocmd()
 	if resize_autocmd_installed then
 		return
@@ -3382,6 +3455,13 @@ local function install_resize_autocmd()
 					end
 				end
 			end
+		end,
+	})
+	-- Any change of a window's height, the editor's resize included, and a
+	-- tab whose windows the context was fitted without.
+	vim.api.nvim_create_autocmd({ "WinResized", "TabEnter" }, {
+		callback = function()
+			M.fit_diff_context()
 		end,
 	})
 end
