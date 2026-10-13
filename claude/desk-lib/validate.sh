@@ -58,8 +58,8 @@ desk_strip_disallowed_urls() {
 # annotation on a line whose HEAD content is an accepted suggestion —
 # desk_write_marked_head_copy's own comment) from $1. J or a close call may
 # echo a marked line back verbatim as part of an anchor/before/after; this
-# is what keeps that mark from ever reaching the user's real files, and from
-# breaking an exact-line anchor match against real (unmarked) HEAD content.
+# is what keeps that mark from ever reaching the user's real files. Matching
+# a quoted line against HEAD drops the mark on its own (desk_line_key).
 desk_strip_agent_marks() {
 	local text="$1"
 	printf '%s' "${text//${DESK_AGENT_MARK:-  <<agent-suggested>>}/}"
@@ -119,7 +119,7 @@ desk_sanitize_item_text() {
 
 # desk_before_is_committed <item-json> <before> <repo>: true when the item
 # rewrites existing lines (edit, move, merge) and <before> is a run of whole
-# lines of the item's file at <repo>'s HEAD.
+# lines of the item's file at <repo>'s HEAD, compared by desk_line_key.
 desk_before_is_committed() {
 	local item_json="$1" before="$2" repo="$3" file content
 	[ -n "$repo" ] && [ -n "$before" ] || return 1
@@ -128,6 +128,8 @@ desk_before_is_committed() {
 	[ -n "$file" ] || return 1
 	content="$(git -C "$repo" show "HEAD:$file" 2> /dev/null)" || return 1
 	while [[ "$before" == *$'\n' ]]; do before="${before%$'\n'}"; done
+	content="$(desk_line_key <<< "$content")"
+	before="$(desk_line_key <<< "$before")"
 	[[ $'\n'"$content"$'\n' == *$'\n'"$before"$'\n'* ]]
 }
 
@@ -137,8 +139,11 @@ desk_before_is_committed() {
 # line of the notes, so it must be at least three characters, and it must be
 # the first line of `before`, since that is where the lines it names start.
 desk_item_at_problem() {
+	# Compared as desk_line_key compares (common.sh): the mark gone with any
+	# whitespace before it, and trailing whitespace trimmed.
 	jq -r --arg mark "${DESK_AGENT_MARK:-  <<agent-suggested>>}" '
-		def unmark: split($mark) | join("");
+		($mark | sub("^\\s+"; "")) as $m
+		| def unmark: split("\n") | map(split($m) | join("") | sub("\\s+$"; "")) | join("\n");
 		(.target | if type == "array" then .[0] else . end | if type == "object" then .at else null end) as $at
 		| if $at == null then empty
 		  elif ($at | type) != "string" then "its at must be a line of text"

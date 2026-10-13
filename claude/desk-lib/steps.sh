@@ -198,13 +198,17 @@ desk_write_marked_head_copy() {
 		printf '%s\n' "$head_content" > "$out"
 		return
 	fi
-	while IFS= read -r line; do
-		if [ -n "$line" ] && grep -qxF -- "$line" <<< "$marked_lines" 2> /dev/null; then
-			printf '%s%s\n' "$line" "$DESK_AGENT_MARK"
-		else
-			printf '%s\n' "$line"
-		fi
-	done <<< "$head_content" > "$out"
+	# Compared as desk_line_key compares, so a taken line whose trailing
+	# whitespace changed is still marked; one pass over the file.
+	DESK_TAKEN="$marked_lines" DESK_MARK_TEXT="$DESK_AGENT_MARK" perl -ne '
+		BEGIN {
+			($m = $ENV{DESK_MARK_TEXT}) =~ s/^\s+//; $m = quotemeta($m);
+			sub key { my $l = shift; $l =~ s/\s*$m//g; $l =~ s/[ \t\r]+$//; $l }
+			%taken = map { key($_) => 1 } grep { length } split /\n/, $ENV{DESK_TAKEN};
+		}
+		chomp; my $k = key($_);
+		print $_, (length($k) && $taken{$k} ? $ENV{DESK_MARK_TEXT} : ""), "\n";
+	' <<< "$head_content" > "$out"
 }
 
 # desk_write_tickets_diff <old-ticket-cache-json> <ticket-cache-file> <out>

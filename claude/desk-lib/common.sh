@@ -171,3 +171,12 @@ desk_write_atomic() {
 	printf '%s' "$content" > "$tmp"
 	mv -f "$tmp" "$path"
 }
+
+# desk_line_key: each line on stdin as it is compared with a quoted one:
+# the agent mark dropped together with any whitespace before it, and
+# trailing whitespace dropped, so a quote of a taken line ending in a space
+# still matches it. The same rule the review's own matching uses.
+desk_line_key() {
+	DESK_MARK="$(sed 's/^[[:space:]]*//' <<< "${DESK_AGENT_MARK:-  <<agent-suggested>>}")" \
+		perl -pe 'BEGIN { $m = quotemeta($ENV{DESK_MARK}) } s/\s*$m//g; s/[ \t\r]+$//'
+}
