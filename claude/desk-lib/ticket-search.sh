@@ -32,8 +32,8 @@ desk_ticket_search_config() {
 # prints the placeholders the prompt gets. The query asks in relative
 # minutes, so the Jira account's own time zone never shifts it, five
 # minutes wider than the window, which the runner then cuts to exactly. It
-# reaches back at most max_window_days: past that, more results than one
-# page holds are likely, and a saved result's next page cannot be fetched.
+# reaches back at most max_window_days, so a long absence costs a bounded
+# number of pages (desk_fetch_remaining_pages).
 desk_ticket_search_window() {
 	local id="$1" cfg="$2" start="$3" end="$4" floor since capped="false" minutes jql
 	floor=$((end - $(jq -r '.max_window_days' <<< "$cfg") * 86400))

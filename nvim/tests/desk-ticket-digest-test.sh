@@ -264,6 +264,11 @@ FIXDIR="$FIX"
 FAKE
 cat >> "$FAKEBIN/claude" << 'FAKE'
 case "$(pwd -P)" in
+	*-F-tickets-page-*)
+		jq -c '{type:"assistant",message:{content:[{type:"tool_use",id:"u2",name:"mcp__tickets__search",input:.[0]}]}}' pinned-args.json
+		jq -nc --rawfile t "$FIXDIR/run-page2.json" '{type:"user",message:{content:[{type:"tool_result",tool_use_id:"u2",content:$t}]}}'
+		echo '{"type":"result","subtype":"success"}'
+		;;
 	*-F-tickets-*)
 		q="$(sed -n 's/^Search with jql=//p' prompt.txt)"
 		jq -nc --arg q "$q" '{type:"assistant",message:{content:[{type:"tool_use",id:"u1",name:"mcp__tickets__search",input:{jql:$q}}]}}'
@@ -317,6 +322,137 @@ assert_eq "an ok pass installs the snapshots" '["ABC-1"]' "$(jq -c '.tickets | k
 proposal="$(git -C "$repo" show refs/desk/proposal:proposal.json 2> /dev/null)"
 assert_eq "a digest PR's link is an allowed source, a link it never listed is not" '["pr"]' \
 	"$(jq -c '[.items[].headline]' <<< "$proposal" 2> /dev/null)"
+
+# A search past one page: desk-run pages it, and the judge gets both pages.
+rm -f "$J_SEEN"
+t_new="$(iso $(($(date +%s) - 60)))"
+issue ABC-21 "In Progress" "[$(comment 31 "Kari Human" "page one" "$t_new")]" "" "plan" "$t_new" \
+	| jq -cs '{issues: ., nextPageToken: "t2", isLast: false}' > "$FIX/run-issues.json"
+issue ABC-22 "In Progress" "[$(comment 41 "Kari Human" "page two" "$t_new")]" "" "plan" "$t_new" \
+	| jq -cs '{issues: ., isLast: true}' > "$FIX/run-page2.json"
+jq 'del(.passes.digestpass.scheduled_date)' "$DESK_STATUS_FILE" > "$ROOT/st.json" && mv -f "$ROOT/st.json" "$DESK_STATUS_FILE"
+DESK_CONFIG="$INST/config.json" "$DESK_RUN" digestpass > "$ROOT/run3.out" 2>&1
+rc=$?
+assert_eq "a pass whose search runs past a page passes" "0" "$rc"
+[ "$rc" -eq 0 ] || sed 's/^/    /' "$ROOT/run3.out"
+assert_eq "desk-run fetches the second page, and the judge gets both" '["ABC-21","ABC-22"]' \
+	"$(jq -c '[.entries[] | .key // empty] | sort' "$J_SEEN" 2> /dev/null)"
+
+echo
+echo "=== a search past one page is paged by the runner, which alone can read the token ==="
+source "$LIB/timeout.sh"
+source "$LIB/steps.sh"
+cat > "$FAKEBIN/claude-pages" << 'FAKE'
+#!/usr/bin/env bash
+# One page call: the pinned args, checked by the deny hook, answered from
+# $PAGE_FIX/<token>.json, or saved to the project folder as a too-large
+# result when $PAGE_FIX/<token>.spill exists.
+settings=""
+args=("$@")
+for ((i = 0; i < ${#args[@]}; i++)); do [ "${args[$i]}" = --settings ] && settings="${args[$((i + 1))]}"; done
+input="$(jq -c '.[0]' pinned-args.json)"
+echo "$input" >> "$PAGE_LOG"
+tok="$(jq -r .nextPageToken <<< "$input")"
+cmd="$(jq -r '.hooks.PreToolUse[0].hooks[0].command' "$settings")"
+jq -cn --argjson i "$input" --arg id "p$tok" '{type:"assistant",message:{content:[{type:"tool_use",id:$id,name:"mcp__tickets__search",input:$i}]}}'
+if jq -cn --argjson i "$input" '{tool_name:"mcp__tickets__search", tool_input:$i}' | bash -c "$cmd" > /dev/null 2>&1; then
+	if [ -e "$PAGE_FIX/$tok.spill" ]; then
+		saved="$CLAUDE_CONFIG_DIR/projects/$(printf '%s' "$(pwd -P)" | tr -c 'A-Za-z0-9' '-')/sess/tool-results/page-$tok.txt"
+		mkdir -p "$(dirname "$saved")"
+		cp "$PAGE_FIX/$tok.json" "$saved"
+		jq -cn --arg id "p$tok" --arg p "$saved" '{type:"user",message:{content:[{type:"tool_result",tool_use_id:$id,content:("Error: result exceeds maximum allowed tokens. Output has been saved to " + $p + ".")}]}}'
+	else
+		jq -cn --arg id "p$tok" --rawfile t "$PAGE_FIX/$tok.json" '{type:"user",message:{content:[{type:"tool_result",tool_use_id:$id,content:$t}]}}'
+	fi
+fi
+echo '{"type":"result","subtype":"success","total_cost_usd":0.01}'
+FAKE
+chmod +x "$FAKEBIN/claude-pages"
+export PAGE_LOG="$ROOT/page-calls.log" PAGE_FIX="$ROOT/page-fix"
+PAGE_Q="(project = ABC) AND updated >= -60m"
+# page_setup <dir>: a first page, saved as too large, that names token t2.
+page_setup() {
+	rm -rf "$1" "$PAGE_FIX"
+	mkdir -p "$1/F-tickets-spill" "$PAGE_FIX"
+	: > "$PAGE_LOG"
+	issue ABC-1 "To Do" "[]" | jq -cs '{issues: ., nextPageToken: "t2", isLast: false}' > "$1/F-tickets-spill/saved.txt"
+	jq -cn --arg q "$PAGE_Q" '{type:"tool_use", id:"u1", name:"mcp__tickets__search", input:{jql:$q, cloudId:"site", maxResults:100}}' > "$1/F-tickets-tool-uses.jsonl"
+	jq -cn '{type:"tool_result", tool_use_id:"u1", content:"Output too large. Output has been saved to /somewhere/tool-results/saved.txt."}' > "$1/F-tickets-tool-results.jsonl"
+}
+page_page() { # token, then issue keys; a last page when $PAGE_NEXT is unset
+	local tok="$1"; shift
+	local k
+	for k in "$@"; do issue "$k" "To Do" "[]"; done | jq -cs --arg n "${PAGE_NEXT:-}" \
+		'{issues: .} + (if $n == "" then {isLast: true} else {nextPageToken: $n, isLast: false} end)' > "$PAGE_FIX/$tok.json"
+}
+page_keys() { # dir
+	local cfg
+	cfg="$(desk_ticket_digest_config "$CFG_STEP" "$CONFIG")"
+	jq -cn --arg q "$PAGE_Q" --argjson s "$NOW" '{since: $s, now: $s, jql: $q}' > "$1/F-tickets-ticket-digest-window.jsonl"
+	echo '[]' > "$FIX/prs.json"
+	PASS_SCRATCH="$1" desk_ticket_digest_collect morning F-tickets "$cfg" mcp__tickets__search > /dev/null 2>&1
+	jq -c '[.[].key] | sort' "$1/F-tickets-ticket-digest-issues.jsonl" 2> /dev/null || echo none
+}
+# page_run <dir>: the paging, its log in <dir>/page.log, under a watchdog
+# of its own so a loop that never stops fails the test instead of hanging it.
+page_run() {
+	PASS_SCRATCH="$1" DESK_CLAUDE_BIN="$FAKEBIN/claude-pages" \
+		desk_fetch_remaining_pages morning F-tickets mcp__tickets__search "$PAGE_Q" '{"id":"F-tickets","timeout":30}' 2> "$1/page.log" &
+	local pid=$! dog rc
+	( sleep 60; kill "$pid" 2> /dev/null ) &
+	dog=$!
+	wait "$pid"
+	rc=$?
+	kill "$dog" 2> /dev/null
+	wait "$dog" 2> /dev/null
+	[ "$rc" -eq 0 ] || bad "the paging ended by its watchdog or an error (status $rc)"
+}
+
+D="$ROOT/pages-a"
+page_setup "$D"
+PAGE_NEXT=t3 page_page t2 ABC-2
+touch "$PAGE_FIX/t2.spill"
+page_page t3 ABC-3
+page_run "$D"
+assert_eq "two more pages fetched, each with the token the last one gave" '["t2","t3"]' "$(jq -cs '[.[].nextPageToken]' "$PAGE_LOG")"
+assert_eq "with the first call's own arguments" '["site"]' "$(jq -cs '[.[].cloudId] | unique' "$PAGE_LOG")"
+assert_eq "a later page saved as too large is read too, and the digest comes back whole" '["ABC-1","ABC-2","ABC-3"]' "$(page_keys "$D")"
+
+D="$ROOT/pages-b"
+page_setup "$D"
+PAGE_NEXT=t3 page_page t2 ABC-2
+PAGE_NEXT=t2 page_page t3 ABC-3
+page_run "$D"
+assert_eq "a token already followed, even two pages back, stops the paging" '["t2","t3"]' "$(jq -cs '[.[].nextPageToken]' "$PAGE_LOG")"
+assert_eq "...and the search counts as not whole" "none" "$(page_keys "$D")"
+
+D="$ROOT/pages-c"
+page_setup "$D"
+PAGE_NEXT=t3 page_page t2
+page_run "$D"
+assert_eq "an empty page that still names a token stops the paging" '["t2"]' "$(jq -cs '[.[].nextPageToken]' "$PAGE_LOG")"
+
+D="$ROOT/pages-e"
+page_setup "$D"
+PAGE_NEXT=t3 page_page t2 ABC-1
+page_page t3 ABC-3
+page_run "$D"
+assert_eq "a page holding only tickets an earlier page held stops the paging, whatever its token" '["t2"]' "$(jq -cs '[.[].nextPageToken]' "$PAGE_LOG")"
+assert_eq "...and the search counts as not whole" "none" "$(page_keys "$D")"
+
+D="$ROOT/pages-f"
+page_setup "$D"
+jq -cn '{issues: []}' > "$D/F-tickets-spill/saved.txt"
+page_run "$D"
+assert_eq "an empty page naming no token is the end, not a page that says more follow" "0:false" \
+	"$(wc -l < "$PAGE_LOG" | tr -d ' '):$(grep -q 'came back empty' "$D/page.log" && echo true || echo false)"
+
+D="$ROOT/pages-d"
+page_setup "$D"
+page_page t2 ABC-2
+PASS_SCRATCH="$D" DESK_DENY_HOOK_SCRIPT="$ROOT/no-such-hook.sh" DESK_CLAUDE_BIN="$FAKEBIN/claude-pages" \
+	desk_fetch_remaining_pages morning F-tickets mcp__tickets__search "$PAGE_Q" '{"id":"F-tickets","timeout":30}' 2> /dev/null
+assert_eq "a missing deny hook makes no unpinned call" "0" "$(wc -l < "$PAGE_LOG" | tr -d ' ')"
 
 echo
 echo "=== summary: $pass passed, $fail failed ==="

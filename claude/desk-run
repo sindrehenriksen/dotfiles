@@ -463,6 +463,15 @@ $(git -C "$repo" show "HEAD:$f" 2> /dev/null)"
 					> "$PASS_SCRATCH/$id-tool-results.resolved" \
 					&& mv -f "$PASS_SCRATCH/$id-tool-results.resolved" "$PASS_SCRATCH/$id-tool-results.jsonl"
 			fi
+			# A search past the output limit is paged by the runner, which
+			# alone can read the page token from the saved result.
+			if [ "$result" = "ok" ] && { [ -n "$ticket_search_cfg" ] || [ -n "$ticket_digest_cfg" ]; }; then
+				for page_window in "$PASS_SCRATCH/$id-ticket-search-window.jsonl" "$PASS_SCRATCH/$id-ticket-digest-window.jsonl"; do
+					[ -f "$page_window" ] || continue
+					desk_fetch_remaining_pages "$pass" "$id" "$(jq -r '(.tools // [])[0] // empty' <<< "$step_json")" \
+						"$(jq -r '.jql // empty' "$page_window")" "$step_json"
+				done
+			fi
 			if [ "$result" = "ok" ] && [ -n "$mail_triage_cfg" ]; then
 				desk_mail_triage_collect "$pass" "$id" "$mail_triage_cfg" \
 					"$mail_search_tool" "$today" || result="failed"
