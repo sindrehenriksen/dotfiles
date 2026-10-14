@@ -379,6 +379,57 @@ do
 	review.view = "split"
 end
 
+print("\n=== closing in one step over a change on disk: the decline is recorded, the take waits, nothing is lost ===")
+do
+	local ledger = require("desk.ledger")
+	for _, view in ipairs({ "split", "inline" }) do
+		review.view = view
+		local r = new_repo()
+		assert(proposal.build(r, "morning", "2026-10-01", {
+			{ id = "n1", file = "notes.md", kind = "new", target = "top", before = "", after = "NEWS n1", source = "https://example.invalid/n1", headline = "headline n1" },
+			{ id = "n2", file = "notes.md", kind = "add", target = { under = "Section B" }, before = "", after = "  NEWS n2", source = "https://example.invalid/n2", headline = "headline n2" },
+		}, { "notes.md", "reading.md" }))
+		local nb = open(r .. "/notes.md")
+		assert(review.open_review(nb))
+		local rb = vim.api.nvim_get_current_buf()
+		vim.api.nvim_win_set_cursor(0, { 1, 0 })
+		vim.cmd("normal dp")
+		-- The other suggestion's line deleted by hand: a decline.
+		for i, l in ipairs(vim.api.nvim_buf_get_lines(rb, 0, -1, false)) do
+			if l == "  NEWS n2" then
+				vim.api.nvim_win_set_cursor(vim.fn.bufwinid(rb), { i, 0 })
+			end
+		end
+		vim.api.nvim_set_current_win(vim.fn.bufwinid(rb))
+		vim.cmd("normal! dd")
+		vim.api.nvim_exec_autocmds("TextChanged", { buffer = rb })
+		write_disk(r .. "/notes.md", { "Section A", "  theirs", "Section B", "  other" })
+		vim.cmd("checktime")
+		settle()
+		said = {}
+		vim.api.nvim_feedkeys("Q", "x", false)
+		settle()
+		local records = ledger.read(r)
+		local function headlines(t)
+			local out = {}
+			for _, rec in pairs(t) do
+				out[#out + 1] = rec.headline
+			end
+			return out
+		end
+		local desc = view .. ": "
+		assert_true(desc .. "Q ends the review", not vim.api.nvim_buf_is_valid(rb))
+		assert_eq(desc .. "the hand decline is recorded", { "headline n2" }, headlines(ledger.declined(records).ids))
+		assert_eq(desc .. "the take is not, its save held back", {}, headlines(ledger.taken_by_id(records)))
+		assert_eq(desc .. "their change stays on disk", { "Section A", "  theirs", "Section B", "  other" }, vim.fn.readfile(r .. "/notes.md"))
+		assert_true(desc .. "the take stays in the buffer", vim.tbl_contains(vim.api.nvim_buf_get_lines(nb, 0, -1, false), "NEWS n1"))
+		assert_true(desc .. "and the held save is said", said_matching("notes%.md changed on disk: not saved until it is merged") >= 1)
+		pcall(diskmerge.close, nb)
+		vim.bo[nb].modified = false
+	end
+	review.view = "split"
+end
+
 print("\n=== the other notes file's unmerged change stops ␣gc before anything is saved or recorded ===")
 do
 	local ledger = require("desk.ledger")

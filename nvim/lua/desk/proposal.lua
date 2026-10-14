@@ -366,19 +366,22 @@ local function open_tree(repo, p, file, base, open)
 end
 
 --- The suggestions of `file` a review can actually show against `ours`
+--- (`skip`, ids it treats as declined too; `only`, the ids it may show,
+--- whatever the ledger has recorded since)
 --- (the user's text): not deferred, not taken or declined, in the merged view but
 --- not yet in the user's text. A suggestion the user's own edit conflicts with is still
 --- shown, in the union view, and listed in `conflicts` with the line of the user's
 --- text it sits next to. Returns { shown = id -> item, conflicts = id ->
 --- line, merged = lines }, or nil, err.
-function M.reviewable(repo, p, file, ours)
+function M.reviewable(repo, p, file, ours, skip, only)
 	local base = M.base_lines(repo, p, file)
 	local records = ledger.read(repo)
 	local declined = ledger.declined(records)
 	local taken = ledger.taken_by_id(records)
 	local open = {}
 	for _, item in ipairs(p.items) do
-		if item.file == file and not item.deferred and not taken[item.id] and not declined.ids[item.id] then
+		local wanted = only and only[item.id] or (not only and not taken[item.id] and not declined.ids[item.id])
+		if item.file == file and not item.deferred and wanted and not (skip and skip[item.id]) then
 			open[#open + 1] = item
 		end
 	end

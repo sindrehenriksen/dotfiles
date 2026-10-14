@@ -12,11 +12,10 @@
 -- pass carries it). The decline key makes the hunk under the cursor in the
 -- review split equal the user's text — an ordinary edit, so plain `u` undoes
 -- it; `u` in the split undoes a take made there too. Nothing is recorded
--- until the user SAVES the review split: that is the commit point, recording
--- as declined every suggestion the decline key was used on whose lines are
--- still gone from the review buffer and not in the user's notes. Lines gone
--- by any other edit decline nothing. A discarded
--- review buffer records nothing. Adjacent suggestions are one diff hunk, so
+-- until the review is saved or ended (Q, ␣gq, :q), which records as declined
+-- every suggestion whose lines are gone from the review buffer and not in
+-- the user's notes, by the decline key or deleted by hand, and says what it
+-- recorded. Adjacent suggestions are one diff hunk, so
 -- the decline key (and `<leader>gA`, which takes one) act on a single
 -- suggestion's own lines rather than the whole hunk.
 --
@@ -336,10 +335,9 @@ local function close_session(s, quiet)
 	end
 end
 
---- Remembers `items` as declined with a decline key in review `s`, which
---- is all the save records as declined: a suggestion whose lines leave the
---- review any other way (typed over, deleted by hand) is left for the next
---- pass, never declined by saving.
+--- Remembers `items` as declined with a decline key in review `s`. The save
+--- also counts a suggestion whose lines were deleted from the review by
+--- hand as declined: that is how a decline is made by hand.
 function M.mark_declining(s, items)
 	s.declining = s.declining or {}
 	for _, item in ipairs(items) do
@@ -347,10 +345,12 @@ function M.mark_declining(s, items)
 	end
 end
 
---- Records as declined every suggestion declined with a decline key whose
---- lines are still gone from the review buffer and not in the user's notes
---- — the review split's save.
-function M.save_review(s)
+--- Records as declined every suggestion whose lines are gone from the review
+--- buffer (a decline key, or deleted by hand) and not in the user's notes —
+--- the review's save — and the takes waiting, unless `keep_takes` (a close,
+--- which records them as their notes are saved, never over a change on
+--- disk). Returns true, how many it declined, and those suggestions.
+function M.save_review(s, keep_takes)
 	if not vim.api.nvim_buf_is_valid(s.review_buf) then
 		return false, "review buffer is gone"
 	end
@@ -363,13 +363,9 @@ function M.save_review(s)
 	end
 	local taking = pending_ids(s.notes_buf)
 	local gone = {}
-	local declining = s.declining or {}
 	for _, item in pairs(s.shown) do
 		local _, _, text = mark_range(s, item)
-		if not declining[item.id] then
-			-- Only a decline key declines: lines gone from the review by any
-			-- other edit leave the suggestion for the next pass.
-		elseif taking[item.id] then
+		if taking[item.id] then
 			-- taken by decision: edited text is no reason to call it declined
 		elseif text and #text > 0 and not proposal.contains(notes_lines, text) then
 			-- edited in the split and not taken yet: still waiting
@@ -396,9 +392,11 @@ function M.save_review(s)
 	for _, item in ipairs(gone) do
 		s.declined_here[item.id] = true
 	end
-	M.flush_taken(s.notes_buf)
+	if not keep_takes then
+		M.flush_taken(s.notes_buf)
+	end
 	vim.bo[s.review_buf].modified = false
-	return true, #gone
+	return true, #gone, gone
 end
 
 -- Maps a row of one side of a diff to the other: `hunks` as vim.diff gives
@@ -603,24 +601,51 @@ local function open_file_buf(repo, file)
 	return b
 end
 
--- Asks about the split's unsaved declines before it goes; true to go on.
+M.HAND_EDITS = "the review has edits of yours that are not declines (a line typed or changed in it): take them with dp, or put them back, then close"
+
+--- Whether review `s`'s buffer holds edits that are neither a decline nor
+--- the review's own text: typed or changed lines, a suggestion edited and
+--- not taken. Ending the review would drop them, so it stops on them, as
+--- E37 does on any unsaved buffer. Declines are lines deleted (by key or by
+--- hand): with those left out, the review is what the proposal gives over
+--- the notes it was built from (`s.built_ours`, never the live notes, which
+--- the user may be typing in), and any other difference is an edit of the
+--- user's in the review.
+function M.hand_edits(s)
+	if not (vim.api.nvim_buf_is_valid(s.review_buf) and vim.bo[s.review_buf].modified) then
+		return false
+	end
+	local p = proposal.read(s.repo, s.sha)
+	if not p then
+		return false
+	end
+	local review_lines, built = buf_lines(s.review_buf), s.built_ours or buf_lines(s.notes_buf)
+	local skip, only = {}, {}
+	for id, item in pairs(s.shown) do
+		only[id] = true
+		if not proposal.proposed_in(item, review_lines, s.base) then
+			skip[id] = true
+		end
+	end
+	local r = proposal.reviewable(s.repo, p, s.file, built, skip, only)
+	return r ~= nil and not vim.deep_equal(r.merged, review_lines)
+end
+
+-- A review that ends or moves records its declines in the same step: there
+-- is no separate save to make first. The takes wait for their notes' save.
+-- Edits that are not declines stop it instead (M.hand_edits).
 local function settle_declines(s)
 	if not vim.bo[s.review_buf].modified then
 		return true
 	end
-	local choice = M.confirm("The review split has unsaved declines.", "&Save them\n&Discard them\n&Cancel")
-	if choice == 1 then
-		local saved, why = M.save_review(s)
-		if not saved then
-			return false, why
-		end
-		return true
+	if M.hand_edits(s) then
+		return false, M.HAND_EDITS
 	end
-	if choice == 2 then
-		vim.bo[s.review_buf].modified = false
-		return true
+	local saved, why = M.save_review(s, true)
+	if not saved then
+		return false, why
 	end
-	return false, "kept the review split: it has unsaved declines"
+	return true
 end
 
 -- Notes buffers whose takes a save must not record: the overview's `q`
@@ -648,7 +673,46 @@ end
 -- rather than by BufWritePost, which a write from an autocmd need not run;
 -- one already on disk from the overview's `q` is recorded now too. Says in
 -- one line what it saved, and why it left any.
-local function write_taken_notes(s, everything)
+--- What review `s`'s ledger gained since `before` (its records then), as
+--- "2 taken, 1 declined (headline)", or nil when nothing.
+function M.decided_since(repo, before)
+	local after = ledger.read(repo)
+	local had_taken, had_declined = ledger.taken_by_id(before), ledger.declined(before).ids
+	local taken, declined = 0, {}
+	for id in pairs(ledger.taken_by_id(after)) do
+		if not had_taken[id] then
+			taken = taken + 1
+		end
+	end
+	for id, rec in pairs(ledger.declined(after).ids) do
+		if not had_declined[id] then
+			local h = rec.headline or id
+			declined[#declined + 1] = vim.fn.strcharlen(h) > 60 and (vim.fn.strcharpart(h, 0, 59) .. "…") or h
+		end
+	end
+	table.sort(declined)
+	local parts = {}
+	if taken > 0 then
+		parts[#parts + 1] = taken .. " taken"
+	end
+	if #declined > 0 then
+		parts[#parts + 1] = #declined .. " declined (" .. table.concat(declined, "; ") .. ")"
+	end
+	return #parts > 0 and table.concat(parts, ", ") or nil
+end
+
+--- Says, once the windows have closed, what ending review `s` recorded since
+--- `before`; nothing when it recorded nothing.
+function M.say_closed(s, before)
+	vim.schedule(function()
+		local summary = M.decided_since(s.repo, before)
+		if summary then
+			vim.notify("desk: review closed: " .. summary, vim.log.levels.INFO)
+		end
+	end)
+end
+
+local function write_taken_notes(s, everything, before)
 	local autosave = require("desk.autosave")
 	local took, wrote, left = {}, {}, {}
 	for b in pairs(s.took_into or {}) do
@@ -681,10 +745,14 @@ local function write_taken_notes(s, everything)
 	if #others > 0 then
 		parts[#parts + 1] = (#wrote > 0 and "and " or "saved ") .. table.concat(others, " and ")
 	end
-	-- After the windows close, whose redraw would hide it.
+	-- After the windows close, whose redraw would hide it. A review ending
+	-- says what it recorded first (`before`, its ledger at the start).
 	vim.schedule(function()
-		if #parts > 0 then
-			vim.notify("desk: " .. table.concat(parts, ", "), vim.log.levels.INFO)
+		local summary = before and M.decided_since(s.repo, before)
+		local saved = table.concat(parts, ", ")
+		local msg = summary and ("review closed: " .. summary .. (saved ~= "" and ("; " .. saved) or "")) or saved
+		if msg ~= "" then
+			vim.notify("desk: " .. msg, vim.log.levels.INFO)
 		end
 		for _, why in ipairs(left) do
 			vim.notify("desk: " .. why, vim.log.levels.WARN)
@@ -700,12 +768,12 @@ end
 -- decline, compares the sha the review was built from with the ref. With
 -- nothing unsaved the review is rebuilt in its own windows; unsaved
 -- declines are work against the old view, never thrown away here, so the
--- view stays and refuses to act until `<leader>gR` has them saved or
--- discarded and reloads it.
+-- view stays and refuses to act until `<leader>gR` records them and
+-- reloads it.
 -- ---------------------------------------------------------------------------
 
 M.STALE_RELOADED = "the proposal changed: reloaded the review"
-M.STALE_HELD = "the proposal changed: ␣gR reloads the review, once your unsaved declines are saved or discarded"
+M.STALE_HELD = "the proposal changed: ␣gR records your unsaved declines and reloads the review"
 
 local function same_ids(a, b)
 	for id in pairs(a) do
@@ -758,6 +826,7 @@ local function rebuild(s, p, need_shown, force)
 	vim.bo[s.review_buf].undolevels = undolevels
 	vim.bo[s.review_buf].modified = false
 	vim.api.nvim_buf_clear_namespace(s.review_buf, MARK_NS, 0, -1)
+	s.built_ours = ours
 	s.sha, s.shown, s.conflicts, s.merged = p.sha, r.shown, r.conflicts, r.merged
 	s.base = proposal.base_lines(s.repo, p, s.file)
 	-- Their undo states belong to the old view.
@@ -822,8 +891,9 @@ function M.ensure_current(s, acting)
 end
 
 --- Moves the review from `from_buf`'s file to `file` of the same repo, in
---- the window the notes were in: unsaved declines ask first (cancelling
---- keeps the review), and the review opens over the other file. When it
+--- the window the notes were in: its unsaved declines are recorded first
+--- (edits that are not declines keep it), and the review opens over the
+--- other file. When it
 --- ends, that window shows the notes the move started from again, as they
 --- were. Returns true, or false, why.
 function M.move_review(from_buf, file)
@@ -1155,8 +1225,8 @@ end
 -- ---------------------------------------------------------------------------
 -- Quitting the notes window ends the review too, as `:q` in the split does:
 -- the user is left in their notes, shown in the split's window when no other
--- window has them. Unsaved declines ask first; cancelling keeps the review
--- and puts the notes back below it.
+-- window has them. Its unsaved declines are recorded as it ends; edits that
+-- are not declines keep the review and put the notes back below it.
 -- ---------------------------------------------------------------------------
 
 local watch_notes_window
@@ -1171,15 +1241,15 @@ local function end_from_notes(s)
 	end
 	local review_win = vim.fn.bufwinid(s.review_buf)
 	if notes_ok and vim.bo[s.review_buf].modified then
-		local choice = M.confirm("The review split has unsaved declines.", "&Save them\n&Discard them\n&Cancel")
-		if choice == 1 then
-			local saved, why = M.save_review(s)
-			if not saved then
-				vim.notify("desk: " .. tostring(why), vim.log.levels.WARN)
-				choice = 3
-			end
+		local before = ledger.read(s.repo)
+		local saved, why = false, M.HAND_EDITS
+		if not M.hand_edits(s) then
+			saved, why = M.save_review(s, true)
 		end
-		if choice ~= 1 and choice ~= 2 then
+		if saved then
+			M.say_closed(s, before)
+		else
+			vim.notify("desk: " .. tostring(why), vim.log.levels.WARN)
 			local win = vim.fn.win_findbuf(s.notes_buf)[1]
 			if not win and review_win ~= -1 then
 				vim.api.nvim_win_call(review_win, function()
@@ -1271,26 +1341,21 @@ function M.open_review(notes_buf)
 			end
 		end
 		if vim.bo[existing.review_buf].modified then
-			-- Unsaved declines would be lost with the old split.
-			local choice = M.confirm("The review split has unsaved declines.", "&Save them\n&Discard them\n&Cancel")
-			if choice == 1 then
-				local saved, why = M.save_review(existing)
-				if not saved then
-					return false, why
-				end
-			elseif choice ~= 2 then
-				local win = vim.fn.bufwinid(existing.review_buf)
-				if win ~= -1 then
-					vim.api.nvim_set_current_win(win)
-				end
-				return false, "kept the review split: it has unsaved declines"
+			-- The old review's declines are recorded before it goes; edits
+			-- of the user's that are not declines keep it.
+			if M.hand_edits(existing) then
+				return false, M.HAND_EDITS
+			end
+			local saved, why = M.save_review(existing)
+			if not saved then
+				return false, why
 			end
 		end
 		-- In its own windows, unless nothing would show here: then the
 		-- review goes on below as a fresh one, which moves to the other
 		-- file or says there is nothing.
 		local win = vim.fn.bufwinid(existing.review_buf)
-		vim.bo[existing.review_buf].modified = false -- saved or discarded above
+		vim.bo[existing.review_buf].modified = false -- recorded above
 		if win ~= -1 and rebuild(existing, p, true, true) then
 			vim.api.nvim_set_current_win(win)
 			vim.notify("desk: " .. M.STALE_RELOADED, vim.log.levels.INFO)
@@ -1374,6 +1439,7 @@ function M.open_review(notes_buf)
 		return_to = carried,
 		took_into = carried_took,
 		notes_bufhidden = notes_bufhidden,
+		built_ours = ours,
 	}
 	sessions[notes_buf] = s
 	M.recount_saved(s)
@@ -1405,12 +1471,14 @@ function M.open_review(notes_buf)
 		group = group,
 		buffer = review_buf,
 		callback = function()
+			local before = ledger.read(s.repo)
 			local ok, n_or_err = M.save_review(s)
 			if not ok then
 				vim.notify("desk: " .. tostring(n_or_err), vim.log.levels.WARN)
 			else
-				if n_or_err > 0 then
-					vim.notify("desk: declined " .. n_or_err .. " suggestion(s)", vim.log.levels.INFO)
+				local summary = M.decided_since(s.repo, before)
+				if summary then
+					vim.notify("desk: recorded " .. summary, vim.log.levels.INFO)
 				end
 				-- `:wq` is this save and a quit in one command: the quit
 				-- (QuitPre, below) finds the mark before the next tick clears
@@ -1432,13 +1500,23 @@ function M.open_review(notes_buf)
 			if s.saving_quit and sessions[notes_buf] == s then
 				s.saving_quit = nil
 				write_taken_notes(s)
+			elseif sessions[notes_buf] == s and vim.api.nvim_get_current_buf() == review_buf then
+				-- `:q` closes in one step, as Q does: its declines are
+				-- recorded rather than stopping the quit (E37). The takes
+				-- wait for the notes' own save, as after any `:q`.
+				local before = ledger.read(s.repo)
+				if M.hand_edits(s) then
+					-- Left unsaved, so the quit stops on it (E37).
+					vim.notify("desk: " .. M.HAND_EDITS, vim.log.levels.WARN)
+				elseif vim.bo[review_buf].modified and M.save_review(s, true) then
+					M.say_closed(s, before)
+				end
 			end
 			-- In one window, `:q` ends the review as it does in the split:
 			-- the notes take a window beside it first, so the quit closes
 			-- the review's window rather than leaving nvim with the notes
-			-- out of sight. A quit that then stops on unsaved declines (E37,
-			-- as in the split) takes that window away again; QuitPre can't
-			-- tell `:q` from `:q!`, which goes through.
+			-- out of sight. A quit that stops after all takes that window
+			-- away again.
 			if s.inline and sessions[notes_buf] == s and vim.api.nvim_get_current_buf() == review_buf then
 				local win, created = M.notes_beside(s, vim.api.nvim_get_current_win())
 				if created then
@@ -1598,7 +1676,7 @@ function M.open_review(notes_buf)
 		for _, lhs in ipairs({ "<leader>gq", "Q" }) do
 			vim.keymap.set("n", lhs, function()
 				report(M.close_review(s))
-			end, { buffer = b, desc = "End the review (asks about unsaved declines)" })
+			end, { buffer = b, desc = "End the review, recording its takes and declines" })
 		end
 	end
 	map_next_change(review_buf)
@@ -2240,7 +2318,7 @@ function M.switch_review(review_buf)
 	if not s then
 		return false, "not a desk review buffer"
 	end
-	-- Over a proposal that has moved on the key reloads first, asking about
+	-- Over a proposal that has moved on the key reloads first, recording
 	-- unsaved declines as the notes' own review key does.
 	if git.ref_sha(s.repo, M.PROPOSAL_REF) ~= s.sha then
 		return M.open_review(s.notes_buf)
@@ -2548,18 +2626,20 @@ function M.toggle_view(review_buf)
 end
 
 --- Ends the review `s` as `:q` in its split does, and closes the overview
---- when it is this review's list: unsaved declines ask first, and
---- cancelling keeps everything open. Leaves the user in their notes.
+--- when it is this review's list: its declines are recorded in the same
+--- step, and edits that are not declines keep everything open (why, in
+--- the return). Leaves the user in their notes.
 --- Returns true, or false, why.
 function M.close_review(s)
 	if not (s and sessions[s.notes_buf] == s and vim.api.nvim_buf_is_valid(s.review_buf)) then
 		return false, "no review open"
 	end
+	local before = ledger.read(s.repo)
 	local ok, why = settle_declines(s)
 	if not ok then
 		return false, why
 	end
-	write_taken_notes(s, true)
+	write_taken_notes(s, true, before)
 	local info = vim.fn.getqflist({ title = 0, context = 0 })
 	local ctx = type(info.context) == "table" and info.context or {}
 	if info.title == M.OVERVIEW_TITLE and (ctx.desk_review_buf == s.review_buf or not session_for_review_buf(ctx.desk_review_buf or -1)) then
@@ -3735,12 +3815,14 @@ function M.commit_from_review(review_buf)
 		return false, why
 	end
 	if vim.bo[review_buf].modified then
+		local before = ledger.read(s.repo)
 		local ok, n_or_err = M.save_review(s)
 		if not ok then
 			return false, n_or_err
 		end
-		if n_or_err > 0 then
-			vim.notify("desk: declined " .. n_or_err .. " suggestion(s)", vim.log.levels.INFO)
+		local summary = M.decided_since(s.repo, before)
+		if summary then
+			vim.notify("desk: recorded " .. summary, vim.log.levels.INFO)
 		end
 	end
 	local ok, res = M.commit(s.notes_buf)

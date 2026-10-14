@@ -435,24 +435,28 @@ do
 	assert_eq("on the entry's line", line_of(rb, "- b4 added"), vim.api.nvim_win_get_cursor(rw)[1])
 end
 
-print("\n=== :q over unsaved declines stops as the split does; :q! ends the review ===")
+print("\n=== :q over a decline closes the review in one step, recording it ===")
 do
-	local r, nb, rb = setup()
-	vim.api.nvim_win_set_cursor(0, { line_of(rb, "- b4 added"), 0 })
-	review.decline(rb)
-	local ok = pcall(vim.cmd, "q")
-	vim.wait(20, function()
-		return false
-	end)
-	assert_eq("the quit is refused (E37)", false, ok)
-	assert_eq("with no window added", 1, #vim.api.nvim_tabpage_list_wins(0))
-	assert_true("and the review open", vim.api.nvim_buf_is_valid(rb) and #vim.fn.win_findbuf(nb) == 0)
-	vim.cmd("q!")
-	vim.wait(20, function()
-		return false
-	end)
-	assert_true(":q! ends the review, its declines dropped", not vim.api.nvim_buf_is_valid(rb) and next(ledger.declined(ledger.read(r)).ids) == nil)
-	assert_eq("leaving the notes in the one window, nvim still running", { 1, 1 }, { #vim.api.nvim_tabpage_list_wins(0), #vim.fn.win_findbuf(nb) })
+	for _, cmd in ipairs({ "q", "q!" }) do
+		local r, nb, rb = setup()
+		local said = {}
+		vim.notify = function(m)
+			said[#said + 1] = m
+		end
+		vim.api.nvim_win_set_cursor(0, { line_of(rb, "- b4 added"), 0 })
+		review.decline(rb)
+		local ok = pcall(vim.cmd, cmd)
+		vim.wait(20, function()
+			return false
+		end)
+		assert_true(":" .. cmd .. " goes through, with no E37", ok and not vim.api.nvim_buf_is_valid(rb))
+		assert_eq(":" .. cmd .. ": the decline is recorded", { "add b4" }, vim.tbl_map(function(rec)
+			return rec.headline
+		end, vim.tbl_values(ledger.declined(ledger.read(r)).ids)))
+		assert_true(":" .. cmd .. ": said by name", vim.tbl_contains(said, "desk: review closed: 1 declined (add b4)"))
+		assert_eq(":" .. cmd .. ": the notes in the one window, nvim still running", { 1, 1 }, { #vim.api.nvim_tabpage_list_wins(0), #vim.fn.win_findbuf(nb) })
+		vim.notify = function() end
+	end
 end
 
 print("\n=== an ended review leaves nothing behind ===")

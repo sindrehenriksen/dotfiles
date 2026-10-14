@@ -942,19 +942,14 @@ do
 	assert_eq("and stays", rb, review_buf_of(nb))
 	go_to(vim.fn.bufwinid(rb), rb, "NEWS n1")
 	review.decline(rb)
-	local asked
+	local asked = false
 	review.confirm = function()
 		asked = true
 		return 3
 	end
 	leader("gR")
-	assert_true("with unsaved declines it asks", asked)
-	assert_eq("cancelling keeps the review", rb, review_buf_of(nb))
-	review.confirm = function()
-		return 1
-	end
-	leader("gR")
-	assert_eq("saving them records the decline", { id_by_headline(r, "headline n1") }, declined_ids(r))
+	assert_true("with a decline unsaved it moves without asking", not asked)
+	assert_eq("recording the decline on the way", { id_by_headline(r, "headline n1") }, declined_ids(r))
 	local rrb = review_buf_of(nb)
 	assert_true("the review is now of reading.md", rrb ~= nil and vim.api.nvim_buf_get_name(rrb):match("reading.md$") ~= nil)
 	assert_true("shown where the notes were", vim.api.nvim_buf_get_name(vim.api.nvim_win_get_buf(home)):match("reading.md$") ~= nil)
@@ -1052,35 +1047,25 @@ do
 	vim.fn.delete(swapdir, "rf")
 end
 
-print("\n=== the review key asks before discarding unsaved declines ===")
+print("\n=== the review key reopens over unsaved declines, recording them ===")
 do
-	local function setup()
-		local r = new_repo(BASE)
-		build(r, "2026-10-01", { item("n1"), item("n2") })
-		local nb = open_notes(r)
-		review.attach(nb)
-		assert_true("review opens", review.open_review(nb))
-		local rb = review_buf_of(nb)
-		go_to(vim.fn.bufwinid(rb), rb, "NEWS n1")
-		review.decline(rb)
-		build(r, "2026-10-01", { item("n3") }) -- a new pass lands: the review is stale
-		return r, nb, rb
+	local r = new_repo(BASE)
+	build(r, "2026-10-01", { item("n1"), item("n2") })
+	local nb = open_notes(r)
+	review.attach(nb)
+	assert_true("review opens", review.open_review(nb))
+	local rb = review_buf_of(nb)
+	go_to(vim.fn.bufwinid(rb), rb, "NEWS n1")
+	review.decline(rb)
+	build(r, "2026-10-01", { item("n3") }) -- a new pass lands: the review is stale
+	local orig, asked = review.confirm, 0
+	review.confirm = function()
+		asked = asked + 1
+		return 3
 	end
-	local orig = review.confirm
-	local asked = 0
-	review.confirm = function() asked = asked + 1; return 3 end
-	local r, nb, rb = setup()
-	local ok1 = review.open_review(nb)
-	assert_true("asked once", asked == 1)
-	assert_true("cancel keeps the split and its unsaved decline", not ok1 and vim.api.nvim_buf_is_valid(rb) and line_of(rb, "NEWS n1") == nil)
-	assert_eq("nothing recorded", {}, declined_ids(r))
-	review.confirm = function() return 1 end
-	assert_true("save-then-reopen works", review.open_review(nb))
-	assert_eq("the decline was saved first", 1, #declined_ids(r))
-	local r2, nb2 = setup()
-	review.confirm = function() return 2 end
-	assert_true("discard reopens", review.open_review(nb2))
-	assert_eq("and records nothing", {}, declined_ids(r2))
+	assert_true("it reopens", review.open_review(nb))
+	assert_eq("without asking", 0, asked)
+	assert_eq("the decline recorded first", { id_by_headline(r, "headline n1") }, declined_ids(r))
 	review.confirm = orig
 end
 
@@ -1646,39 +1631,17 @@ do
 	left_in_notes(":q in the notes window", nb)
 	assert_eq("nothing to ask about", 0, asked)
 
-	-- unsaved declines, cancel: the review stays and the notes come back below it
-	local r2, nb2, rb2, rw2, nw2 = setup()
-	go_to(rw2, rb2, "  added")
+	-- unsaved declines: the review ends in one step, recording them
+	local r2, nb2, rb2, _, nw2 = setup()
+	go_to(vim.fn.bufwinid(rb2), rb2, "  added")
 	assert_true("decline", review.decline(rb2))
 	answer(3)
 	vim.api.nvim_set_current_win(nw2)
 	vim.cmd("quit")
 	tick()
-	assert_eq("it asked", 1, asked)
-	assert_true("cancel keeps the review and its unsaved decline", vim.api.nvim_buf_is_valid(rb2) and vim.bo[rb2].modified)
-	local nw2b = vim.fn.bufwinid(nb2)
-	assert_true("the notes are shown again", nw2b ~= -1)
-	assert_true("below the review", vim.fn.win_screenpos(rw2)[1] < vim.fn.win_screenpos(nw2b)[1])
-	assert_true("in diff mode with the review colours", vim.wo[nw2b].diff and vim.wo[nw2b].winhighlight == review.NOTES_WINHL)
-	-- then save: the decline is recorded and the review ends
-	answer(1)
-	vim.api.nvim_set_current_win(nw2b)
-	vim.cmd("quit")
-	tick()
-	assert_eq("asked again", 1, asked)
-	assert_eq("save records the decline", 1, #declined_ids(r2))
-	left_in_notes(":q in the notes window, then save", nb2)
-
-	-- discard: nothing recorded
-	local r3, nb3, rb3, rw3, nw3 = setup()
-	go_to(rw3, rb3, "  added")
-	assert_true("decline", review.decline(rb3))
-	answer(2)
-	vim.api.nvim_set_current_win(nw3)
-	vim.cmd("quit")
-	tick()
-	assert_eq("discard records nothing", {}, declined_ids(r3))
-	left_in_notes(":q in the notes window, then discard", nb3)
+	assert_eq("it does not ask", 0, asked)
+	assert_eq("the decline is recorded", 1, #declined_ids(r2))
+	left_in_notes(":q in the notes window over a decline", nb2)
 
 	-- another buffer in the notes window ends it too
 	answer(3)
@@ -1958,15 +1921,8 @@ do
 		return 3
 	end
 	in_list(qw2, "Q")
-	assert_eq("Q over unsaved declines asks", 1, asked)
-	assert_true("cancelling keeps the list", list_open())
-	assert_true("and the split", vim.api.nvim_buf_is_valid(rb2))
-	review.confirm = function()
-		asked = asked + 1
-		return 1
-	end
-	in_list(qw2, "Q")
-	assert_eq("saving records the decline", { id_by_headline(r2, "headline n1") }, declined_ids(r2))
+	assert_eq("Q over unsaved declines does not ask", 0, asked)
+	assert_eq("it records the decline as it closes", { id_by_headline(r2, "headline n1") }, declined_ids(r2))
 	assert_true("Q closes the list", not list_open())
 	assert_true("and the split", not vim.api.nvim_buf_is_valid(rb2))
 	assert_eq("leaving the user in their notes", nb2, vim.api.nvim_get_current_buf())
@@ -2339,7 +2295,8 @@ do
 		assert_true(desc .. ": the take is on disk", vim.tbl_contains(on_disk(r), "NEWS n1"))
 		assert_eq(desc .. ": the notes are saved", false, vim.bo[nb].modified)
 		assert_true(desc .. ": the take is recorded", taken(r, "headline n1"))
-		assert_true(desc .. ": and it says so", vim.tbl_contains(said, "desk: saved notes.md with your takes"))
+		local closing = desc:match("^:wq") and "desk: saved notes.md with your takes" or "desk: review closed: 1 taken; saved notes.md with your takes"
+		assert_true(desc .. ": and it says what it recorded and saved", vim.tbl_contains(said, closing))
 	end
 
 	local r, nb = setup()
@@ -2391,7 +2348,7 @@ do
 	assert_true("notes.md is written", vim.tbl_contains(on_disk(r4), "NEWS n1"))
 	assert_true("and reading.md", vim.tbl_contains(on_disk(r4, "reading.md"), "READ paper"))
 	assert_true("both takes recorded", taken(r4, "headline n1") and taken(r4, "read paper"))
-	assert_true("said in one line (" .. table.concat(said, " | ") .. ")", vim.tbl_contains(said, "desk: saved notes.md and reading.md with your takes"))
+	assert_true("said in one line (" .. table.concat(said, " | ") .. ")", vim.tbl_contains(said, "desk: review closed: 2 taken; saved notes.md and reading.md with your takes"))
 	vim.notify = orig_notify
 end
 
@@ -2932,7 +2889,7 @@ do
 	vim.cmd("silent! %bwipeout!")
 end
 
-print("\n=== saving the review declines only what a decline key declined ===")
+print("\n=== a suggestion's lines deleted by hand are declined, and closing says which ===")
 do
 	local said = {}
 	local notify = vim.notify
@@ -2948,24 +2905,105 @@ do
 		assert_true(view .. ": review opens", review.open_review(nb))
 		local rb = review_buf_of(nb)
 		local rw = vim.fn.bufwinid(rb)
-		-- A suggestion's line deleted by hand, as an edit of what looks like
-		-- the notes, then saved.
 		said = {}
 		go_to(rw, rb, "NEWS n1")
 		vim.cmd("normal! dd")
-		vim.cmd("silent write")
-		assert_eq(view .. ": deleting its line by hand and saving declines nothing", {}, declined_ids(r))
-		assert_true(view .. ": and says nothing of a decline", #vim.tbl_filter(function(m)
-			return m:match("declined") ~= nil
-		end, said) == 0)
-		go_to(rw, rb, "NEWS n2")
-		assert_true(view .. ": the decline key", review.decline(rb))
-		vim.cmd("silent write")
-		assert_eq(view .. ": declines what it was used on, on the save", { id_by_headline(r, "headline n2") }, declined_ids(r))
+		vim.api.nvim_exec_autocmds("TextChanged", { buffer = rb })
+		vim.api.nvim_set_current_win(rw)
+		vim.cmd("normal Q")
+		vim.wait(20, function()
+			return false
+		end)
+		assert_true(view .. ": Q closes the review in one step", not vim.api.nvim_buf_is_valid(rb))
+		assert_eq(view .. ": declining what was deleted by hand", { id_by_headline(r, "headline n1") }, declined_ids(r))
+		assert_true(view .. ": and says so plainly, by name", vim.tbl_contains(said, "desk: review closed: 1 declined (headline n1)"))
+		assert_eq(view .. ": your notes are as they were", BASE, lines_of(nb))
 		vim.cmd("silent! %bwipeout!")
 	end
 	review.view = "split"
 	vim.notify = notify
+end
+
+print("\n=== edits of yours in the split that are not declines stop the close, never dropped ===")
+do
+	local said = {}
+	local notify = vim.notify
+	vim.notify = function(m)
+		said[#said + 1] = m
+	end
+	local function tick()
+		vim.wait(20, function()
+			return false
+		end)
+	end
+	for _, edit in ipairs({
+		{ "a line typed in the review", function(rb, rw)
+			go_to(rw, rb, "Section B")
+			vim.cmd("normal! otyped in the review")
+		end },
+		{ "a suggestion edited and not taken", function(rb, rw)
+			go_to(rw, rb, "NEWS n1")
+			vim.cmd("normal! A, edited")
+		end },
+	}) do
+		for _, close in ipairs({ "Q", "q" }) do
+			local r = new_repo(BASE)
+			build(r, "2026-10-01", { item("n1"), item("n2") })
+			local nb = open_notes(r)
+			review.attach(nb)
+			assert_true("review opens", review.open_review(nb))
+			local rb = review_buf_of(nb)
+			local rw = vim.fn.bufwinid(rb)
+			edit[2](rb, rw)
+			local typed = lines_of(rb)
+			said = {}
+			vim.api.nvim_set_current_win(rw)
+			local ok = pcall(vim.cmd, close == "Q" and "normal Q" or "q")
+			tick()
+			local desc = edit[1] .. ", then " .. close
+			assert_true(desc .. ": the review stays, with the edit", vim.api.nvim_buf_is_valid(rb) and vim.deep_equal(typed, lines_of(rb)))
+			assert_true(desc .. ": saying to take or undo it", vim.tbl_contains(said, "desk: " .. review.HAND_EDITS))
+			if close == "q" then
+				assert_true(desc .. ": the quit stops (E37)", not ok)
+			end
+			assert_eq(desc .. ": nothing declined", {}, declined_ids(r))
+			vim.api.nvim_set_current_win(rw)
+			vim.cmd("normal u")
+			vim.cmd("normal Q")
+			tick()
+			assert_true(desc .. ": once undone, Q closes", not vim.api.nvim_buf_is_valid(rb))
+			vim.cmd("silent! %bwipeout!")
+		end
+	end
+	vim.notify = notify
+end
+
+print("\n=== typing in the notes window is no edit of the review's: Q closes cleanly over a decline ===")
+do
+	local said = {}
+	local notify = vim.notify
+	vim.notify = function(m)
+		said[#said + 1] = m
+	end
+	local r = new_repo(BASE)
+	build(r, "2026-10-01", { item("n1"), item("n2") })
+	local nb = open_notes(r)
+	review.attach(nb)
+	assert_true("review opens", review.open_review(nb))
+	local rb = review_buf_of(nb)
+	go_to(vim.fn.bufwinid(rb), rb, "NEWS n1")
+	assert_true("decline", review.decline(rb))
+	vim.api.nvim_buf_set_lines(nb, -1, -1, false, { "typed in the notes" })
+	vim.api.nvim_set_current_win(vim.fn.bufwinid(rb))
+	vim.cmd("normal Q")
+	vim.wait(20, function()
+		return false
+	end)
+	assert_true("Q closes", not vim.api.nvim_buf_is_valid(rb) and not vim.tbl_contains(said, "desk: " .. review.HAND_EDITS))
+	assert_eq("recording the decline", { id_by_headline(r, "headline n1") }, declined_ids(r))
+	assert_true("the typed line stays in the notes", line_of(nb, "typed in the notes") ~= nil)
+	vim.notify = notify
+	vim.cmd("silent! %bwipeout!")
 end
 
 print(string.format("\n=== summary: %d passed, %d failed ===", pass, fail))
