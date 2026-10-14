@@ -11,7 +11,9 @@
 # sent; idle sessions reach the message through the close step's list; a
 # pending run outlives the seven-day sweep; a shared name or none holds a
 # brief; a failed pass still briefs; a weekend slot of a weekdays-only pass
-# makes none of its own. A step with `weekdays` runs only on those days. No live model call.
+# makes none of its own; another pass's pending brief goes with this pass's
+# delivery as its own message. A step with `weekdays` runs only on those
+# days. No live model call.
 set -u
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -344,6 +346,30 @@ DESK_CONFIG="$ROOT/cfg-nd.json" DESK_NOW="$(day 2026-10-21)" TZ=UTC "$DESK_RUN" 
 assert_true "notes-diff.md is written, the notes diff a tab would get" \
 	"$(grep -q '^# Notes diff' "$DESK_RUNS_ROOT/testpass-2026-10-21/notes-diff.md" 2> /dev/null && echo true || echo false)"
 assert_contains "and the message names it" ", notes-diff.md." "$(jq -rs '.[-1].message' "$BRIEF_TEST_SENT")"
+
+echo
+echo "=== a brief another pass left pending goes with this pass's delivery, as its own message ==="
+jq '.passes.otherpass = {steps: [{id: "F-web", kind: "fetch", prompt: "web.md", tools: ["WebSearch"], connector: false, timeout: 30}],
+	brief: {input_files: ["notes.md", "f-web.json"], instructions: ["brief.md"], send: {prompt: "send.md"}}}' "$cfg" > "$ROOT/cfg-two.json"
+run_as() { # pass date
+	DESK_CONFIG="$ROOT/cfg-two.json" DESK_NOW="$(day "$2")" TZ=UTC "$DESK_RUN" "$1" > "$ROOT/run.out" 2>&1
+}
+sessions <<< "$CENTRAL central-x false"
+run_as otherpass 2026-10-22
+sessions <<< "$CENTRAL central-x true"
+before="$(sent_n)"
+run_as testpass 2026-10-22
+assert_eq "this pass's brief and the other's, two sends" "$((before + 2))" "$(sent_n)"
+assert_eq "each its own message" "The otherpass pass of 2026-10-22|The testpass pass of 2026-10-22" \
+	"$(jq -rs '.[-2:] | map(.message | split("\n")[0] | sub("^\\[desk-brief\\] "; "") | sub(" is ready.*"; "")) | sort | join("|")' "$BRIEF_TEST_SENT")"
+assert_true "the other pass's run is marked sent" "$([ -f "$DESK_RUNS_ROOT/otherpass-2026-10-22/brief.sent" ] && echo true || echo false)"
+sessions <<< "$CENTRAL central-x false"
+run_as otherpass 2026-10-23
+sessions <<< "$CENTRAL central-x true"
+before="$(sent_n)"
+run_as testpass 2026-10-22
+assert_eq "a later slot of a date already run sends the other pass's, with none of its own waiting" "$((before + 1))" "$(sent_n)"
+assert_contains "naming that run" "Run directory: $DESK_RUNS_ROOT/otherpass-2026-10-23" "$(jq -rs '.[-1].message' "$BRIEF_TEST_SENT")"
 
 echo
 echo "=== a pending run outlives the seven-day sweep; a delivered one does not ==="

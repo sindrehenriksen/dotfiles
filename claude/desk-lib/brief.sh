@@ -17,9 +17,10 @@
 # Delivery is the follow pass's: the address check (desk_follow_address) and
 # the one restricted, pinned SendMessage call (desk_follow_send). A brief
 # that cannot go (the central session not running, its name not addressing
-# it alone, or the send failing) stays pending, and every later run of the
-# pass tries again, a later slot the same day included; a run of a new day
-# sends its own brief and every older pending one in one message. A send
+# it alone, or the send failing) stays pending, and every later run of any
+# pass with a brief tries again, a later slot the same day included, so a
+# pass that runs once a week does not hold a missed brief a week. Each
+# pass's pending runs go as one message of their own, oldest first. A send
 # that ran without confirming a delivery is tried once more, then counted
 # as sent, as the follow pass counts it.
 set -u
@@ -221,11 +222,11 @@ desk_brief_deliver() {
 	fi
 	if ! name="$(desk_follow_address "$central")"; then
 		if [ "$name" = "not running" ]; then
-			desk_log "$pass" "brief: the central session is not running — $dates waits for the next run of this pass"
+			desk_log "$pass" "brief: the central session is not running — $dates waits for the next run of a pass with a brief"
 		elif [ "$name" = "unnamed" ]; then
-			desk_log "$pass" "brief: the central session is running but has no name to send to — $dates waits for the first run of this pass after it is named, a later slot or a run by hand"
+			desk_log "$pass" "brief: the central session is running but has no name to send to — $dates waits for the first run of a pass with a brief after it is named, a later slot or a run by hand"
 		else
-			desk_log "$pass" "brief: the name '${name#ambiguous }' does not address the central session alone — $dates waits for the next run of this pass"
+			desk_log "$pass" "brief: the name '${name#ambiguous }' does not address the central session alone — $dates waits for the next run of a pass with a brief"
 		fi
 		return 0
 	fi
@@ -257,18 +258,36 @@ desk_brief_deliver() {
 		for r in "${runs[@]}"; do
 			jq -cn --argjson n "$((tries + 1))" '{unconfirmed_sends: $n}' > "$r/brief.pending"
 		done
-		desk_log "$pass" "brief: the send of $dates to $name ran but was not confirmed — the next run of this pass tries once more (result: $detail)"
+		desk_log "$pass" "brief: the send of $dates to $name ran but was not confirmed — the next run of a pass with a brief tries once more (result: $detail)"
 	else
-		desk_log "$pass" "brief: the send of $dates to $name failed — it waits for the next run of this pass (result: $detail)"
+		desk_log "$pass" "brief: the send of $dates to $name failed — it waits for the next run of a pass with a brief (result: $detail)"
 	fi
 	return 0
+}
+
+# desk_brief_deliver_all <pass> <brief json> <config>: the pass's own
+# pending runs, then every other pass's with a brief, each its own message.
+desk_brief_deliver_all() {
+	local pass="$1" brief="$2" config="$3" p
+	desk_brief_deliver "$pass" "$brief" "$config"
+	local -a others=()
+	mapfile -t others < <(desk_brief_passes "$config" | grep -vxF -- "$pass")
+	for p in "${others[@]}"; do
+		desk_brief_deliver "$p" "$(jq -c --arg p "$p" '.passes[$p].brief' <<< "$config")" "$config"
+	done
+}
+
+# desk_brief_passes <config>: the name of every pass with a brief.
+desk_brief_passes() {
+	jq -r '(.passes // {}) | to_entries[] | select((.value.brief | type) == "object") | .key' <<< "$1"
 }
 
 # desk_brief_after_pass <pass> <pass_config> <config> <repo> <scheduled_date>
 #   <pass_ctx json> <placeholders json> <file>...
 # What desk-run does once the pass is done, whatever its result: prepares
 # this run's brief, except for a weekend slot of a weekdays-only pass,
-# whose model steps did not run, and delivers what is pending.
+# whose model steps did not run, and delivers what is pending, its own and
+# every other pass's.
 desk_brief_after_pass() {
 	local pass="$1" pass_config="$2" config="$3" repo="$4" scheduled_date="$5" pass_ctx="$6" placeholders="$7"
 	shift 7
@@ -281,23 +300,27 @@ desk_brief_after_pass() {
 		desk_brief_prepare "$pass" "$brief" "$config" "$pass_config" "$repo" "$scheduled_date" \
 			"$pass_ctx" "$placeholders" "$@" > /dev/null
 	fi
-	desk_brief_deliver "$pass" "$brief" "$config"
+	desk_brief_deliver_all "$pass" "$brief" "$config"
 }
 
 # desk_brief_retry <pass> <pass_config> <config>: what a later run of a
-# date that already ran does: delivers what is pending, with a deny hook of
-# its own, since such a run sets up no pass scratch.
+# date that already ran does: delivers what is pending, its own and every
+# other pass's, with a deny hook of its own, since such a run sets up no
+# pass scratch.
 desk_brief_retry() {
-	local pass="$1" pass_config="$2" config="$3" brief work
+	local pass="$1" pass_config="$2" config="$3" brief work p pending=""
 	brief="$(desk_brief_config "$pass_config")"
 	[ -n "$brief" ] || return 0
-	[ -n "$(desk_brief_pending_runs "$pass")" ] || return 0
+	while IFS= read -r p; do
+		[ -n "$(desk_brief_pending_runs "$p")" ] && pending=1
+	done < <(desk_brief_passes "$config")
+	[ -n "$pending" ] || return 0
 	work="$(desk_scratch_dir "$pass-brief-retry")"
 	if ! cp "$DESK_LIB_DIR/deny-unlisted-tool.sh" "$work/deny-unlisted-tool.sh" 2> /dev/null; then
 		desk_log "$pass" "brief: couldn't copy the deny hook — not sending"
 		rm -rf "$work"
 		return 0
 	fi
-	DESK_DENY_HOOK_SCRIPT="$work/deny-unlisted-tool.sh" desk_brief_deliver "$pass" "$brief" "$config"
+	DESK_DENY_HOOK_SCRIPT="$work/deny-unlisted-tool.sh" desk_brief_deliver_all "$pass" "$brief" "$config"
 	rm -rf "$work"
 }
