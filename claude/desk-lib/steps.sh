@@ -1265,8 +1265,8 @@ desk_follow_up_summary() {
 # asked for it. Only a not-live session gets a fresh
 # `claude --resume` tab (the same default-permissions envelope: no
 # --restricted, --tools, --strict-mcp-config or --permission-mode)
-# desk_step_open_tab's own `restricted: false` path uses for the
-# Wednesday tab. Every tab opened here is a background one: it never takes
+# desk_step_open_tab's own `restricted: false` path uses for an
+# interactive tab. Every tab opened here is a background one: it never takes
 # focus from wherever the user is typing.
 #
 # Before that tab opens, desk_follow_up_summary adds a plain-language turn
@@ -1606,7 +1606,8 @@ desk_notes_diff_since_epoch() {
 DESK_GIT_EMPTY_TREE="4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 
 # desk_write_notes_diff <repo> <out_file> <notes_diff_since> <file>...
-# Writes the weekly tab's own notes-diff input: the user's own
+# Writes the notes-diff input an open_tab step or a brief with
+# notes_diff_since gets: the user's own
 # additions/removals in each of `file`s, from the commit at or before
 # `notes_diff_since`'s window start through HEAD, with every line the
 # ledger says is agent-originated excluded — nvim/lua/desk/cli.lua's own
@@ -1615,7 +1616,7 @@ DESK_GIT_EMPTY_TREE="4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 # this only resolves the since-commit, calls that verb once per file, and
 # renders the result. Best-effort per file: one whose diff can't be
 # computed gets a one-line note in its place rather than failing the whole
-# step — the Wednesday tab isn't worth blocking over this. The whole body
+# step — a weekly review isn't worth blocking over this. The whole body
 # is fenced as one block: quoted lines from the user's own files are data for
 # whatever reads this next, never instructions.
 desk_write_notes_diff() {

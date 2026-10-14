@@ -337,6 +337,15 @@ assert_true "no run directory brief for the Saturday" "$([ ! -e "$DESK_RUNS_ROOT
 assert_true "and the log says why" "$(grep -q 'brief: weekend slot' "$ROOT/run.out" && echo true || echo false)"
 
 echo
+echo "=== a brief with notes_diff_since carries the user's notes diff ==="
+sessions <<< "$CENTRAL central-x true"
+jq '.passes.testpass.brief.notes_diff_since = "last_wednesday"' "$cfg" > "$ROOT/cfg-nd.json"
+DESK_CONFIG="$ROOT/cfg-nd.json" DESK_NOW="$(day 2026-10-21)" TZ=UTC "$DESK_RUN" testpass > "$ROOT/run.out" 2>&1
+assert_true "notes-diff.md is written, the notes diff a tab would get" \
+	"$(grep -q '^# Notes diff' "$DESK_RUNS_ROOT/testpass-2026-10-21/notes-diff.md" 2> /dev/null && echo true || echo false)"
+assert_contains "and the message names it" ", notes-diff.md." "$(jq -rs '.[-1].message' "$BRIEF_TEST_SENT")"
+
+echo
 echo "=== a pending run outlives the seven-day sweep; a delivered one does not ==="
 # shellcheck source=../../claude/desk-lib/common.sh
 source "$LIB/common.sh"

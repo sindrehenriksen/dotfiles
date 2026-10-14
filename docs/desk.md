@@ -312,6 +312,7 @@ A weekend slot of a `weekdays_only` pass prepares no brief of its own, but still
 | `input_files` | As a judge step's, seeded into `inputs/`. |
 | `instructions` | The instruction files, relative to the config's directory, in the order the central session reads them. A brief whose files are all missing is not prepared. |
 | `send.prompt`, `send.model`, `send.timeout` | The send call, as the follow pass's `send`. |
+| `notes_diff_since` | Optional, as an `open_tab` step's: the user's own notes additions and removals since that moment, written to `notes-diff.md` in the run directory, for instructions that want them (a weekly review). |
 
 ## The follow pass
 

@@ -46,7 +46,7 @@ desk_brief_prepare() {
 	run="$(desk_brief_run_dir "$pass" "$scheduled_date")"
 	mkdir -p "$run"
 	rm -rf "$run/inputs" "$run/instructions"
-	rm -f "$run/brief.pending" "$run/brief.sent" "$run/brief-message.txt" "$run/judgement.json" "$run/judgement.draft.json"
+	rm -f "$run/brief.pending" "$run/brief.sent" "$run/brief-message.txt" "$run/judgement.json" "$run/judgement.draft.json" "$run/notes-diff.md"
 	mkdir -p "$run/inputs" "$run/instructions"
 
 	files_json="$(printf '%s\n' "${files[@]}" | jq -R . | jq -cs .)"
@@ -102,6 +102,12 @@ desk_brief_prepare() {
 	fi
 
 	desk_brief_notes_changes "$pass" "$run" "$repo" "$head" "${files[@]}"
+	# The user's own notes changes since a weekday and time, as an open_tab
+	# step writes them (desk_write_notes_diff), for a brief whose
+	# instructions want them.
+	local since_kind
+	since_kind="$(jq -c '.notes_diff_since // empty' <<< "$brief" | sed -E 's/^"(.*)"$/\1/')"
+	[ -z "$since_kind" ] || desk_write_notes_diff "$repo" "$run/notes-diff.md" "$since_kind" "${files[@]}"
 
 	printf '%s\n' '{"unconfirmed_sends": 0}' > "$run/brief.pending"
 	printf '%s' "$run"
@@ -182,7 +188,7 @@ desk_brief_message() {
 		# staged.json only when the pass staged or held back anything itself.
 		printf -- '- Also there: notes-changes.txt (the notes'"'"' own commits since the last judged brief), allowed-urls.txt%s%s.\n' \
 			"$(jq -e '((.staged // []) + (.held_back // [])) | length > 0' "$r/staged.json" > /dev/null 2>&1 && printf ', staged.json')" \
-			"$([ -f "$r/mail-noise.json" ] && printf ', mail-noise.json')"
+			"$([ -f "$r/mail-noise.json" ] && printf ', mail-noise.json')$([ -f "$r/notes-diff.md" ] && printf ', notes-diff.md')"
 	done
 }
 

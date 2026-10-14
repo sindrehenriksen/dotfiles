@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # claude/desk-lib/steps.sh's
-# desk_step_open_tab — assembling the Wednesday tab's launch command from
+# desk_step_open_tab — assembling an open_tab step's launch command from
 # its step config (cwd, restricted, permission_mode, tools,
 # strict_mcp_config/mcp_config, settings, skill, the fixed prompt_text) and
 # handing it to
