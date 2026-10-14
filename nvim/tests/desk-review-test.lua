@@ -6,6 +6,9 @@
 --
 -- Run: nvim --headless -u nvim/tests/minimal_init.lua -l nvim/tests/desk-review-test.lua
 local review = require("desk.review")
+-- The split view, which most of this file was written against; the
+-- one-window view has its own tests (desk-inline-test.lua).
+review.view = "split"
 local proposal = require("desk.proposal")
 local ledger = require("desk.ledger")
 local git = require("desk.git")
@@ -2642,6 +2645,7 @@ do
 		window.run = function(_, cb) cb(true, "") end
 		window.owner_fn = function() return nil end
 		local review = require("desk.review")
+		review.view = "split"
 		vim.cmd("edit " .. vim.fn.fnameescape(... .. "/notes.md"))
 		local nb = vim.api.nvim_get_current_buf()
 		review.attach(nb)
@@ -2813,6 +2817,7 @@ do
 		local child = vim.fn.tempname() .. ".lua"
 		vim.fn.writefile(vim.split([[
 local review = require("desk.review")
+review.view = "split"
 require("desk.window").run = function(_, cb) cb(true, "none") end
 require("desk.window").owner_fn = function() return nil end
 vim.cmd("edit " .. vim.fn.fnameescape(vim.env.DESK_TEST_REPO .. "/notes.md"))

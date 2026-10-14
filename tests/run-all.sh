@@ -123,6 +123,7 @@ LUA_SUITES=(
 	nvim/tests/desk-autosave-test.lua
 	nvim/tests/desk-conceal-test.lua
 	nvim/tests/desk-hotkey-test.lua
+	nvim/tests/desk-inline-test.lua
 	nvim/tests/desk-ledger-test.lua
 	nvim/tests/desk-proposal-test.lua
 	nvim/tests/desk-review-test.lua

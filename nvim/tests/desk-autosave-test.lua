@@ -16,6 +16,9 @@ require("desk").setup()
 local autosave = require("desk.autosave")
 local diskmerge = require("diskmerge")
 local review = require("desk.review")
+-- The split view, which most of this file was written against; the
+-- one-window view has its own tests (desk-inline-test.lua).
+review.view = "split"
 local proposal = require("desk.proposal")
 local git = require("desk.git")
 local snippet = require("desk.snippet")
@@ -291,7 +294,7 @@ do
 		settle()
 	end
 	local paths = {
-		{ "␣gc in the notes", function(_, nb)
+		{ "␣gc in the notes", split_only = true, function(_, nb)
 			vim.api.nvim_set_current_win(vim.fn.bufwinid(nb))
 			key("<leader>gc")
 		end },
@@ -307,8 +310,9 @@ do
 			assert(review.overview(nb))
 			key("Q")
 		end },
-		{ "␣gq", function(_, nb)
-			vim.api.nvim_set_current_win(vim.fn.bufwinid(nb))
+		{ "␣gq", function(rb, nb)
+			local nw = vim.fn.bufwinid(nb)
+			vim.api.nvim_set_current_win(nw ~= -1 and nw or vim.fn.bufwinid(rb))
 			key("<leader>gq")
 		end },
 		{ ":q in the review", function(rb)
@@ -335,7 +339,8 @@ do
 			settle()
 		end },
 	}
-	for _, path in ipairs(paths) do
+	local function run(path, view)
+		local name = path[1] .. (view == "inline" and " (one window)" or "")
 		local r = new_repo()
 		assert(proposal.build(r, "morning", "2026-10-01", {
 			{ id = "n1", file = "notes.md", kind = "new", target = "top", before = "", after = "NEWS n1", source = "https://example.invalid/n1", headline = "headline n1" },
@@ -355,12 +360,23 @@ do
 		vim.cmd("checktime")
 		settle()
 		path[2](rb, nb)
-		assert_eq(path[1] .. ": their change stays on disk", THEIRS, vim.fn.readfile(r .. "/notes.md"))
-		assert_eq(path[1] .. ": nothing is committed", head, select(2, git.run(r, { "rev-parse", "HEAD" })))
-		assert_true(path[1] .. ": the take stays in the buffer", vim.tbl_contains(vim.api.nvim_buf_get_lines(nb, 0, -1, false), "NEWS n1"))
+		assert_eq(name .. ": their change stays on disk", THEIRS, vim.fn.readfile(r .. "/notes.md"))
+		assert_eq(name .. ": nothing is committed", head, select(2, git.run(r, { "rev-parse", "HEAD" })))
+		assert_true(name .. ": the take stays in the buffer", vim.tbl_contains(vim.api.nvim_buf_get_lines(nb, 0, -1, false), "NEWS n1"))
 		pcall(diskmerge.close, nb)
 		vim.bo[nb].modified = false
 	end
+	-- Each way out, from either view (one window has no notes window to
+	-- press ␣gc in).
+	for _, view in ipairs({ "split", "inline" }) do
+		review.view = view
+		for _, path in ipairs(paths) do
+			if view == "split" or not path.split_only then
+				run(path, view)
+			end
+		end
+	end
+	review.view = "split"
 end
 
 print("\n=== the other notes file's unmerged change stops ␣gc before anything is saved or recorded ===")
