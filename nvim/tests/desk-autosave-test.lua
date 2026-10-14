@@ -294,11 +294,11 @@ do
 		settle()
 	end
 	local paths = {
-		{ "␣gc in the notes", split_only = true, function(_, nb)
+		{ "␣gc in the notes", function(_, nb)
 			vim.api.nvim_set_current_win(vim.fn.bufwinid(nb))
 			key("<leader>gc")
 		end },
-		{ "␣gc in the review", function(rb)
+		{ "␣gc in the review", split_only = true, function(rb)
 			vim.api.nvim_set_current_win(vim.fn.bufwinid(rb))
 			key("<leader>gc")
 		end },
@@ -315,12 +315,19 @@ do
 			vim.api.nvim_set_current_win(nw ~= -1 and nw or vim.fn.bufwinid(rb))
 			key("<leader>gq")
 		end },
-		{ ":q in the review", function(rb)
+		{ ":q in the notes", inline_only = true, function(_, nb)
+			vim.api.nvim_set_current_win(vim.fn.bufwinid(nb))
+			vim.cmd("botright new")
+			vim.api.nvim_set_current_win(vim.fn.bufwinid(nb))
+			vim.cmd("q")
+			settle()
+		end },
+		{ ":q in the review", split_only = true, function(rb)
 			vim.api.nvim_set_current_win(vim.fn.bufwinid(rb))
 			vim.cmd("q")
 			settle()
 		end },
-		{ ":wq in the review", function(rb)
+		{ ":wq in the review", split_only = true, function(rb)
 			vim.api.nvim_set_current_win(vim.fn.bufwinid(rb))
 			vim.cmd("wq")
 			settle()
@@ -366,12 +373,12 @@ do
 		pcall(diskmerge.close, nb)
 		vim.bo[nb].modified = false
 	end
-	-- Each way out, from either view (one window has no notes window to
-	-- press ␣gc in).
+	-- Each way out, from either view (the one window has no review window
+	-- to press keys in, the split no `:q` of a notes window that ends it).
 	for _, view in ipairs({ "split", "inline" }) do
 		review.view = view
 		for _, path in ipairs(paths) do
-			if view == "split" or not path.split_only then
+			if (view == "split" and not path.inline_only) or (view == "inline" and not path.split_only) then
 				run(path, view)
 			end
 		end
@@ -391,18 +398,29 @@ do
 		}, { "notes.md", "reading.md" }))
 		local nb = open(r .. "/notes.md")
 		assert(review.open_review(nb))
-		local rb = vim.api.nvim_get_current_buf()
+		local rb = review.open_review_buf(nb)
 		vim.api.nvim_win_set_cursor(0, { 1, 0 })
 		vim.cmd("normal dp")
-		-- The other suggestion's line deleted by hand: a decline.
-		for i, l in ipairs(vim.api.nvim_buf_get_lines(rb, 0, -1, false)) do
-			if l == "  NEWS n2" then
-				vim.api.nvim_win_set_cursor(vim.fn.bufwinid(rb), { i, 0 })
+		if view == "split" then
+			-- The other suggestion's line deleted by hand: a decline.
+			for i, l in ipairs(vim.api.nvim_buf_get_lines(rb, 0, -1, false)) do
+				if l == "  NEWS n2" then
+					vim.api.nvim_win_set_cursor(vim.fn.bufwinid(rb), { i, 0 })
+				end
 			end
+			vim.api.nvim_set_current_win(vim.fn.bufwinid(rb))
+			vim.cmd("normal! dd")
+			vim.api.nvim_exec_autocmds("TextChanged", { buffer = rb })
+		else
+			-- The one window declines with its key, on the line n2 hangs on.
+			vim.api.nvim_exec_autocmds("TextChanged", { buffer = nb })
+			for _, spot in ipairs(review.session_of(nb).view_spots) do
+				if spot.item.headline == "headline n2" then
+					vim.api.nvim_win_set_cursor(0, { spot.row, 0 })
+				end
+			end
+			vim.api.nvim_feedkeys(vim.keycode("<leader>gD"), "x", false)
 		end
-		vim.api.nvim_set_current_win(vim.fn.bufwinid(rb))
-		vim.cmd("normal! dd")
-		vim.api.nvim_exec_autocmds("TextChanged", { buffer = rb })
 		write_disk(r .. "/notes.md", { "Section A", "  theirs", "Section B", "  other" })
 		vim.cmd("checktime")
 		settle()
@@ -419,7 +437,7 @@ do
 		end
 		local desc = view .. ": "
 		assert_true(desc .. "Q ends the review", not vim.api.nvim_buf_is_valid(rb))
-		assert_eq(desc .. "the hand decline is recorded", { "headline n2" }, headlines(ledger.declined(records).ids))
+		assert_eq(desc .. "the decline is recorded", { "headline n2" }, headlines(ledger.declined(records).ids))
 		assert_eq(desc .. "the take is not, its save held back", {}, headlines(ledger.taken_by_id(records)))
 		assert_eq(desc .. "their change stays on disk", { "Section A", "  theirs", "Section B", "  other" }, vim.fn.readfile(r .. "/notes.md"))
 		assert_true(desc .. "the take stays in the buffer", vim.tbl_contains(vim.api.nvim_buf_get_lines(nb, 0, -1, false), "NEWS n1"))

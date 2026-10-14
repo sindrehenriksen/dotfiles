@@ -179,6 +179,10 @@ function M.fitted_after(lines, item)
 	return snippet.join_lines(fitted, fitted[#fitted] == "")
 end
 
+--- (A fourth return, `placed`: for each applied item the committed rows it
+--- removes (`rows`), and where its new lines go: the gap after committed
+--- row `gap` (0 the top), `order` among what goes there, and the `lines`.)
+---
 --- One target file's committed lines (array of strings) + the items that
 --- target it -> new lines, a results table item.id -> "applied" |
 --- "deferred", and a set item.id -> true of every id that landed at the top
@@ -210,19 +214,25 @@ function M.apply_file(lines, items)
 		end
 		return true
 	end
+	local placed = {} -- item id -> { rows = committed rows it removes, gap, order, lines }
+	local current
 	local function claim(first, count)
 		for i = first, first + count - 1 do
 			claimed[i] = true
+			local p = placed[current]
+			p.rows[#p.rows + 1] = i
 		end
 	end
 
 	for item_index, item in ipairs(items) do
+		current = item.id
+		placed[item.id] = { rows = {} }
 		local leave_anchor, land_anchor = block.parse_target(item.target)
 		local after_lines = snippet.split_lines(M.fitted_after(lines, item))
 		local function put(gap, insert, in_place)
 			if #insert > 0 then
 				pieces[gap] = pieces[gap] or {}
-				table.insert(pieces[gap], { insert = insert, seq = item_index, in_place = in_place, section = is_section(insert) })
+				table.insert(pieces[gap], { insert = insert, seq = item_index, in_place = in_place, section = is_section(insert), id = item.id })
 			end
 		end
 		if INSERT_KINDS[item.kind] then
@@ -299,8 +309,10 @@ function M.apply_file(lines, items)
 				end
 				return a.seq < b.seq
 			end)
-			for _, piece in ipairs(here) do
+			for order, piece in ipairs(here) do
 				vim.list_extend(new_lines, piece.insert)
+				local p = placed[piece.id]
+				p.gap, p.order, p.lines = gap, order, piece.insert
 			end
 		end
 		if gap < #lines and not claimed[gap + 1] then
@@ -308,7 +320,12 @@ function M.apply_file(lines, items)
 		end
 	end
 
-	return new_lines, results, landed_on_top
+	for id, result in pairs(results) do
+		if result ~= "applied" then
+			placed[id] = nil
+		end
+	end
+	return new_lines, results, landed_on_top, placed
 end
 
 return M

@@ -1,7 +1,7 @@
--- The review's one-window view (desk.inline, desk.review with view
--- "inline"), headless against throwaway repos: what it draws, and that
--- take, decline, n/N, undo, the save, the overview, the view key and `:q`
--- work in it as they do in the split.
+-- The review's one window (desk.inline, desk.review with view "inline"):
+-- the notes buffer itself, decorated. Headless against throwaway repos: what
+-- it draws over the notes, that typing edits the notes, and that take,
+-- decline, n/N, undo, the overview, the view key and every way out work.
 --
 -- Run: nvim --headless -u nvim/tests/minimal_init.lua -l nvim/tests/desk-inline-test.lua
 local review = require("desk.review")
@@ -94,421 +94,278 @@ local ITEMS = {
 
 -- A repo with the three suggestions, its notes open and reviewed in one
 -- window. Returns repo, notes buffer, review buffer.
-local function setup(items)
+
+-- The notes open and reviewed in one window over `notes` and `items`.
+-- Returns repo, notes buffer, review session.
+local function setup(notes, items)
 	vim.cmd("silent! %bwipeout!")
 	vim.cmd("silent! only")
-	local r = new_repo(BASE)
+	local r = new_repo(notes or BASE)
 	assert(proposal.build(r, "morning", "2026-10-01", items or ITEMS, FILES))
 	vim.cmd("edit " .. vim.fn.fnameescape(r .. "/notes.md"))
 	local nb = vim.api.nvim_get_current_buf()
 	review.attach(nb)
 	review.view = "inline"
 	assert(review.open_review(nb))
-	return r, nb, review.open_review_buf(nb)
+	return r, nb, review.session_of(nb)
 end
 
--- The view's extmarks on `buf`, as { row (1-based), virt lines' text,
--- line highlight, eol label }.
-local function marks(buf)
-	local out = {}
+local function changed(nb)
+	vim.api.nvim_exec_autocmds("TextChanged", { buffer = nb })
+end
+
+-- The decorations on `buf`: struck rows, and virtual blocks as
+-- { row, above, lines (with any label) }.
+local function decor(buf)
+	local out = { struck = {}, blocks = {}, labels = {} }
 	for _, m in ipairs(vim.api.nvim_buf_get_extmarks(buf, inline.NS, 0, -1, { details = true })) do
 		local d = m[4]
-		local e = { row = m[2] + 1 }
+		if d.hl_group == "DeskInlineOld" then
+			out.struck[#out.struck + 1] = m[2] + 1
+		end
 		if d.virt_lines then
-			e.virt = {}
+			local lines = {}
 			for _, vl in ipairs(d.virt_lines) do
 				local t = {}
-				for _, chunk in ipairs(vl) do
-					t[#t + 1] = chunk[1]
+				for _, c in ipairs(vl) do
+					t[#t + 1] = c[1]
 				end
-				e.virt[#e.virt + 1] = table.concat(t)
+				lines[#lines + 1] = table.concat(t)
 			end
-			e.above = d.virt_lines_above or false
+			out.blocks[#out.blocks + 1] = { row = m[2] + 1, above = d.virt_lines_above or false, lines = lines }
 		end
-		e.hl = d.line_hl_group
 		if d.virt_text then
-			e.label = d.virt_text[1][1]
+			out.labels[m[2] + 1] = d.virt_text[1][1]
 		end
-		out[#out + 1] = e
 	end
+	table.sort(out.struck)
 	return out
 end
 
-local function find(ms, pred)
-	for _, m in ipairs(ms) do
-		if pred(m) then
-			return m
+local function block_with(buf, text)
+	for _, b in ipairs(decor(buf).blocks) do
+		for _, l in ipairs(b.lines) do
+			if l:find(text, 1, true) then
+				return b
+			end
 		end
 	end
+end
+
+local function spot_row(s, headline)
+	for _, spot in ipairs(s.view_spots) do
+		if spot.item.headline == headline then
+			return spot.row
+		end
+	end
+end
+
+local function settle()
+	vim.wait(20, function()
+		return false
+	end)
 end
 
 print("=== the split is the default; one window is the view key away ===")
 assert_eq("a review opens as the split", "split", review.view)
-do
-	local reply = { review.toggle_view(0) }
-	assert_eq("and the view key says the one window is coming back", { false, review.VIEW_COMING }, reply)
-end
--- What follows tests the one window itself, the key switched back on.
-review.view_key_off = false
 
-print("\n=== one window: the merged text with each suggestion's old lines drawn above its new ones ===")
+print("\n=== one window: the notes themselves, suggestions drawn over them ===")
 do
-	local _, nb, rb = setup()
+	local _, nb = setup()
 	assert_eq("one window", "leaf", vim.fn.winlayout()[1])
-	assert_eq("showing the review", rb, vim.api.nvim_get_current_buf())
+	assert_eq("showing the notes", nb, vim.api.nvim_get_current_buf())
+	assert_eq("the notes as they were", BASE, lines_of(nb))
 	assert_true("not in diff mode", not vim.wo.diff)
-	assert_true("the notes stay loaded behind it", vim.api.nvim_buf_is_loaded(nb) and #vim.fn.win_findbuf(nb) == 0)
-	local ms = marks(rb)
-	local new_row = line_of(rb, "- new line")
-	local old = find(ms, function(m)
-		return m.virt and m.row == new_row
-	end)
-	assert_eq("an edit's old line is drawn directly above its new one", { { "- old line" }, true }, { old and old.virt, old and old.above })
-	assert_true("its new line is highlighted", find(ms, function(m)
-		return m.row == new_row and m.hl == "DeskInlineNew"
-	end))
-	assert_true("with its headline beside it", find(ms, function(m)
-		return m.row == new_row and m.label and m.label:match("rewrite the old line")
-	end))
-	local add_row = line_of(rb, "- b4 added")
-	assert_true("an added line is highlighted, with its headline", find(ms, function(m)
-		return m.row == add_row and m.hl == "DeskInlineNew"
-	end) and find(ms, function(m)
-		return m.row == add_row and m.label and m.label:match("add b4")
-	end))
-	local removed = find(ms, function(m)
-		return m.virt and m.virt[1]:match("^%- stale")
-	end)
-	assert_true("a removed line hangs, struck, under the line before it, its headline on it", removed
-		and removed.row == line_of(rb, "- b1")
-		and not removed.above
-		and removed.virt[1]:match("drop the stale line"))
-	assert_true("the bar names the view's keys and the toggle", vim.wo.winbar:match("^" .. vim.pesc(review.INLINE_KEY_HINT)))
+	local d = decor(nb)
+	assert_eq("the lines a suggestion removes or replaces are struck, as real lines", { line_of(nb, "- old line"), line_of(nb, "- stale") }, d.struck)
+	local edit = block_with(nb, "- new line")
+	assert_eq("an edit's new line is drawn, tinted, just above the line it replaces, its headline on it", { line_of(nb, "- old line"), true, { "- new line  « rewrite the old line" } }, { edit and edit.row, edit and edit.above, edit and edit.lines })
+	local add = block_with(nb, "- b4 added")
+	assert_eq("an added line is drawn where it would go", { line_of(nb, "- b3"), false }, { add and add.row, add and add.above })
+	assert_true("a removal's headline sits beside its struck line", (d.labels[line_of(nb, "- stale")] or ""):match("drop the stale line"))
+	assert_true("the bar names the keys", vim.wo.winbar:match("^" .. vim.pesc(review.INLINE_KEY_HINT)))
 end
 
-print("\n=== n/N, take, decline and undo in one window ===")
+print("\n=== typing edits the notes, and the decorations follow ===")
 do
-	local r, nb, rb = setup()
-	local win = vim.api.nvim_get_current_win()
-	vim.api.nvim_win_set_cursor(win, { 1, 0 })
-	vim.cmd("normal n")
-	assert_eq("n goes to the first suggestion", line_of(rb, "- new line"), vim.api.nvim_win_get_cursor(win)[1])
-	vim.cmd("normal n")
-	vim.cmd("normal n")
-	vim.cmd("normal n")
-	assert_eq("and wraps round to it after the last", line_of(rb, "- new line"), vim.api.nvim_win_get_cursor(win)[1])
-	vim.cmd("normal N")
-	assert_eq("N goes back, wrapping to the last", line_of(rb, "- b4 added"), vim.api.nvim_win_get_cursor(win)[1])
-
-	vim.api.nvim_win_set_cursor(win, { line_of(rb, "- new line"), 0 })
+	local r, nb, s = setup()
+	vim.api.nvim_win_set_cursor(0, { line_of(nb, "- b1"), 0 })
+	vim.api.nvim_feedkeys("O- typed above a pending removal\27", "xt", false)
+	changed(nb)
+	assert_true("what is typed is in the notes", line_of(nb, "- typed above a pending removal") ~= nil)
+	assert_eq("the removal is still struck, on its own line", { line_of(nb, "- old line"), line_of(nb, "- stale") }, decor(nb).struck)
+	vim.api.nvim_win_set_cursor(0, { line_of(nb, "- stale"), 0 })
 	vim.cmd("normal dp")
-	assert_true("dp takes the edit into the notes", line_of(nb, "- new line") and not line_of(nb, "- old line"))
-	assert_true("and its old line is no longer drawn", not find(marks(rb), function(m)
-		return m.virt and m.virt[1] == "- old line"
-	end))
+	assert_true("taking it removes that line and no other", not line_of(nb, "- stale") and line_of(nb, "- typed above a pending removal") and line_of(nb, "- b1") and line_of(nb, "- b3"))
 	vim.cmd("normal u")
-	assert_true("u undoes the take", line_of(nb, "- old line") and not line_of(nb, "- new line"))
-	assert_true("and it is drawn again", find(marks(rb), function(m)
-		return m.virt and m.virt[1] == "- old line"
-	end))
-
-	vim.api.nvim_win_set_cursor(win, { line_of(rb, "- b4 added"), 0 })
-	assert_true("␣gD declines the line under the cursor", review.decline(rb) and not line_of(rb, "- b4 added"))
-	vim.cmd("normal u")
-	assert_true("u undoes the decline", line_of(rb, "- b4 added"))
-	review.decline(rb)
-	vim.api.nvim_win_set_cursor(win, { line_of(rb, "- b1"), 0 })
-	assert_true("␣gA takes the removal its lines hang under", review.take(rb) and not line_of(nb, "- stale"))
+	assert_true("u takes the take back as one change", line_of(nb, "- stale") ~= nil)
+	-- A struck line deleted by hand: that removal is taken.
+	vim.api.nvim_win_set_cursor(0, { line_of(nb, "- stale"), 0 })
+	vim.cmd("normal! dd")
+	changed(nb)
+	assert_true("deleting a struck line by hand leaves it taken, not shown", spot_row(s, "drop the stale line") == nil)
 	vim.cmd("silent write")
-	local declined = vim.tbl_map(function(rec)
-		return rec.headline
-	end, vim.tbl_values(ledger.declined(ledger.read(r)).ids))
-	assert_eq("the save records the decline", { "add b4" }, declined)
+	review.commit(nb)
+	assert_true("and the commit records it taken", #vim.tbl_filter(function(rec)
+		return rec.headline == "drop the stale line"
+	end, vim.tbl_values(ledger.taken_by_id(ledger.read(r)))) == 1)
+	-- The line a suggestion hangs on deleted: its business for the next pass.
+	vim.api.nvim_win_set_cursor(0, { line_of(nb, "- b3"), 0 })
+	vim.cmd("normal! dd")
+	changed(nb)
+	assert_true("deleting the line an addition hangs on is the user's edit, kept", not line_of(nb, "- b3"))
+	vim.api.nvim_win_set_cursor(0, { line_of(nb, "Section B"), 0 })
+	vim.cmd("normal! dd")
+	changed(nb)
+	assert_true("with its anchor gone the addition waits for the next pass, never on top", block_with(nb, "- b4 added") == nil)
 end
 
-print("\n=== the overview previews and acts in one window ===")
+print("\n=== take, decline, n/N and undo ===")
 do
-	local _, nb, rb = setup()
-	local rw = vim.api.nvim_get_current_win()
-	assert_true("the overview opens", review.overview(nb))
-	assert_eq("a list above the one view", 2, #vim.api.nvim_tabpage_list_wins(0))
-	local qw = vim.api.nvim_get_current_win()
-	vim.api.nvim_win_set_cursor(qw, { 2, 0 })
-	review.qf_preview()
-	assert_eq("moving in the list shows the entry in the view: a removal at the line below its removed lines", line_of(rb, "- b3"), vim.api.nvim_win_get_cursor(rw)[1])
-	vim.cmd("normal t")
-	assert_true("t takes it", not line_of(nb, "- stale"))
-	vim.cmd("normal x")
-	assert_true("x declines the next one", not line_of(rb, "- b4 added"))
-	review.confirm = function()
-		return 1
-	end
-	vim.cmd("normal Q")
-	assert_true("Q ends the review, saving the decline", review.open_review_buf(nb) == nil)
-	assert_eq("leaving the notes in the window", nb, vim.api.nvim_win_get_buf(vim.fn.win_findbuf(nb)[1]))
-end
-
-print("\n=== the view key switches to two windows and back, and is remembered ===")
-do
-	local _, nb, rb = setup()
+	local _, nb, s = setup()
 	local win = vim.api.nvim_get_current_win()
-	vim.api.nvim_win_set_cursor(win, { line_of(rb, "- b4 added"), 0 })
-	vim.api.nvim_feedkeys(vim.keycode("<leader>gv"), "x", false)
-	assert_eq("two windows", "col", vim.fn.winlayout()[1])
-	assert_true("both in diff mode", vim.wo[vim.fn.bufwinid(rb)].diff and vim.wo[vim.fn.bufwinid(nb)].diff)
-	assert_true("nothing drawn in the split", #marks(rb) == 0)
-	assert_eq("remembered", "split", review.view)
-	vim.api.nvim_set_current_win(vim.fn.bufwinid(rb))
-	vim.api.nvim_win_set_cursor(0, { line_of(rb, "- b4 added"), 0 })
-	vim.api.nvim_feedkeys(vim.keycode("<leader>gv"), "x", false)
-	assert_eq("back to one window", "leaf", vim.fn.winlayout()[1])
-	assert_true("out of diff mode", not vim.wo.diff)
-	assert_eq("the cursor where it was", line_of(rb, "- b4 added"), vim.api.nvim_win_get_cursor(0)[1])
-	assert_true("drawn again", #marks(rb) > 0)
-	assert_eq("and remembered", "inline", review.view)
-end
-
-print("\n=== :q in one window ends the review and leaves the notes showing ===")
-do
-	local _, nb, rb = setup()
-	vim.cmd("q")
-	vim.wait(20, function()
-		return false
-	end)
-	assert_true("the review is gone", not vim.api.nvim_buf_is_valid(rb))
-	assert_true("nvim is still here, the notes in a window", #vim.fn.win_findbuf(nb) == 1)
-end
-
-print("\n=== closing the view's window another way brings the notes back ===")
-do
-	local _, nb, rb = setup()
-	vim.cmd("botright new")
-	local other = vim.api.nvim_get_current_win()
-	vim.api.nvim_set_current_win(vim.fn.bufwinid(rb))
-	vim.cmd("close")
-	vim.wait(20, function()
-		return false
-	end)
-	assert_true("the review is gone", not vim.api.nvim_buf_is_valid(rb))
-	assert_true("the notes show again", #vim.fn.win_findbuf(nb) == 1)
-	assert_true("and the other window is left as it was", vim.api.nvim_win_is_valid(other))
-end
-
-print("\n=== the review moves to the other file in one window ===")
-do
-	vim.cmd("silent! %bwipeout!")
-	vim.cmd("silent! only")
-	local r = new_repo(BASE)
-	write(r, "reading.md", { "- a paper" })
-	assert(git.run(r, { "commit", "-qam", "reading" }))
-	assert(proposal.build(r, "morning", "2026-10-01", {
-		item("n1", { after = "NEWS n1" }),
-		item("p1", { file = "reading.md", after = "- another paper" }),
-	}, FILES))
-	vim.cmd("edit " .. vim.fn.fnameescape(r .. "/notes.md"))
-	local nb = vim.api.nvim_get_current_buf()
-	review.attach(nb)
-	review.view = "inline"
-	assert(review.open_review(nb))
-	local rb = review.open_review_buf(nb)
-	vim.api.nvim_win_set_cursor(0, { 1, 0 })
-	vim.cmd("normal dp")
-	assert_true("the review moves there", review.switch_review(rb))
-	local rd = vim.fn.bufnr(r .. "/reading.md")
-	local rb2 = review.open_review_buf(rd)
-	assert_true("in one window, drawn", rb2 and vim.fn.winlayout()[1] == "leaf" and vim.api.nvim_get_current_buf() == rb2 and #marks(rb2) > 0)
-end
-
--- Opens a review in one window over `notes` and `items`.
-local function review_of(notes, items)
-	vim.cmd("silent! %bwipeout!")
-	vim.cmd("silent! only")
-	local r = new_repo(notes)
-	assert(proposal.build(r, "morning", "2026-10-01", items, FILES))
-	vim.cmd("edit " .. vim.fn.fnameescape(r .. "/notes.md"))
-	local nb = vim.api.nvim_get_current_buf()
-	review.attach(nb)
-	review.view = "inline"
-	assert(review.open_review(nb))
-	return r, nb, review.open_review_buf(nb)
-end
-
-print("\n=== each suggestion keeps its own old lines and headline, adjacent ones too ===")
-do
-	local _, _, rb = review_of({ "A", "- one", "- two", "- keep", "- gone", "- tail" }, {
-		item("e1", { kind = "edit", target = { at = "- one" }, before = "- one", after = "- ONE", headline = "first" }),
-		item("e2", { kind = "edit", target = { at = "- two" }, before = "- two", after = "- TWO", headline = "second" }),
-		item("rm", { kind = "remove", target = { at = "- gone" }, before = "- gone", after = "", headline = "drop" }),
-		item("ad", { kind = "add", target = { after = "- keep" }, after = "- added", headline = "add" }),
-	})
-	local ms = marks(rb)
-	local function virt_at(row)
-		local out = {}
-		for _, m in ipairs(ms) do
-			if m.virt and m.row == row then
-				vim.list_extend(out, m.virt)
-			end
-		end
-		return out
-	end
-	assert_eq("two adjacent edits: each old line above its own new one", { { "- one" }, { "- two" } }, { virt_at(line_of(rb, "- ONE")), virt_at(line_of(rb, "- TWO")) })
-	assert_eq("a removal beside an add keeps its own struck line and headline", { "- gone  « drop" }, virt_at(line_of(rb, "- keep")))
-	assert_true("and the add its own headline", find(ms, function(m)
-		return m.row == line_of(rb, "- added") and m.label and m.label:match("add$")
-	end))
-end
-
-print("\n=== a removal on the first line is drawn above it; dp from either side of a removal ===")
-do
-	local _, nb, rb = review_of({ "- first", "- second", "- last" }, {
-		item("r1", { kind = "remove", target = { at = "- first" }, before = "- first", after = "", headline = "drop first" }),
-		item("r3", { kind = "remove", target = { at = "- last" }, before = "- last", after = "", headline = "drop last" }),
-	})
-	local top = find(marks(rb), function(m)
-		return m.virt and m.virt[1]:match("^%- first")
-	end)
-	assert_eq("above line 1", { 1, true }, { top and top.row, top and top.above })
-	vim.api.nvim_win_set_cursor(0, { 1, 0 })
-	vim.cmd("normal dp")
-	assert_true("dp on the line below a removal takes it", not line_of(nb, "- first"))
-	vim.api.nvim_win_set_cursor(0, { line_of(rb, "- second"), 0 })
-	vim.cmd("normal dp")
-	assert_true("dp on the line a removal hangs under takes it, at the end of the file", not line_of(nb, "- last"))
-end
-
-print("\n=== n from a suggestion's own line goes to the next; dp takes it whole, recorded on the save ===")
-do
-	local r, nb, rb = review_of({ "A", "- a1", "", "B", "- b1", "- b2", "- b9", "", "C", "- c1" }, {
-		item("n1", { kind = "add", target = { after = "- a1" }, after = "- a2", headline = "a2" }),
-		item("mv", { kind = "move", target = { { at = "- b2" }, { after = "- c1" } }, before = "- b2", after = "- b2", headline = "move b2" }),
-		item("n3", { kind = "add", target = { after = "- b9" }, after = "- b3", headline = "b3" }),
-	})
-	local rows = review.inline_rows(review.session_of(nb))
-	vim.api.nvim_win_set_cursor(0, { rows[1], 0 })
+	assert_eq("the cursor starts on the first suggestion", spot_row(s, "rewrite the old line"), vim.api.nvim_win_get_cursor(win)[1])
 	vim.cmd("normal n")
-	assert_eq("n from a hunk's row goes to the next hunk", rows[2], vim.api.nvim_win_get_cursor(0)[1])
-	vim.api.nvim_win_set_cursor(0, { line_of(rb, "- b2"), 0 })
-	vim.cmd("normal dp")
-	assert_true("dp on a move's landing takes both its places", line_of(nb, "- b2") == line_of(nb, "- c1") + 1 and #vim.tbl_filter(function(l)
-		return l == "- b2"
-	end, lines_of(nb)) == 1)
-	vim.api.nvim_win_set_cursor(0, { line_of(rb, "- a2"), 0 })
-	vim.cmd("normal dp")
-	vim.api.nvim_buf_call(nb, function()
-		vim.cmd("silent write")
-	end)
-	local taken = vim.tbl_map(function(rec)
-		return rec.headline
-	end, vim.tbl_values(ledger.taken_by_id(ledger.read(r))))
-	table.sort(taken)
-	assert_eq("the takes are recorded once the notes are saved", { "a2", "move b2" }, taken)
+	assert_eq("n goes to the next", spot_row(s, "drop the stale line"), vim.api.nvim_win_get_cursor(win)[1])
+	vim.cmd("normal n")
+	vim.cmd("normal n")
+	assert_eq("and wraps round", spot_row(s, "rewrite the old line"), vim.api.nvim_win_get_cursor(win)[1])
+	vim.cmd("normal N")
+	assert_eq("N goes back, wrapping", spot_row(s, "add b4"), vim.api.nvim_win_get_cursor(win)[1])
+	vim.api.nvim_win_set_cursor(win, { spot_row(s, "add b4"), 0 })
+	vim.api.nvim_feedkeys(vim.keycode("<leader>gA"), "x", false)
+	assert_true("␣gA takes the suggestion on the line", line_of(nb, "- b4 added") ~= nil)
+	vim.api.nvim_win_set_cursor(win, { line_of(nb, "- old line"), 0 })
+	vim.api.nvim_feedkeys(vim.keycode("<leader>gA"), "x", false)
+	assert_true("an edit taken replaces its line", line_of(nb, "- new line") and not line_of(nb, "- old line"))
+	vim.cmd("normal u")
+	assert_true("u takes the whole take back at once", line_of(nb, "- old line") and not line_of(nb, "- new line") and line_of(nb, "- b4 added"))
+	vim.api.nvim_win_set_cursor(win, { line_of(nb, "- stale"), 0 })
+	vim.api.nvim_feedkeys(vim.keycode("<leader>gD"), "x", false)
+	assert_true("␣gD declines it: its decoration goes", not vim.tbl_contains(decor(nb).struck, line_of(nb, "- stale")) and line_of(nb, "- stale"))
+	vim.cmd("normal u")
+	assert_true("u brings it back", vim.tbl_contains(decor(nb).struck, line_of(nb, "- stale")))
+	vim.api.nvim_feedkeys(vim.keycode("<leader>gD"), "x", false)
+	assert_true("the count leaves out what was declined", review.status_line(nb):match("1 left") ~= nil)
 end
 
-print("\n=== a count on dp takes that many hunks from the cursor down ===")
+print("\n=== Q, ␣gq and :q end the review in one step, saying what went ===")
 do
-	local _, nb, rb = review_of({ "- a1", "- a2", "- a3", "- a4" }, {
-		item("x", { kind = "add", target = { after = "- a1" }, after = "- x" }),
-		item("y", { kind = "add", target = { after = "- a3" }, after = "- y" }),
-		item("z", { kind = "add", target = "top", after = "- z" }),
-	})
-	vim.api.nvim_win_set_cursor(0, { line_of(rb, "- x"), 0 })
-	vim.cmd("normal 2dp")
-	assert_eq("2dp: the one under the cursor and the next, not the one above", { "- a1", "- x", "- a2", "- a3", "- y", "- a4" }, lines_of(nb))
-end
-
-print("\n=== dp into an empty notes file leaves no extra line ===")
-do
-	local _, nb = review_of({}, { item("n1", { kind = "new", target = "top", after = "NEWS n1" }) })
-	vim.api.nvim_win_set_cursor(0, { 1, 0 })
-	vim.cmd("normal dp")
-	assert_eq("just the suggestion", { "NEWS n1" }, lines_of(nb))
-end
-
-print("\n=== <CR> in the overview jumps to the suggestion in one window ===")
-do
-	local _, nb, rb = setup()
-	local rw = vim.api.nvim_get_current_win()
-	assert_true("the overview opens", review.overview(nb))
-	vim.api.nvim_win_set_cursor(0, { 3, 0 })
-	review.qf_jump()
-	assert_eq("in the view's window", rw, vim.api.nvim_get_current_win())
-	assert_eq("on the entry's line", line_of(rb, "- b4 added"), vim.api.nvim_win_get_cursor(rw)[1])
-end
-
-print("\n=== :q over a decline closes the review in one step, recording it ===")
-do
-	for _, cmd in ipairs({ "q", "q!" }) do
-		local r, nb, rb = setup()
+	for _, way in ipairs({ "Q", "gq", ":q" }) do
+		local r, nb, s = setup()
 		local said = {}
 		vim.notify = function(m)
 			said[#said + 1] = m
 		end
-		vim.api.nvim_win_set_cursor(0, { line_of(rb, "- b4 added"), 0 })
-		review.decline(rb)
-		local ok = pcall(vim.cmd, cmd)
-		vim.wait(20, function()
-			return false
-		end)
-		assert_true(":" .. cmd .. " goes through, with no E37", ok and not vim.api.nvim_buf_is_valid(rb))
-		assert_eq(":" .. cmd .. ": the decline is recorded", { "add b4" }, vim.tbl_map(function(rec)
+		vim.api.nvim_win_set_cursor(0, { line_of(nb, "- stale"), 0 })
+		vim.api.nvim_feedkeys(vim.keycode("<leader>gD"), "x", false)
+		vim.api.nvim_win_set_cursor(0, { spot_row(s, "add b4"), 0 })
+		vim.cmd("normal dp")
+		local rb = s.review_buf
+		if way == ":q" then
+			vim.cmd("botright new")
+			vim.api.nvim_set_current_win(vim.fn.bufwinid(nb))
+			vim.cmd("q")
+		else
+			vim.api.nvim_feedkeys(way == "Q" and "Q" or vim.keycode("<leader>gq"), "x", false)
+		end
+		settle()
+		local declined = vim.tbl_map(function(rec)
 			return rec.headline
-		end, vim.tbl_values(ledger.declined(ledger.read(r)).ids)))
-		assert_true(":" .. cmd .. ": said by name", vim.tbl_contains(said, "desk: review closed: 1 declined (add b4)"))
-		assert_eq(":" .. cmd .. ": the notes in the one window, nvim still running", { 1, 1 }, { #vim.api.nvim_tabpage_list_wins(0), #vim.fn.win_findbuf(nb) })
+		end, vim.tbl_values(ledger.declined(ledger.read(r)).ids))
+		assert_true(way .. ": the review is over", not vim.api.nvim_buf_is_valid(rb) and review.open_review_buf(nb) == nil)
+		assert_eq(way .. ": the decline is recorded", { "drop the stale line" }, declined)
+		assert_true(way .. ": the take stays in the notes", line_of(nb, "- b4 added") ~= nil)
+		if way ~= ":q" then
+			assert_true(way .. ": recorded taken as the notes are saved", #vim.tbl_filter(function(rec)
+				return rec.headline == "add b4"
+			end, vim.tbl_values(ledger.taken_by_id(ledger.read(r)))) == 1)
+		end
+		assert_true(way .. ": and it says so, by name", #vim.tbl_filter(function(m)
+			return m:match("^desk: review closed: .*1 declined %(drop the stale line%)") ~= nil
+		end, said) == 1)
+		assert_eq(way .. ": no decoration is left", 0, #vim.api.nvim_buf_get_extmarks(nb, inline.NS, 0, -1, {}))
 		vim.notify = function() end
+		vim.bo[nb].modified = false
 	end
 end
 
-print("\n=== an ended review leaves nothing behind ===")
+print("\n=== the overview previews, acts and jumps in one window ===")
 do
-	local function count()
-		return #vim.api.nvim_get_autocmds({ event = "WinClosed" })
-	end
-	local nb = select(2, setup())
-	review.close_review(review.session_of(nb))
-	vim.wait(20, function()
-		return false
-	end)
-	local after_one = count()
-	for _ = 1, 3 do
-		nb = select(2, setup())
-		review.close_review(review.session_of(nb))
-		vim.wait(20, function()
-			return false
-		end)
-	end
-	assert_eq("no window watch stays per review", after_one, count())
-	assert_eq("the notes' 'bufhidden' is theirs again", "", vim.bo[nb].bufhidden)
+	local _, nb, s = setup()
+	local nw = vim.api.nvim_get_current_win()
+	assert_true("the overview opens", review.overview(nb))
+	local qw = vim.api.nvim_get_current_win()
+	vim.api.nvim_win_set_cursor(qw, { 3, 0 })
+	review.qf_preview()
+	assert_eq("moving in the list shows the entry's line in the notes", spot_row(s, "add b4"), vim.api.nvim_win_get_cursor(nw)[1])
+	review.qf_jump()
+	assert_eq("<CR> jumps there", nw, vim.api.nvim_get_current_win())
+	vim.api.nvim_set_current_win(qw)
+	vim.api.nvim_win_set_cursor(qw, { 1, 0 })
+	vim.cmd("normal t")
+	assert_true("t takes the entry", line_of(nb, "- new line") ~= nil and not line_of(nb, "- old line"))
+	vim.cmd("normal x")
+	assert_true("x declines the next", spot_row(s, "drop the stale line") == nil)
+	vim.cmd("normal q")
+	settle()
+	assert_true("q closes the list, the review staying", vim.fn.getqflist({ winid = 0 }).winid == 0 and review.open_review_buf(nb) ~= nil)
+	assert_true("with the notes saved", not vim.bo[nb].modified)
+	assert_true("the overview reopens", review.overview(nb))
+	vim.cmd("normal Q")
+	settle()
+	assert_true("Q ends the review", review.open_review_buf(nb) == nil)
 end
 
-print("\n=== after the toggle to one window nothing folds; edits in the view count ===")
+print("\n=== the view key: to the split and back, the declines carried ===")
 do
-	local _, nb, rb = setup()
+	local r, nb, s = setup()
+	vim.api.nvim_win_set_cursor(0, { line_of(nb, "- stale"), 0 })
+	vim.api.nvim_feedkeys(vim.keycode("<leader>gD"), "x", false)
 	vim.api.nvim_feedkeys(vim.keycode("<leader>gv"), "x", false)
+	assert_eq("two windows", "col", vim.fn.winlayout()[1])
+	local rb = s.review_buf
+	assert_true("the split in diff mode", vim.wo[vim.fn.bufwinid(rb)].diff and vim.wo[vim.fn.bufwinid(nb)].diff)
+	assert_true("the declined removal not proposed there: its line stays", line_of(rb, "- stale") ~= nil)
+	assert_eq("no decoration in the split", 0, #vim.api.nvim_buf_get_extmarks(nb, inline.NS, 0, -1, {}))
 	vim.api.nvim_set_current_win(vim.fn.bufwinid(rb))
 	vim.api.nvim_feedkeys(vim.keycode("<leader>gv"), "x", false)
+	assert_eq("back to one window", "leaf", vim.fn.winlayout()[1])
+	assert_eq("on the notes", nb, vim.api.nvim_get_current_buf())
 	local closed = false
-	for l = 1, vim.api.nvim_buf_line_count(rb) do
+	for l = 1, vim.api.nvim_buf_line_count(nb) do
 		closed = closed or vim.fn.foldclosed(l) ~= -1
 	end
-	assert_true("no diff folds left", vim.wo.foldmethod ~= "diff" and not closed)
-	local s = review.session_of(nb)
-	local before = review.left(s)
-	vim.api.nvim_win_set_cursor(0, { line_of(rb, "- b4 added"), 0 })
-	vim.cmd("normal! dd")
-	assert_eq("deleting a suggestion's line in the view takes it off the count", before - 1, review.left(s))
+	assert_true("out of diff mode, nothing folded or bound", not vim.wo.diff and not closed and not vim.wo.scrollbind)
+	assert_true("drawn again, the decline still out", #decor(nb).blocks > 0 and not vim.tbl_contains(decor(nb).struck, line_of(nb, "- stale")))
+	vim.api.nvim_feedkeys("Q", "x", false)
+	settle()
+	assert_eq("the decline is recorded as it ends", 1, #vim.tbl_keys(ledger.declined(ledger.read(r)).ids))
 end
 
-print("\n=== the status line counts what is deferred, with the view open ===")
+print("\n=== the top and the end of the file, and an empty one ===")
 do
-	local _, nb = review_of({ "A", "- keep" }, {
-		item("e1", { kind = "edit", target = { at = "- keep" }, before = "- keep", after = "- kept" }),
-		item("e2", { kind = "edit", target = { at = "- keep" }, before = "- keep", after = "- changed" }),
+	local _, nb = setup({ "- first", "- middle", "- last" }, {
+		item("top", { kind = "new", target = "top", after = "- on top" }),
+		item("end", { kind = "add", target = { after = "- last" }, after = "- at the end" }),
+		item("rm", { kind = "remove", target = { at = "- last" }, before = "- last", after = "" }),
 	})
-	assert_true("1 deferred", review.status_line(nb):match("1 deferred") ~= nil)
+	local top = block_with(nb, "- on top")
+	assert_eq("a line for the top is drawn above line 1", { 1, true }, { top and top.row, top and top.above })
+	assert_true("the last line struck", vim.tbl_contains(decor(nb).struck, 3))
+	local bottom = block_with(nb, "- at the end")
+	assert_true("and a line for the end drawn after it", bottom and bottom.row == 3 and not bottom.above)
+	vim.api.nvim_win_set_cursor(0, { 1, 0 })
+	vim.cmd("normal dp")
+	assert_eq("dp on line 1 takes the line for the top", "- on top", lines_of(nb)[1])
+	local _, nb2 = setup({}, { item("n1", { kind = "new", target = "top", after = "NEWS n1" }) })
+	local b = block_with(nb2, "NEWS n1")
+	assert_true("an empty file shows its suggestion above its one line", b and b.row == 1 and b.above)
+	vim.cmd("normal dp")
+	assert_eq("and dp leaves just it", { "NEWS n1" }, lines_of(nb2))
 end
 
-print("\n=== removed lines wrap to the window, unicode and all ===")
+print("\n=== new lines wrap to the window, unicode and all ===")
 do
 	local long = string.rep("æøå ", 40) .. "slutt"
 	local pieces = inline.wrap(long, 30)
@@ -518,96 +375,332 @@ do
 	end
 	assert_true("into pieces that fit", #pieces > 1 and fits)
 	assert_eq("and lose nothing", long, table.concat(pieces))
-	assert_true("cut at spaces", pieces[1]:sub(-1) == " ")
-	local _, _, rb = review_of({ "A", "- " .. long }, {
-		item("e", { kind = "edit", target = { at = "- " .. long }, before = "- " .. long, after = "- kort" }),
+	local _, nb = setup({ "A", "- short" }, {
+		item("e", { kind = "edit", target = { at = "- short" }, before = "- short", after = "- " .. long }),
 	})
-	local old = find(marks(rb), function(m)
-		return m.virt and m.row == line_of(rb, "- kort")
-	end)
-	assert_true("a long removed line is drawn on several lines", old and #old.virt > 1)
+	local b = block_with(nb, "æøå")
+	assert_true("a long new line is drawn on several lines", b and #b.lines > 1)
 end
 
-print("\n=== removing every line, or your own edit at the top, is drawn above line 1 ===")
+print("\n=== more ways the keys find a suggestion ===")
 do
-	local _, _, rb = review_of({ "- only" }, {
-		item("r", { kind = "remove", target = { at = "- only" }, before = "- only", after = "", headline = "drop it" }),
+	-- A count on dp; an edit's own block under its own line; the struck
+	-- first line of a longer edit; a move taken from either place.
+	local _, nb, s = setup({ "A", "- a1", "- a2", "- a3", "", "B", "- b1", "- b2", "- b3", "", "C", "- c1" }, {
+		item("x", { kind = "add", target = { after = "- a1" }, after = "- x", headline = "x" }),
+		item("ed", { kind = "edit", target = { at = "- b1" }, before = "- b1\n- b2", after = "- b1 and b2", headline = "join b" }),
+		item("rm", { kind = "remove", target = { at = "- b3" }, before = "- b3", after = "", headline = "drop b3" }),
+		item("mv", { kind = "move", target = { { at = "- a3" }, { after = "- c1" } }, before = "- a3", after = "- a3", headline = "move a3" }),
 	})
-	local m = find(marks(rb), function(x)
-		return x.virt
-	end)
-	assert_eq("an emptied review hangs the line above its one row", { 1, true, "- only  « drop it" }, { m and m.row, m and m.above, m and m.virt[1] })
-	local _, nb2, rb2 = setup()
+	local edit = block_with(nb, "- b1 and b2")
+	assert_eq("an edit's new line is drawn at its own old lines, not after the removal beside them", { line_of(nb, "- b1"), true }, { edit and edit.row, edit and edit.above })
+	vim.api.nvim_win_set_cursor(0, { line_of(nb, "- b1"), 0 })
+	vim.api.nvim_feedkeys(vim.keycode("<leader>gA"), "x", false)
+	assert_true("␣gA on the first of an edit's struck lines takes it", line_of(nb, "- b1 and b2") and not line_of(nb, "- b2"))
+	vim.api.nvim_win_set_cursor(0, { line_of(nb, "- c1"), 0 })
+	vim.cmd("normal dp")
+	assert_true("dp on a move's landing takes both its places", line_of(nb, "- a3") == line_of(nb, "- c1") + 1)
+	vim.api.nvim_win_set_cursor(0, { spot_row(s, "x"), 0 })
+	vim.cmd("normal 2dp")
+	assert_true("2dp takes two changes from the cursor down", line_of(nb, "- x") and not line_of(nb, "- b3"))
+end
+
+print("\n=== the overview shows an addition on the line it hangs on ===")
+do
+	local _, nb, s = setup({ "A", "- a1", "- a2", "- a3" }, { item("x", { kind = "add", target = { after = "- a1" }, after = "- x" }) })
+	local nw = vim.api.nvim_get_current_win()
+	assert_true("the overview opens", review.overview(nb))
+	review.qf_preview()
+	assert_eq("on its line", spot_row(s, "headline x"), vim.api.nvim_win_get_cursor(nw)[1])
+end
+
+print("\n=== declines made in the split carry to the one window ===")
+do
+	local r, nb = setup()
+	vim.api.nvim_feedkeys(vim.keycode("<leader>gv"), "x", false)
+	local s = review.session_of(nb)
+	local rb = s.review_buf
+	vim.api.nvim_set_current_win(vim.fn.bufwinid(rb))
+	vim.api.nvim_win_set_cursor(0, { line_of(rb, "- b4 added"), 0 })
+	assert_true("declined in the split", review.decline(rb))
+	vim.api.nvim_feedkeys(vim.keycode("<leader>gv"), "x", false)
+	assert_true("not drawn in the one window", block_with(nb, "- b4 added") == nil)
+	vim.api.nvim_feedkeys("Q", "x", false)
+	settle()
+	assert_eq("recorded as it ends", { "add b4" }, vim.tbl_map(function(rec)
+		return rec.headline
+	end, vim.tbl_values(ledger.declined(ledger.read(r)).ids)))
+end
+
+print("\n=== a new proposal under the open window is drawn ===")
+do
+	local r, nb = setup()
+	assert(proposal.build(r, "morning", "2026-10-02", { item("new", { kind = "new", target = "top", after = "- brand new" }) }, FILES))
+	vim.api.nvim_exec_autocmds("FocusGained", { buffer = nb })
+	assert_true("its suggestion appears", block_with(nb, "- brand new") ~= nil)
+end
+
+print("\n=== duplicate lines: the drawing and the take agree on which one ===")
+do
+	local _, nb, s = setup({ "A", "- dup", "B", "- dup" }, {
+		item("ed", { kind = "edit", target = { at = "- dup" }, before = "- dup", after = "- changed", headline = "change dup" }),
+	})
+	assert_eq("the first is struck", { 2 }, decor(nb).struck)
+	vim.api.nvim_win_set_cursor(0, { 2, 0 })
+	vim.api.nvim_feedkeys(vim.keycode("<leader>gA"), "x", false)
+	assert_eq("and the take changes that one", { "A", "- changed", "B", "- dup" }, lines_of(nb))
+	_ = s
+end
+
+print("\n=== suggestions at one place are drawn in the order a take puts them ===")
+do
+	local _, nb, s = setup({ "A", "- a1", "- a2" }, {
+		item("x", { kind = "add", target = { after = "- a1" }, after = "- x" }),
+		item("y", { kind = "add", target = { after = "- a1" }, after = "- y" }),
+	})
+	local b = block_with(nb, "- x")
+	local drawn = vim.tbl_map(function(l)
+		return (l:gsub("  « .*$", ""))
+	end, b and b.lines or {})
+	vim.api.nvim_win_set_cursor(0, { spot_row(s, "headline x"), 0 })
+	vim.cmd("normal dp")
+	assert_eq("drawn as taken", vim.list_slice(lines_of(nb), 3, 4), drawn)
+	local _, nb2, s2 = setup({ "A" }, {
+		item("p", { kind = "new", target = "top", after = "- p" }),
+		item("q", { kind = "new", target = "top", after = "- q" }),
+	})
 	vim.api.nvim_win_set_cursor(0, { 1, 0 })
-	vim.cmd("normal! dd")
-	review.render_inline(review.session_of(nb2))
-	local top = find(marks(rb2), function(x)
-		return x.virt and x.virt[1] == "Section A"
-	end)
-	assert_eq("your own deletion of the first line is drawn above line 1", { 1, true }, { top and top.row, top and top.above })
+	vim.api.nvim_feedkeys(vim.keycode("<leader>gA"), "x", false)
+	assert_eq("of two on line 1, ␣gA takes the first drawn", "- p", lines_of(nb2)[1])
+	_ = s2
 end
 
-print("\n=== with 'nohidden' the notes still stay behind the view; the toggle leaves no diff state ===")
+print("\n=== in the split, typing in the notes is no edit of the review's ===")
 do
-	local diffopt = vim.o.diffopt
-	vim.cmd("silent! %bwipeout!")
+	review.view = "split"
 	local r = new_repo(BASE)
 	assert(proposal.build(r, "morning", "2026-10-01", ITEMS, FILES))
-	vim.o.hidden = false
+	vim.cmd("silent! %bwipeout!")
 	vim.cmd("edit " .. vim.fn.fnameescape(r .. "/notes.md"))
 	local nb = vim.api.nvim_get_current_buf()
 	review.attach(nb)
-	vim.api.nvim_buf_set_lines(nb, 0, 0, false, { "- mine" })
-	review.view = "inline"
-	assert_true("the review opens over modified notes", review.open_review(nb))
+	assert(review.open_review(nb))
 	local rb = review.open_review_buf(nb)
-	assert_true("which stay loaded and modified behind it", vim.api.nvim_get_current_buf() == rb and vim.api.nvim_buf_is_loaded(nb) and vim.bo[nb].modified)
-	vim.o.hidden = true
-	vim.api.nvim_feedkeys(vim.keycode("<leader>gv"), "x", false)
 	vim.api.nvim_set_current_win(vim.fn.bufwinid(rb))
-	vim.api.nvim_feedkeys(vim.keycode("<leader>gv"), "x", false)
-	assert_true("back in one window, nothing bound or diffed", not vim.wo.diff and not vim.wo.scrollbind and not vim.wo.cursorbind)
-	assert_eq("and the diff context left as it was", diffopt, vim.o.diffopt)
-	vim.bo[nb].modified = false
+	vim.api.nvim_win_set_cursor(0, { line_of(rb, "- b4 added"), 0 })
+	assert_true("declined", review.decline(rb))
+	vim.api.nvim_set_current_win(vim.fn.bufwinid(nb))
+	vim.api.nvim_feedkeys("Go- typed in the notes\27", "xt", false)
+	local said = {}
+	vim.notify = function(m)
+		said[#said + 1] = m
+	end
+	vim.api.nvim_feedkeys("Q", "x", false)
+	settle()
+	assert_true("Q closes cleanly", review.open_review_buf(nb) == nil and not vim.tbl_contains(said, "desk: " .. review.HAND_EDITS))
+	assert_eq("recording the decline", { "add b4" }, vim.tbl_map(function(rec)
+		return rec.headline
+	end, vim.tbl_values(ledger.declined(ledger.read(r)).ids)))
+	assert_true("and the typing is in the notes", line_of(nb, "- typed in the notes") ~= nil)
+	vim.notify = function() end
+	review.view = "inline"
 end
 
-print("\n=== drawing stays fast on a long file ===")
+print("\n=== declines are recorded however the one window ends ===")
+do
+	local function declined(r)
+		return vim.tbl_map(function(rec)
+			return rec.headline
+		end, vim.tbl_values(ledger.declined(ledger.read(r)).ids))
+	end
+	-- The review key over a proposal that moved on.
+	local r, nb = setup()
+	vim.api.nvim_win_set_cursor(0, { line_of(nb, "- stale"), 0 })
+	vim.api.nvim_feedkeys(vim.keycode("<leader>gD"), "x", false)
+	assert(proposal.build(r, "morning", "2026-10-02", { item("new", { kind = "new", target = "top", after = "- brand new" }) }, FILES))
+	assert_true("␣gR reopens", review.open_review(nb))
+	assert_eq("␣gR records the decline first", { "drop the stale line" }, declined(r))
+	-- The notes window shown another buffer.
+	r, nb = setup()
+	vim.api.nvim_win_set_cursor(0, { line_of(nb, "- stale"), 0 })
+	vim.api.nvim_feedkeys(vim.keycode("<leader>gD"), "x", false)
+	vim.cmd("enew")
+	settle()
+	assert_true("another buffer in the window ends the review", review.open_review_buf(nb) == nil)
+	assert_eq("recording the decline", { "drop the stale line" }, declined(r))
+	-- nvim quitting.
+	r, nb = setup()
+	vim.api.nvim_win_set_cursor(0, { line_of(nb, "- stale"), 0 })
+	vim.api.nvim_feedkeys(vim.keycode("<leader>gD"), "x", false)
+	vim.api.nvim_exec_autocmds("VimLeavePre", {})
+	assert_eq("quitting nvim records it", { "drop the stale line" }, declined(r))
+end
+
+print("\n=== the keys act on the notes as they are, reported or not ===")
+do
+	local _, nb = setup()
+	-- A change no TextChanged has reported yet.
+	vim.api.nvim_buf_set_lines(nb, 0, 0, false, { "- a line put in above everything" })
+	vim.api.nvim_win_set_cursor(0, { line_of(nb, "- old line"), 0 })
+	vim.api.nvim_feedkeys(vim.keycode("<leader>gA"), "x", false)
+	assert_true("␣gA takes the suggestion on that line", line_of(nb, "- new line") and not line_of(nb, "- old line"))
+end
+
+print("\n=== auto-save runs in the one window; takes are recorded as it ends ===")
+do
+	-- As desk.setup wires it: what each save wrote is what the next is
+	-- checked against.
+	require("desk.autosave").setup({ "*/notes.md" })
+	local r, nb, s = setup()
+	require("desk.autosave").attach(nb)
+	vim.api.nvim_win_set_cursor(0, { spot_row(s, "add b4"), 0 })
+	vim.cmd("normal dp")
+	vim.api.nvim_feedkeys("Go- typed\27", "xt", false)
+	vim.api.nvim_exec_autocmds("InsertLeave", { buffer = nb })
+	settle()
+	assert_true("what is typed is saved", vim.tbl_contains(vim.fn.readfile(r .. "/notes.md"), "- typed"))
+	assert_eq("the take not yet recorded", 0, #vim.tbl_keys(ledger.taken_by_id(ledger.read(r))))
+	-- Take, undo, redo, end: taken.
+	vim.cmd("normal u")
+	vim.cmd("normal u")
+	vim.cmd("redo")
+	changed(nb)
+	vim.api.nvim_feedkeys("Q", "x", false)
+	settle()
+	assert_true("a take undone and redone is recorded as the review ends", #vim.tbl_filter(function(rec)
+		return rec.headline == "add b4"
+	end, vim.tbl_values(ledger.taken_by_id(ledger.read(r)))) == 1)
+end
+
+print("\n=== an edit's struck line deleted by hand declines it, named as the review ends ===")
+do
+	local r, nb, s = setup()
+	vim.api.nvim_win_set_cursor(0, { line_of(nb, "- old line"), 0 })
+	vim.cmd("normal! dd")
+	changed(nb)
+	assert_true("its decoration goes", spot_row(s, "rewrite the old line") == nil)
+	vim.cmd("normal! u")
+	changed(nb)
+	assert_true("u brings it back with its line", spot_row(s, "rewrite the old line") ~= nil)
+	vim.api.nvim_win_set_cursor(0, { line_of(nb, "- old line"), 0 })
+	vim.cmd("normal! dd")
+	changed(nb)
+	local said = {}
+	vim.notify = function(m)
+		said[#said + 1] = m
+	end
+	vim.api.nvim_feedkeys("Q", "x", false)
+	settle()
+	assert_true("recorded declined", vim.tbl_contains(vim.tbl_map(function(rec)
+		return rec.headline
+	end, vim.tbl_values(ledger.declined(ledger.read(r)).ids)), "rewrite the old line"))
+	assert_true("and named", #vim.tbl_filter(function(m)
+		return m:match("declined %(rewrite the old line%)") ~= nil
+	end, said) == 1)
+	vim.notify = function() end
+end
+
+print("\n=== a take undone, then a decline: the decline is recorded ===")
+do
+	local r, nb = setup()
+	vim.api.nvim_win_set_cursor(0, { line_of(nb, "- stale"), 0 })
+	vim.cmd("normal dp")
+	vim.cmd("normal u")
+	changed(nb)
+	vim.api.nvim_win_set_cursor(0, { line_of(nb, "- stale"), 0 })
+	vim.api.nvim_feedkeys(vim.keycode("<leader>gD"), "x", false)
+	vim.api.nvim_feedkeys("Q", "x", false)
+	settle()
+	local records = ledger.read(r)
+	assert_eq("declined, not taken", { { "drop the stale line" }, 0 }, { vim.tbl_map(function(rec)
+		return rec.headline
+	end, vim.tbl_values(ledger.declined(records).ids)), #vim.tbl_keys(ledger.taken_by_id(records)) })
+end
+
+print("\n=== the view key over typing: no false stop either way ===")
+do
+	local r, nb = setup()
+	vim.api.nvim_feedkeys("Go- typed in one window\27", "xt", false)
+	changed(nb)
+	vim.api.nvim_feedkeys(vim.keycode("<leader>gv"), "x", false)
+	local rb = review.open_review_buf(nb)
+	vim.api.nvim_set_current_win(vim.fn.bufwinid(rb))
+	vim.api.nvim_win_set_cursor(0, { line_of(rb, "- b4 added"), 0 })
+	assert_true("declined in the split", review.decline(rb))
+	local said = {}
+	vim.notify = function(m)
+		said[#said + 1] = m
+	end
+	vim.api.nvim_feedkeys("Q", "x", false)
+	settle()
+	assert_true("Q closes, no edit of the review's found", review.open_review_buf(nb) == nil and not vim.tbl_contains(said, "desk: " .. review.HAND_EDITS))
+	assert_eq("recording the decline", { "add b4" }, vim.tbl_map(function(rec)
+		return rec.headline
+	end, vim.tbl_values(ledger.declined(ledger.read(r)).ids)))
+	-- And back: typing in the split's notes window, then to one window.
+	local nb2 = select(2, setup())
+	vim.api.nvim_feedkeys(vim.keycode("<leader>gv"), "x", false)
+	vim.api.nvim_set_current_win(vim.fn.bufwinid(nb2))
+	vim.api.nvim_feedkeys("Go- typed in the split\27", "xt", false)
+	vim.api.nvim_set_current_win(vim.fn.bufwinid(review.open_review_buf(nb2)))
+	local ok, why = review.toggle_view(review.session_of(nb2))
+	assert_true("back to one window over notes typed in the split (" .. tostring(why) .. ")", ok)
+	vim.api.nvim_feedkeys("Q", "x", false)
+	settle()
+	assert_true("and Q closes there", review.open_review_buf(nb2) == nil)
+	vim.notify = function() end
+end
+
+print("\n=== typing into or splitting a struck line is an edit, not a decline ===")
+do
+	for _, typing in ipairs({ "A, typed into", "0wi\r" }) do
+		local r, nb = setup()
+		vim.api.nvim_win_set_cursor(0, { line_of(nb, "- old line"), 0 })
+		vim.cmd("normal! " .. typing)
+		changed(nb)
+		vim.api.nvim_feedkeys("Q", "x", false)
+		settle()
+		assert_eq(typing .. ": nothing declined", 0, #vim.tbl_keys(ledger.declined(ledger.read(r)).ids))
+	end
+end
+
+print("\n=== dp on a struck line takes everything on it, an addition drawn there too ===")
+do
+	local _, nb = setup({ "A", "- a1", "- a2", "B", "- b1", "- b2" }, {
+		item("x", { kind = "add", target = { after = "- a1" }, after = "- x" }),
+		item("rm", { kind = "remove", target = { at = "- a2" }, before = "- a2", after = "" }),
+		item("y", { kind = "add", target = { after = "- b1" }, after = "- y" }),
+		item("rm2", { kind = "remove", target = { at = "- b2" }, before = "- b2", after = "" }),
+	})
+	vim.api.nvim_win_set_cursor(0, { line_of(nb, "- a2"), 0 })
+	vim.cmd("normal 2dp")
+	assert_eq("both on that line and both on the next", { "A", "- a1", "- x", "B", "- b1", "- y" }, lines_of(nb))
+end
+
+print("\n=== it stays quick on a long file ===")
 do
 	local notes = {}
-	for i = 1, 600 do
+	for i = 1, 400 do
 		notes[#notes + 1] = (i % 12 == 0) and "" or ("- line " .. i .. " " .. string.rep("word ", i % 30))
 	end
 	local items = {}
-	for i = 1, 40 do
-		local at = notes[i * 14 + 1]
+	for i = 1, 10 do
+		local at = notes[i * 30 + 1]
 		if at ~= "" then
-			items[#items + 1] = item("e" .. i, { kind = "edit", target = { at = at }, before = at, after = at .. " edited", headline = "edit " .. i })
+			items[#items + 1] = item("e" .. i, { kind = "edit", target = { at = at }, before = at, after = at .. " edited" })
 		end
 	end
-	vim.cmd("silent! %bwipeout!")
-	local r = new_repo(notes)
-	assert(proposal.build(r, "morning", "2026-10-01", items, FILES))
-	vim.cmd("edit " .. vim.fn.fnameescape(r .. "/notes.md"))
-	local nb = vim.api.nvim_get_current_buf()
-	review.attach(nb)
-	review.view = "inline"
-	assert(review.open_review(nb))
-	local function time(f)
-		local t0 = vim.uv.hrtime()
-		for _ = 1, 10 do
-			f()
-		end
-		return (vim.uv.hrtime() - t0) / 1e6 / 10
+	local _, nb, s = setup(notes, items)
+	local t0 = vim.uv.hrtime()
+	for _ = 1, 5 do
+		vim.api.nvim_buf_set_lines(nb, 0, 1, false, { "- edited " .. vim.uv.hrtime() })
+		changed(nb)
 	end
-	local draw = time(function()
-		review.render_inline(review.session_of(nb))
-	end)
-	local refresh = time(function()
-		review.refresh_status_line(nb)
-	end)
+	local ms = (vim.uv.hrtime() - t0) / 1e6 / 5
+	print(string.format("     (an edit and its redraw: %.1f ms)", ms))
+	assert_true("an edit and its redraw stay well under a tenth of a second", ms < 100)
+	assert_true("still drawn", #s.view_spots > 0)
 	review.view = "split"
-	print(string.format("     (drawing: %.1f ms; a whole refresh with it: %.1f ms)", draw, refresh))
-	assert_true("drawing the view takes a few milliseconds", draw < 20)
 end
 
 print(string.format("\n=== summary: %d passed, %d failed ===", pass, fail))

@@ -2896,7 +2896,7 @@ do
 	vim.notify = function(m)
 		said[#said + 1] = m
 	end
-	for _, view in ipairs({ "split", "inline" }) do
+	for _, view in ipairs({ "split" }) do
 		review.view = view
 		local r = new_repo(BASE)
 		build(r, "2026-10-01", { item("n1"), item("n2") })

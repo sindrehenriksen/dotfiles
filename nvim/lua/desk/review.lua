@@ -19,11 +19,11 @@
 -- the decline key (and `<leader>gA`, which takes one) act on a single
 -- suggestion's own lines rather than the whole hunk.
 --
--- That is the split view, the default. The merged buffer can show in one
--- window instead, in place of the notes, which stay loaded behind it: desk.inline
--- draws each hunk there (old lines above new), the keys act on hunks it
--- computes rather than on diff mode, and `<leader>gv` switches between the
--- two (M.view).
+-- That is the split view, the default. The other view is one window, the
+-- notes buffer itself with the open suggestions drawn over it (desk.inline,
+-- M.view_refresh); the merged buffer is then never shown, only kept as the
+-- model the drawing and the keys are worked out from. `<leader>gv` switches
+-- between the two (M.view).
 local apply = require("desk.apply")
 local block = require("desk.block")
 local git = require("desk.git")
@@ -38,9 +38,9 @@ local M = {}
 
 M.PROPOSAL_REF = proposal.REF
 
--- How a review shows: "inline", the merged text in the notes' window with
--- each suggestion's old lines drawn above its new ones (desk.inline), or
--- "split", the merged text above the notes in two diff windows. The toggle
+-- How a review shows: "split", the merged text above the notes in two diff
+-- windows, or "inline", the notes alone with the suggestions drawn over
+-- them (desk.inline). The toggle
 -- key switches the open review and is remembered for the next one.
 M.view = "split"
 
@@ -361,7 +361,15 @@ function M.save_review(s, keep_takes)
 	else
 		notes_lines = proposal.lines_at(s.repo, "HEAD", s.file)
 	end
-	local taking = pending_ids(s.notes_buf)
+	-- A take the notes' own undo has taken back is no take (a redo makes it
+	-- one again): it neither keeps its suggestion from a decline nor waits
+	-- to be recorded.
+	local taking = {}
+	for id, t in pairs(pending_ids(s.notes_buf)) do
+		if not vim.api.nvim_buf_is_loaded(s.notes_buf) or undo_reaches(s.notes_buf, t.seq) ~= false then
+			taking[id] = t
+		end
+	end
 	local gone = {}
 	for _, item in pairs(s.shown) do
 		local _, _, text = mark_range(s, item)
@@ -373,6 +381,13 @@ function M.save_review(s, keep_takes)
 			gone[#gone + 1] = item
 		end
 	end
+	-- Declines made in the one window, kept out of the merged text.
+	for id, item in pairs(s.view_declined or {}) do
+		if not taking[id] and not proposal.proposed_in(item, notes_lines, s.base) then
+			gone[#gone + 1] = item
+		end
+	end
+	s.view_declined, s.view_acts = {}, {}
 	table.sort(gone, function(a, b)
 		return a.id < b.id
 	end)
@@ -635,7 +650,7 @@ end
 -- is no separate save to make first. The takes wait for their notes' save.
 -- Edits that are not declines stop it instead (M.hand_edits).
 local function settle_declines(s)
-	if not vim.bo[s.review_buf].modified then
+	if not vim.bo[s.review_buf].modified and next(s.view_declined or {}) == nil then
 		return true
 	end
 	if M.hand_edits(s) then
@@ -866,7 +881,15 @@ function M.ensure_current(s, acting)
 	end
 	local p = sha and proposal.read(s.repo, sha)
 	local ok, changed
-	if p then
+	if p and s.inline then
+		-- Nothing unsaved lives in the one window but its declines, kept
+		-- by id: the decorations are worked out over the new proposal.
+		s.sha = p.sha
+		M.view_refresh(s)
+		M.recount_saved(s)
+		M.refresh_overview(s)
+		ok, changed = true, true
+	elseif p then
 		s.reloading = true
 		ok, changed = rebuild(s, p)
 		s.reloading = nil
@@ -1025,6 +1048,7 @@ function M.define_highlights()
 		set(0, "DeskDiffFiller", { link = "NonText" })
 		set(0, "DeskInlineNew", { link = "DiffAdd" })
 		set(0, "DeskInlineOld", { link = "DiffDelete" })
+		set(0, "DeskInlineOldLine", { link = "DiffDelete" })
 		set(0, "DeskInlineSign", { link = "DiffAdd" })
 		set(0, "DeskInlineLabel", { link = "Comment" })
 		return
@@ -1051,7 +1075,8 @@ function M.define_highlights()
 	-- replace dimmed and struck through on the removal colour.
 	set(0, "DeskInlineNew", { bg = away(green, bg, -0.45) })
 	set(0, "DeskInlineSign", { fg = strong(green), bg = away(green, bg, -0.45) })
-	set(0, "DeskInlineOld", { bg = away(red, bg, -0.45), fg = away(fg, bg, -0.4), strikethrough = true })
+	set(0, "DeskInlineOld", { fg = away(fg, bg, -0.4), strikethrough = true })
+	set(0, "DeskInlineOldLine", { bg = away(red, bg, -0.45) })
 	set(0, "DeskInlineLabel", { fg = away(fg, bg, -0.45), italic = true })
 end
 
@@ -1120,12 +1145,6 @@ end
 --- buffer, one step and one back lands on the first (last) change whether
 --- or not it starts on that very line. Returns whether there is one.
 function M.first_change(win)
-	local s = session_for_review_buf(vim.api.nvim_win_get_buf(win))
-	if s and s.inline then
-		local rows = M.inline_rows(s)
-		vim.api.nvim_win_set_cursor(win, { rows[1] or 1, 0 })
-		return rows[1] ~= nil
-	end
 	vim.api.nvim_win_set_cursor(win, { 1, 0 })
 	pcall(vim.cmd, "normal! ]c")
 	pcall(vim.cmd, "normal! [c")
@@ -1137,10 +1156,6 @@ end
 --- motion does the moving, so the cursor lands where `dp` or `do` acts.
 function M.next_change(forward)
 	local win = vim.api.nvim_get_current_win()
-	local s = session_for_review_buf(vim.api.nvim_get_current_buf())
-	if s and s.inline then
-		return M.inline_next(s, win, forward)
-	end
 	local before = vim.api.nvim_win_get_cursor(win)
 	local key = forward and "]c" or "[c"
 	pcall(vim.cmd, "normal! " .. vim.v.count1 .. key)
@@ -1184,7 +1199,7 @@ local function map_next_change(buf)
 end
 
 -- The keys the notes buffer has only while a review of it is open.
-local NOTES_REVIEW_KEYS = { "do", "]c", "[c", "n", "N", "u", "<leader>gA", "<leader>gD", "<leader>gq", "Q" }
+local NOTES_REVIEW_KEYS = { "do", "dp", "]c", "[c", "n", "N", "u", "<leader>gA", "<leader>gD", "<leader>gq", "Q", "<leader>gv" }
 
 local function unmap_notes_keys(notes_buf)
 	if not vim.api.nvim_buf_is_valid(notes_buf) then
@@ -1334,15 +1349,15 @@ function M.open_review(notes_buf)
 	local carried, carried_took
 	if existing and vim.api.nvim_buf_is_valid(existing.review_buf) then
 		if existing.sha == p.sha then
-			local win = vim.fn.bufwinid(existing.review_buf)
+			local win = vim.fn.bufwinid(existing.inline and existing.notes_buf or existing.review_buf)
 			if win ~= -1 then
 				vim.api.nvim_set_current_win(win)
 				return true
 			end
 		end
-		if vim.bo[existing.review_buf].modified then
-			-- The old review's declines are recorded before it goes; edits
-			-- of the user's that are not declines keep it.
+		-- The old review's declines are recorded before it goes, the one
+		-- window's too; edits of the user's that are not declines keep it.
+		if vim.bo[existing.review_buf].modified or next(existing.view_declined or {}) ~= nil then
 			if M.hand_edits(existing) then
 				return false, M.HAND_EDITS
 			end
@@ -1390,15 +1405,17 @@ function M.open_review(notes_buf)
 		vim.api.nvim_win_set_buf(notes_win, notes_buf)
 	end
 	vim.api.nvim_set_current_win(notes_win)
+	-- In one window the merged text is never shown: it is the model the
+	-- decorations over the notes are worked out from (M.view_refresh).
 	local in_line = M.view == "inline"
-	local review_win = notes_win
+	local review_win
 	if not in_line then
 		vim.cmd("aboveleft split")
 		review_win = vim.api.nvim_get_current_win()
 	end
 	local review_buf = vim.api.nvim_create_buf(false, true)
 	vim.bo[review_buf].buftype = "acwrite"
-	vim.bo[review_buf].bufhidden = "wipe"
+	vim.bo[review_buf].bufhidden = in_line and "hide" or "wipe"
 	vim.bo[review_buf].swapfile = false
 	vim.bo[review_buf].modeline = false
 	vim.api.nvim_buf_set_name(review_buf, "desk-review://" .. file)
@@ -1410,20 +1427,18 @@ function M.open_review(notes_buf)
 	if vim.bo[review_buf].filetype == "markdown" and not vim.treesitter.highlighter.active[review_buf] then
 		pcall(vim.treesitter.start, review_buf, "markdown")
 	end
-	vim.wo[review_win].conceallevel = vim.wo[notes_win].conceallevel
+	if review_win then
+		vim.wo[review_win].conceallevel = vim.wo[notes_win].conceallevel
+	end
 	-- Loaded outside the undo history, so `u` in the split never blanks it.
 	local undolevels = vim.bo[review_buf].undolevels
 	vim.bo[review_buf].undolevels = -1
 	vim.api.nvim_buf_set_lines(review_buf, 0, -1, false, merged)
 	vim.bo[review_buf].undolevels = undolevels
 	vim.bo[review_buf].modified = false
-	-- In one window the notes stay loaded behind the review, hidden while
-	-- it shows, whatever 'hidden' says.
-	local notes_bufhidden = vim.bo[notes_buf].bufhidden
-	if in_line then
-		vim.bo[notes_buf].bufhidden = "hide"
+	if review_win then
+		vim.api.nvim_win_set_buf(review_win, review_buf)
 	end
-	vim.api.nvim_win_set_buf(review_win, review_buf)
 
 	local s = {
 		notes_buf = notes_buf,
@@ -1438,7 +1453,7 @@ function M.open_review(notes_buf)
 		takes = {},
 		return_to = carried,
 		took_into = carried_took,
-		notes_bufhidden = notes_bufhidden,
+		notes_win = notes_win,
 		built_ours = ours,
 	}
 	sessions[notes_buf] = s
@@ -1449,7 +1464,6 @@ function M.open_review(notes_buf)
 	install_colours()
 	if in_line then
 		s.inline = true
-		s.inline_win = review_win
 	else
 		s.notes_wrap = wrap_opts(notes_win)
 		M.show_split(s, review_win, notes_win)
@@ -1459,7 +1473,10 @@ function M.open_review(notes_buf)
 		group = vim.api.nvim_create_augroup("desk_taken_" .. notes_buf, { clear = true }),
 		buffer = notes_buf,
 		callback = function()
-			if not holding_takes[notes_buf] then
+			-- In the one window auto-save runs as the user types; a take is
+			-- recorded as the review ends, so a later `u` can still take it
+			-- back.
+			if not holding_takes[notes_buf] and not (sessions[notes_buf] and sessions[notes_buf].inline) then
 				M.flush_taken(notes_buf)
 			end
 			M.refresh_status_line(notes_buf, true)
@@ -1512,21 +1529,6 @@ function M.open_review(notes_buf)
 					M.say_closed(s, before)
 				end
 			end
-			-- In one window, `:q` ends the review as it does in the split:
-			-- the notes take a window beside it first, so the quit closes
-			-- the review's window rather than leaving nvim with the notes
-			-- out of sight. A quit that stops after all takes that window
-			-- away again.
-			if s.inline and sessions[notes_buf] == s and vim.api.nvim_get_current_buf() == review_buf then
-				local win, created = M.notes_beside(s, vim.api.nvim_get_current_win())
-				if created then
-					vim.schedule(function()
-						if vim.api.nvim_win_is_valid(win) and sessions[notes_buf] == s and vim.fn.bufwinid(review_buf) ~= -1 then
-							vim.api.nvim_win_close(win, false)
-						end
-					end)
-				end
-			end
 		end,
 	})
 	vim.api.nvim_create_autocmd({ "WinEnter", "FocusGained" }, {
@@ -1534,21 +1536,6 @@ function M.open_review(notes_buf)
 		buffer = review_buf,
 		callback = function()
 			M.ensure_current(s)
-		end,
-	})
-	-- The one view's window closed some other way than `:q` (`<C-w>c`): the
-	-- review ends with it, and the notes come back beside where it was, as
-	-- the split leaves them in their own window.
-	vim.api.nvim_create_autocmd("WinClosed", {
-		group = group,
-		callback = function(args)
-			if s.inline and tonumber(args.match) == s.inline_win then
-				vim.schedule(function()
-					if vim.api.nvim_buf_is_valid(notes_buf) and #vim.fn.win_findbuf(notes_buf) == 0 and not s.quiet then
-						M.notes_beside(s, vim.api.nvim_get_current_win())
-					end
-				end)
-			end
 		end,
 	})
 	vim.api.nvim_create_autocmd({ "WinEnter", "FocusGained" }, {
@@ -1571,9 +1558,7 @@ function M.open_review(notes_buf)
 				pcall(vim.api.nvim_del_augroup_by_name, "desk_review_notes_" .. notes_buf)
 			end
 			record_saved_takes(s)
-			if vim.api.nvim_buf_is_valid(notes_buf) and vim.bo[notes_buf].bufhidden == "hide" and s.notes_bufhidden ~= nil then
-				vim.bo[notes_buf].bufhidden = s.notes_bufhidden
-			end
+			inline.clear(notes_buf)
 			tidy_notes_windows(s)
 			M.fit_diff_context()
 			-- The window layout can't change while a buffer is being wiped.
@@ -1585,6 +1570,9 @@ function M.open_review(notes_buf)
 			end)
 		end,
 	})
+	-- The notes window's keys of the split; the one window maps its own
+	-- (M.map_view_keys), and the view key swaps them.
+	s.map_split_notes = function()
 	-- Plain `do` on the last line does nothing when a suggestion is appended
 	-- after it and another hunk precedes it; the range form works, so fall
 	-- back to it when `do` changed nothing there.
@@ -1605,6 +1593,17 @@ function M.open_review(notes_buf)
 		note_takes(s, pre)
 		M.refresh_status_line(notes_buf)
 	end, { buffer = notes_buf, desc = "Take the hunk under the cursor (also at the end of the file)" })
+	for lhs, verb in pairs({ ["<leader>gA"] = "take", ["<leader>gD"] = "decline" }) do
+		vim.keymap.set("n", lhs, function()
+			report(M.notes_act(notes_buf, verb))
+		end, { buffer = notes_buf, desc = verb == "take" and "Take just the suggestion in this hunk" or "Decline the suggestion in this hunk (u undoes; Q records)" })
+	end
+	vim.keymap.set("n", "u", function()
+		M.notes_undo(notes_buf)
+	end, { buffer = notes_buf, desc = "Undo the latest take or decline made here, else plain undo" })
+	map_next_change(notes_buf)
+	pcall(vim.keymap.del, "n", "dp", { buffer = notes_buf })
+	end
 	-- The same take from the review side. Plain `dp` takes a removal (lines
 	-- only the notes have, grey filler in the split) from the line just below
 	-- the filler, and misses it from the line just above, which is the only
@@ -1615,9 +1614,6 @@ function M.open_review(notes_buf)
 		local fresh, stale = M.ensure_current(s, true)
 		if not fresh then
 			return report(false, stale)
-		end
-		if s.inline then
-			return report(M.inline_put(s, vim.v.count1))
 		end
 		local tick = vim.api.nvim_buf_get_changedtick(notes_buf)
 		local t = begin_take(s)
@@ -1667,9 +1663,11 @@ function M.open_review(notes_buf)
 	vim.keymap.set("n", "<leader>gR", function()
 		report(M.switch_review(review_buf))
 	end, { buffer = review_buf, desc = "Move the review to the other file once this one has none left" })
-	vim.keymap.set("n", "<leader>gv", function()
-		report(M.toggle_view(review_buf))
-	end, { buffer = review_buf, desc = "Switch the review between one view and two diff windows" })
+	for _, b in ipairs({ review_buf, notes_buf }) do
+		vim.keymap.set("n", "<leader>gv", function()
+			report(M.toggle_view(s))
+		end, { buffer = b, desc = "Switch the review between one window and two" })
+	end
 	-- `Q` as well, the overview's own key for it, so the review ends from
 	-- the diff windows with the same key whether or not the list is open.
 	for _, b in ipairs({ review_buf, notes_buf }) do
@@ -1680,19 +1678,15 @@ function M.open_review(notes_buf)
 		end
 	end
 	map_next_change(review_buf)
-	map_next_change(notes_buf)
+	if s.inline then
+		M.map_view_keys(s)
+	else
+		s.map_split_notes()
+	end
 	-- The split shows the notes' text, so the hotkey works there too;
 	-- without it ␣gx falls through to nvim's own gx, which hands a session
 	-- name to the system opener.
 	require("desk.hotkey").attach(review_buf, tokens.load() or { tokens = {} })
-	for lhs, verb in pairs({ ["<leader>gA"] = "take", ["<leader>gD"] = "decline" }) do
-		vim.keymap.set("n", lhs, function()
-			report(M.notes_act(notes_buf, verb))
-		end, { buffer = notes_buf, desc = verb == "take" and "Take just the suggestion in this hunk" or "Decline the suggestion in this hunk (u undoes; :w in the split records)" })
-	end
-	vim.keymap.set("n", "u", function()
-		M.notes_undo(notes_buf)
-	end, { buffer = notes_buf, desc = "Undo the latest take or decline made here, else plain undo" })
 
 	-- Edits by hand move the count too; the keys refresh it themselves.
 	vim.api.nvim_create_autocmd("TextChanged", {
@@ -1702,20 +1696,66 @@ function M.open_review(notes_buf)
 			M.refresh_status_line(notes_buf)
 		end,
 	})
-	vim.api.nvim_create_autocmd("TextChanged", {
+	-- In one window the notes are the view: every change of them redraws
+	-- what is still open over them (M.view_refresh).
+	vim.api.nvim_create_autocmd({ "TextChanged", "InsertLeave" }, {
 		buffer = notes_buf,
 		callback = function()
 			if sessions[notes_buf] ~= s then
 				return true -- this review is over: drop the autocmd
 			end
+			M.view_refresh(s)
 			M.refresh_status_line(notes_buf)
+		end,
+	})
+	-- The one window's notes leaving their last window (another buffer
+	-- shown there, the window closed) end the review, its declines recorded.
+	vim.api.nvim_create_autocmd("BufWinLeave", {
+		buffer = notes_buf,
+		callback = function()
+			if sessions[notes_buf] ~= s then
+				return true
+			end
+			vim.schedule(function()
+				if sessions[notes_buf] == s and s.inline and #vim.fn.win_findbuf(notes_buf) == 0 then
+					local before = ledger.read(s.repo)
+					if M.save_review(s, true) then
+						M.say_closed(s, before)
+					end
+					close_session(s)
+				end
+			end)
+		end,
+	})
+	-- `:q` on the one window's notes ends the review on the way, as `Q`
+	-- does: its declines recorded, its takes left for the notes' save.
+	vim.api.nvim_create_autocmd("QuitPre", {
+		buffer = notes_buf,
+		nested = true,
+		callback = function()
+			if sessions[notes_buf] ~= s then
+				return true
+			end
+			if s.inline and vim.api.nvim_get_current_buf() == notes_buf then
+				local before = ledger.read(s.repo)
+				if M.save_review(s, true) then
+					M.say_closed(s, before)
+				end
+				close_session(s)
+			end
 		end,
 	})
 
 	M.refresh_status_line(notes_buf)
 	M.refresh_overview(s)
-	vim.api.nvim_set_current_win(review_win)
-	first_hunk(review_win)
+	if in_line then
+		M.view_refresh(s)
+		M.refresh_status_line(notes_buf)
+		M.view_next(s, notes_win, true, true)
+	else
+		vim.api.nvim_set_current_win(review_win)
+		first_hunk(review_win)
+	end
 	say_elsewhere(repo, file, p)
 	return true
 end
@@ -2148,20 +2188,7 @@ local function diff_act(s, verb)
 		local line = vim.api.nvim_win_get_cursor(win)[1]
 		local first, last, item = M.item_range(s, line)
 		acted = item
-		if s.inline then
-			local hunks = inline.hunks(before_notes, before_review)
-			local hs = first and inline.hunks_in(hunks, first, last) or { inline.hunk_at(hunks, line) }
-			-- From the bottom up, so each hunk's rows still hold.
-			for i = #hs, 1, -1 do
-				local h = hs[i]
-				if verb == "diffput" then
-					take_hunk(s, h, before_review)
-				else
-					local at = h[4] > 0 and h[3] - 1 or h[3]
-					vim.api.nvim_buf_set_lines(s.review_buf, at, at + h[4], false, vim.list_slice(before_notes, h[1], h[1] + h[2] - 1))
-				end
-			end
-		elseif first then
+		if first then
 			pcall(vim.cmd, string.format("%d,%d%s", first, last, verb))
 		else
 			pcall(vim.cmd, "normal! d" .. (verb == "diffget" and "o" or "p"))
@@ -2191,6 +2218,9 @@ end
 -- is the place of a move or merge the key acted on ("landing" or
 -- "removal"), nil when it named neither.
 local function act_on(s, item, verb, side)
+	if verb == "decline" and s.inline then
+		return M.view_decline(s, item)
+	end
 	if verb == "decline" then
 		if not decline_item(s, item) then
 			return false, "nothing to decline here"
@@ -2356,47 +2386,298 @@ function M.show_split(s, review_win, notes_win)
 	M.fit_diff_context()
 end
 
---- Shows review `s`'s notes in a window of their own below `win`, unless a
---- window already shows them. Returns that window, and whether it is new.
-function M.notes_beside(s, win)
-	local have = vim.fn.win_findbuf(s.notes_buf)[1]
-	if have or not vim.api.nvim_buf_is_valid(s.notes_buf) then
-		return have, false
+-- ---------------------------------------------------------------------------
+-- The one window: the notes buffer itself, decorated. What a suggestion
+-- brings in is drawn as virtual lines, tinted, and what it would remove or
+-- replace stays as the real lines, struck through; its headline sits beside
+-- it. There is nothing to keep in step: typing edits the notes, and every
+-- change of them works the decorations out again from the notes and the
+-- proposal, as the split works out what is still open. The merged text is
+-- kept in the review buffer, never shown, so take, overview and count work
+-- as in the split; declines made here (`s.view_declined`) leave it out of
+-- that text until the review records them as it ends.
+-- ---------------------------------------------------------------------------
+
+--- Works review `s`'s one-window decorations out again from the notes and
+--- the proposal it was built from.
+function M.view_refresh(s)
+	if not (s.inline and vim.api.nvim_buf_is_valid(s.review_buf) and vim.api.nvim_buf_is_valid(s.notes_buf)) then
+		return
 	end
-	local new
-	vim.api.nvim_win_call(win, function()
-		vim.cmd("belowright split")
-		new = vim.api.nvim_get_current_win()
-	end)
-	vim.api.nvim_win_set_buf(new, s.notes_buf)
-	return new, true
+	-- The proposal, its base text and the ledger are read once per proposal:
+	-- nothing here needs git on an edit.
+	if not (s.view_p and s.view_p.sha == s.sha) then
+		s.view_p = proposal.read(s.repo, s.sha)
+	end
+	local p = s.view_p
+	if not p then
+		return
+	end
+	local ours = buf_lines(s.notes_buf)
+	local c = s.view_cache
+	if not (c and c.sha == p.sha) then
+		s.view_cache = { sha = p.sha, base = proposal.base_lines(s.repo, p, s.file) or false, records = ledger.read(s.repo) }
+		c = s.view_cache
+	end
+	local base = c.base or nil
+	s.view_declined = s.view_declined or {}
+	s.view_auto = s.view_auto or {}
+	-- An edit, move or merge whose struck lines the user deleted by hand is
+	-- declined by that, as deleting a suggestion's lines in the split is,
+	-- and named as the review ends; the lines put back (`u`), it is back.
+	-- Deleted, not typed into: a struck line changed or split is an edit
+	-- of the notes, which leaves the suggestion to the next pass.
+	local prev = s.view_prev_ours
+	local deleted = {}
+	if prev then
+		for _, h in ipairs(inline.hunks(prev, ours)) do
+			if h[2] > 0 and h[4] == 0 then
+				for r = h[1], h[1] + h[2] - 1 do
+					deleted[r] = true
+				end
+			end
+		end
+	end
+	for id, item in pairs(s.view_shown or {}) do
+		local struck = item.kind == "edit" or item.kind == "move" or item.kind == "merge"
+		local rows = s.view_placed and s.view_placed[id] and s.view_placed[id].rows or {}
+		local all_deleted = #rows > 0
+		for _, r in ipairs(rows) do
+			all_deleted = all_deleted and deleted[r] == true
+		end
+		if struck and all_deleted and not s.view_declined[id] and not proposal.contains(ours, snippet.split_lines(item.before)) and not proposal.proposed_in(item, ours, base) then
+			s.view_declined[id], s.view_auto[id] = item, true
+		end
+	end
+	s.view_prev_ours = ours
+	for id in pairs(s.view_auto) do
+		local item = s.view_declined[id]
+		if not item or proposal.contains(ours, snippet.split_lines(item.before)) then
+			s.view_declined[id], s.view_auto[id] = nil, nil
+		end
+	end
+	-- What is still open, placed against the notes as they stand, as a pass
+	-- places it against HEAD: an item already in the notes is done, one
+	-- whose place is gone from them is the next pass's business, and a
+	-- decline made here is left out until it is recorded.
+	local declined, taken = ledger.declined(c.records).ids, ledger.taken_by_id(c.records)
+	local open = {}
+	for _, item in ipairs(p.items) do
+		if
+			item.file == s.file
+			and not item.deferred
+			and not taken[item.id]
+			and not declined[item.id]
+			and not s.view_declined[item.id]
+			and not proposal.proposed_in(item, ours, base)
+		then
+			local _, land = block.parse_target(item.target)
+			local placed = item.kind == "edit" or item.kind == "remove" or land == nil or land.kind == "top" or block.find_line(ours, land.quote) ~= nil
+			if placed then
+				open[#open + 1] = item
+			end
+		end
+	end
+	local merged, results, _, placed = apply.apply_file(ours, open)
+	local shown = {}
+	for _, item in ipairs(open) do
+		if results[item.id] == "applied" then
+			shown[item.id] = item
+		end
+	end
+	s.shown, s.conflicts, s.merged, s.base = shown, {}, merged, base
+	s.view_shown, s.view_placed, s.view_open = shown, placed, open
+	s.built_ours = ours
+	s.view_tick = vim.api.nvim_buf_get_changedtick(s.notes_buf)
+	local undolevels = vim.bo[s.review_buf].undolevels
+	vim.bo[s.review_buf].undolevels = -1
+	vim.api.nvim_buf_set_lines(s.review_buf, 0, -1, false, merged)
+	vim.bo[s.review_buf].undolevels = undolevels
+	vim.bo[s.review_buf].modified = false
+	vim.api.nvim_buf_clear_namespace(s.review_buf, MARK_NS, 0, -1)
+	M.place_marks(s, ours)
+	M.place_del_marks(s)
+	M.view_draw(s)
 end
 
---- The review rows the one-window view's hunks are acted on from, in order.
-function M.inline_rows(s)
+--- Rebuilds review `s`'s one-window model when the notes changed since it
+--- was last worked out (an edit TextChanged has not reported yet).
+local function view_current(s)
+	if s.view_tick ~= vim.api.nvim_buf_get_changedtick(s.notes_buf) then
+		M.view_refresh(s)
+	end
+end
+
+--- Draws review `s`'s decorations over its notes from where each open
+--- suggestion lands (desk.apply), the same placement a take applies, so the
+--- drawing and the take agree on every line, duplicates included; new lines
+--- that land at one place are drawn in the order a take puts them in.
+--- Keeps where each suggestion sits (`s.view_spots`).
+function M.view_draw(s)
+	local notes = buf_lines(s.notes_buf)
+	local placed = s.view_placed or {}
+	local view = { blocks = {}, struck = {}, width = 80 }
+	local spots = {}
+	local struck_at = {}
+	local seq = {}
+	for i, item in ipairs(s.view_open or {}) do
+		seq[item.id] = i
+	end
+	-- Struck lines, a run per suggestion.
+	for _, item in ipairs(s.view_open or {}) do
+		local pl = placed[item.id]
+		if pl and #pl.rows > 0 then
+			local rows = vim.deepcopy(pl.rows)
+			table.sort(rows)
+			local first = rows[1]
+			for i = 2, #rows + 1 do
+				if rows[i] ~= rows[i - 1] + 1 then
+					view.struck[#view.struck + 1] = { first = first, last = rows[i - 1], label = (#(pl.lines or {}) == 0 or item.kind ~= "edit") and (item.headline or item.id) or nil }
+					first = rows[i]
+				end
+			end
+			for _, r in ipairs(rows) do
+				struck_at[r] = true
+			end
+		end
+	end
+	-- New lines, one block per place, in the order a take produces.
+	local gaps = {}
+	for _, item in ipairs(s.view_open or {}) do
+		local pl = placed[item.id]
+		if pl and pl.gap and pl.lines and #pl.lines > 0 then
+			gaps[pl.gap] = gaps[pl.gap] or {}
+			table.insert(gaps[pl.gap], { item = item, order = pl.order, lines = pl.lines })
+		end
+	end
+	for gap, list in pairs(gaps) do
+		table.sort(list, function(a, b)
+			return a.order < b.order
+		end)
+		local row, above
+		if notes[gap + 1] ~= nil and struck_at[gap + 1] then
+			row, above = gap + 1, true
+		elseif gap == 0 then
+			row, above = 1, true
+		else
+			row, above = gap, false
+		end
+		local lines, labels = {}, {}
+		for _, e in ipairs(list) do
+			labels[#lines + 1] = e.item.headline or e.item.id
+			vim.list_extend(lines, e.lines)
+		end
+		view.blocks[#view.blocks + 1] = { row = row, above = above, lines = lines, labels = labels }
+	end
+	-- Where each suggestion sits: its first struck line, else the line its
+	-- new lines hang on.
+	for _, item in ipairs(s.view_open or {}) do
+		local pl = placed[item.id]
+		if pl then
+			local rows = vim.deepcopy(pl.rows)
+			table.sort(rows)
+			local order = (pl.gap or 0) * 1000 + (pl.order or 0)
+			if rows[1] then
+				spots[#spots + 1] = { item = item, row = rows[1], first = rows[1], last = rows[#rows], order = order, seq = seq[item.id] }
+			end
+			-- Where its new lines hang: for a move or merge a place of its
+			-- own, apart from the lines it takes away.
+			local lands = pl.gap and pl.lines and #pl.lines > 0
+			if lands and (not rows[1] or item.kind == "move" or item.kind == "merge") then
+				local row = math.max(pl.gap + (notes[pl.gap + 1] ~= nil and struck_at[pl.gap + 1] and 1 or 0), 1)
+				if not (rows[1] and row >= rows[1] and row <= rows[#rows]) then
+					spots[#spots + 1] = { item = item, row = row, order = order, seq = seq[item.id] }
+				end
+			end
+		end
+	end
+	local win = vim.fn.win_findbuf(s.notes_buf)[1]
+	if win then
+		local info = vim.fn.getwininfo(win)[1]
+		view.width = vim.api.nvim_win_get_width(win) - (info and info.textoff or 0)
+	end
+	table.sort(spots, function(a, b)
+		if a.row ~= b.row then
+			return a.row < b.row
+		end
+		return a.order < b.order
+	end)
+	s.view_spots = spots
+	inline.draw(s.notes_buf, view)
+end
+
+--- The suggestions the cursor on notes row `line` names in the one window:
+--- those whose struck lines hold the line, then those drawn on it, in the
+--- order they sit there.
+function M.view_items_at(s, line)
+	local out, seen = {}, {}
+	local function add(item)
+		if not seen[item.id] then
+			seen[item.id] = true
+			out[#out + 1] = item
+		end
+	end
+	for _, spot in ipairs(s.view_spots or {}) do
+		if spot.first and line >= spot.first and line <= spot.last then
+			add(spot.item)
+		end
+	end
+	for _, spot in ipairs(s.view_spots or {}) do
+		if spot.row == line then
+			add(spot.item)
+		end
+	end
+	return out
+end
+
+--- The one suggestion a key that takes or declines one acts on at notes row
+--- `line`: one whose struck lines hold it, else the first drawn on it.
+function M.view_item_at(s, line)
+	return M.view_items_at(s, line)[1]
+end
+
+--- Takes `items` into the notes as one change: the notes become what
+--- desk.apply makes of them with just those items, the placement the
+--- drawing shows. Returns whether anything changed.
+function M.view_take(s, items)
+	local pre = buf_lines(s.notes_buf)
+	local new = apply.apply_file(pre, items)
+	if vim.deep_equal(new, pre) then
+		return false
+	end
+	undo_break(s.notes_buf)
+	local hunks = inline.hunks(pre, new)
+	for i = #hunks, 1, -1 do
+		local h = hunks[i]
+		local first = h[2] > 0 and h[1] - 1 or h[1]
+		set_notes(s, first, first + h[2], vim.list_slice(new, h[3], h[3] + h[4] - 1))
+	end
+	for _, item in ipairs(items) do
+		note_takes(s, pre, item)
+	end
+	return true
+end
+
+--- `n`/`N` in the one window: to the next (previous) suggestion's line,
+--- wrapping round. `quiet` for the first jump at open.
+function M.view_next(s, win, forward, quiet)
 	local rows, seen = {}, {}
-	for _, h in ipairs(inline.hunks(buf_lines(s.notes_buf), buf_lines(s.review_buf))) do
-		local r = inline.row(h)
-		if not seen[r] then
-			seen[r] = true
-			rows[#rows + 1] = r
+	for _, spot in ipairs(s.view_spots or {}) do
+		if not seen[spot.row] then
+			seen[spot.row] = true
+			rows[#rows + 1] = spot.row
 		end
 	end
 	table.sort(rows)
-	return rows
-end
-
---- `n`/`N` in the one-window view: to the next (previous) hunk's row,
---- wrapping around as the split's motion does.
-function M.inline_next(s, win, forward)
-	local rows = M.inline_rows(s)
 	if #rows == 0 then
-		vim.notify("desk: no suggestions left here", vim.log.levels.INFO)
+		if not quiet then
+			vim.notify("desk: no suggestions left here", vim.log.levels.INFO)
+		end
 		return false
 	end
-	local line = vim.api.nvim_win_get_cursor(win)[1]
+	local line = quiet and 0 or vim.api.nvim_win_get_cursor(win)[1]
 	local wrapped = false
-	for _ = 1, vim.v.count1 do
+	for _ = 1, quiet and 1 or vim.v.count1 do
 		local target
 		if forward then
 			for _, r in ipairs(rows) do
@@ -2419,184 +2700,215 @@ function M.inline_next(s, win, forward)
 		end
 		line = target
 	end
-	vim.api.nvim_win_set_cursor(win, { line, 0 })
-	if wrapped then
+	vim.api.nvim_win_set_cursor(win, { math.min(line, vim.api.nvim_buf_line_count(s.notes_buf)), 0 })
+	if wrapped and not quiet then
 		vim.notify(forward and "desk: wrapped to first" or "desk: wrapped to last", vim.log.levels.INFO)
 	end
 	return true
 end
 
---- `dp` in the one-window view: takes the hunk under the cursor into the
---- notes, as `dp` in the split does, and with a count that many hunks from
---- there down (in the split a count names a buffer, which has no meaning
---- with one). Returns true, or false, why.
-function M.inline_put(s, count)
-	local win = vim.fn.bufwinid(s.review_buf)
+--- `dp`/`do` in the one window: takes into the notes every suggestion on
+--- the cursor line, and with a count those of that many suggestion lines
+--- from there down, as one change `u` takes back. Returns true, or false, why.
+function M.view_put(s, count)
+	local win = vim.fn.bufwinid(s.notes_buf)
 	if win == -1 then
-		return false, "review buffer has no window"
+		return false, "your notes are not showing in any window"
 	end
-	local review_lines, pre = buf_lines(s.review_buf), buf_lines(s.notes_buf)
-	local hunks = inline.hunks(pre, review_lines)
-	local h = inline.hunk_at(hunks, vim.api.nvim_win_get_cursor(win)[1])
-	if not h then
-		return false, "no suggestion under the cursor"
+	view_current(s)
+	local line = vim.api.nvim_win_get_cursor(win)[1]
+	local items = M.view_items_at(s, line)
+	if #items == 0 then
+		return false, "no suggestion on this line"
 	end
-	local take = { h }
-	for _, other in ipairs(hunks) do
-		if #take >= (count or 1) then
-			break
-		end
-		if other[3] > h[3] then
-			take[#take + 1] = other
+	local rows, seen = {}, {}
+	for _, spot in ipairs(s.view_spots or {}) do
+		if spot.row > line and not seen[spot.row] then
+			seen[spot.row] = true
+			rows[#rows + 1] = spot.row
 		end
 	end
-	local t = begin_take(s)
-	-- From the bottom up, so each hunk's notes rows still hold.
-	for i = #take, 1, -1 do
-		take_hunk(s, take[i], review_lines)
+	table.sort(rows)
+	for i = 1, (count or 1) - 1 do
+		if rows[i] then
+			vim.list_extend(items, M.view_items_at(s, rows[i]))
+		end
 	end
-	complete_halves(s, pre)
-	note_takes(s, pre)
-	end_take(s, t)
+	M.view_take(s, items)
+	M.view_refresh(s)
+	M.refresh_overview(s)
 	M.refresh_status_line(s.notes_buf)
 	return true
 end
 
---- Draws the one-window view of review `s` (desk.inline): every hunk of
---- (notes -> review), its old lines given to the suggestion they belong to,
---- so an edit's sit above its own new line and a removal's hang where it
---- takes them, with its headline, even beside another suggestion; lines no
---- suggestion claims (the user's own edits in the view) are drawn as their
---- hunk's. Each adding suggestion's headline sits beside its first new line.
-function M.render_inline(s)
-	if not (s.inline and vim.api.nvim_buf_is_valid(s.review_buf) and vim.api.nvim_buf_is_valid(s.notes_buf)) then
-		return
-	end
-	local review_lines, notes = buf_lines(s.review_buf), buf_lines(s.notes_buf)
-	local hunks = inline.hunks(notes, review_lines)
-	local items = vim.tbl_values(s.shown)
-	table.sort(items, function(a, b)
-		return a.id < b.id
-	end)
-	local view = { new_rows = {}, blocks = {}, labels = {}, width = 80 }
-	local function label(t, k, text)
-		t[k] = t[k] and (t[k] .. " · " .. text) or text
-	end
-	for _, h in ipairs(hunks) do
-		for row = h[3], h[3] + h[4] - 1 do
-			view.new_rows[#view.new_rows + 1] = { row = row, changed = h[2] > 0 }
-		end
-		local claimed = {}
-		-- The notes rows of this hunk holding `lines`, unclaimed: the first.
-		local function claim(lines)
-			if #lines == 0 then
-				return nil
-			end
-			for pos = h[1], h[1] + h[2] - #lines do
-				local free = true
-				for i = 0, #lines - 1 do
-					free = free and not claimed[pos + i]
-				end
-				if free and snippet.lines_match_at(notes, pos, lines) then
-					for i = 0, #lines - 1 do
-						claimed[pos + i] = true
-					end
-					return vim.list_slice(notes, pos, pos + #lines - 1)
-				end
-			end
-		end
-		for _, item in ipairs(items) do
-			local text = item.headline or item.id
-			local first, last = mark_range(s, item)
-			local own_first
-			for r = first or 1, first and last or 0 do
-				if r >= h[3] and r <= h[3] + h[4] - 1 then
-					own_first = r
-					break
-				end
-			end
-			if own_first then
-				label(view.labels, own_first, text)
-				if item.kind == "edit" then
-					local old = claim(snippet.split_lines(item.before))
-					if old then
-						view.blocks[#view.blocks + 1] = { row = own_first, above = true, lines = old }
-					end
-				end
-			end
-			if leaves_before(item) and h[2] > 0 then
-				local row = del_row(s, item)
-				if row and row >= h[3] - 1 and row <= h[3] + h[4] then
-					local old = claim(snippet.split_lines(item.before))
-					if old then
-						view.blocks[#view.blocks + 1] = row == 0 and { row = 1, above = true, lines = old, label = text }
-							or { row = row, above = false, lines = old, label = text }
-					end
-				end
-			end
-		end
-		local rest = {}
-		for i = h[1], h[1] + h[2] - 1 do
-			if not claimed[i] then
-				rest[#rest + 1] = notes[i]
-			end
-		end
-		if #rest > 0 then
-			if h[4] > 0 then
-				view.blocks[#view.blocks + 1] = { row = h[3], above = true, lines = rest }
-			elseif h[3] == 0 then
-				view.blocks[#view.blocks + 1] = { row = 1, above = true, lines = rest }
-			else
-				view.blocks[#view.blocks + 1] = { row = h[3], above = false, lines = rest }
-			end
-		end
-	end
-	local win = vim.fn.win_findbuf(s.review_buf)[1]
-	if win then
-		local info = vim.fn.getwininfo(win)[1]
-		view.width = vim.api.nvim_win_get_width(win) - (info and info.textoff or 0)
-	end
-	inline.render(s.review_buf, #review_lines, view)
+--- The decline key in the one window: the suggestion's decoration goes,
+--- and it is recorded as declined when the review ends. `u` brings it back
+--- while the notes have not changed since.
+function M.view_decline(s, item)
+	s.view_declined = s.view_declined or {}
+	s.view_declined[item.id] = item
+	s.view_acts = s.view_acts or {}
+	s.view_acts[#s.view_acts + 1] = { id = item.id, seq = undo_seq(s.notes_buf) }
+	M.view_refresh(s)
+	M.refresh_overview(s)
+	M.refresh_status_line(s.notes_buf)
+	return true
 end
 
--- The one-window view shows the review buffer in the notes' place, so what
--- is typed there never reaches the notes. Until it is the notes buffer
--- itself, the view key only says so.
-M.view_key_off = true
-M.VIEW_COMING = "the one-window view is coming back soon; the review stays in two windows meanwhile"
+--- `u` in the one window: takes back the latest decline when nothing has
+--- changed in the notes since, else the notes' own undo.
+function M.view_undo(s)
+	local last = s.view_acts and s.view_acts[#s.view_acts]
+	if last and last.seq == undo_seq(s.notes_buf) then
+		table.remove(s.view_acts)
+		s.view_declined[last.id] = nil
+	else
+		local count = vim.v.count > 0 and tostring(vim.v.count) or ""
+		vim.api.nvim_buf_call(s.notes_buf, function()
+			vim.cmd("normal! " .. count .. "u")
+		end)
+	end
+	M.view_refresh(s)
+	M.refresh_overview(s)
+	M.refresh_status_line(s.notes_buf)
+	return true
+end
 
---- The view key: switches the open review between one window and the split,
---- keeping the cursor on the line it was on, and remembers the choice for the
---- next review. Returns true, or false, why.
-function M.toggle_view(review_buf)
-	if M.view_key_off then
-		return false, M.VIEW_COMING
+--- The one window's keys, on the notes buffer.
+function M.map_view_keys(s)
+	local nb = s.notes_buf
+	local function map(lhs, fn, desc)
+		vim.keymap.set("n", lhs, fn, { buffer = nb, desc = desc })
 	end
-	local s = session_for_review_buf(review_buf)
-	if not s then
-		return false, "not a desk review buffer"
+	for _, lhs in ipairs({ "dp", "do" }) do
+		map(lhs, function()
+			local fresh, stale = M.ensure_current(s, true)
+			if not fresh then
+				return report(false, stale)
+			end
+			report(M.view_put(s, vim.v.count1))
+		end, "Take the suggestions on this line into your notes")
 	end
-	local rw = vim.fn.bufwinid(review_buf)
-	if rw == -1 then
-		return false, "the review is not in this tab"
+	for lhs, verb in pairs({ ["<leader>gA"] = "take", ["<leader>gD"] = "decline" }) do
+		map(lhs, function()
+			local fresh, stale = M.ensure_current(s, true)
+			if not fresh then
+				return report(false, stale)
+			end
+			view_current(s)
+			local item = M.view_item_at(s, vim.api.nvim_win_get_cursor(0)[1])
+			if not item then
+				return report(false, "no suggestion on this line")
+			end
+			if verb == "take" then
+				M.view_take(s, { item })
+			else
+				M.view_decline(s, item)
+			end
+			M.view_refresh(s)
+			M.refresh_overview(s)
+			M.refresh_status_line(nb)
+		end, verb == "take" and "Take the suggestion on this line" or "Decline the suggestion on this line (u brings it back)")
+	end
+	map("u", function()
+		M.view_undo(s)
+	end, "Undo the latest decline made here, else the notes' own undo")
+	for lhs, forward in pairs({ ["]c"] = true, ["[c"] = false }) do
+		map(lhs, function()
+			M.view_next(s, vim.api.nvim_get_current_win(), forward)
+		end, forward and "Next suggestion" or "Previous suggestion")
+	end
+	for lhs, forward in pairs({ n = true, N = false }) do
+		vim.keymap.set("n", lhs, function()
+			if vim.o.hlsearch and vim.v.hlsearch == 1 then
+				return lhs
+			end
+			return string.format("<Cmd>lua require('desk.review').view_next_key(%d, %s)<CR>", nb, tostring(forward))
+		end, { buffer = nb, expr = true, desc = "Next/previous suggestion, or the search's match while one is highlighted" })
+	end
+end
+
+function M.view_next_key(notes_buf, forward)
+	local s = live_session(notes_buf)
+	if s and s.inline then
+		M.view_next(s, vim.api.nvim_get_current_win(), forward)
+	end
+end
+
+--- The view key: switches review `s` between one window and the split,
+--- remembering the choice for the next review. Returns true, or false, why.
+function M.toggle_view(s)
+	if not (s and sessions[s.notes_buf] == s and vim.api.nvim_buf_is_valid(s.review_buf)) then
+		return false, "no review open"
 	end
 	if s.inline then
-		local nw = M.notes_beside(s, rw)
-		if not nw then
-			return false, "your notes are gone"
+		local nw = vim.fn.bufwinid(s.notes_buf)
+		if nw == -1 then
+			return false, "your notes are not showing in any window"
 		end
-		inline.clear(review_buf)
+		inline.clear(s.notes_buf)
+		unmap_notes_keys(s.notes_buf)
+		local cursor = vim.api.nvim_win_get_cursor(nw)
+		local rw
+		vim.api.nvim_win_call(nw, function()
+			vim.cmd("aboveleft split")
+			rw = vim.api.nvim_get_current_win()
+		end)
+		-- The split's own merged text, as a split opened now would show it,
+		-- so what it later takes for an edit of the user's is measured from
+		-- the same build; the declines made here stay out of it.
+		local p = proposal.read(s.repo, s.sha)
+		local ours = buf_lines(s.notes_buf)
+		local skip = {}
+		for id in pairs(s.view_declined or {}) do
+			skip[id] = true
+		end
+		local r = p and proposal.reviewable(s.repo, p, s.file, ours, skip)
+		if r then
+			local undolevels = vim.bo[s.review_buf].undolevels
+			vim.bo[s.review_buf].undolevels = -1
+			vim.api.nvim_buf_set_lines(s.review_buf, 0, -1, false, r.merged)
+			vim.bo[s.review_buf].undolevels = undolevels
+			vim.bo[s.review_buf].modified = false
+			s.shown, s.conflicts, s.merged, s.built_ours = r.shown, r.conflicts, r.merged, ours
+			vim.api.nvim_buf_clear_namespace(s.review_buf, MARK_NS, 0, -1)
+			M.place_marks(s, ours)
+			M.place_del_marks(s)
+		end
+		vim.bo[s.review_buf].bufhidden = "wipe"
+		vim.api.nvim_win_set_buf(rw, s.review_buf)
 		s.inline = false
 		s.notes_wrap = wrap_opts(nw)
 		M.show_split(s, rw, nw)
+		s.map_split_notes()
+		for _, lhs in ipairs({ "<leader>gq", "Q", "<leader>gv" }) do
+			vim.keymap.set("n", lhs, lhs == "<leader>gv" and function()
+				report(M.toggle_view(s))
+			end or function()
+				report(M.close_review(s))
+			end, { buffer = s.notes_buf })
+		end
+		vim.api.nvim_win_set_cursor(nw, cursor)
 		vim.api.nvim_set_current_win(rw)
+		pcall(vim.cmd, "diffupdate")
 		M.view = "split"
 	else
-		local nw = s.notes_win
+		if M.hand_edits(s) then
+			return false, M.HAND_EDITS
+		end
+		-- The split's declines carry over as the one window's, recorded as
+		-- it ends.
+		local review_lines, notes_lines = buf_lines(s.review_buf), buf_lines(s.notes_buf)
+		s.view_declined = s.view_declined or {}
+		for id, item in pairs(s.shown) do
+			if not proposal.proposed_in(item, review_lines, s.base) and not proposal.proposed_in(item, notes_lines, s.base) then
+				s.view_declined[id] = item
+			end
+		end
+		local nw, rw = s.notes_win, vim.fn.bufwinid(s.review_buf)
 		pcall(vim.api.nvim_del_augroup_by_name, "desk_review_notes_" .. s.notes_buf)
-		local cursor = vim.api.nvim_win_get_cursor(rw)
 		for _, w in ipairs({ rw, nw }) do
-			if w and vim.api.nvim_win_is_valid(w) then
+			if w and w ~= -1 and vim.api.nvim_win_is_valid(w) then
 				vim.api.nvim_win_call(w, function()
 					vim.cmd("diffoff")
 				end)
@@ -2606,20 +2918,27 @@ function M.toggle_view(review_buf)
 				end
 			end
 		end
-		vim.bo[s.notes_buf].bufhidden = "hide"
-		local home = rw
-		if nw and vim.api.nvim_win_is_valid(nw) and nw ~= rw then
-			vim.api.nvim_win_set_buf(nw, review_buf)
+		vim.bo[s.review_buf].bufhidden = "hide"
+		if rw ~= -1 and #vim.api.nvim_tabpage_list_wins(0) > 1 then
 			vim.api.nvim_win_close(rw, false)
-			home = nw
 		end
-		s.notes_win = nil
 		s.inline = true
-		s.inline_win = home
-		M.view = "inline"
-		vim.api.nvim_set_current_win(home)
-		vim.api.nvim_win_set_cursor(home, cursor)
+		unmap_notes_keys(s.notes_buf)
+		M.map_view_keys(s)
+		for _, lhs in ipairs({ "<leader>gq", "Q", "<leader>gv" }) do
+			vim.keymap.set("n", lhs, lhs == "<leader>gv" and function()
+				report(M.toggle_view(s))
+			end or function()
+				report(M.close_review(s))
+			end, { buffer = s.notes_buf })
+		end
+		vim.bo[s.review_buf].modified = false
+		M.view_refresh(s)
 		M.fit_diff_context()
+		M.view = "inline"
+		if nw and vim.api.nvim_win_is_valid(nw) then
+			vim.api.nvim_set_current_win(nw)
+		end
 	end
 	M.refresh_status_line(s.notes_buf)
 	return true
@@ -3136,6 +3455,15 @@ preview = {}
 local function entry_target(entry)
 	local s = sessions[entry.bufnr]
 	local id = type(entry.user_data) == "table" and entry.user_data.id
+	-- In one window the notes are the view: the entry's place there.
+	if s and s.inline and id and vim.api.nvim_buf_is_valid(s.review_buf) then
+		local nw = vim.fn.bufwinid(s.notes_buf)
+		for _, spot in ipairs(s.view_spots or {}) do
+			if spot.item.id == id and nw ~= -1 then
+				return nw, spot.row
+			end
+		end
+	end
 	local rw = s and vim.api.nvim_buf_is_valid(s.review_buf) and vim.fn.bufwinid(s.review_buf) or -1
 	if rw ~= -1 and id then
 		for _, r in ipairs(M.remaining(s)) do
@@ -3838,7 +4166,9 @@ end
 --- (in the notes, or taken and since edited) nor declined (gone from the
 --- split), saved or not. The live number both of the review's bars show.
 function M.left(s)
-	local pend = pending_ids(s.notes_buf)
+	-- The one window's model is worked out from the notes as they stand,
+	-- so what is taken there, undone or redone since, is already out of it.
+	local pend = s.inline and {} or pending_ids(s.notes_buf)
 	local saved = s.taken_saved or {}
 	local n = 0
 	for _, r in ipairs(M.remaining(s)) do
@@ -3909,12 +4239,11 @@ function M.refresh_status_line(bufnr, recount)
 		M.recount_saved(s)
 	end
 	local left = s and M.left(s)
-	local line = (s and M.NOTES_KEY_HINT or M.NOTES_IDLE_HINT) .. "%=" .. bar_text(M.status_line(bufnr, left))
+	local line = (s and (s.inline and M.INLINE_KEY_HINT or M.NOTES_KEY_HINT) or M.NOTES_IDLE_HINT) .. "%=" .. bar_text(M.status_line(bufnr, left))
 	for _, win in ipairs(vim.fn.win_findbuf(bufnr)) do
 		vim.wo[win].winbar = line
 	end
 	if s then
-		M.render_inline(s)
 		local rw = vim.fn.bufwinid(s.review_buf)
 		if rw ~= -1 then
 			local other = s.elsewhere and string.format("%s: %d more ␣gR · ", s.elsewhere.file, s.elsewhere.count) or ""
@@ -3993,6 +4322,10 @@ local function install_leave_autocmd()
 	vim.api.nvim_create_autocmd("VimLeavePre", {
 		callback = function()
 			for _, s in pairs(sessions) do
+				-- The one window's declines live only in the session.
+				if s.inline and next(s.view_declined or {}) ~= nil then
+					M.save_review(s, true)
+				end
 				record_saved_takes(s)
 			end
 		end,
@@ -4041,7 +4374,7 @@ local function install_resize_autocmd()
 			for bufnr in pairs(sessions) do
 				local s = live_session(bufnr)
 				if s and s.inline then
-					M.render_inline(s)
+					M.view_draw(s)
 				end
 			end
 		end,

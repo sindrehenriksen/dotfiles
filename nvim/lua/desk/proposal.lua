@@ -312,8 +312,8 @@ end
 --- `theirs` when given. Returns the `--ours` merge (the user's text winning
 --- any conflict), the `--union` merge (both sides kept where they
 --- conflict), or nil, err.
-function M.merged_lines(repo, p, file, ours_lines, theirs)
-	local base = p.parent and M.lines_at(repo, p.parent, file) or {}
+function M.merged_lines(repo, p, file, ours_lines, theirs, base)
+	base = base or (p.parent and M.lines_at(repo, p.parent, file)) or {}
 	theirs = theirs or M.lines_at(repo, p.sha, file)
 	local dir = vim.fn.tempname()
 	vim.fn.mkdir(dir, "p")
@@ -325,14 +325,19 @@ function M.merged_lines(repo, p, file, ours_lines, theirs)
 		return path
 	end
 	local ours_path, base_path, theirs_path = put("ours", ours_lines), put("base", base), put("theirs", theirs)
-	local out = {}
+	-- Both merges at once, so the wait is one merge's.
+	local runs = {}
 	for _, mode in ipairs({ "--ours", "--union" }) do
-		local ok, text, err = git.run(repo, { "merge-file", "-p", mode, ours_path, base_path, theirs_path })
-		if not ok then
+		runs[#runs + 1] = vim.system({ "git", "-C", repo, "merge-file", "-p", mode, ours_path, base_path, theirs_path }, { text = true })
+	end
+	local out = {}
+	for _, run in ipairs(runs) do
+		local res = run:wait()
+		if res.code ~= 0 then
 			vim.fn.delete(dir, "rf")
-			return nil, "git merge-file failed: " .. err
+			return nil, "git merge-file failed: " .. (res.stderr or "")
 		end
-		out[#out + 1] = (snippet.split_lines(text))
+		out[#out + 1] = (snippet.split_lines(res.stdout or ""))
 	end
 	vim.fn.delete(dir, "rf")
 	return out[1], out[2]
@@ -385,7 +390,7 @@ function M.reviewable(repo, p, file, ours, skip, only)
 			open[#open + 1] = item
 		end
 	end
-	local clean, merged = M.merged_lines(repo, p, file, ours, open_tree(repo, p, file, base, open))
+	local clean, merged = M.merged_lines(repo, p, file, ours, open_tree(repo, p, file, base, open), base or {})
 	if not clean then
 		return nil, merged
 	end
