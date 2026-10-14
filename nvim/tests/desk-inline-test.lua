@@ -142,7 +142,10 @@ local function find(ms, pred)
 	end
 end
 
-print("=== one window: the merged text with each suggestion's old lines drawn above its new ones ===")
+print("=== the split is the default; one window is the view key away ===")
+assert_eq("a review opens as the split", "split", review.view)
+
+print("\n=== one window: the merged text with each suggestion's old lines drawn above its new ones ===")
 do
 	local _, nb, rb = setup()
 	assert_eq("one window", "leaf", vim.fn.winlayout()[1])

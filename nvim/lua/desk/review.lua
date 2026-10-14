@@ -20,8 +20,8 @@
 -- the decline key (and `<leader>gA`, which takes one) act on a single
 -- suggestion's own lines rather than the whole hunk.
 --
--- That is the split view. By default the merged buffer shows in one window
--- instead, in place of the notes, which stay loaded behind it: desk.inline
+-- That is the split view, the default. The merged buffer can show in one
+-- window instead, in place of the notes, which stay loaded behind it: desk.inline
 -- draws each hunk there (old lines above new), the keys act on hunks it
 -- computes rather than on diff mode, and `<leader>gv` switches between the
 -- two (M.view).
@@ -43,7 +43,7 @@ M.PROPOSAL_REF = proposal.REF
 -- each suggestion's old lines drawn above its new ones (desk.inline), or
 -- "split", the merged text above the notes in two diff windows. The toggle
 -- key switches the open review and is remembered for the next one.
-M.view = "inline"
+M.view = "split"
 
 -- ---------------------------------------------------------------------------
 -- Repo/file context
