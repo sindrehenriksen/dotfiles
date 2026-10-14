@@ -103,6 +103,7 @@ desk_brief_prepare() {
 	fi
 
 	desk_brief_notes_changes "$pass" "$run" "$repo" "$head" "${files[@]}"
+	desk_brief_gone_edits "$run" "$repo" "${files[@]}"
 	# The user's own notes changes since a weekday and time, as an open_tab
 	# step writes them (desk_write_notes_diff), for a brief whose
 	# instructions want them.
@@ -132,10 +133,12 @@ _desk_brief_mtime() { # file: its mtime, 0 when it is missing
 # rewritten), the file says so and holds the whole diff from it instead, so
 # a lost line shows. With no run kept, a run that recorded no commit, or
 # its commit gone, the file says which.
-desk_brief_notes_changes() {
-	local pass="$1" run="$2" repo="$3" head="$4"
-	shift 4
-	local out="$run/notes-changes.txt" date base="" from="" judged=true r i
+# _desk_brief_base_run <run dir>: what this run's brief compares against,
+# as "<judged: true|false><tab><dir>": the latest judged run of any pass by
+# date (a later judgement breaking a tie within a date), else the oldest
+# kept run; nothing when no other run is kept.
+_desk_brief_base_run() {
+	local run="$1" date r i
 	date="$(basename "$run")"
 	date="${date: -10}"
 	# Each run directory as "<date> <judgement mtime> <dir>", so a later
@@ -149,12 +152,20 @@ desk_brief_notes_changes() {
 	for ((i = ${#kept[@]} - 1; i >= 0; i--)); do
 		r="${kept[$i]#* * }"
 		[ -f "$r/judgement.json" ] || continue
-		from="$r"
-		break
+		printf 'true\t%s\n' "$r"
+		return 0
 	done
-	if [ -z "$from" ] && [ "${#kept[@]}" -gt 0 ]; then
-		from="${kept[0]#* * }"
-		judged=false
+	[ "${#kept[@]}" -eq 0 ] || printf 'false\t%s\n' "${kept[0]#* * }"
+}
+
+desk_brief_notes_changes() {
+	local pass="$1" run="$2" repo="$3" head="$4"
+	shift 4
+	local out="$run/notes-changes.txt" base="" from="" judged=true found
+	found="$(_desk_brief_base_run "$run")"
+	if [ -n "$found" ]; then
+		judged="${found%%$'\t'*}"
+		from="${found#*$'\t'}"
 	fi
 	[ -z "$from" ] || base="$(jq -r '.notes_head // empty' "$from/run.json" 2> /dev/null)"
 	local name="${from##*/}"
@@ -188,6 +199,42 @@ desk_brief_notes_changes() {
 		git -C "$repo" log -p --no-color --format='commit %H%nDate: %ad%n%n    %s%n' --date=iso "$base..$head" -- "$@" >> "$out" 2> /dev/null \
 			|| printf 'The notes log since %s could not be read.\n' "${base:0:12}" >> "$out"
 	fi
+}
+
+# desk_brief_gone_edits <run dir> <repo> <file>...
+# gone-edits.json: the edits the notes review settled as declined because
+# the lines they change were gone from the notes (nvim/lua/desk/proposal.lua),
+# since this brief's base run was judged (or, with no judged run kept, since
+# the oldest kept run), each with its proposed text from the ledger, for the
+# central session to offer again. Still declined only: one restored since is
+# left out. Not written when there are none.
+desk_brief_gone_edits() {
+	local run="$1" repo="$2"
+	shift 2
+	local found since=0 files_json ledger
+	rm -f "$run/gone-edits.json"
+	found="$(_desk_brief_base_run "$run")"
+	if [ -n "$found" ]; then
+		if [ "${found%%$'\t'*}" = true ]; then
+			since="$(_desk_brief_mtime "${found#*$'\t'}/judgement.json")"
+		else
+			since="$(_desk_brief_mtime "${found#*$'\t'}/run.json")"
+		fi
+	fi
+	ledger="$(git -C "$repo" cat-file -p refs/desk/ledger 2> /dev/null)" || return 0
+	files_json="$(printf '%s\n' "$@" | jq -R . | jq -cs .)"
+	jq -Rn --argjson since "$since" --argjson files "$files_json" '
+		[inputs | (try fromjson catch null) | objects
+		 | select(.id and (.type == "decline" or .type == "restore" or .type == "restore_applied"))]
+		| group_by(.id) | map(last)
+		| [.[] | select(.type == "decline" and .settled == true
+		               and .reason == "the lines it changes are no longer in your notes"
+		               and (.at // 0) >= $since and (.item | type) == "object"
+		               and (.item.file as $f | $files | index($f)))
+		   | .item | {id, file, kind, headline, source, before, after}
+		   | with_entries(select(.value != null))]
+		| sort_by(.id)' <<< "$ledger" > "$run/gone-edits.json" 2> /dev/null || rm -f "$run/gone-edits.json"
+	jq -e 'length > 0' > /dev/null 2>&1 "$run/gone-edits.json" || rm -f "$run/gone-edits.json"
 }
 
 # desk_brief_message <pass> <run dir>...: the one message for these runs,
@@ -238,7 +285,7 @@ desk_brief_message() {
 		# staged.json only when the pass staged or held back anything itself.
 		printf -- '- Also there: notes-changes.txt (the notes'"'"' own commits since the last judged brief), allowed-urls.txt%s%s.\n' \
 			"$(jq -e '((.staged // []) + (.held_back // [])) | length > 0' "$r/staged.json" > /dev/null 2>&1 && printf ', staged.json')" \
-			"$([ -f "$r/mail-noise.json" ] && printf ', mail-noise.json')$([ -f "$r/notes-diff.md" ] && printf ', notes-diff.md')"
+			"$([ -f "$r/mail-noise.json" ] && printf ', mail-noise.json')$([ -f "$r/notes-diff.md" ] && printf ', notes-diff.md')$([ -f "$r/gone-edits.json" ] && printf ', gone-edits.json')"
 	done
 }
 

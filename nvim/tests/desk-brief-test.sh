@@ -419,6 +419,32 @@ assert_eq "a recorded commit now gone is said as that" \
 	"$(notes_changes "$G" testpass-2026-11-03)"
 
 echo
+echo "=== edits the review settled because their lines were gone reach the brief ==="
+GE="$ROOT/runs-gone"
+mkdir -p "$GE/testpass-2026-11-01" "$GE/testpass-2026-11-02"
+echo '{}' > "$GE/testpass-2026-11-01/run.json"
+echo '{"items": []}' > "$GE/testpass-2026-11-01/judgement.json"
+judged_at="$(_now=$(date +%s); echo $((_now - 3600)))"
+touch -t "$(date -r "$judged_at" +%Y%m%d%H%M.%S 2> /dev/null || date -d "@$judged_at" +%Y%m%d%H%M.%S)" "$GE/testpass-2026-11-01/judgement.json"
+gone="the lines it changes are no longer in your notes"
+ge_item() { jq -cn --arg id "$1" --arg f "${2:-notes.md}" '{id: $id, file: $f, kind: "edit", headline: ("h " + $id), source: "https://example.com/a", before: "  old", after: ("  new " + $id)}'; }
+{
+	jq -cn --arg r "$gone" --argjson i "$(ge_item before)" --argjson at "$((judged_at - 60))" '{type: "decline", id: "before", at: $at, reason: $r, settled: true, item: $i}'
+	jq -cn --arg r "$gone" --argjson i "$(ge_item g1)" --argjson at "$((judged_at + 60))" '{type: "decline", id: "g1", at: $at, reason: $r, settled: true, item: $i}'
+	jq -cn --arg r "$gone" --argjson i "$(ge_item g2)" --argjson at "$((judged_at + 60))" '{type: "decline", id: "g2", at: $at, reason: $r, settled: true, item: $i}'
+	jq -cn --argjson at "$((judged_at + 120))" '{type: "restore", id: "g2", at: $at}'
+	jq -cn --argjson i "$(ge_item mine)" --argjson at "$((judged_at + 60))" '{type: "decline", id: "mine", at: $at, item: $i}'
+	jq -cn --arg r "$gone" --argjson i "$(ge_item other other.md)" --argjson at "$((judged_at + 60))" '{type: "decline", id: "other", at: $at, reason: $r, settled: true, item: $i}'
+} > "$ROOT/ledger.jsonl"
+git -C "$repo" update-ref refs/desk/ledger "$(git -C "$repo" hash-object -w "$ROOT/ledger.jsonl")"
+bash -c 'source "$1/common.sh"; source "$1/brief.sh"; DESK_RUNS_ROOT="$2"; desk_brief_gone_edits "$2/testpass-2026-11-02" "$3" notes.md reading.md' _ "$LIB" "$GE" "$repo"
+assert_eq "only the edits settled as gone since the judged brief, still declined, in the notes' files, with their text" \
+	'[{"id":"g1","after":"  new g1"}]' "$(jq -c '[.[] | {id, after}]' "$GE/testpass-2026-11-02/gone-edits.json" 2> /dev/null)"
+assert_contains "and the message names the file" ", gone-edits.json." \
+	"$(bash -c 'source "$1/common.sh"; source "$1/brief.sh"; echo "{\"scheduled_date\":\"2026-11-02\"}" > "$2/run.json"; echo "{}" > "$2/staged.json"; desk_brief_message testpass "$2"' _ "$LIB" "$GE/testpass-2026-11-02")"
+git -C "$repo" update-ref -d refs/desk/ledger
+
+echo
 echo "=== a pending run outlives the seven-day sweep; a delivered one does not ==="
 # shellcheck source=../../claude/desk-lib/common.sh
 source "$LIB/common.sh"
