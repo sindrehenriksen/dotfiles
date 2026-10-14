@@ -74,12 +74,14 @@ desk_brief_prepare() {
 	fi
 
 	desk_follow_up_run_status "$pass" > "$run/run-status.txt"
-	desk_status_read | jq --arg p "$pass" --arg d "$scheduled_date" \
+	local head
+	head="$(git -C "$repo" rev-parse -q --verify HEAD 2> /dev/null)"
+	desk_status_read | jq --arg p "$pass" --arg d "$scheduled_date" --arg head "$head" \
 		--argjson instructions "$(printf '%s\n' "${rendered[@]}" | jq -R . | jq -cs .)" '
 		(.passes[$p] // {}) as $s
 		| {pass: $p, scheduled_date: $d, result: ($s.result // "unknown"),
 		   stopped_at: ($s.stopped_at // null), failed: ($s.failed_sources // []),
-		   instructions: $instructions}' > "$run/run.json"
+		   instructions: $instructions, notes_head: $head}' > "$run/run.json"
 
 	# What the pass staged itself (a capture step's lines), and what it
 	# held back over the caps, so the brief can say so.
@@ -99,8 +101,37 @@ desk_brief_prepare() {
 		cp -f "$PASS_SCRATCH/mail-noise.json" "$run/mail-noise.json"
 	fi
 
+	desk_brief_notes_changes "$pass" "$run" "$repo" "$head" "${files[@]}"
+
 	printf '%s\n' '{"unconfirmed_sends": 0}' > "$run/brief.pending"
 	printf '%s' "$run"
+}
+
+# desk_brief_notes_changes <pass> <run dir> <repo> <head> <file>...
+# notes-changes.txt: the notes repo's own commits to the configured files
+# since the last judged brief, `git log -p` from the HEAD that run recorded
+# to <head>, so the central session can update its picture and check that
+# nothing broke or got lost. The last judged brief is the newest earlier run
+# of the pass whose directory holds judgement.json. With none, or when its
+# commit is gone, the file says so.
+desk_brief_notes_changes() {
+	local pass="$1" run="$2" repo="$3" head="$4"
+	shift 4
+	local out="$run/notes-changes.txt" base="" r
+	for r in $(for d in "$DESK_RUNS_ROOT/$pass"-*; do [ -d "$d" ] && [ "$d" != "$run" ] && printf '%s\n' "$d"; done | sort -r); do
+		[ -f "$r/judgement.json" ] || continue
+		[[ "$(basename "$r")" < "$(basename "$run")" ]] || continue
+		base="$(jq -r '.notes_head // empty' "$r/run.json" 2> /dev/null)"
+		break
+	done
+	if [ -z "$base" ] || ! git -C "$repo" cat-file -e "$base^{commit}" 2> /dev/null; then
+		printf 'No earlier judged brief recorded a notes commit to compare against.\n' > "$out"
+	elif [ "$base" = "$head" ]; then
+		printf 'The notes have no new commits since the last judged brief (%s).\n' "${base:0:12}" > "$out"
+	else
+		git -C "$repo" log -p --no-color --format='commit %H%nDate: %ad%n%n    %s%n' --date=iso "$base..$head" -- "$@" > "$out" 2> /dev/null \
+			|| printf 'The notes log since %s could not be read.\n' "${base:0:12}" > "$out"
+	fi
 }
 
 # desk_brief_message <pass> <run dir>...: the one message for these runs,
@@ -149,7 +180,7 @@ desk_brief_message() {
 		[ -z "$close_line" ] || printf '%s\n' "$close_line"
 		[ -z "$retention_line" ] || printf '%s\n' "$retention_line"
 		# staged.json only when the pass staged or held back anything itself.
-		printf -- '- Also there: allowed-urls.txt%s%s.\n' \
+		printf -- '- Also there: notes-changes.txt (the notes'"'"' own commits since the last judged brief), allowed-urls.txt%s%s.\n' \
 			"$(jq -e '((.staged // []) + (.held_back // [])) | length > 0' "$r/staged.json" > /dev/null 2>&1 && printf ', staged.json')" \
 			"$([ -f "$r/mail-noise.json" ] && printf ', mail-noise.json')"
 	done

@@ -208,10 +208,12 @@ assert_contains "it names the run directory" "Run directory: $R1" "$msg"
 assert_contains "and the instruction files to judge by, in order" "- Judge it by: $R1/instructions/brief.md, then $R1/instructions/close.md" "$msg"
 assert_contains "and the inputs" "- inputs/: f-web.json, notes.md, open-items.json" "$msg"
 assert_contains "and how it went" "- How it went: finished ok." "$msg"
-assert_contains "an empty staged.json goes unmentioned" "- Also there: allowed-urls.txt." "$msg"
+also="- Also there: notes-changes.txt (the notes' own commits since the last judged brief), allowed-urls.txt"
+assert_contains "an empty staged.json goes unmentioned" "$also." "$msg"
+assert_eq "the first brief has no judged one to compare the notes against" "No earlier judged brief recorded a notes commit to compare against." "$(cat "$R1/notes-changes.txt")"
 jq -n '{staged: [{headline: "a capture"}], held_back: []}' > "$ROOT/staged-probe.json"
 mkdir -p "$ROOT/probe-run" && cp -R "$R1/." "$ROOT/probe-run/" && cp "$ROOT/staged-probe.json" "$ROOT/probe-run/staged.json"
-assert_contains "one holding something is named" "- Also there: allowed-urls.txt, staged.json." \
+assert_contains "one holding something is named" "$also, staged.json." \
 	"$(bash -c 'source "$1/common.sh"; source "$1/brief.sh"; desk_brief_message testpass "$2"' _ "$LIB" "$ROOT/probe-run")"
 
 assert_true "a Monday-only step runs on a Monday" "$(grep -q 'model call: F-mon' "$ROOT/run.out" && echo true || echo false)"
@@ -230,10 +232,17 @@ run 2026-10-05
 assert_eq "another run that day sends nothing more" "1" "$(sent_n)"
 
 echo
+echo "=== the notes' own commits since the last judged brief ==="
+echo '{"items": []}' > "$R1/judgement.json"
+printf 'Section A\n  detail\n  a line the user added\n' > "$repo/notes.md"
+git -C "$repo" commit -q -am "Add a line"
+echo
 echo "=== a renamed central session is still found by its id ==="
 sessions <<< "$CENTRAL central-renamed true"
 run 2026-10-06
 assert_eq "sent to its new name" "central-renamed" "$(jq -rs '.[-1].to' "$BRIEF_TEST_SENT")"
+assert_true "the next run lists the notes' own commit since the judged brief, with its diff" \
+	"$(grep -q '^    Add a line$' "$DESK_RUNS_ROOT/testpass-2026-10-06/notes-changes.txt" && grep -q '^+  a line the user added$' "$DESK_RUNS_ROOT/testpass-2026-10-06/notes-changes.txt" && echo true || echo false)"
 assert_true "a Monday-only step is skipped on a Tuesday" \
 	"$(grep -q 'step F-mon (fetch): skipped (it runs on weekdays 1 only)' "$ROOT/run.out" && ! grep -q 'model call: F-mon' "$ROOT/run.out" && echo true || echo false)"
 assert_eq "and the pass is not partial for it" "ok" "$(jq -r '.passes.testpass.result' "$DESK_STATUS_FILE")"

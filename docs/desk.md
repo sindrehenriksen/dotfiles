@@ -284,6 +284,7 @@ A pass with a `brief` does not judge its own fetches. Once it is done, whatever 
 - `inputs/`: the brief's `input_files`, seeded exactly as a judge's are ([Judge input files](#the-prompt-contract)): the committed notes with the agent marks, the fetch replies, the ticket digest and search, `tickets.json`, `open-items.json` and the rest.
 - `instructions/`: each of the brief's `instructions`, rendered with the placeholders a prompt gets plus `run_dir`, `inputs`, `pass` and `scheduled_date`.
 - `allowed-urls.txt`: every URL a suggestion may cite, the set a judge's reply is checked against. The central session stages with `desk-propose --allowed-urls` on it.
+- `notes-changes.txt`: the notes repo's own commits to the configured files since the last judged brief (the newest earlier run holding `judgement.json`), as `git log -p` from the notes commit that run recorded in its `run.json` (`notes_head`), so the central session can update its picture and catch a line lost or broken by accident.
 - `run-status.txt` and `run.json`: how the run went, as the follow-up prompts get it (`run_status`), and its result, failed steps and instruction files.
 - `staged.json`: what the pass staged itself (captures) and what it held back over the caps. `mail-noise.json`: the mail triage's noise as the write step acted on it, when there was any.
 - `close/`: the `close` step's list, a directory per session with its transcript.
@@ -299,7 +300,7 @@ Run directory: /home/me/work/calls/runs/morning-2026-10-13
 - Judge it by: /home/me/work/calls/runs/morning-2026-10-13/instructions/brief.md, then /home/me/work/calls/runs/morning-2026-10-13/instructions/close.md
 - inputs/: f-private.json, f-web.json, notes.md, open-items.json, reading.md, tickets.json
 - close/: 1 idle session to offer for closing, each in close/<session id>/ with session.json and transcript.txt: old-spike (4 working days idle).
-- Also there: allowed-urls.txt, mail-noise.json.
+- Also there: notes-changes.txt (the notes' own commits since the last judged brief), allowed-urls.txt, mail-noise.json.
 ```
 
 **When it cannot go.** The central session is addressed as a followed session is: only while it is live, one process holds it and its name resolves back to it alone. Otherwise the run is left `brief.pending`, as a followed session's news waits in its queue, and every later run of the pass tries again: a later slot the same day, and the next day's run, which sends its own run and every older pending one in one message, oldest first. A pending run directory is never swept. A send that fails waits the same way; one that ran without confirming a delivery is tried once more, then counted as sent (`brief.sent` with `confirmed: false`), as the follow pass counts it. A delivered run has `brief.sent`. Unlike a follow update, nothing tries between the pass's own runs: a brief that missed the pass's last slot of the day waits for the next day's run.
