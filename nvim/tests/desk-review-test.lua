@@ -2932,6 +2932,42 @@ do
 	vim.cmd("silent! %bwipeout!")
 end
 
+print("\n=== saving the review declines only what a decline key declined ===")
+do
+	local said = {}
+	local notify = vim.notify
+	vim.notify = function(m)
+		said[#said + 1] = m
+	end
+	for _, view in ipairs({ "split", "inline" }) do
+		review.view = view
+		local r = new_repo(BASE)
+		build(r, "2026-10-01", { item("n1"), item("n2") })
+		local nb = open_notes(r)
+		review.attach(nb)
+		assert_true(view .. ": review opens", review.open_review(nb))
+		local rb = review_buf_of(nb)
+		local rw = vim.fn.bufwinid(rb)
+		-- A suggestion's line deleted by hand, as an edit of what looks like
+		-- the notes, then saved.
+		said = {}
+		go_to(rw, rb, "NEWS n1")
+		vim.cmd("normal! dd")
+		vim.cmd("silent write")
+		assert_eq(view .. ": deleting its line by hand and saving declines nothing", {}, declined_ids(r))
+		assert_true(view .. ": and says nothing of a decline", #vim.tbl_filter(function(m)
+			return m:match("declined") ~= nil
+		end, said) == 0)
+		go_to(rw, rb, "NEWS n2")
+		assert_true(view .. ": the decline key", review.decline(rb))
+		vim.cmd("silent write")
+		assert_eq(view .. ": declines what it was used on, on the save", { id_by_headline(r, "headline n2") }, declined_ids(r))
+		vim.cmd("silent! %bwipeout!")
+	end
+	review.view = "split"
+	vim.notify = notify
+end
+
 print(string.format("\n=== summary: %d passed, %d failed ===", pass, fail))
 if fail > 0 then
 	os.exit(1)

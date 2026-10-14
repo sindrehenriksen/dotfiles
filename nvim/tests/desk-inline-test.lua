@@ -483,7 +483,7 @@ do
 	local before = review.left(s)
 	vim.api.nvim_win_set_cursor(0, { line_of(rb, "- b4 added"), 0 })
 	vim.cmd("normal! dd")
-	assert_eq("deleting a suggestion's line in the view counts as declining it", before - 1, review.left(s))
+	assert_eq("deleting a suggestion's line in the view takes it off the count", before - 1, review.left(s))
 end
 
 print("\n=== the status line counts what is deferred, with the view open ===")

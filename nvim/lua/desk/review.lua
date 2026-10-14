@@ -12,8 +12,10 @@
 -- pass carries it). The decline key makes the hunk under the cursor in the
 -- review split equal the user's text — an ordinary edit, so plain `u` undoes
 -- it; `u` in the split undoes a take made there too. Nothing is recorded
--- until the user SAVES the review split: that is the commit point, recording every suggestion whose lines are gone
--- from the review buffer and not in the user's notes as declined. A discarded
+-- until the user SAVES the review split: that is the commit point, recording
+-- as declined every suggestion the decline key was used on whose lines are
+-- still gone from the review buffer and not in the user's notes. Lines gone
+-- by any other edit decline nothing. A discarded
 -- review buffer records nothing. Adjacent suggestions are one diff hunk, so
 -- the decline key (and `<leader>gA`, which takes one) act on a single
 -- suggestion's own lines rather than the whole hunk.
@@ -334,8 +336,20 @@ local function close_session(s, quiet)
 	end
 end
 
---- Records as declined every shown suggestion whose lines are gone from the
---- review buffer and not present in the user's notes — the review split's save.
+--- Remembers `items` as declined with a decline key in review `s`, which
+--- is all the save records as declined: a suggestion whose lines leave the
+--- review any other way (typed over, deleted by hand) is left for the next
+--- pass, never declined by saving.
+function M.mark_declining(s, items)
+	s.declining = s.declining or {}
+	for _, item in ipairs(items) do
+		s.declining[item.id] = true
+	end
+end
+
+--- Records as declined every suggestion declined with a decline key whose
+--- lines are still gone from the review buffer and not in the user's notes
+--- — the review split's save.
 function M.save_review(s)
 	if not vim.api.nvim_buf_is_valid(s.review_buf) then
 		return false, "review buffer is gone"
@@ -349,9 +363,13 @@ function M.save_review(s)
 	end
 	local taking = pending_ids(s.notes_buf)
 	local gone = {}
+	local declining = s.declining or {}
 	for _, item in pairs(s.shown) do
 		local _, _, text = mark_range(s, item)
-		if taking[item.id] then
+		if not declining[item.id] then
+			-- Only a decline key declines: lines gone from the review by any
+			-- other edit leave the suggestion for the next pass.
+		elseif taking[item.id] then
 			-- taken by decision: edited text is no reason to call it declined
 		elseif text and #text > 0 and not proposal.contains(notes_lines, text) then
 			-- edited in the split and not taken yet: still waiting
@@ -2074,6 +2092,16 @@ local function diff_act(s, verb)
 	if vim.deep_equal(before_review, buf_lines(s.review_buf)) and vim.deep_equal(before_notes, buf_lines(s.notes_buf)) then
 		return false, "no suggestion under the cursor"
 	end
+	if verb == "diffget" then
+		-- The decline key on a whole hunk: what it took out of the view.
+		local now, hit = buf_lines(s.review_buf), {}
+		for _, item in pairs(s.shown) do
+			if proposal.proposed_in(item, before_review, s.base) and not proposal.proposed_in(item, now, s.base) then
+				hit[#hit + 1] = item
+			end
+		end
+		M.mark_declining(s, hit)
+	end
 	if verb == "diffput" then
 		complete_halves(s, before_notes)
 		note_takes(s, before_notes, acted)
@@ -2089,6 +2117,7 @@ local function act_on(s, item, verb, side)
 		if not decline_item(s, item) then
 			return false, "nothing to decline here"
 		end
+		M.mark_declining(s, { item })
 		return true
 	end
 	local pre = buf_lines(s.notes_buf)
