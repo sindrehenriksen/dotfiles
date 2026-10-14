@@ -144,6 +144,12 @@ end
 
 print("=== the split is the default; one window is the view key away ===")
 assert_eq("a review opens as the split", "split", review.view)
+do
+	local reply = { review.toggle_view(0) }
+	assert_eq("and the view key says the one window is coming back", { false, review.VIEW_COMING }, reply)
+end
+-- What follows tests the one window itself, the key switched back on.
+review.view_key_off = false
 
 print("\n=== one window: the merged text with each suggestion's old lines drawn above its new ones ===")
 do

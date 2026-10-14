@@ -2481,10 +2481,19 @@ function M.render_inline(s)
 	inline.render(s.review_buf, #review_lines, view)
 end
 
+-- The one-window view shows the review buffer in the notes' place, so what
+-- is typed there never reaches the notes. Until it is the notes buffer
+-- itself, the view key only says so.
+M.view_key_off = true
+M.VIEW_COMING = "the one-window view is coming back soon; the review stays in two windows meanwhile"
+
 --- The view key: switches the open review between one window and the split,
 --- keeping the cursor on the line it was on, and remembers the choice for the
 --- next review. Returns true, or false, why.
 function M.toggle_view(review_buf)
+	if M.view_key_off then
+		return false, M.VIEW_COMING
+	end
 	local s = session_for_review_buf(review_buf)
 	if not s then
 		return false, "not a desk review buffer"
