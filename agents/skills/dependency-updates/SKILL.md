@@ -24,7 +24,7 @@ Its PRs are a starting point, not the unit of work. Split one, combine several, 
 
 ## What Dependabot doesn't see
 
-Dependabot reads the package ecosystems its config lists, and nothing else. Look for the rest, compare each against the latest its upstream releases and its platform supports, and add what is behind to the set:
+Dependabot reads the package ecosystems its config lists, and nothing else. Look for the rest, compare each against the latest its upstream releases and its platform supports, and add what is behind to the set, aiming straight for that latest rather than each version in between:
 
 - **Toolchain pins**: mise (`.mise.toml`), `.nvmrc`, `.python-version`, `packageManager` in `package.json`, a Docker base image in a file it doesn't scan, the `python-version` / `node-version` inputs in CI workflows.
 - **Language constraints**: `requires-python`, `engines`, and the linter and type-checker targets that follow them.
