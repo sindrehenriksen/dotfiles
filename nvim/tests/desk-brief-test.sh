@@ -12,8 +12,10 @@
 # pending run outlives the seven-day sweep; a shared name or none holds a
 # brief; a failed pass still briefs; a weekend slot of a weekdays-only pass
 # makes none of its own; another pass's pending brief goes with this pass's
-# delivery as its own message. A step with `weekdays` runs only on those
-# days. No live model call.
+# delivery as its own message; notes-changes.txt goes back to the last
+# judged run of any pass, says when no kept run was judged or the history
+# was rewritten (with the whole diff) or the commit is gone. A step with
+# `weekdays` runs only on those days. No live model call.
 set -u
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -212,7 +214,7 @@ assert_contains "and the inputs" "- inputs/: f-web.json, notes.md, open-items.js
 assert_contains "and how it went" "- How it went: finished ok." "$msg"
 also="- Also there: notes-changes.txt (the notes' own commits since the last judged brief), allowed-urls.txt"
 assert_contains "an empty staged.json goes unmentioned" "$also." "$msg"
-assert_eq "the first brief has no judged one to compare the notes against" "No earlier judged brief recorded a notes commit to compare against." "$(cat "$R1/notes-changes.txt")"
+assert_eq "the first brief has no run to compare the notes against" "No earlier brief run is kept, so there is nothing to compare the notes against." "$(cat "$R1/notes-changes.txt")"
 jq -n '{staged: [{headline: "a capture"}], held_back: []}' > "$ROOT/staged-probe.json"
 mkdir -p "$ROOT/probe-run" && cp -R "$R1/." "$ROOT/probe-run/" && cp "$ROOT/staged-probe.json" "$ROOT/probe-run/staged.json"
 assert_contains "one holding something is named" "$also, staged.json." \
@@ -370,6 +372,51 @@ before="$(sent_n)"
 run_as testpass 2026-10-22
 assert_eq "a later slot of a date already run sends the other pass's, with none of its own waiting" "$((before + 1))" "$(sent_n)"
 assert_contains "naming that run" "Run directory: $DESK_RUNS_ROOT/otherpass-2026-10-23" "$(jq -rs '.[-1].message' "$BRIEF_TEST_SENT")"
+
+echo
+echo "=== notes-changes compares against the last judged run of any pass ==="
+printf 'Section A\n  detail\n  a line the user added\n  before the judged run\n' > "$repo/notes.md"
+git -C "$repo" commit -q -am "Before the judged run"
+jq --arg h "$(git -C "$repo" rev-parse HEAD)" '.notes_head = $h' "$DESK_RUNS_ROOT/otherpass-2026-10-22/run.json" > "$ROOT/rj.json" \
+	&& mv -f "$ROOT/rj.json" "$DESK_RUNS_ROOT/otherpass-2026-10-22/run.json"
+echo '{"items": []}' > "$DESK_RUNS_ROOT/otherpass-2026-10-22/judgement.json"
+printf 'Section A\n  detail\n  a line the user added\n  before the judged run\n  since the judged run\n' > "$repo/notes.md"
+git -C "$repo" commit -q -am "Since the judged run"
+run_as testpass 2026-10-24
+nc="$(cat "$DESK_RUNS_ROOT/testpass-2026-10-24/notes-changes.txt" 2> /dev/null)"
+assert_contains "the newest run being unjudged, it goes back to another pass's judged one" "    Since the judged run" "$nc"
+assert_true "and no further" "$(! grep -q 'Before the judged run' <<< "$nc" && echo true || echo false)"
+echo '{"items": []}' > "$DESK_RUNS_ROOT/testpass-2026-10-24/judgement.json"
+git -C "$repo" reset -q --hard HEAD~1
+printf 'Section A\n  detail\n  a line the user added\n  before the judged run\n  a different line\n' > "$repo/notes.md"
+git -C "$repo" commit -q -am "A rewritten history"
+run_as testpass 2026-10-25
+nc="$(cat "$DESK_RUNS_ROOT/testpass-2026-10-25/notes-changes.txt" 2> /dev/null)"
+assert_contains "a rewritten history is said plainly" "The notes history was rewritten since testpass-2026-10-24" "$nc"
+assert_true "with the whole diff, so the lost line shows" \
+	"$(grep -q '^-  since the judged run$' <<< "$nc" && grep -q '^+  a different line$' <<< "$nc" && echo true || echo false)"
+notes_changes() { # runs root, run name
+	bash -c 'source "$1/common.sh"; source "$1/brief.sh"; DESK_RUNS_ROOT="$2"; mkdir -p "$2/$3"
+		desk_brief_notes_changes x "$2/$3" "$4" "$(git -C "$4" rev-parse HEAD)" notes.md; cat "$2/$3/notes-changes.txt"' _ "$LIB" "$1" "$2" "$repo"
+}
+G="$ROOT/runs-gap"
+mkdir -p "$G/testpass-2026-11-01" "$G/testpass-2026-11-02"
+jq -n --arg h "$(git -C "$repo" rev-parse HEAD~1)" '{notes_head: $h}' > "$G/testpass-2026-11-01/run.json"
+jq -n --arg h "$(git -C "$repo" rev-parse HEAD)" '{notes_head: $h}' > "$G/testpass-2026-11-02/run.json"
+nc="$(notes_changes "$G" testpass-2026-11-03)"
+assert_contains "no kept run judged: the oldest kept stands in, and the file says what that misses" \
+	"No kept brief run was judged, so this goes back only to the oldest kept, testpass-2026-11-01" "$nc"
+assert_contains "...with the commits since it" "    A rewritten history" "$nc"
+echo '{"items": []}' > "$G/testpass-2026-11-02/judgement.json"
+jq -n '{notes_head: "0123456789abcdef0123456789abcdef01234567"}' > "$G/testpass-2026-11-02/run.json"
+jq -n '{}' > "$G/testpass-2026-11-02/run.json"
+assert_eq "a judged run that recorded no commit is said as that" \
+	"The last judged brief, testpass-2026-11-02, recorded no notes commit, so there is nothing to compare against." \
+	"$(notes_changes "$G" testpass-2026-11-03)"
+jq -n '{notes_head: "0123456789abcdef0123456789abcdef01234567"}' > "$G/testpass-2026-11-02/run.json"
+assert_eq "a recorded commit now gone is said as that" \
+	"The notes commit testpass-2026-11-02 recorded, 0123456789ab, is no longer in the repo, so there is nothing to compare against." \
+	"$(notes_changes "$G" testpass-2026-11-03)"
 
 echo
 echo "=== a pending run outlives the seven-day sweep; a delivered one does not ==="

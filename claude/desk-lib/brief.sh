@@ -114,30 +114,79 @@ desk_brief_prepare() {
 	printf '%s' "$run"
 }
 
+_desk_brief_mtime() { # file: its mtime, 0 when it is missing
+	local m
+	if [ -r /proc/stat ]; then m="$(stat -c %Y "$1" 2> /dev/null)"; else m="$(stat -f %m "$1" 2> /dev/null)"; fi
+	printf '%s' "${m:-0}"
+}
+
 # desk_brief_notes_changes <pass> <run dir> <repo> <head> <file>...
 # notes-changes.txt: the notes repo's own commits to the configured files
 # since the last judged brief, `git log -p` from the HEAD that run recorded
 # to <head>, so the central session can update its picture and check that
-# nothing broke or got lost. The last judged brief is the newest earlier run
-# of the pass whose directory holds judgement.json. With none, or when its
-# commit is gone, the file says so.
+# nothing broke or got lost. The last judged brief is the latest run of any
+# pass, by its date, whose directory holds judgement.json; a judgement of
+# one pass covers the notes for all of them. When no kept run was judged,
+# the oldest kept run stands in, and the file says what that misses. When
+# that commit is no longer an ancestor of <head> (the history was
+# rewritten), the file says so and holds the whole diff from it instead, so
+# a lost line shows. With no run kept, a run that recorded no commit, or
+# its commit gone, the file says which.
 desk_brief_notes_changes() {
 	local pass="$1" run="$2" repo="$3" head="$4"
 	shift 4
-	local out="$run/notes-changes.txt" base="" r
-	for r in $(for d in "$DESK_RUNS_ROOT/$pass"-*; do [ -d "$d" ] && [ "$d" != "$run" ] && printf '%s\n' "$d"; done | sort -r); do
+	local out="$run/notes-changes.txt" date base="" from="" judged=true r i
+	date="$(basename "$run")"
+	date="${date: -10}"
+	# Each run directory as "<date> <judgement mtime> <dir>", so a later
+	# judgement breaks a tie between two passes of one date.
+	local -a kept=()
+	mapfile -t kept < <(for r in "$DESK_RUNS_ROOT"/*-[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]; do
+		[ -d "$r" ] && [ "$r" != "$run" ] && [ -f "$r/run.json" ] || continue
+		[[ "${r: -10}" > "$date" ]] && continue
+		printf '%s %s %s\n' "${r: -10}" "$(_desk_brief_mtime "$r/judgement.json")" "$r"
+	done | sort -k1,1 -k2,2n)
+	for ((i = ${#kept[@]} - 1; i >= 0; i--)); do
+		r="${kept[$i]#* * }"
 		[ -f "$r/judgement.json" ] || continue
-		[[ "$(basename "$r")" < "$(basename "$run")" ]] || continue
-		base="$(jq -r '.notes_head // empty' "$r/run.json" 2> /dev/null)"
+		from="$r"
 		break
 	done
-	if [ -z "$base" ] || ! git -C "$repo" cat-file -e "$base^{commit}" 2> /dev/null; then
-		printf 'No earlier judged brief recorded a notes commit to compare against.\n' > "$out"
-	elif [ "$base" = "$head" ]; then
-		printf 'The notes have no new commits since the last judged brief (%s).\n' "${base:0:12}" > "$out"
+	if [ -z "$from" ] && [ "${#kept[@]}" -gt 0 ]; then
+		from="${kept[0]#* * }"
+		judged=false
+	fi
+	[ -z "$from" ] || base="$(jq -r '.notes_head // empty' "$from/run.json" 2> /dev/null)"
+	local name="${from##*/}"
+	if [ -z "$from" ]; then
+		printf 'No earlier brief run is kept, so there is nothing to compare the notes against.\n' > "$out"
+		return 0
+	fi
+	if [ -z "$base" ]; then
+		if [ "$judged" = true ]; then
+			printf 'The last judged brief, %s, recorded no notes commit, so there is nothing to compare against.\n' "$name" > "$out"
+		else
+			printf 'No kept brief run was judged, and the oldest kept, %s, recorded no notes commit, so there is nothing to compare against.\n' "$name" > "$out"
+		fi
+		return 0
+	fi
+	if ! git -C "$repo" cat-file -e "$base^{commit}" 2> /dev/null; then
+		printf 'The notes commit %s recorded, %s, is no longer in the repo, so there is nothing to compare against.\n' "$name" "${base:0:12}" > "$out"
+		return 0
+	fi
+	: > "$out"
+	[ "$judged" = true ] || printf 'No kept brief run was judged, so this goes back only to the oldest kept, %s (%s); changes before it are not here.\n\n' \
+		"$name" "${base:0:12}" >> "$out"
+	if [ "$base" = "$head" ]; then
+		printf 'The notes have no new commits since %s (%s).\n' "$name" "${base:0:12}" >> "$out"
+	elif ! git -C "$repo" merge-base --is-ancestor "$base" "$head" 2> /dev/null; then
+		printf 'The notes history was rewritten since %s: its commit %s is no longer an ancestor of HEAD. The whole difference from it follows, so a lost line shows as removed.\n\n' \
+			"$name" "${base:0:12}" >> "$out"
+		git -C "$repo" diff --no-color "$base" "$head" -- "$@" >> "$out" 2> /dev/null \
+			|| printf 'The diff from %s could not be read.\n' "${base:0:12}" >> "$out"
 	else
-		git -C "$repo" log -p --no-color --format='commit %H%nDate: %ad%n%n    %s%n' --date=iso "$base..$head" -- "$@" > "$out" 2> /dev/null \
-			|| printf 'The notes log since %s could not be read.\n' "${base:0:12}" > "$out"
+		git -C "$repo" log -p --no-color --format='commit %H%nDate: %ad%n%n    %s%n' --date=iso "$base..$head" -- "$@" >> "$out" 2> /dev/null \
+			|| printf 'The notes log since %s could not be read.\n' "${base:0:12}" >> "$out"
 	fi
 }
 
