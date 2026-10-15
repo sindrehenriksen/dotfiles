@@ -148,17 +148,28 @@ if head -n1 prompt.txt | grep -q '^CHANGELOG'; then
 		printf '%s\n' "$input" >> "$FOLLOW_TEST_FIX/changelog-inputs.jsonl"
 		emit_use "cl$n" mcp__tickets__getIssue "$input"
 		key="$(jq -r .issueIdOrKey <<< "$input")"
+		# The issue read's result as the Atlassian MCP returns it: the issue
+		# as the one node of a connection, beside the call's context; the
+		# bare REST issue with FAKE_CHANGELOG_BARE.
+		body=""
+		if [ -f "$FOLLOW_TEST_FIX/changelog-$key.json" ]; then
+			if [ -n "${FAKE_CHANGELOG_BARE:-}" ]; then
+				body="$(jq -c --arg k "$key" '.key = $k' "$FOLLOW_TEST_FIX/changelog-$key.json")"
+			else
+				body="$(jq -c --arg k "$key" '{issues: {nodes: [.key = $k]}, context: {cloudId: "tickets.example", toolName: "getIssue"}}' "$FOLLOW_TEST_FIX/changelog-$key.json")"
+			fi
+		fi
 		if ! jq -cn --argjson i "$input" '{tool_name:"mcp__tickets__getIssue", tool_input:$i}' | bash -c "$cmd" > /dev/null 2>&1; then
 			emit_result "cl$n" "PreToolUse hook denied this call" true
-		elif [ -f "$FOLLOW_TEST_FIX/changelog-$key.json" ] && [ -n "${FAKE_CHANGELOG_SAVED:-}" ]; then
+		elif [ -n "$body" ] && [ -n "${FAKE_CHANGELOG_SAVED:-}" ]; then
 			# Too large to show: Claude Code saves it under the project
 			# folder and the call gets the pointer it returns live.
 			saved="$CLAUDE_CONFIG_DIR/projects/$(printf '%s' "$(pwd -P)" | tr -c 'A-Za-z0-9' '-')/sess/tool-results/mcp-tickets-getIssue-$n.txt"
 			mkdir -p "$(dirname "$saved")"
-			jq -c '[{type: "text", text: tojson}]' "$FOLLOW_TEST_FIX/changelog-$key.json" > "$saved"
-			emit_text_result "cl$n" "$(printf '<persisted-output>\nOutput too large (57.9KB). Full output saved to: %s\n\nPreview (first 2KB):\n{\n  "expand": "renderedFields"\n...\n</persisted-output>' "$saved")"
-		elif [ -f "$FOLLOW_TEST_FIX/changelog-$key.json" ]; then
-			emit_text_result "cl$n" "$(cat "$FOLLOW_TEST_FIX/changelog-$key.json")"
+			jq -c '[{type: "text", text: tojson}]' <<< "$body" > "$saved"
+			emit_text_result "cl$n" "$(printf '<persisted-output>\nOutput too large (57.9KB). Full output saved to: %s\n\nPreview (first 2KB):\n{\n  "issues": {\n...\n</persisted-output>' "$saved")"
+		elif [ -n "$body" ]; then
+			emit_text_result "cl$n" "$body"
 		else
 			emit_result "cl$n" "Issue does not exist or you do not have permission" true
 		fi
@@ -579,6 +590,14 @@ jira_before="$(jq .last_jira_ok "$DESK_FOLLOW_STATE_FILE")"
 issue ABC-2 "Blocked" | jq -cs '{issues:., isLast:false, nextPageToken:"p2"}' > "$FIX/changes-result.json"
 "$RUN" follow > /dev/null 2>&1
 assert_eq "a short pagination keeps the ticket window" "$jira_before" "$(jq .last_jira_ok "$DESK_FOLLOW_STATE_FILE")"
+jq '.scope.refreshed_at = 0' "$DESK_FOLLOW_STATE_FILE" > "$ROOT/s" && mv "$ROOT/s" "$DESK_FOLLOW_STATE_FILE"
+cp "$FIX/scope-result.json" "$ROOT/scope-before.json"
+issue ABC-1 "In QA" | jq -cs '{issues: {nodes: ., pageInfo: {hasNextPage: true, endCursor: "c2"}}}' > "$FIX/scope-result.json"
+out="$("$RUN" follow 2>&1)"
+assert_contains "a scope query stopped short says why" "the scope query did not come back (its last page says more follow, and no call fetched them)" "$out"
+assert_contains "and its call is kept" "the ticket-fetch call is kept in $DESK_RUNS_ROOT/follow-$(date +%F)/ticket-fetch-failed" "$out"
+assert_eq "with its results" "true" "$([ -s "$DESK_RUNS_ROOT/follow-$(date +%F)/ticket-fetch-failed/jira-results.jsonl" ] && echo true || echo false)"
+mv "$ROOT/scope-before.json" "$FIX/scope-result.json"
 
 echo
 echo "=== a run with only skipped changes sends nothing, and the counts carry ==="
@@ -665,7 +684,7 @@ history() { # author-account field to [created]
 	jq -cn --arg a "$1" --arg f "$2" --arg to "$3" --arg t "${4:-$own_t}" \
 		'{id: "h1", author: {accountId: $a, displayName: "x"}, created: $t, items: [{field: $f, toString: $to}]}'
 }
-changelog() { jq -cs '{key: "x", changelog: {histories: .}, fields: {summary: "s"}}'; }
+changelog() { jq -cs '{changelog: {startAt: 0, maxResults: length, total: length, histories: .}, fields: {summary: "s"}}'; }
 { history acc-owner Rank "Ranked higher"; history acc-owner summary "Renamed by the user"; } | changelog > "$FIX/changelog-ABC-1.json"
 { history acc-owner summary "Renamed, an Epic Link changed too"; history acc-dev "Epic Link" "ABC-9" "not a time"; } | changelog > "$FIX/changelog-ABC-11.json"
 rm -f "$FIX/changelog-LNK-7.json"
@@ -687,6 +706,27 @@ assert_contains "one whose changelog did not come back is forwarded as before" "
 assert_contains "and the log names it" "no changelog came back for LNK-7" "$(cat "$ROOT/own-fields.out")"
 assert_contains "the footer counts the user's field move" "1 own field move" "$msg"
 assert_eq "every changelog call carries the configured site" '["tickets.example"]' "$(jq -cs '[.[].cloudId] | unique' "$FIX/changelog-inputs.jsonl")"
+kept="$(sed -n 's/.*the changelog call is kept in \([^ ]*\) — .*/\1/p' "$ROOT/own-fields.out")"
+assert_eq "the failed read's call is kept under the runs root" "$DESK_RUNS_ROOT/follow-$(date +%F)/changelog-failed" "$kept"
+assert_eq "with its stream" "true" "$([ -s "$kept/changelog-stream.jsonl" ] && echo true || echo false)"
+assert_contains "and the log quotes its first result" "first result: {" "$(cat "$ROOT/own-fields.out")"
+
+echo
+echo "=== a changelog in the bare REST shape is read too, and a partial one is not ==="
+jq --arg s "$SID_A" '.queues[$s].changes = [] | .queues[$s].skipped = {}' "$DESK_FOLLOW_STATE_FILE" > "$ROOT/s" && mv "$ROOT/s" "$DESK_FOLLOW_STATE_FILE"
+{ history acc-owner summary "Renamed by the user, bare"; } | changelog > "$FIX/changelog-ABC-1.json"
+# A first page of a longer changelog: an entry in the window may be on the next.
+{ history acc-owner summary "Renamed, only a page of the changelog read"; } | changelog | jq -c '.changelog.total = 40' > "$FIX/changelog-ABC-11.json"
+{
+	issue ABC-1 "In QA" "" "[]" "[]" "" "Renamed by the user, bare"
+	issue ABC-11 "Done" ABC-1 "[]" "[]" "" "Renamed, only a page of the changelog read"
+} | rest > "$FIX/changes-result.json"
+: > "$FOLLOW_TEST_SENT"
+FAKE_CHANGELOG_BARE=1 "$RUN" follow > "$ROOT/bare-changelog.out" 2>&1
+msg="$(jq -r '.message // empty' "$FOLLOW_TEST_SENT")"
+assert_not_contains "the user's own rename in a bare issue is not sent" "Renamed by the user, bare" "$msg"
+assert_contains "a ticket whose changelog came back only in part is forwarded" "Renamed, only a page of the changelog read" "$msg"
+assert_contains "and the log names it" "no changelog came back for ABC-11" "$(cat "$ROOT/bare-changelog.out")"
 
 echo
 echo "=== a changelog Claude Code saved to a file is read from it, however large ==="

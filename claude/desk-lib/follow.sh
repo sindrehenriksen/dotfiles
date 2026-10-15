@@ -289,6 +289,13 @@ _DESK_FOLLOW_NORM_ISSUE='
 	           created, updated, body: (.body | str // "")}] }
 	| select(.key != null)'
 
+# Whether the last page of the calls whose jql is $q says more follow: the
+# fetch stopped short.
+_DESK_FOLLOW_JQ_SHORT='([.[] | select(.input.jql == $q) | .text | (try fromjson catch null) | select(. != null)] | last) as $tail
+	| (($tail.issues | objects | .pageInfo) // {}) as $info
+	| ($tail != null and (($tail.nextPageToken // $info.endCursor // null) != null
+		and ($tail.isLast != true) and ($info.hasNextPage // true) != false))'
+
 # Every issue in the results of the calls whose jql is exactly $3, as one
 # JSON array, or "null" when no such call returned anything parseable.
 _desk_follow_issues_for() { # tool-uses tool-results jql tool
@@ -298,13 +305,37 @@ _desk_follow_issues_for() { # tool-uses tool-results jql tool
 		[.[] | select(.input.jql == \$q) | .text | (try fromjson catch null) | select(. != null)
 		 | (if (.issues | type) == \"array\" then .issues
 		    elif (.issues.nodes | type) == \"array\" then .issues.nodes else null end)] as \$pages
-		| ([.[] | select(.input.jql == \$q) | .text | (try fromjson catch null) | select(. != null)] | last) as \$tail
-		# A last page that says more follow: the fetch stopped short.
-		| ((\$tail.issues | objects | .pageInfo) // {}) as \$info
-		| (\$tail != null and ((\$tail.nextPageToken // \$info.endCursor // null) != null
-			and (\$tail.isLast != true) and (\$info.hasNextPage // true) != false)) as \$short
+		| ($_DESK_FOLLOW_JQ_SHORT) as \$short
 		| if (\$pages | length) == 0 or any(\$pages[]; . == null) or \$short then null
 		  else [\$pages[][] | $_DESK_FOLLOW_NORM_ISSUE] | unique_by(.key) end" <<< "$pairs" 2> /dev/null
+}
+
+# Why a query's results were refused, for the log: "" or a short clause.
+_desk_follow_why_not() { # tool-uses tool-results jql tool
+	desk_tool_call_pairs "$1" "$2" "$4" | jq -r --arg q "$3" '
+		if any(.[]; .input.jql == $q) | not then " (no call ran it)"
+		elif '"$_DESK_FOLLOW_JQ_SHORT"' then " (its last page says more follow, and no call fetched them)"
+		else "" end' 2> /dev/null
+}
+
+# _desk_follow_keep_failed <pass> <name> <stream> <results.jsonl> <file or dir>...
+# A read that did not come back keeps its call's stream, results and saved
+# files under the runs root, so the log can name them: one directory per
+# read and day, holding that day's last failure, swept with the runs after
+# a week (desk_prune_old_runs). The log line quotes the call's reply and
+# the start of its first result, as read from a saved file when it was one.
+_desk_follow_keep_failed() {
+	local pass="$1" name="$2" stream="$3" results="$4" dir reply first f
+	shift 3
+	dir="$DESK_RUNS_ROOT/$pass-$(date +%F)/$name-failed"
+	rm -rf "$dir"
+	mkdir -p "$dir" || return 0
+	for f in "$stream" "$@"; do
+		[ -e "$f" ] && cp -R "$f" "$dir"/ 2> /dev/null
+	done
+	reply="$(desk_extract_final_text "$stream" 2> /dev/null | tr '\n' ' ' | cut -c1-200)"
+	first="$(head -n1 "$results" 2> /dev/null | jq -r "$_DESK_JQ_RESULT_TEXT" 2> /dev/null | tr '\n' ' ' | cut -c1-200)"
+	desk_log "$pass" "follow: the $name call is kept in $dir — reply: ${reply:-none}; first result: ${first:-none}"
 }
 
 _desk_follow_jql_keys() { jq -r 'join(", ")' <<< "$1"; }
@@ -415,17 +446,25 @@ desk_follow_fetch_jira() {
 	desk_extract_tool_uses "$out" > "$out_dir/jira-uses.jsonl"
 	desk_extract_tool_results "$out" > "$out_dir/jira-results-raw.jsonl"
 	_desk_follow_resolve_spills "$out_dir/jira-results-raw.jsonl" "$out_dir/spill" > "$out_dir/jira-results.jsonl"
-	local got ok="true"
+	local got ok="true" failed="false"
 	if [ "$scope_jql" != "none" ]; then
 		got="$(_desk_follow_issues_for "$out_dir/jira-uses.jsonl" "$out_dir/jira-results.jsonl" "$scope_jql" "$tool")"
 		if [ -n "$got" ] && [ "$got" != "null" ]; then printf '%s\n' "$got" > "$out_dir/scope.json"
-		else desk_log "$pass" "follow: the scope query did not come back — keeping the previous scope"; fi
+		else
+			desk_log "$pass" "follow: the scope query did not come back$(_desk_follow_why_not "$out_dir/jira-uses.jsonl" "$out_dir/jira-results.jsonl" "$scope_jql" "$tool") — keeping the previous scope"
+			failed="true"
+		fi
 	fi
 	if [ "$changes_jql" != "none" ]; then
 		got="$(_desk_follow_issues_for "$out_dir/jira-uses.jsonl" "$out_dir/jira-results.jsonl" "$changes_jql" "$tool")"
 		if [ -n "$got" ] && [ "$got" != "null" ]; then printf '%s\n' "$got" > "$out_dir/changes.json"
-		else desk_log "$pass" "follow: the changes query did not come back (call rc $rc)"; ok="false"; fi
+		else
+			desk_log "$pass" "follow: the changes query did not come back (call rc $rc)$(_desk_follow_why_not "$out_dir/jira-uses.jsonl" "$out_dir/jira-results.jsonl" "$changes_jql" "$tool")"
+			ok="false" failed="true"
+		fi
 	fi
+	[ "$failed" = "false" ] || _desk_follow_keep_failed "$pass" ticket-fetch "$out" \
+		"$out_dir/jira-results.jsonl" "$out_dir/jira-uses.jsonl" "$out_dir/spill"
 	[ "$ok" = "true" ]
 }
 # desk_follow_own_field_moves <pass> <pass_config> <keys json> <since epoch> <out_dir>
@@ -505,9 +544,17 @@ desk_follow_own_field_moves() {
 			  - (($c.z // "Z") as $z | if $z == "Z" then 0 else ($z | sub(":"; "")) as $zz
 			     | (($zz[1:3] | tonumber) * 3600 + ($zz[3:5] | tonumber) * 60) * (if $zz[0:1] == "+" then 1 else -1 end) end))
 			catch null;
-		(reduce .[] as $p ({}; ($p.text | try fromjson catch null) as $r
-			| if ($r | type) == "object" and ($r.changelog.histories | type) == "array"
-			  then .[($p.input.issueIdOrKey // "")] = $r.changelog.histories else . end)) as $by
+		# The issue a result holds: the REST issue itself, or, as the
+		# Atlassian MCP returns it, the one node of {issues: {nodes: [...]}}.
+		def issue_of($k): (if (.issues.nodes | type) == "array" then .issues.nodes[] else . end)
+			| objects | select((.key // $k) == $k);
+		# A changelog shorter than its total is a page of it, which may miss
+		# an entry in the window.
+		def complete: (.changelog.histories | type) == "array"
+			and ((.changelog.total // 0) <= (.changelog.histories | length));
+		(reduce .[] as $p ({}; ($p.input.issueIdOrKey // "") as $k
+			| ([$p.text | try fromjson catch null | objects | issue_of($k) | select(complete)] | first) as $i
+			| if $i != null then .[$k] = $i.changelog.histories else . end)) as $by
 		| {read: [$keys[] | select($by[.] != null)],
 		   own: (reduce $keys[] as $k ({};
 			[($by[$k] // [])[] | select(((.created | ts) // ($since + 1)) > $since)] as $moves
@@ -519,7 +566,11 @@ desk_follow_own_field_moves() {
 	[ -n "$result" ] || result='{"read": [], "own": {}}'
 	local missing
 	missing="$(jq -r --argjson r "$result" '.[] | select(. as $k | $r.read | index($k) | not)' <<< "$keys" | paste -sd, - | sed 's/,/, /g')"
-	[ -z "$missing" ] || desk_log "$pass" "follow: no changelog came back for $missing — their field moves are forwarded"
+	if [ -n "$missing" ]; then
+		desk_log "$pass" "follow: no changelog came back for $missing — their field moves are forwarded"
+		_desk_follow_keep_failed "$pass" changelog "$out" \
+			"$out_dir/changelog-results.jsonl" "$out_dir/changelog-uses.jsonl" "$out_dir/changelog-spill"
+	fi
 	jq -c '.own' <<< "$result"
 }
 
