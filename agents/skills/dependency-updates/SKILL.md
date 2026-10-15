@@ -1,6 +1,6 @@
 ---
 name: dependency-updates
-description: 'Keeping a repo''s dependencies current: its open Dependabot PRs and alerts, and the versions Dependabot does not see (toolchain pins, language constraints, platform runtimes, dev tools it cannot read). Triage, the order and batches to land them in, CI on Dependabot branches, paired bumps, splitting major groups and landing majors on the new version''s own defaults, reporting what can''t land yet, keeping dependabot.yml in shape. USE FOR: "pick off the dependabot PRs", a dependency or version-update sweep, a stale toolchain pin, a Dependabot security PR or alert, setting up or changing dependabot.yml, adding or removing an ignore. DO NOT USE FOR: a dependency change that is part of feature work, reviewing other PRs, debugging an unrelated CI failure (ci-debugging). A repo or workspace may layer its own skill on top of this one: read both.'
+description: 'Keeping a repo''s dependencies current: its open Dependabot PRs and alerts, and the versions Dependabot does not see (toolchain pins, language constraints, platform runtimes, dev tools it cannot read). Triage, the order and batches to land them in, checks on Dependabot branches, paired bumps, splitting major groups and landing majors on the new version''s own defaults, reporting what can''t land yet, keeping dependabot.yml in shape. USE FOR: "pick off the dependabot PRs", a dependency or version-update sweep, a stale toolchain pin, a Dependabot security PR or alert, setting up or changing dependabot.yml, adding or removing an ignore. DO NOT USE FOR: a dependency change that is part of feature work, reviewing other PRs, debugging an unrelated CI failure (ci-debugging). A repo or workspace may layer its own skill on top of this one: read both.'
 allowed-tools: Bash, Read, Grep
 ---
 
@@ -54,13 +54,15 @@ Majors are part of the sweep, not a separate project. **Split the major group ea
 
 **What the user sees or feels may change**, and that is not a reason to hold the upgrade back. Show it: before/after screenshots at the product's own viewport, and a line per visible change in the report. How much of it waits for the user's yes goes the same way: little for a tool only they run, more the further along a product with end users is. The repo's docs say who uses it and its stage; where they don't, ask once and write it there. A big change in look or feel (a redesign the version invites, an interaction that works differently) is suggested with its before/after whatever the stage, neither pinned back silently nor landed unannounced.
 
-## CI on a Dependabot branch
+## Checks on a Dependabot branch
 
-- Runs triggered by Dependabot get **no repo secrets**, so a secret-dependent job fails as an artifact rather than a real red: check that the underlying tests passed. If a required check depends on a secret, the PR can't merge until you push a commit (the lockfile fix, or an empty one), whose run is attributed to you and gets secrets.
+Dependabot's PRs are proposals: landing one runs the repo's normal checks (the pre-push hooks, CI on the default branch), so a sweep's evidence is those checks and the branch run locally, not a CI run on the PR.
+
+- Where a repo does run CI on them, runs triggered by Dependabot get **no repo secrets**, so a secret-dependent job fails as an artifact rather than a real red: check that the underlying tests passed. If a required check depends on a secret, the PR can't merge until you push a commit (the lockfile fix, or an empty one), whose run is attributed to you and gets secrets.
 - The common real failures are mechanical: a lockfile the bump left out of sync, a formatter whose new version reformats files. Fix them on the branch. A formatter bump (ruff, prettier) reformats even where CI doesn't check formatting: run the formatter on the bump branch and commit the result, or the next unrelated commit picks up the reformat.
 - **Pre-commit hook bumps** are usually exercised by nothing in CI: run `pre-commit run --all-files` on the branch before merging.
 - **Paired bumps.** Some versions must move together and Dependabot can only move one of them: a package and the CI image tagged to it, a runtime pinned somewhere Dependabot can't read (mise, a Dockerfile it doesn't scan) and the types or SDK that follow it. The repo's `dependabot.yml` names its pairs in comments. Carry the other half in the same change, whether that lands as a PR merge or a direct push.
-- A grouped set that cannot resolve together gets split: land what resolves, leave the entangled bumps in the group PR and report them (below). Trust CI's environment over a local resolve.
+- A grouped set that cannot resolve together gets split: land what resolves, leave the entangled bumps in the group PR and report them (below). Where CI does run on the PR, trust its environment over a local resolve.
 
 ## Landing
 
@@ -80,4 +82,4 @@ The shape that works: weekly, minor and patch grouped into one PR, majors in a g
 
 **Every `ignore` carries a comment** saying why it exists and what would remove it (the work item, the pin it follows, the condition). An ignore without one outlives its reason unnoticed.
 
-GitHub only reads `.github/dependabot.yml` at the repository root. Dependabot's own jobs don't use Actions minutes, but in a private repo the CI they trigger does, rebases included.
+GitHub only reads `.github/dependabot.yml` at the repository root. Dependabot's own jobs don't use Actions minutes, but in a private repo the CI they trigger does, rebases included. **Skip CI on Dependabot's PRs**, with a job-level `if` on the PR's author, since landing one runs the checks anyway: a bump that breaks something shows when a sweep lands it rather than as a red PR nobody has picked up.
