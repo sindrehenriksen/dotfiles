@@ -28,12 +28,11 @@ desk_tool_call_pairs() {
 		echo '[]'
 		return
 	fi
-	local results_by_id
-	results_by_id="$(jq -cs "map({(.tool_use_id): ($_DESK_JQ_RESULT_TEXT)}) | add // {}" \
-		"$results_file" 2> /dev/null)"
-	[ -n "$results_by_id" ] || results_by_id='{}'
-	jq -cs --arg tool "$tool_name" --argjson by_id "$results_by_id" '
-		map(select(.name == $tool))
+	# The results are read by jq itself, never passed as an argument: a long
+	# search's results run to megabytes, past what one argument may hold.
+	jq -cs --arg tool "$tool_name" --slurpfile results "$results_file" '
+		($results | map({(.tool_use_id): ('"$_DESK_JQ_RESULT_TEXT"')}) | add // {}) as $by_id
+		| map(select(.name == $tool))
 		| map({input: .input, text: ($by_id[.id] // "")})
 	' "$uses_file" 2> /dev/null || echo '[]'
 }
@@ -98,13 +97,12 @@ desk_collect_slack_ts_pairs() {
 desk_collect_slack_call_pairs() {
 	local uses_file="$1" results_file="$2"
 	[ -f "$uses_file" ] && [ -f "$results_file" ] || return 0
-	local results_by_id
-	results_by_id="$(jq -cs "map({(.tool_use_id): ($_DESK_JQ_RESULT_TEXT)}) | add // {}" \
-		"$results_file" 2> /dev/null)"
-	[ -n "$results_by_id" ] || return 0
-	jq -c --argjson by_id "$results_by_id" '
+	# Results read by jq itself, as in desk_tool_call_pairs.
+	jq -cn --slurpfile results "$results_file" '
 		def is_ts: type == "string" and test("^[0-9]+\\.[0-9]+$");
-		select((.input | type) == "object")
+		($results | map({(.tool_use_id): ('"$_DESK_JQ_RESULT_TEXT"')}) | add // {}) as $by_id
+		| inputs
+		| select((.input | type) == "object")
 		| ((.input.channel_id // .input.channel) | select(type == "string" and . != "")) as $channel
 		| ($by_id[.id] // "") as $text
 		| select($text != "")
@@ -156,12 +154,10 @@ desk_mail_opened_thread_ids() {
 		echo '[]'
 		return
 	fi
-	local results_by_id
-	results_by_id="$(jq -cs "map(select(.is_error != true) | {(.tool_use_id): ($_DESK_JQ_RESULT_TEXT)}) | add // {}" \
-		"$results_file" 2> /dev/null)"
-	[ -n "$results_by_id" ] || results_by_id='{}'
-	jq -cs --arg search "$search_tool" --argjson by_id "$results_by_id" --argjson threads "$threads" '
-		[.[] | select(.name != $search) | select(($by_id[.id] // "") != "")
+	# Results read by jq itself, as in desk_tool_call_pairs.
+	jq -cs --arg search "$search_tool" --slurpfile results "$results_file" --argjson threads "$threads" '
+		($results | map(select(.is_error != true) | {(.tool_use_id): ('"$_DESK_JQ_RESULT_TEXT"')}) | add // {}) as $by_id
+		| [.[] | select(.name != $search) | select(($by_id[.id] // "") != "")
 			| [.input | .. | strings]] | add // []
 		| . as $named
 		| [$threads[] | .id | select(. as $i | $named | index($i))]

@@ -136,6 +136,30 @@ assert_true "a window bound in the arguments is not a message" \
 	"$(allowed_lacks https://example.slack.com/archives/CCHANA01/p1700090000000000)"
 
 echo
+echo "=== results past the argument limit are still paired with their calls ==="
+# Over ARG_MAX (1 MiB on macOS; Linux caps one argument at 128 KiB), so a
+# reader that handed jq the results as an argument would pair nothing.
+big_dir="$ROOT/big"
+mkdir -p "$big_dir"
+big_size=1500000
+cat > "$big_dir/F-big-tool-uses.jsonl" <<'JSONL'
+{"type":"tool_use","id":"b1","name":"mcp__tickets__search","input":{"jql":"project = ABC"}}
+{"type":"tool_use","id":"b2","name":"mcp__chat__read_channel","input":{"channel_id":"CBIG01"}}
+{"type":"tool_use","id":"b3","name":"mcp__mail__get_thread","input":{"thread_id":"thBig"}}
+JSONL
+jq -nc --argjson n "$big_size" '
+	{type: "tool_result", tool_use_id: "b1", content: [{type: "text", text: ("x" * $n)}]},
+	{type: "tool_result", tool_use_id: "b2", content: [{type: "text", text: ("Message TS: 1700000500.000500\n" + ("y" * $n))}]},
+	{type: "tool_result", tool_use_id: "b3", content: [{type: "text", text: ("z" * $n)}]}
+' > "$big_dir/F-big-tool-results.jsonl"
+assert_eq "desk_tool_call_pairs keeps the whole text" "$big_size" \
+	"$(desk_tool_call_pairs "$big_dir/F-big-tool-uses.jsonl" "$big_dir/F-big-tool-results.jsonl" mcp__tickets__search | jq '.[0].text | length')"
+assert_true "a Slack ts in it still pairs with its call's channel" \
+	"$(desk_allowed_urls "https://example.slack.com" "$big_dir/F-big-tool-results.jsonl" | grep -qxF https://example.slack.com/archives/CBIG01/p1700000500000500 && echo true || echo false)"
+assert_eq "a mail thread it opened still counts as opened" '["thBig"]' \
+	"$(desk_mail_opened_thread_ids "$big_dir/F-big-tool-uses.jsonl" "$big_dir/F-big-tool-results.jsonl" mcp__mail__search '[{"id":"thBig"}]')"
+
+echo
 echo "=== desk_validate_items: drops an item whose source URL isn't verifiable ==="
 items='[
   {"id":"i1","file":"notes.md","kind":"new","target":"top","before":"","after":"a Slack item","source":"https://example.slack.com/archives/CEXAMPLEID/p1700000000123456","headline":"h1"},

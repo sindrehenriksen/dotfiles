@@ -324,7 +324,8 @@ _desk_follow_resolve_spills() { # results.jsonl spill-dir
 			saved="$(jq -r 'if type == "array" then [.[] | select(.type? == "text") | .text] | join("\n") else tojson end' \
 				"$2/$(basename "$file")" 2> /dev/null)" || saved=""
 			[ -n "$saved" ] || saved="$(cat "$2/$(basename "$file")")"
-			jq -c --arg t "$saved" '.content = $t | .is_error = false' <<< "$line"
+			# From a file, not --arg: a saved result can be past the argument limit.
+			jq -c --rawfile t <(printf '%s' "$saved") '.content = $t | .is_error = false' <<< "$line"
 		else
 			printf '%s\n' "$line"
 		fi

@@ -150,6 +150,13 @@ if head -n1 prompt.txt | grep -q '^CHANGELOG'; then
 		key="$(jq -r .issueIdOrKey <<< "$input")"
 		if ! jq -cn --argjson i "$input" '{tool_name:"mcp__tickets__getIssue", tool_input:$i}' | bash -c "$cmd" > /dev/null 2>&1; then
 			emit_result "cl$n" "PreToolUse hook denied this call" true
+		elif [ -f "$FOLLOW_TEST_FIX/changelog-$key.json" ] && [ -n "${FAKE_CHANGELOG_SAVED:-}" ]; then
+			# Too large to show: Claude Code saves it under the project
+			# folder and the call gets the pointer it returns live.
+			saved="$CLAUDE_CONFIG_DIR/projects/$(printf '%s' "$(pwd -P)" | tr -c 'A-Za-z0-9' '-')/sess/tool-results/mcp-tickets-getIssue-$n.txt"
+			mkdir -p "$(dirname "$saved")"
+			jq -c '[{type: "text", text: tojson}]' "$FOLLOW_TEST_FIX/changelog-$key.json" > "$saved"
+			emit_text_result "cl$n" "$(printf '<persisted-output>\nOutput too large (57.9KB). Full output saved to: %s\n\nPreview (first 2KB):\n{\n  "expand": "renderedFields"\n...\n</persisted-output>' "$saved")"
 		elif [ -f "$FOLLOW_TEST_FIX/changelog-$key.json" ]; then
 			emit_text_result "cl$n" "$(cat "$FOLLOW_TEST_FIX/changelog-$key.json")"
 		else
@@ -680,6 +687,24 @@ assert_contains "one whose changelog did not come back is forwarded as before" "
 assert_contains "and the log names it" "no changelog came back for LNK-7" "$(cat "$ROOT/own-fields.out")"
 assert_contains "the footer counts the user's field move" "1 own field move" "$msg"
 assert_eq "every changelog call carries the configured site" '["tickets.example"]' "$(jq -cs '[.[].cloudId] | unique' "$FIX/changelog-inputs.jsonl")"
+
+echo
+echo "=== a changelog Claude Code saved to a file is read from it, however large ==="
+jq --arg s "$SID_A" '.queues[$s].changes = [] | .queues[$s].skipped = {}' "$DESK_FOLLOW_STATE_FILE" > "$ROOT/s" && mv "$ROOT/s" "$DESK_FOLLOW_STATE_FILE"
+{ history acc-owner summary "Renamed by the user, saved"; } | changelog > "$FIX/changelog-ABC-1.json"
+# Past ARG_MAX, as a long description's edit history runs.
+history acc-owner description BIG | jq -c '.items[0].toString = ("x" * 1500000)' | changelog > "$FIX/changelog-ABC-11.json"
+{
+	issue ABC-1 "In QA" "" "[]" "[]" "" "Renamed by the user, saved"
+	issue ABC-11 "Done" ABC-1 "[]" "[]" "" "A long description the user edited"
+} | rest > "$FIX/changes-result.json"
+: > "$FOLLOW_TEST_SENT"
+: > "$CALLS"
+FAKE_CHANGELOG_SAVED=1 "$RUN" follow > "$ROOT/saved-changelog.out" 2>&1
+assert_eq "the saved changelogs were read" "" "$(grep -o 'no changelog came back for.*' "$ROOT/saved-changelog.out")"
+assert_not_contains "so the user's own rename is not sent" "Renamed by the user, saved" "$(jq -r '.message // empty' "$FOLLOW_TEST_SENT")"
+assert_not_contains "nor the user's edit to a description past the argument limit" "A long description the user edited" "$(jq -r '.message // empty' "$FOLLOW_TEST_SENT")"
+rm -f "$FIX/changelog-ABC-11.json"
 
 echo
 echo "=== with no cloud_id configured, no changelog is read and field moves are forwarded ==="
