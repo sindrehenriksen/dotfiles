@@ -3,10 +3,16 @@
 -- suggestion applied as its tree. Nothing in it ever enters the user's notes unless
 -- the user takes it, and nothing here tracks a suggestion by position.
 --
--- Review key: merges the user's CURRENT buffer text (ours) with the proposal
--- (theirs) against the pass-time version (base) with `git merge-file`, the user's
--- text winning any conflict, and opens the result in a split above the notes
--- as an `acwrite` scratch buffer, both windows in diff mode, the cursor in the
+-- Review key: by default the review is one window, the notes buffer itself
+-- with the open suggestions drawn over it (desk.inline, M.view_refresh). Its
+-- model is the user's CURRENT buffer text (ours) merged with the proposal
+-- (theirs) against the pass-time version (base) with `git merge-file`, the
+-- user's text winning any conflict; in the one window that merged buffer is
+-- never shown, only kept as the model the drawing and the keys are worked
+-- out from. `<leader>gv` switches between the two views (M.view).
+--
+-- The other view, the split, opens the merged buffer above the notes as an
+-- `acwrite` scratch buffer, both windows in diff mode, the cursor in the
 -- split. The user takes a hunk with `dp` there or `do` in the notes window
 -- (editing first is fine) and leaves one alone to mean "not now" (the next
 -- pass carries it). The decline key makes the hunk under the cursor in the
@@ -18,12 +24,6 @@
 -- recorded. Adjacent suggestions are one diff hunk, so
 -- the decline key (and `<leader>gA`, which takes one) act on a single
 -- suggestion's own lines rather than the whole hunk.
---
--- That is the split view, the default. The other view is one window, the
--- notes buffer itself with the open suggestions drawn over it (desk.inline,
--- M.view_refresh); the merged buffer is then never shown, only kept as the
--- model the drawing and the keys are worked out from. `<leader>gv` switches
--- between the two (M.view).
 local apply = require("desk.apply")
 local block = require("desk.block")
 local git = require("desk.git")
@@ -38,11 +38,11 @@ local M = {}
 
 M.PROPOSAL_REF = proposal.REF
 
--- How a review shows: "split", the merged text above the notes in two diff
--- windows, or "inline", the notes alone with the suggestions drawn over
--- them (desk.inline). The toggle
--- key switches the open review and is remembered for the next one.
-M.view = "split"
+-- How a review shows: "inline", the notes alone with the suggestions drawn
+-- over them (desk.inline), or "split", the merged text above the notes in
+-- two diff windows. The toggle key switches the open review and is
+-- remembered for the next one.
+M.view = "inline"
 
 -- ---------------------------------------------------------------------------
 -- Repo/file context

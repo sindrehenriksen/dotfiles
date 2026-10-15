@@ -166,8 +166,8 @@ local function settle()
 	end)
 end
 
-print("=== the split is the default; one window is the view key away ===")
-assert_eq("a review opens as the split", "split", review.view)
+print("=== one window is the default; the split is the view key away ===")
+assert_eq("a review opens in one window", "inline", review.view)
 
 print("\n=== one window: the notes themselves, suggestions drawn over them ===")
 do
