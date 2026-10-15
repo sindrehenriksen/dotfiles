@@ -310,14 +310,16 @@ _desk_follow_issues_for() { # tool-uses tool-results jql tool
 _desk_follow_jql_keys() { jq -r 'join(", ")' <<< "$1"; }
 
 # A tool result past Claude Code's output limit arrives as a pointer ("...
-# Output has been saved to <path>"); the call's --spill-dir copied the
+# Output has been saved to <path>", or for a large result Claude Code
+# persists itself, "<persisted-output> … Full output saved to: <path>");
+# the call's --spill-dir copied the
 # file out. Rewrites each such result's content to the saved text (a
 # content-block array is joined), leaving every other result as it was.
 _desk_follow_resolve_spills() { # results.jsonl spill-dir
 	local line text file saved
 	while IFS= read -r line; do
 		text="$(jq -r "$_DESK_JQ_RESULT_TEXT" <<< "$line" 2> /dev/null)"
-		file="$(grep -oE 'saved to [^ ]+' <<< "$text" | head -n1 | sed 's/^saved to //; s/[.,;:)]*$//')"
+		file="$(grep -oE 'saved to:? [^ ]+' <<< "$text" | head -n1 | sed -E 's/^saved to:? //; s/[.,;:)]*$//')"
 		if [ -n "$file" ] && [ -f "$2/$(basename "$file")" ]; then
 			saved="$(jq -r 'if type == "array" then [.[] | select(.type? == "text") | .text] | join("\n") else tojson end' \
 				"$2/$(basename "$file")" 2> /dev/null)" || saved=""

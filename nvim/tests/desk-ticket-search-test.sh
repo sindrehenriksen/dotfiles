@@ -102,8 +102,15 @@ case "$cwd" in
 			*/lost-*) ;;
 			*) mkdir -p "$(dirname "$saved")"; jq -c '[{type: "text", text: tojson}]' "$ISSUES" > "$saved" ;;
 		esac
-		jq -nc --arg p "$saved" '{type:"user",message:{content:[{type:"tool_result",tool_use_id:"u1",
-			content:("Output too large. Output has been saved to " + $p + ".")}]}}'
+		# Two pointer forms: the MCP limit's, and Claude Code's own for a
+		# large result (FAKE_POINTER=persisted), as a live call returns it.
+		if [ "${FAKE_POINTER:-}" = persisted ]; then
+			jq -nc --arg p "$saved" '{type:"user",message:{content:[{type:"tool_result",tool_use_id:"u1",
+				content:("<persisted-output>\nOutput too large (57.9KB). Full output saved to: " + $p + "\n\nPreview (first 2KB):\n[\n  {\n    \"type\": \"text\",\n...\n</persisted-output>")}]}}'
+		else
+			jq -nc --arg p "$saved" '{type:"user",message:{content:[{type:"tool_result",tool_use_id:"u1",
+				content:("Output too large. Output has been saved to " + $p + ".")}]}}'
+		fi
 		echo '{"type":"assistant","message":{"content":[{"type":"text","text":"{\"candidates\":[{\"key\":\"MADE-UP-1\"}]}"}]}}'
 		echo '{"type":"result","subtype":"success"}'
 		;;
@@ -131,6 +138,11 @@ assert_eq "coverage counts what came back and what was kept" "3 returned, 2 crea
 	"$(jq -r '.coverage' "$J_SEEN" 2> /dev/null)"
 assert_eq "the query the call ran was the runner's, in relative minutes" "true" \
 	"$(grep -qx '(project = ABC AND creator != currentUser()) AND created >= -[0-9]*m' "$J_SEEN.query" && echo true || echo false)"
+
+rm -f "$J_SEEN"
+FAKE_POINTER=persisted DESK_CONFIG="$INST/config.json" "$DESK_RUN" spilled --rerun > "$ROOT/persisted.out" 2>&1
+assert_eq "a result Claude Code persisted (\"saved to: <path>\") is read from the saved file too" "3 returned" \
+	"$(jq -r '.coverage' "$J_SEEN" 2> /dev/null | cut -d, -f1)"
 
 echo
 echo "=== a saved result that cannot be read fails the step, and the judge is told ==="
