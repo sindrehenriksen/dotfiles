@@ -177,6 +177,28 @@ if head -n1 prompt.txt | grep -q '^CHANGELOG'; then
 	echo '{"type":"result","subtype":"success","total_cost_usd":0.01}'
 	exit 0
 fi
+if head -n1 prompt.txt | grep -q '^You fetch one more page'; then
+	# The runner's call for one more page of a search: its pinned
+	# arguments, answered from $FOLLOW_TEST_FIX/page-<token>.json, saved to
+	# the project folder as a result too large to show.
+	input="$(jq -c '.[0]' pinned-args.json)"
+	printf '%s\n' "$input" >> "$FOLLOW_TEST_FIX/page-inputs.jsonl"
+	tok="$(jq -r .nextPageToken <<< "$input")"
+	cmd="$(jq -r '.hooks.PreToolUse[0].hooks[0].command' "$settings")"
+	emit_use "p-$tok" mcp__tickets__search "$input"
+	if ! jq -cn --argjson i "$input" '{tool_name:"mcp__tickets__search", tool_input:$i}' | bash -c "$cmd" > /dev/null 2>&1; then
+		emit_result "p-$tok" "PreToolUse hook denied this call" true
+	elif [ -f "$FOLLOW_TEST_FIX/page-$tok.json" ]; then
+		saved="$CLAUDE_CONFIG_DIR/projects/$(printf '%s' "$(pwd -P)" | tr -c 'A-Za-z0-9' '-')/sess/tool-results/mcp-tickets-search-$tok.txt"
+		mkdir -p "$(dirname "$saved")"
+		cp "$FOLLOW_TEST_FIX/page-$tok.json" "$saved"
+		emit_text_result "p-$tok" "Error: result (145,310 characters) exceeds maximum allowed tokens. Output has been saved to $saved."
+	else
+		emit_result "p-$tok" "No such page" true
+	fi
+	echo '{"type":"result","subtype":"success","total_cost_usd":0.01}'
+	exit 0
+fi
 echo "fetch" >> "$FOLLOW_TEST_CALLS"
 cp prompt.txt "$FOLLOW_TEST_LAST_PROMPT"
 scope="$(sed -n 's/^SCOPE: //p' prompt.txt)"
@@ -590,14 +612,37 @@ jira_before="$(jq .last_jira_ok "$DESK_FOLLOW_STATE_FILE")"
 issue ABC-2 "Blocked" | jq -cs '{issues:., isLast:false, nextPageToken:"p2"}' > "$FIX/changes-result.json"
 "$RUN" follow > /dev/null 2>&1
 assert_eq "a short pagination keeps the ticket window" "$jira_before" "$(jq .last_jira_ok "$DESK_FOLLOW_STATE_FILE")"
+
+echo
+echo "=== a query past one page is paged by the runner, through pages saved to a file ==="
+cp "$DESK_FOLLOW_STATE_FILE" "$ROOT/state-before-paging.json"
+cp "$FIX/changes-result.json" "$ROOT/changes-before-paging.json"
 jq '.scope.refreshed_at = 0' "$DESK_FOLLOW_STATE_FILE" > "$ROOT/s" && mv "$ROOT/s" "$DESK_FOLLOW_STATE_FILE"
 cp "$FIX/scope-result.json" "$ROOT/scope-before.json"
+echo '{"issues":{"nodes":[]}}' > "$FIX/changes-result.json"
 issue ABC-1 "In QA" | jq -cs '{issues: {nodes: ., pageInfo: {hasNextPage: true, endCursor: "c2"}}}' > "$FIX/scope-result.json"
+issue ABC-90 "To Do" ABC-1 | jq -cs '{issues: {nodes: ., pageInfo: {hasNextPage: true, endCursor: "c3"}}}' > "$FIX/page-c2.json"
+issue ABC-91 "To Do" ABC-1 | jq -cs '{issues: {nodes: ., pageInfo: {hasNextPage: false}}}' > "$FIX/page-c3.json"
+rm -f "$FIX/page-inputs.jsonl"
 out="$("$RUN" follow 2>&1)"
-assert_contains "a scope query stopped short says why" "the scope query did not come back (its last page says more follow, and no call fetched them)" "$out"
+scope_q="$(jq -r 'select(.nextPageToken == "c2") | .jql' "$FIX/page-inputs.jsonl")"
+assert_eq "two more pages are fetched, each with the token the last one gave" '["c2","c3"]' "$(jq -cs '[.[].nextPageToken]' "$FIX/page-inputs.jsonl")"
+assert_contains "pinned to the scope query's own arguments" "parent in (" "$scope_q"
+assert_not_contains "and the scope comes back" "the scope query did not come back" "$out"
+assert_eq "with the tickets of every page" '["ABC-90","ABC-91"]' "$(jq -c '.scope.children["ABC-1"] | sort' "$DESK_FOLLOW_STATE_FILE")"
+jq '.scope.refreshed_at = 0' "$DESK_FOLLOW_STATE_FILE" > "$ROOT/s" && mv "$ROOT/s" "$DESK_FOLLOW_STATE_FILE"
+issue ABC-91 "To Do" ABC-1 | jq -cs '{issues: {nodes: ., pageInfo: {hasNextPage: true, endCursor: "c2"}}}' > "$FIX/page-c3.json"
+rm -f "$FIX/page-inputs.jsonl"
+out="$("$RUN" follow 2>&1)"
+assert_eq "a token already followed stops the paging" '["c2","c3"]' "$(jq -cs '[.[].nextPageToken]' "$FIX/page-inputs.jsonl")"
+assert_contains "and the scope query that stopped short says why" "the scope query did not come back (its last page says more follow, and paging stopped there)" "$out"
 assert_contains "and its call is kept" "the ticket-fetch call is kept in $DESK_RUNS_ROOT/follow-$(date +%F)/ticket-fetch-failed" "$out"
 assert_eq "with its results" "true" "$([ -s "$DESK_RUNS_ROOT/follow-$(date +%F)/ticket-fetch-failed/jira-results.jsonl" ] && echo true || echo false)"
+assert_eq "and its page calls" "true" "$([ -s "$DESK_RUNS_ROOT/follow-$(date +%F)/ticket-fetch-failed/jira-page2-stream.jsonl" ] && echo true || echo false)"
 mv "$ROOT/scope-before.json" "$FIX/scope-result.json"
+mv "$ROOT/changes-before-paging.json" "$FIX/changes-result.json"
+mv "$ROOT/state-before-paging.json" "$DESK_FOLLOW_STATE_FILE"
+rm -f "$FIX"/page-c*.json
 
 echo
 echo "=== a run with only skipped changes sends nothing, and the counts carry ==="
