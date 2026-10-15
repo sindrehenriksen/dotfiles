@@ -32,6 +32,8 @@ Dependabot reads the package ecosystems its config lists, and nothing else. Look
 - **Dev tools it can't read**: for Python it reads PEP 621 `[project]` and `[project.optional-dependencies]` and PEP 735 `[dependency-groups]`, not tool-specific environment tables (hatch envs, say). Dev and test tools belong in `[dependency-groups]`, or Dependabot never proposes them.
 - **Ecosystems without an entry** in `dependabot.yml`, or a repo with no config at all: add the entry (see Config) rather than bumping them by hand each time. That includes `pre-commit`, which Dependabot supports as an ecosystem since 2026-03, updating hook revs.
 
+**Latest means the upstream's stable channel**, not its newest release. A release list can run ahead of it, pnpm's for one, which tags releases `next` and promotes them weeks later: for a tool published on npm, read the `latest` dist-tag (`npm view <package> dist-tags`).
+
 They take the same order as the PRs, a toolchain or runtime major with the other majors. **One version everywhere**: a tool or runtime runs at the same version wherever it appears in the repo (one Python, say), and across repos meant to share a toolchain, unless there is a reason, written beside the divergent pin. Within one project every place moves in one change, even across its separate release pipelines; rolling out one area after another is for when it pays off, typically across separate projects.
 
 ## Order
