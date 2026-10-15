@@ -1047,8 +1047,10 @@ function M.define_highlights()
 		end
 		set(0, "DeskDiffFiller", { link = "NonText" })
 		set(0, "DeskInlineNew", { link = "DiffAdd" })
+		set(0, "DeskInlineNewText", { link = "DiffText" })
 		set(0, "DeskInlineOld", { link = "DiffDelete" })
 		set(0, "DeskInlineOldLine", { link = "DiffDelete" })
+		set(0, "DeskInlineOldText", { link = "DiffText" })
 		set(0, "DeskInlineSign", { link = "DiffAdd" })
 		set(0, "DeskInlineLabel", { link = "Comment" })
 		return
@@ -1072,11 +1074,14 @@ function M.define_highlights()
 	set(0, "DeskDiffRemoveText", { bg = strong(red) })
 	set(0, "DeskDiffFiller", { bg = away(bg, fg, -0.06), fg = away(bg, fg, -0.3) })
 	-- The one-window view: new lines as the split shows them, the lines they
-	-- replace dimmed and struck through on the removal colour.
+	-- replace on the removal colour in the text's own colour, so they stay
+	-- easy to read; the words an edit changes in either, stronger.
 	set(0, "DeskInlineNew", { bg = away(green, bg, -0.45) })
+	set(0, "DeskInlineNewText", { bg = strong(green) })
 	set(0, "DeskInlineSign", { fg = strong(green), bg = away(green, bg, -0.45) })
-	set(0, "DeskInlineOld", { fg = away(fg, bg, -0.4), strikethrough = true })
+	set(0, "DeskInlineOld", {})
 	set(0, "DeskInlineOldLine", { bg = away(red, bg, -0.45) })
+	set(0, "DeskInlineOldText", { bg = strong(red) })
 	set(0, "DeskInlineLabel", { fg = away(fg, bg, -0.45), italic = true })
 end
 
@@ -2389,9 +2394,10 @@ end
 -- ---------------------------------------------------------------------------
 -- The one window: the notes buffer itself, decorated. What a suggestion
 -- brings in is drawn as virtual lines, tinted, and what it would remove or
--- replace stays as the real lines, struck through; its headline sits beside
--- it. There is nothing to keep in step: typing edits the notes, and every
--- change of them works the decorations out again from the notes and the
+-- replace stays as the real lines, tinted red ("struck" below), the words
+-- an edit changes marked more strongly; its headline sits beside it. There
+-- is nothing to keep in step: typing edits the notes, and every change of
+-- them works the decorations out again from the notes and the
 -- proposal, as the split works out what is still open. The merged text is
 -- kept in the review buffer, never shown, so take, overview and count work
 -- as in the split; declines made here (`s.view_declined`) leave it out of
@@ -2516,12 +2522,34 @@ end
 function M.view_draw(s)
 	local notes = buf_lines(s.notes_buf)
 	local placed = s.view_placed or {}
-	local view = { blocks = {}, struck = {}, width = 80 }
+	local view = { blocks = {}, struck = {}, width = 80, old_words = {} }
 	local spots = {}
 	local struck_at = {}
 	local seq = {}
 	for i, item in ipairs(s.view_open or {}) do
 		seq[item.id] = i
+	end
+	-- What changes within the lines an edit replaces: its old rows' changed
+	-- words (view.old_words) and its new lines' (new_words, by item id).
+	local new_words = {}
+	for _, item in ipairs(s.view_open or {}) do
+		local pl = placed[item.id]
+		if item.kind == "edit" and pl and #pl.rows > 0 and pl.lines and #pl.lines > 0 then
+			local rows = vim.deepcopy(pl.rows)
+			table.sort(rows)
+			local old = {}
+			for i, r in ipairs(rows) do
+				old[i] = notes[r] or ""
+			end
+			new_words[item.id] = {}
+			for _, pair in ipairs(inline.pair_lines(old, pl.lines)) do
+				local a, b = inline.word_changes(old[pair[1]], pl.lines[pair[2]])
+				if a then
+					view.old_words[rows[pair[1]]] = a
+					new_words[item.id][pair[2]] = b
+				end
+			end
+		end
 	end
 	-- Struck lines, a run per suggestion.
 	for _, item in ipairs(s.view_open or {}) do
@@ -2562,12 +2590,15 @@ function M.view_draw(s)
 		else
 			row, above = gap, false
 		end
-		local lines, labels = {}, {}
+		local lines, labels, words = {}, {}, {}
 		for _, e in ipairs(list) do
 			labels[#lines + 1] = e.item.headline or e.item.id
+			for k, r in pairs(new_words[e.item.id] or {}) do
+				words[#lines + k] = r
+			end
 			vim.list_extend(lines, e.lines)
 		end
-		view.blocks[#view.blocks + 1] = { row = row, above = above, lines = lines, labels = labels }
+		view.blocks[#view.blocks + 1] = { row = row, above = above, lines = lines, labels = labels, words = words }
 	end
 	-- Where each suggestion sits: its first struck line, else the line its
 	-- new lines hang on.

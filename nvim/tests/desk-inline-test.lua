@@ -117,11 +117,15 @@ end
 -- The decorations on `buf`: struck rows, and virtual blocks as
 -- { row, above, lines (with any label) }.
 local function decor(buf)
-	local out = { struck = {}, blocks = {}, labels = {} }
+	local out = { struck = {}, blocks = {}, labels = {}, old_words = {}, new_words = {} }
 	for _, m in ipairs(vim.api.nvim_buf_get_extmarks(buf, inline.NS, 0, -1, { details = true })) do
 		local d = m[4]
 		if d.hl_group == "DeskInlineOld" then
 			out.struck[#out.struck + 1] = m[2] + 1
+		end
+		if d.hl_group == "DeskInlineOldText" then
+			local line = vim.api.nvim_buf_get_lines(buf, m[2], m[2] + 1, false)[1]
+			out.old_words[#out.old_words + 1] = line:sub(m[3] + 1, d.end_col)
 		end
 		if d.virt_lines then
 			local lines = {}
@@ -129,6 +133,9 @@ local function decor(buf)
 				local t = {}
 				for _, c in ipairs(vl) do
 					t[#t + 1] = c[1]
+					if c[2] == "DeskInlineNewText" then
+						out.new_words[#out.new_words + 1] = c[1]
+					end
 				end
 				lines[#lines + 1] = table.concat(t)
 			end
@@ -184,6 +191,44 @@ do
 	assert_eq("an added line is drawn where it would go", { line_of(nb, "- b3"), false }, { add and add.row, add and add.above })
 	assert_true("a removal's headline sits beside its struck line", (d.labels[line_of(nb, "- stale")] or ""):match("drop the stale line"))
 	assert_true("the bar names the keys", vim.wo.winbar:match("^" .. vim.pesc(review.INLINE_KEY_HINT)))
+end
+
+print("\n=== what an edit changes within a line is marked more strongly ===")
+do
+	assert_eq("the changed word, in the old line and the new", { { { 2, 5 } }, { { 2, 5 } } }, { inline.word_changes("- old line", "- new line") })
+	assert_eq("a word with letters past ASCII is one word", { { { 8, 11 } }, { { 8, 14 } } }, { inline.word_changes("møte i dag", "møte i morgen") })
+	assert_eq("an added word is marked only in the new line", { {}, { { 6, 10 } } }, { inline.word_changes("- buy milk", "- buy oat milk") })
+	assert_eq("lines with no word in common: no marks, the tint alone", nil, inline.word_changes("- alpha beta", "* gamma"))
+	assert_eq("lines pair where a hunk replaces them, an added one unpaired", { { 1, 1 }, { 2, 3 } }, inline.pair_lines({ "- one", "- two", "- keep" }, { "- one!", "- inserted", "- two!", "- keep" }))
+
+	local buf = vim.api.nvim_create_buf(false, true)
+	vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "- an old line here" })
+	inline.draw(buf, {
+		struck = { { first = 1, last = 1 } },
+		old_words = { [1] = { { 5, 8 } } },
+		blocks = { { row = 1, above = true, lines = { "- an new line here, changed" }, words = { { { 5, 8 }, { 18, 27 } } } } },
+		width = 12,
+	})
+	local d = decor(buf)
+	assert_eq("the old line's changed word is marked", { "old" }, d.old_words)
+	assert_eq("the new line's, across the pieces it wraps into", { "new", ", ", "changed" }, d.new_words)
+	assert_eq("and the wrapped line still reads whole", "- an new line here, changed", table.concat(d.blocks[1].lines))
+	vim.api.nvim_buf_delete(buf, { force = true })
+
+	local _, nb = setup()
+	d = decor(nb)
+	assert_eq("in the review, the edit's old word", { "old" }, d.old_words)
+	assert_eq("and its new one; the removal and the addition have none", { "new" }, d.new_words)
+
+	local tgc = vim.o.termguicolors
+	vim.o.termguicolors = true
+	review.define_highlights()
+	local old = vim.api.nvim_get_hl(0, { name = "DeskInlineOld" })
+	assert_true("the lines going away are not struck through", not old.strikethrough)
+	assert_true("they are tinted red instead, their words that change stronger", vim.api.nvim_get_hl(0, { name = "DeskInlineOldLine" }).bg ~= nil and vim.api.nvim_get_hl(0, { name = "DeskInlineOldText" }).bg ~= vim.api.nvim_get_hl(0, { name = "DeskInlineOldLine" }).bg)
+	assert_true("the new lines' changed words stronger than their tint", vim.api.nvim_get_hl(0, { name = "DeskInlineNewText" }).bg ~= vim.api.nvim_get_hl(0, { name = "DeskInlineNew" }).bg)
+	vim.o.termguicolors = tgc
+	review.define_highlights()
 end
 
 print("\n=== typing edits the notes, and the decorations follow ===")
