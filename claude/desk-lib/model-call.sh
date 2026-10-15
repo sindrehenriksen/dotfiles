@@ -391,7 +391,14 @@ desk_extract_tool_uses() {
 # has no assistant text at all (a hung/killed call, or one that only ever
 # called tools).
 desk_extract_final_text() {
-	local stream_file="$1"
+	local stream_file="$1" result
+	# The result line's own `result` is the call's whole final text; the last
+	# assistant line is only its last message, which need not hold it.
+	result="$(jq -rs '[.[] | select(.type == "result") | .result | strings] | last // empty' "$stream_file" 2> /dev/null)"
+	if [ -n "$result" ]; then
+		printf '%s\n' "$result"
+		return 0
+	fi
 	jq -cs '[.[] | select(.type == "assistant")] | last' "$stream_file" 2> /dev/null \
 		| jq -r '
 			if . == null then ""

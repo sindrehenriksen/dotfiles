@@ -101,6 +101,14 @@ desk_brief_prepare() {
 	if [ -n "${PASS_SCRATCH:-}" ] && [ -s "$PASS_SCRATCH/mail-noise.json" ]; then
 		cp -f "$PASS_SCRATCH/mail-noise.json" "$run/mail-noise.json"
 	fi
+	# A fetch reply that held no JSON, kept so what it fetched can still be read.
+	rm -f "$run"/*-reply.txt
+	if [ -n "${PASS_SCRATCH:-}" ]; then
+		local reply
+		for reply in "$PASS_SCRATCH"/*-reply.txt; do
+			[ -f "$reply" ] && cp -f "$reply" "$run/"
+		done
+	fi
 
 	desk_brief_notes_changes "$pass" "$run" "$repo" "$head" "${files[@]}"
 	desk_brief_gone_edits "$run" "$repo" "${files[@]}"

@@ -487,6 +487,17 @@ $(git -C "$repo" show "HEAD:$f" 2> /dev/null)"
 			if [ -n "$ticket_digest_cfg" ] && [ "$result" = "ok" ]; then
 				desk_ticket_digest_build "$pass" "$id" "$ticket_digest_cfg" "$timezone" || result="failed"
 			fi
+			# A reply a judge or the brief reads that holds no JSON object
+			# would reach them as `{}`, read as quiet; it fails the source
+			# instead, its text kept for the run directory.
+			if [ "$result" = "ok" ] && desk_fetch_reply_used "$pass_config" "$config" "$id"; then
+				final_text="$(desk_extract_final_text "$PASS_SCRATCH/${id}-stream.jsonl")"
+				if [ -z "$(desk_reply_json "$final_text")" ]; then
+					printf '%s\n' "$final_text" > "$PASS_SCRATCH/$id-reply.txt"
+					desk_log "$pass" "$id: its reply holds no JSON object ($(printf '%s' "$final_text" | wc -c | tr -d ' ') characters) — failing the source"
+					result="failed"
+				fi
+			fi
 			if [ "$id" = "$ticket_status_step_id" ] && [ "$result" = "ok" ]; then
 				desk_build_ticket_cache "$PASS_SCRATCH/${id}-tool-uses.jsonl" "$PASS_SCRATCH/${id}-tool-results.jsonl" \
 					"$ticket_search_tool" > /dev/null \

@@ -111,9 +111,18 @@ case "$(pwd -P)" in
 	*-F-web-*)
 		emit_use u1 WebSearch '{"query":"news"}'
 		emit_text_result u1 'A post: https://example.com/a and more'
-		jq -cn '{type:"assistant",message:{content:[{type:"text",text:({candidates:[{url:"https://example.com/a",summary:"a post"}]} | tojson)}]}}'
+		if [ -n "${FAKE_WEB_REPLY:-}" ]; then
+			jq -cn --arg t "$FAKE_WEB_REPLY" '{type:"assistant",message:{content:[{type:"text",text:$t}]}}'
+		else
+			jq -cn '{type:"assistant",message:{content:[{type:"text",text:({candidates:[{url:"https://example.com/a",summary:"a post"}]} | tojson)}]}}'
+		fi
+		[ -z "${FAKE_WEB_TRAILER+x}" ] || jq -cn --arg t "$FAKE_WEB_TRAILER" '{type:"assistant",message:{content:[{type:"text",text:$t}]}}'
 		;;
 esac
+if [ -n "${FAKE_RESULT_TEXT:-}" ]; then
+	jq -cn --arg t "$FAKE_RESULT_TEXT" '{type:"result",subtype:"success",total_cost_usd:0.01,result:$t}'
+	exit 0
+fi
 echo '{"type":"result","subtype":"success","total_cost_usd":0.01}'
 FAKE
 chmod +x "$FAKEBIN/claude"
@@ -443,6 +452,22 @@ assert_eq "only the edits settled as gone since the judged brief, still declined
 assert_contains "and the message names the file" ", gone-edits.json." \
 	"$(bash -c 'source "$1/common.sh"; source "$1/brief.sh"; echo "{\"scheduled_date\":\"2026-11-02\"}" > "$2/run.json"; echo "{}" > "$2/staged.json"; desk_brief_message testpass "$2"' _ "$LIB" "$GE/testpass-2026-11-02")"
 git -C "$repo" update-ref -d refs/desk/ledger
+
+echo
+echo "=== a fetch reply is read as JSON however it is wrapped, and one with none fails the source ==="
+sessions <<< "$CENTRAL central-x true"
+FAKE_WEB_REPLY=$'Here it is:\n```json\n{"candidates": [{"url": "https://example.com/a", "summary": "fenced"}]}\n```' run 2026-10-26
+assert_eq "a reply in a code fence is still the step's file" "fenced" \
+	"$(jq -r '.candidates[0].summary' "$DESK_RUNS_ROOT/testpass-2026-10-26/inputs/f-web.json" 2> /dev/null)"
+FAKE_WEB_TRAILER="" FAKE_RESULT_TEXT='{"candidates": [{"url": "https://example.com/a", "summary": "from the result line"}]}' run 2026-10-28
+assert_eq "a final text held by the result line, the last message empty, is still read" "from the result line" \
+	"$(jq -r '.candidates[0].summary' "$DESK_RUNS_ROOT/testpass-2026-10-28/inputs/f-web.json" 2> /dev/null)"
+FAKE_WEB_REPLY="I read the channels but ran out of room before the JSON." run 2026-10-27
+R7="$DESK_RUNS_ROOT/testpass-2026-10-27"
+assert_eq "a reply holding no JSON fails the source, so the pass reads partial" "partial F-web" \
+	"$(jq -r '"\(.passes.testpass.result) \(.passes.testpass.failed_sources | join(","))"' "$DESK_STATUS_FILE" 2> /dev/null)"
+assert_true "the run status says so, never ok" "$(grep -q 'its reply was not the JSON the step asks for' "$R7/run-status.txt" && echo true || echo false)"
+assert_eq "and the reply is kept in the run directory" "I read the channels but ran out of room before the JSON." "$(cat "$R7/F-web-reply.txt" 2> /dev/null)"
 
 echo
 echo "=== a pending run outlives the seven-day sweep; a delivered one does not ==="

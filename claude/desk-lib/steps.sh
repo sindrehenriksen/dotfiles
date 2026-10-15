@@ -403,7 +403,8 @@ desk_seed_named_file() {
 			elif [ -n "$step_id" ]; then
 				text="$(desk_extract_final_text "$pass_scratch/${step_id}-stream.jsonl" 2> /dev/null)"
 			fi
-			if [ -n "$text" ] && jq -e . > /dev/null 2>&1 <<< "$text"; then
+			[ -z "$text" ] || text="$(desk_reply_json "$text")"
+			if [ -n "$text" ]; then
 				printf '%s' "$text" > "$dest_dir/$name"
 			else
 				case "$name" in
@@ -425,7 +426,9 @@ desk_seed_named_file() {
 desk_failed_source_reason() {
 	local id="$1" result="$2" ended
 	ended="$(cat "$PASS_SCRATCH/$id.call-end" 2> /dev/null)"
-	if [ "$result" = "timeout" ]; then
+	if [ -f "$PASS_SCRATCH/$id-reply.txt" ]; then
+		printf "its call ran, but its reply was not the JSON the step asks for, so what it fetched is unknown, not none; the reply is kept in the run directory as %s-reply.txt" "$id"
+	elif [ "$result" = "timeout" ]; then
 		printf 'its call ran out of time'
 	elif [ -z "$ended" ]; then
 		printf 'its call never ran'
@@ -675,6 +678,38 @@ desk_step_model_call() {
 }
 
 desk_step_fetch() { desk_step_model_call "$@"; }
+
+# desk_reply_json <text>: the JSON object a reply holds, compacted: the text
+# itself, or, when the model wrapped it in a code fence or a sentence, the
+# object inside the fence or from the first `{` to the last `}`. Prints
+# nothing when none of those parses as an object.
+desk_reply_json() {
+	local text="$1" candidate
+	for candidate in "$text" "$(sed -n '/^[[:space:]]*```/,/^[[:space:]]*```/{/^[[:space:]]*```/d;p;}' <<< "$text")" \
+		"$([[ "$text" == *"{"*"}"* ]] && { t="{${text#*\{}"; printf '%s}' "${t%\}*}"; })"; do
+		[ -n "$candidate" ] || continue
+		if jq -e 'type == "object"' > /dev/null 2>&1 <<< "$candidate"; then
+			jq -c . <<< "$candidate"
+			return 0
+		fi
+	done
+	return 0
+}
+
+# desk_fetch_reply_used <pass_config> <config> <step id>: true when the
+# step's own reply is what a judge or the brief reads: its `<id>.json`
+# (lowercased) is among their input_files, or it is the mail step and
+# f-private.json is. A step whose file the runner builds from the raw
+# results (the ticket search) is not one.
+desk_fetch_reply_used() {
+	local pass_config="$1" config="$2" id="$3"
+	jq -e --arg id "$id" --arg mail "$(jq -r '.mail_fetch_step_id // empty' <<< "$config")" '
+		([.steps[]? | select(.id == $id) | has("ticket_search")] | any | not)
+		and ((([.steps[]? | select(.kind == "judge") | (.input_files // [])[]] + ((.brief // {}).input_files // []))
+		      | map(if type == "object" then .name else . end)) as $names
+		     | ($names | index(($id | ascii_downcase) + ".json")) != null
+		       or ($id == $mail and ($names | index("f-private.json")) != null))' <<< "$pass_config" > /dev/null 2>&1
+}
 desk_step_ticket_status() { desk_step_model_call "$@"; }
 
 # desk_input_files_json <step-or-brief json> <files json>: its `input_files`,
