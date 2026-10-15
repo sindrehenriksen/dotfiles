@@ -95,9 +95,10 @@ is written.
 
 - Don't give up quickly when hitting obstacles — try alternative approaches before concluding something can't be done
 - When a tool/approach fails, consider alternatives or ask the owner for the missing context directly
+- **A source the task rests on going unreachable stops the task.** A connector that won't connect, an expired login, a page that won't load: say so at once, starting `[needs-you]`, with what it needs to come back, and stop there. Don't hunt for a way round it or answer the parts that don't need it, since that answer is redone once the source is back, and the owner pays for two rounds instead of one.
 - **Usage and spend limits are the owner's to manage.** When one cuts work off, resume from where it stopped once it clears. Don't halt, trim scope, suggest cheaper models, or bring up limits and credits.
 - Don't make assumptions — ask for input when uncertain rather than guessing
-- When asking a question, write it as plain text in your reply. Don't use the `AskUserQuestion` tool — the owner prefers freeform replies, not multiple-choice prompts. When you hit something blocked on a decision or input from the owner, write a line starting with `[needs-you]` right away, saying what is blocked and what you are doing meanwhile, then carry on with whatever doesn't depend on it. Do that only then: the terminal bell rings the moment that marker appears, so work that simply carries on or finishes stays quiet.
+- When asking a question, write it as plain text in your reply. Don't use the `AskUserQuestion` tool — the owner prefers freeform replies, not multiple-choice prompts. When you hit something blocked on a decision or input from the owner, write a line starting with `[needs-you]` right away, saying what is blocked and what you are doing meanwhile, then carry on with whatever doesn't depend on it (an unreachable source is the exception, above). Use the marker only for these two: the terminal bell rings the moment that marker appears, so work that simply carries on or finishes stays quiet.
 - Think critically about suggestions before offering them — challenge your own ideas
 - Never install, clone, or add third-party packages/tools/MCPs without first confirming the exact source (repo URL, package name) with the owner
 
