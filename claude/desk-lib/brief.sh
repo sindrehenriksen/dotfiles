@@ -77,12 +77,17 @@ desk_brief_prepare() {
 	desk_follow_up_run_status "$pass" > "$run/run-status.txt"
 	local head
 	head="$(git -C "$repo" rev-parse -q --verify HEAD 2> /dev/null)"
+	# `fetch` is what a step rerun needs to fetch as the run did: its window
+	# (epoch seconds), mode and date.
 	desk_status_read | jq --arg p "$pass" --arg d "$scheduled_date" --arg head "$head" \
-		--argjson instructions "$(printf '%s\n' "${rendered[@]}" | jq -R . | jq -cs .)" '
+		--argjson instructions "$(printf '%s\n' "${rendered[@]}" | jq -R . | jq -cs .)" \
+		--argjson ph "$placeholders" '
 		(.passes[$p] // {}) as $s
 		| {pass: $p, scheduled_date: $d, result: ($s.result // "unknown"),
 		   stopped_at: ($s.stopped_at // null), failed: ($s.failed_sources // []),
-		   instructions: $instructions, notes_head: $head}' > "$run/run.json"
+		   instructions: $instructions, notes_head: $head,
+		   fetch: {window_start: ($ph.slack_oldest // null), window_end: ($ph.slack_latest // null),
+		           mode: ($ph.mode // null), today: ($ph.today // null)}}' > "$run/run.json"
 
 	# What the pass staged itself (a capture step's lines), and what it
 	# held back over the caps, so the brief can say so.
@@ -427,4 +432,109 @@ desk_brief_retry() {
 	fi
 	DESK_DENY_HOOK_SCRIPT="$work/deny-unlisted-tool.sh" desk_brief_deliver_all "$pass" "$brief" "$config"
 	rm -rf "$work"
+}
+
+# ---------------------------------------------------------------------------
+# A step rerun (`desk-run <pass> --rerun-step <id> [--date <date>]`): one
+# fetch that failed in a brief's run, run again by hand once its source is
+# fixed, into that run's directory, so the central session can judge the run
+# whole without the pass running again. It fetches the run's own window, and
+# moves neither the fetch window nor the ticket digest's snapshots: like any
+# partial pass, the next pass still covers that window. Nothing is sent, and
+# the status file keeps the run's own result.
+# ---------------------------------------------------------------------------
+
+# desk_brief_rerun_check <pass_config> <run dir> <step id>: whether that step
+# can be rerun into that run, printing why not when it can't.
+desk_brief_rerun_check() {
+	local pass_config="$1" run="$2" id="$3"
+	if [ -z "$(desk_brief_config "$pass_config")" ]; then
+		printf 'this pass has no brief, so it has no run directory to rerun a step into'
+		return 1
+	fi
+	if ! jq -e --arg id "$id" 'any(.steps[]?; .id == $id and .kind == "fetch")' > /dev/null 2>&1 <<< "$pass_config"; then
+		printf 'this pass has no fetch step %s; only a fetch step is rerun' "$id"
+		return 1
+	fi
+	if [ ! -f "$run/run.json" ]; then
+		printf 'no run directory for that date (%s)' "$run"
+		return 1
+	fi
+	if ! jq -e '(.fetch.window_start // "") != "" and (.fetch.window_end // "") != ""' > /dev/null 2>&1 "$run/run.json"; then
+		printf 'that run recorded no fetch window, so a step cannot fetch what the run did'
+		return 1
+	fi
+	if ! jq -e --arg id "$id" '(.failed // []) | index($id) != null' > /dev/null 2>&1 "$run/run.json"; then
+		printf '%s did not fail in that run (failed: %s); only a failed step is rerun' "$id" \
+			"$(jq -r '(.failed // []) | if length == 0 then "none" else join(", ") end' "$run/run.json" 2> /dev/null)"
+		return 1
+	fi
+}
+
+# desk_step_input_names <step json> <config> <brief json>: the brief inputs
+# this fetch step's results feed, one per line: its own <id>.json, and
+# f-private.json, ticket-digest.json, inbox.json or tickets.json when it is
+# the mail step, has a ticket digest or a mail triage, or is the ticket
+# status check.
+desk_step_input_names() {
+	jq -rn --argjson step "$1" --argjson config "$2" --argjson brief "$3" '
+		([$brief.input_files[]? | strings]) as $names
+		| [(($step.id | ascii_downcase) + ".json"),
+		   (if $step.id == $config.mail_fetch_step_id then "f-private.json" else empty end),
+		   (if $step.ticket_digest then "ticket-digest.json" else empty end),
+		   (if $step.mail_triage then "inbox.json" else empty end),
+		   (if $step.id == $config.ticket_status_step_id then "tickets.json" else empty end)]
+		| unique[] | select(. as $n | $names | index($n))'
+}
+
+_desk_brief_clock() { # epoch: local date and time
+	date -r "$1" '+%F %H:%M' 2> /dev/null || date -d "@$1" '+%F %H:%M'
+}
+
+# desk_brief_rerun_apply <pass> <pass_config> <config> <run dir> <step id>
+#   <result> <pass_ctx json> <file>...
+# After the rerun's fetch: on success, reseeds the inputs it feeds, adds its
+# links to allowed-urls.txt, takes it off run.json's failed list (a partial
+# run with none left reads ok) and says so in run-status.txt; on failure,
+# says why there and keeps its reply. Either way run.json records the try.
+# Returns 1 when the step failed again.
+desk_brief_rerun_apply() {
+	local pass="$1" pass_config="$2" config="$3" run="$4" id="$5" result="$6" pass_ctx="$7"
+	shift 7
+	local at step brief files_json ctx names fresh name reason
+	at="$(desk_now)"
+	step="$(jq -c --arg id "$id" '[.steps[] | select(.id == $id)][0]' <<< "$pass_config")"
+	brief="$(desk_brief_config "$pass_config")"
+	if [ "$result" != "ok" ]; then
+		reason="$(desk_failed_source_reason "$id" "$result")"
+		[ -f "$PASS_SCRATCH/$id-reply.txt" ] && cp -f "$PASS_SCRATCH/$id-reply.txt" "$run/"
+		printf '%s was rerun by hand at %s and failed again: %s.\n' "$id" "$(_desk_brief_clock "$at")" "$reason" >> "$run/run-status.txt"
+		jq --arg id "$id" --argjson at "$at" '.reruns = ((.reruns // []) + [{step: $id, at: $at, result: "failed"}])' \
+			"$run/run.json" > "$run/run.json.tmp" && mv -f "$run/run.json.tmp" "$run/run.json"
+		desk_log "$pass" "--rerun-step: $id failed again for $(basename "$run"): $reason"
+		return 1
+	fi
+
+	files_json="$(printf '%s\n' "$@" | jq -R . | jq -cs .)"
+	ctx="$(jq -c --argjson files "$files_json" '. + {files: $files}' <<< "$pass_ctx")"
+	names="$(desk_step_input_names "$step" "$config" "$brief" | jq -R . | jq -cs .)"
+	fresh="$PASS_SCRATCH/rerun-inputs"
+	mkdir -p "$fresh" "$run/inputs"
+	desk_seed_inputs "$names" "$fresh" "$ctx"
+	while IFS= read -r name; do
+		[ -f "$fresh/$name" ] && mv -f "$fresh/$name" "$run/inputs/$name"
+	done < <(jq -r '.[]' <<< "$names")
+	rm -f "$run/$id-reply.txt"
+	{
+		cat "$run/allowed-urls.txt" 2> /dev/null
+		desk_pass_allowed_urls "$pass_config" "$config"
+	} | sed '/^$/d' | sort -u > "$run/allowed-urls.txt.tmp" && mv -f "$run/allowed-urls.txt.tmp" "$run/allowed-urls.txt"
+	jq --arg id "$id" --argjson at "$at" '
+		.failed = ((.failed // []) - [$id])
+		| (if .result == "partial" and (.failed | length) == 0 then .result = "ok" else . end)
+		| .reruns = ((.reruns // []) + [{step: $id, at: $at, result: "ok"}])' \
+		"$run/run.json" > "$run/run.json.tmp" && mv -f "$run/run.json.tmp" "$run/run.json"
+	printf '%s was rerun by hand at %s and succeeded: what it fetched is now in inputs/ (%s).\n' "$id" "$(_desk_brief_clock "$at")" \
+		"$(jq -r 'if length == 0 then "nothing the brief reads" else join(", ") end' <<< "$names")" >> "$run/run-status.txt"
+	desk_log "$pass" "--rerun-step: $id succeeded for $(basename "$run"); inputs: $(jq -r 'join(", ")' <<< "$names")"
 }

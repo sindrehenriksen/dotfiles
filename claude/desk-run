@@ -47,13 +47,24 @@ source "$DESK_RUN_DIR/desk-lib/sleep-inhibit.sh"
 
 pass="${1:-}"
 if [ -z "$pass" ]; then
-	echo "usage: desk-run <pass> [--rerun]   (a follow pass: desk-run <pass> [follow options])" >&2
+	echo "usage: desk-run <pass> [--rerun | --rerun-step <step id> [--date YYYY-MM-DD]]   (a follow pass: desk-run <pass> [follow options])" >&2
 	exit 2
 fi
 # `--rerun`: run the pass again for a scheduled date that already ran, by
 # hand, follow-up tab included.
+# `--rerun-step <id>`: run one fetch step that failed in a brief's run again,
+# by hand, into that run's directory (desk_brief_rerun_step); nothing else
+# of the pass runs, and nothing is sent.
 rerun="false"
-[ "${2:-}" = "--rerun" ] && rerun="true"
+rerun_step=""
+rerun_date=""
+case "${2:-}" in
+	--rerun) rerun="true" ;;
+	--rerun-step)
+		rerun_step="${3:-}"
+		[ "${4:-}" = "--date" ] && rerun_date="${5:-}"
+		;;
+esac
 
 # The deny hook every connector call runs under needs jq and realpath; without
 # them it could only deny everything, so a pass that would make such a call
@@ -95,12 +106,19 @@ if [[ "$(jq -r '.kind // empty' <<< "$pass_config")" == "follow" ]]; then
 	source "$DESK_RUN_DIR/desk-lib/follow.sh"
 	export DESK_CONFIG
 	export CLAUDE_CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
-	if [ "${2:-}" = "--rerun" ]; then
-		desk_log "$pass" "--rerun is for the scheduled passes: a follow pass has no once-a-day guard, so desk-run $pass runs it now"
+	if [ "${2:-}" = "--rerun" ] || [ "${2:-}" = "--rerun-step" ]; then
+		desk_log "$pass" "${2} is for the scheduled passes: a follow pass has no once-a-day guard, so desk-run $pass runs it now"
 		exit 2
 	fi
 	desk_follow_main "$pass" "$pass_config" "${@:2}"
 	exit $?
+fi
+if [ "${2:-}" = "--rerun-step" ]; then
+	if [ -z "$rerun_step" ] || { [ -n "${4:-}" ] && [ "${4:-}" != "--date" ]; } \
+		|| { [ "${4:-}" = "--date" ] && ! [[ "$rerun_date" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; }; then
+		echo "usage: desk-run <pass> --rerun-step <step id> [--date YYYY-MM-DD]" >&2
+		exit 2
+	fi
 fi
 
 # Generic ids: dotfiles is public and names no instantiation-specific fact
@@ -182,10 +200,22 @@ scheduled_dow="$(desk_weekday_of_date "$scheduled_date")"
 [ -n "$scheduled_dow" ] || scheduled_dow="$(date +%u)"
 [ "$scheduled_dow" -ge 6 ] && is_weekend="true"
 
+# A step rerun goes into the run directory of the date it names (default
+# the slot's), which must hold a brief whose run that step failed in.
+rerun_run_dir=""
+if [ -n "$rerun_step" ]; then
+	[ -z "$rerun_date" ] || scheduled_date="$rerun_date"
+	rerun_run_dir="$(desk_brief_run_dir "$pass" "$scheduled_date")"
+	if ! why="$(desk_brief_rerun_check "$pass_config" "$rerun_run_dir" "$rerun_step")"; then
+		desk_log "$pass" "--rerun-step $rerun_step for $scheduled_date: $why"
+		exit 2
+	fi
+fi
+
 # `trigger.same_day_only`: a run whose slot falls on an earlier day than
 # today is a no-op, so a login or a wake catches up only today's slot.
 same_day_only="$(jq -r '.trigger.same_day_only == true' <<< "$pass_config")"
-if [ "$same_day_only" = "true" ]; then
+if [ "$same_day_only" = "true" ] && [ -z "$rerun_step" ]; then
 	run_date="$(if desk_is_linux; then date -d "@$(desk_now)" +%F; else date -j -r "$(desk_now)" +%F; fi)"
 	if [ "$scheduled_date" != "$run_date" ]; then
 		desk_log "$pass" "slot of $scheduled_date, not today ($run_date), and same_day_only: no-op"
@@ -196,7 +226,9 @@ fi
 # The once-a-day guard: a slot firing after this scheduled date's pass
 # already ran is a no-op, whatever came of that run. What failed is said in
 # the follow-up tab, and the next day's window covers what it missed.
-if [ "$rerun" = "true" ]; then
+if [ -n "$rerun_step" ]; then
+	desk_log "$pass" "--rerun-step: running $rerun_step again for $scheduled_date's run"
+elif [ "$rerun" = "true" ]; then
 	desk_log "$pass" "--rerun: running $scheduled_date again"
 	rm -f "$DESK_GUARD_DIR/followup-$pass-$scheduled_date" "$DESK_GUARD_DIR/followup-pending-$pass-$scheduled_date"
 elif desk_guard_already_ran_today "$pass" "$scheduled_date"; then
@@ -242,16 +274,19 @@ export DESK_DENY_HOOK_SCRIPT
 # use. `follow_up_step` (this pass's own config, absent for anything not
 # yet wired to it) is resolved into an actual tab once the pass is done,
 # below.
-desk_prune_old_runs
-# A calls_root moved the runs elsewhere: the old root is swept by the same
-# rule until it is empty.
-if [ "$DESK_RUNS_ROOT" != "$DESK_STATE_DIR/runs" ] && [ -d "$DESK_STATE_DIR/runs" ]; then
-	desk_prune_old_runs "" "$DESK_STATE_DIR/runs"
-	rmdir "$DESK_STATE_DIR/runs" 2> /dev/null
+# A step rerun sweeps nothing: the run it goes into may be past the sweep's age.
+if [ -z "$rerun_step" ]; then
+	desk_prune_old_runs
+	# A calls_root moved the runs elsewhere: the old root is swept by the same
+	# rule until it is empty.
+	if [ "$DESK_RUNS_ROOT" != "$DESK_STATE_DIR/runs" ] && [ -d "$DESK_STATE_DIR/runs" ]; then
+		desk_prune_old_runs "" "$DESK_STATE_DIR/runs"
+		rmdir "$DESK_STATE_DIR/runs" 2> /dev/null
+	fi
+	# Left by passes from before a pass ran once a day, when failed sources were
+	# retried from a same-day cache.
+	[ -d "$DESK_STATE_DIR/fetch-cache" ] && rm -rf "${DESK_STATE_DIR:?}/fetch-cache"
 fi
-# Left by passes from before a pass ran once a day, when failed sources were
-# retried from a same-day cache.
-[ -d "$DESK_STATE_DIR/fetch-cache" ] && rm -rf "${DESK_STATE_DIR:?}/fetch-cache"
 follow_up_step="$(jq -r '.follow_up_step // empty' <<< "$pass_config")"
 
 # A fixed lookback window for F-private's Gmail queries (epoch
@@ -278,6 +313,12 @@ if [ -n "$last_fetch_ok" ]; then
 	gmail_window_start="$last_fetch_ok"
 else
 	gmail_window_start=$((gmail_window_end - gmail_window_lookback))
+fi
+# A step rerun fetches the window its run fetched, so what it brings
+# fits beside what the run's other steps brought.
+if [ -n "$rerun_step" ]; then
+	gmail_window_start="$(jq -r '.fetch.window_start' "$rerun_run_dir/run.json")"
+	gmail_window_end="$(jq -r '.fetch.window_end' "$rerun_run_dir/run.json")"
 fi
 # The digest label is instantiation-specific data, so it's a config field, never a
 # literal here — an instantiation with no digest source configured still
@@ -320,8 +361,9 @@ if [ "$repo_toplevel" != "$repo_resolved" ]; then
 fi
 repo="$repo_resolved"
 # Recorded as running only from here, so a run refused over its config never
-# counts as the day's run (desk_guard_already_ran_today).
-desk_status_set_running "$pass" "$scheduled_date"
+# counts as the day's run (desk_guard_already_ran_today). A step rerun is
+# not a run of the pass, so the status keeps the run it went into.
+[ -n "$rerun_step" ] || desk_status_set_running "$pass" "$scheduled_date"
 mapfile -t files < <(jq -r '.files[]' <<< "$config")
 # Where capture items land: `captures_file`,
 # default the first configured file.
@@ -345,6 +387,10 @@ export CLAUDE_CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 # desk_status_set_running overwrote it) rather than re-reading it now.
 mode="$(desk_compute_mode "$last_ok")"
 today="$(date +%F)"
+if [ -n "$rerun_step" ]; then
+	mode="$(jq -r --arg m "$mode" '.fetch.mode // $m' "$rerun_run_dir/run.json")"
+	today="$(jq -r --arg t "$today" '.fetch.today // $t' "$rerun_run_dir/run.json")"
+fi
 window_start_iso="$(desk_iso8601_at_tz "$gmail_window_start" "$timezone")"
 window_end_iso="$(desk_iso8601_at_tz "$gmail_window_end" "$timezone")"
 # The morning pass's one source definition. Its actual name is instantiation-specific data, same
@@ -402,6 +448,105 @@ any_fetch_step_ran="false"
 # "only shown when actually nonzero" gate.
 proposal_overflow_json='{"act": 0, "worth_knowing": 0, "wildcard": 0}'
 
+# desk_run_fetch_step: runs the fetch step in $id and $step_json with this
+# pass's placeholders and window, then everything the runner reads from its
+# raw results (the ticket cache, the paged searches, the mail triage, the
+# ticket search and digest), and sets $result. The step loop and a step
+# rerun both run a fetch through here.
+desk_run_fetch_step() {
+	local ticket_digest_cfg ticket_search_cfg mail_triage_cfg placeholders notes_text f tokens_json jql page_window final_text
+	ticket_digest_cfg="$(desk_ticket_digest_config "$step_json" "$config")"
+	if [ -n "$ticket_digest_cfg" ] && [ "$(jq -r '.jql // empty' <<< "$ticket_digest_cfg")" = "" ]; then
+		desk_log "$pass" "$id: ticket_digest has no jql — no ticket digest"
+		ticket_digest_cfg=""
+	fi
+	ticket_search_cfg="$(desk_ticket_search_config "$step_json")"
+	mail_triage_cfg="$(desk_mail_triage_config "$step_json")"
+	placeholders="$common_placeholders"
+	if [ "$id" = "$ticket_status_step_id" ]; then
+		notes_text=""
+		for f in "${files[@]}"; do
+			notes_text="$notes_text
+$(git -C "$repo" show "HEAD:$f" 2> /dev/null)"
+		done
+		tokens_json="$(jq -c '.tokens // []' <<< "$config")"
+		jql="$(desk_build_jql "$notes_text" "$tokens_json")"
+		placeholders="$(jq -c --arg jql "$jql" '. + {jql: $jql}' <<< "$common_placeholders")"
+	fi
+	if [ -n "$ticket_digest_cfg" ]; then
+		placeholders="$(jq -c --argjson d "$(desk_ticket_digest_window "$id" "$ticket_digest_cfg" \
+			"$gmail_window_start" "$gmail_window_end")" '. + $d' <<< "$placeholders")"
+	fi
+	if [ -n "$ticket_search_cfg" ]; then
+		placeholders="$(jq -c --argjson d "$(desk_ticket_search_window "$id" "$ticket_search_cfg" \
+			"$gmail_window_start" "$gmail_window_end")" '. + $d' <<< "$placeholders")"
+	fi
+	if [ -n "$mail_triage_cfg" ]; then
+		placeholders="$(jq -c --argjson d "$(desk_mail_triage_placeholders "$mail_triage_cfg")" '. + $d' <<< "$placeholders")"
+	fi
+	result="$(desk_step_fetch "$pass" "$step_json" "" "$placeholders" "" "" "$scheduled_date")"
+	# The status search over every key the notes name is often
+	# past the output limit, so its result is read from the saved
+	# file.
+	if [ "$result" = "ok" ] && [ "$id" = "$ticket_status_step_id" ]; then
+		_desk_follow_resolve_spills "$PASS_SCRATCH/$id-tool-results.jsonl" "$PASS_SCRATCH/$id-spill" \
+			> "$PASS_SCRATCH/$id-tool-results.resolved" \
+			&& mv -f "$PASS_SCRATCH/$id-tool-results.resolved" "$PASS_SCRATCH/$id-tool-results.jsonl"
+	fi
+	# A search past the output limit is paged by the runner, which
+	# alone can read the page token from the saved result.
+	if [ "$result" = "ok" ] && { [ -n "$ticket_search_cfg" ] || [ -n "$ticket_digest_cfg" ]; }; then
+		for page_window in "$PASS_SCRATCH/$id-ticket-search-window.jsonl" "$PASS_SCRATCH/$id-ticket-digest-window.jsonl"; do
+			[ -f "$page_window" ] || continue
+			desk_fetch_remaining_pages "$pass" "$id" "$(jq -r '(.tools // [])[0] // empty' <<< "$step_json")" \
+				"$(jq -r '.jql // empty' "$page_window")" "$step_json"
+		done
+	fi
+	if [ "$result" = "ok" ] && [ -n "$mail_triage_cfg" ]; then
+		desk_mail_triage_collect "$pass" "$id" "$mail_triage_cfg" \
+			"$mail_search_tool" "$today" || result="failed"
+	fi
+	if [ "$result" = "ok" ] && [ -n "$ticket_search_cfg" ]; then
+		desk_ticket_search_collect "$pass" "$id" "$ticket_search_cfg" \
+			"$(jq -r '(.tools // [])[0] // empty' <<< "$step_json")" || result="failed"
+	fi
+	if [ "$result" = "ok" ] && [ -n "$ticket_digest_cfg" ]; then
+		desk_ticket_digest_collect "$pass" "$id" "$ticket_digest_cfg" \
+			"$(jq -r '(.tools // [])[0] // empty' <<< "$step_json")" || result="failed"
+	fi
+	if [ -n "$ticket_digest_cfg" ] && [ "$result" = "ok" ]; then
+		desk_ticket_digest_build "$pass" "$id" "$ticket_digest_cfg" "$timezone" || result="failed"
+	fi
+	# A reply a judge or the brief reads that holds no JSON object
+	# would reach them as `{}`, read as quiet; it fails the source
+	# instead, its text kept for the run directory.
+	if [ "$result" = "ok" ] && desk_fetch_reply_used "$pass_config" "$config" "$id"; then
+		final_text="$(desk_extract_final_text "$PASS_SCRATCH/${id}-stream.jsonl")"
+		if [ -z "$(desk_reply_json "$final_text")" ]; then
+			printf '%s\n' "$final_text" > "$PASS_SCRATCH/$id-reply.txt"
+			desk_log "$pass" "$id: its reply holds no JSON object ($(printf '%s' "$final_text" | wc -c | tr -d ' ') characters) — failing the source"
+			result="failed"
+		fi
+	fi
+	if [ "$id" = "$ticket_status_step_id" ] && [ "$result" = "ok" ]; then
+		desk_build_ticket_cache "$PASS_SCRATCH/${id}-tool-uses.jsonl" "$PASS_SCRATCH/${id}-tool-results.jsonl" \
+			"$ticket_search_tool" > /dev/null \
+			|| desk_log "$pass" "$id: ticket cache parse failed, old cache kept"
+	fi
+}
+
+# A step rerun runs that one fetch and hands what it brought to the run
+# directory (brief.sh); no other step runs, and nothing is sent.
+if [ -n "$rerun_step" ]; then
+	id="$rerun_step"
+	step_json="$(jq -c --arg id "$id" '[.steps[] | select(.id == $id)][0]' <<< "$pass_config")"
+	result="failed"
+	desk_run_fetch_step
+	desk_log "$pass" "step $id (fetch, rerun): $result"
+	desk_brief_rerun_apply "$pass" "$pass_config" "$config" "$rerun_run_dir" "$id" "$result" "$pass_ctx" "${files[@]}"
+	exit $?
+fi
+
 steps_len="$(jq '.steps | length' <<< "$pass_config")"
 for ((i = 0; i < steps_len; i++)); do
 	step_json="$(jq -c ".steps[$i]" <<< "$pass_config")"
@@ -425,84 +570,7 @@ for ((i = 0; i < steps_len; i++)); do
 
 		fetch)
 			any_fetch_step_ran="true"
-			ticket_digest_cfg="$(desk_ticket_digest_config "$step_json" "$config")"
-			if [ -n "$ticket_digest_cfg" ] && [ "$(jq -r '.jql // empty' <<< "$ticket_digest_cfg")" = "" ]; then
-				desk_log "$pass" "$id: ticket_digest has no jql — no ticket digest"
-				ticket_digest_cfg=""
-			fi
-			ticket_search_cfg="$(desk_ticket_search_config "$step_json")"
-			mail_triage_cfg="$(desk_mail_triage_config "$step_json")"
-			placeholders="$common_placeholders"
-			if [ "$id" = "$ticket_status_step_id" ]; then
-				notes_text=""
-				for f in "${files[@]}"; do
-					notes_text="$notes_text
-$(git -C "$repo" show "HEAD:$f" 2> /dev/null)"
-				done
-				tokens_json="$(jq -c '.tokens // []' <<< "$config")"
-				jql="$(desk_build_jql "$notes_text" "$tokens_json")"
-				placeholders="$(jq -c --arg jql "$jql" '. + {jql: $jql}' <<< "$common_placeholders")"
-			fi
-			if [ -n "$ticket_digest_cfg" ]; then
-				placeholders="$(jq -c --argjson d "$(desk_ticket_digest_window "$id" "$ticket_digest_cfg" \
-					"$gmail_window_start" "$gmail_window_end")" '. + $d' <<< "$placeholders")"
-			fi
-			if [ -n "$ticket_search_cfg" ]; then
-				placeholders="$(jq -c --argjson d "$(desk_ticket_search_window "$id" "$ticket_search_cfg" \
-					"$gmail_window_start" "$gmail_window_end")" '. + $d' <<< "$placeholders")"
-			fi
-			if [ -n "$mail_triage_cfg" ]; then
-				placeholders="$(jq -c --argjson d "$(desk_mail_triage_placeholders "$mail_triage_cfg")" '. + $d' <<< "$placeholders")"
-			fi
-			result="$(desk_step_fetch "$pass" "$step_json" "" "$placeholders" "" "" "$scheduled_date")"
-			# The status search over every key the notes name is often
-			# past the output limit, so its result is read from the saved
-			# file.
-			if [ "$result" = "ok" ] && [ "$id" = "$ticket_status_step_id" ]; then
-				_desk_follow_resolve_spills "$PASS_SCRATCH/$id-tool-results.jsonl" "$PASS_SCRATCH/$id-spill" \
-					> "$PASS_SCRATCH/$id-tool-results.resolved" \
-					&& mv -f "$PASS_SCRATCH/$id-tool-results.resolved" "$PASS_SCRATCH/$id-tool-results.jsonl"
-			fi
-			# A search past the output limit is paged by the runner, which
-			# alone can read the page token from the saved result.
-			if [ "$result" = "ok" ] && { [ -n "$ticket_search_cfg" ] || [ -n "$ticket_digest_cfg" ]; }; then
-				for page_window in "$PASS_SCRATCH/$id-ticket-search-window.jsonl" "$PASS_SCRATCH/$id-ticket-digest-window.jsonl"; do
-					[ -f "$page_window" ] || continue
-					desk_fetch_remaining_pages "$pass" "$id" "$(jq -r '(.tools // [])[0] // empty' <<< "$step_json")" \
-						"$(jq -r '.jql // empty' "$page_window")" "$step_json"
-				done
-			fi
-			if [ "$result" = "ok" ] && [ -n "$mail_triage_cfg" ]; then
-				desk_mail_triage_collect "$pass" "$id" "$mail_triage_cfg" \
-					"$mail_search_tool" "$today" || result="failed"
-			fi
-			if [ "$result" = "ok" ] && [ -n "$ticket_search_cfg" ]; then
-				desk_ticket_search_collect "$pass" "$id" "$ticket_search_cfg" \
-					"$(jq -r '(.tools // [])[0] // empty' <<< "$step_json")" || result="failed"
-			fi
-			if [ "$result" = "ok" ] && [ -n "$ticket_digest_cfg" ]; then
-				desk_ticket_digest_collect "$pass" "$id" "$ticket_digest_cfg" \
-					"$(jq -r '(.tools // [])[0] // empty' <<< "$step_json")" || result="failed"
-			fi
-			if [ -n "$ticket_digest_cfg" ] && [ "$result" = "ok" ]; then
-				desk_ticket_digest_build "$pass" "$id" "$ticket_digest_cfg" "$timezone" || result="failed"
-			fi
-			# A reply a judge or the brief reads that holds no JSON object
-			# would reach them as `{}`, read as quiet; it fails the source
-			# instead, its text kept for the run directory.
-			if [ "$result" = "ok" ] && desk_fetch_reply_used "$pass_config" "$config" "$id"; then
-				final_text="$(desk_extract_final_text "$PASS_SCRATCH/${id}-stream.jsonl")"
-				if [ -z "$(desk_reply_json "$final_text")" ]; then
-					printf '%s\n' "$final_text" > "$PASS_SCRATCH/$id-reply.txt"
-					desk_log "$pass" "$id: its reply holds no JSON object ($(printf '%s' "$final_text" | wc -c | tr -d ' ') characters) — failing the source"
-					result="failed"
-				fi
-			fi
-			if [ "$id" = "$ticket_status_step_id" ] && [ "$result" = "ok" ]; then
-				desk_build_ticket_cache "$PASS_SCRATCH/${id}-tool-uses.jsonl" "$PASS_SCRATCH/${id}-tool-results.jsonl" \
-					"$ticket_search_tool" > /dev/null \
-					|| desk_log "$pass" "$id: ticket cache parse failed, old cache kept"
-			fi
+			desk_run_fetch_step
 			if [ "$result" != "ok" ]; then
 				# A source's own failure is never fatal to the pass (a
 				# "partial proposal"): recorded, logged, and the loop carries

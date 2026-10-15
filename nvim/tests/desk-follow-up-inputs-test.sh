@@ -52,7 +52,7 @@ assert_eq "the close step leaves the follow-up prompts nothing to offer" "false"
 assert_eq "the chat notes reach them" "Model X in preview|a models section" "$(jq -r '.chat_notes | fromjson | .[0] | "\(.text)|\(.home)"' <<< "$ph")"
 assert_eq "and the scheduled date, not today's" "2026-10-09" "$(jq -r '.scheduled_date' <<< "$ph")"
 assert_eq "the run status names the failed step and the close step's job" "true" \
-	"$(jq -r '.run_status | (contains("these steps failed, and nothing reruns them today: close") and contains("close (listing idle sessions to offer for closing)"))' <<< "$ph")"
+	"$(jq -r '.run_status | (contains("these steps failed, and nothing reruns them on its own: close") and contains("close (listing idle sessions to offer for closing)"))' <<< "$ph")"
 
 echo
 echo "=== summary: $pass passed, $fail failed ==="

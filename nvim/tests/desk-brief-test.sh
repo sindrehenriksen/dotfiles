@@ -109,6 +109,7 @@ if [ "$tools" = "SendMessage" ]; then
 fi
 case "$(pwd -P)" in
 	*-F-web-*)
+		[ -z "${BRIEF_TEST_WEB_PROMPT:-}" ] || cp prompt.txt "$BRIEF_TEST_WEB_PROMPT"
 		emit_use u1 WebSearch '{"query":"news"}'
 		emit_text_result u1 'A post: https://example.com/a and more'
 		if [ -n "${FAKE_WEB_REPLY:-}" ]; then
@@ -157,7 +158,8 @@ git -C "$repo" add notes.md reading.md
 git -C "$repo" commit -q -m initial
 git -C "$repo" branch -M main
 
-echo 'fetch the news' > "$ROOT/web.md"
+echo 'fetch the news {{window_start}} {{window_end}} {{mode}} {{today}}' > "$ROOT/web.md"
+export BRIEF_TEST_WEB_PROMPT="$ROOT/web-prompt.txt"
 printf 'Judge the run in {{run_dir}} from {{inputs}}, caps {{caps}}, for {{pass}} of {{scheduled_date}}.\n' > "$ROOT/brief.md"
 printf 'Offer the sessions in {{run_dir}}/close.\n' > "$ROOT/close.md"
 printf 'Send to {{to}}:\n-----BEGIN MESSAGE-----\n{{message}}\n-----END MESSAGE-----\n' > "$ROOT/send.md"
@@ -464,10 +466,60 @@ assert_eq "a final text held by the result line, the last message empty, is stil
 	"$(jq -r '.candidates[0].summary' "$DESK_RUNS_ROOT/testpass-2026-10-28/inputs/f-web.json" 2> /dev/null)"
 FAKE_WEB_REPLY="I read the channels but ran out of room before the JSON." run 2026-10-27
 R7="$DESK_RUNS_ROOT/testpass-2026-10-27"
+cp "$BRIEF_TEST_WEB_PROMPT" "$ROOT/web-prompt-1027.txt"
 assert_eq "a reply holding no JSON fails the source, so the pass reads partial" "partial F-web" \
 	"$(jq -r '"\(.passes.testpass.result) \(.passes.testpass.failed_sources | join(","))"' "$DESK_STATUS_FILE" 2> /dev/null)"
 assert_true "the run status says so, never ok" "$(grep -q 'its reply was not the JSON the step asks for' "$R7/run-status.txt" && echo true || echo false)"
 assert_eq "and the reply is kept in the run directory" "I read the channels but ran out of room before the JSON." "$(cat "$R7/F-web-reply.txt" 2> /dev/null)"
+assert_true "run.json records the window the run fetched, for a step rerun" \
+	"$(jq -e '.fetch.window_start != null and .fetch.window_end != null and .fetch.mode != null and .fetch.today != null' "$R7/run.json" > /dev/null 2>&1 && echo true || echo false)"
+
+echo
+echo "=== a failed fetch is rerun by hand into its run's directory, and only that step runs ==="
+rerun_step() { # args after the pass; output to $ROOT/rerun.out
+	DESK_NOW="$(day 2026-10-29)" TZ=UTC "$DESK_RUN" testpass "$@" > "$ROOT/rerun.out" 2>&1
+}
+status_before="$(jq -c '.passes.testpass' "$DESK_STATUS_FILE")"
+sent_before="$(sent_n)"
+window_before="$(jq -c '.fetch | {window_start, window_end}' "$R7/run.json")"
+jq '.failed += ["close"]' "$R7/run.json" > "$ROOT/rj.json" && mv -f "$ROOT/rj.json" "$R7/run.json"
+rerun_step --rerun-step close --date 2026-10-27
+assert_eq "a step that is not a fetch is refused, even one that failed" "2" "$?"
+assert_true "for not being a fetch" "$(grep -q 'this pass has no fetch step close; only a fetch step is rerun' "$ROOT/rerun.out" && echo true || echo false)"
+jq '.failed -= ["close"]' "$R7/run.json" > "$ROOT/rj.json" && mv -f "$ROOT/rj.json" "$R7/run.json"
+rerun_step --rerun-step F-mon --date 2026-10-27
+assert_eq "a fetch that did not fail in that run is refused" "2" "$?"
+assert_true "saying why" "$(grep -q 'F-mon did not fail in that run (failed: F-web); only a failed step is rerun' "$ROOT/rerun.out" && echo true || echo false)"
+rerun_step --rerun-step F-web --date 2026-10-02
+assert_eq "a date with no run directory is refused" "2" "$?"
+rerun_step --rerun-step F-web --date yesterday
+assert_eq "a date not written YYYY-MM-DD is a usage error" "2" "$?"
+FAKE_WEB_REPLY="Still no JSON." rerun_step --rerun-step F-web --date 2026-10-27
+assert_eq "a rerun that fails again exits 1" "1" "$?"
+assert_true "run-status.txt says it failed again, and why" \
+	"$(grep -q '^F-web was rerun by hand at .* and failed again: its call ran, but its reply was not the JSON' "$R7/run-status.txt" && echo true || echo false)"
+assert_eq "it is still failed in run.json" '["F-web"]' "$(jq -c '.failed' "$R7/run.json")"
+# A mode and date other than the ones a run on the rerun's own day would
+# get, so the prompt shows whether the recorded ones were used.
+jq '.fetch.mode = "RECORDED-MODE" | .fetch.today = "2026-10-27"' "$R7/run.json" > "$ROOT/rj.json" && mv -f "$ROOT/rj.json" "$R7/run.json"
+rerun_step --rerun-step F-web --date 2026-10-27
+assert_eq "a rerun that succeeds exits 0" "0" "$?"
+assert_eq "it fetched the run's own window, not one ending at the rerun" \
+	"$(awk 'NR == 1 {print $4, $5}' "$ROOT/web-prompt-1027.txt")" "$(awk 'NR == 1 {print $4, $5}' "$BRIEF_TEST_WEB_PROMPT")"
+assert_eq "with the mode and date the run recorded" "RECORDED-MODE 2026-10-27" "$(awk 'NR == 1 {print $6, $7}' "$BRIEF_TEST_WEB_PROMPT")"
+assert_eq "only that step ran: one model call, F-web's" "F-web" "$(sed -n 's/.*model call: \([^ ]*\)$/\1/p' "$ROOT/rerun.out" | paste -sd, -)"
+assert_eq "its reply is the run's input now" "https://example.com/a" "$(jq -r '.candidates[0].url' "$R7/inputs/f-web.json" 2> /dev/null)"
+assert_true "its links are allowed" "$(grep -qxF 'https://example.com/a' "$R7/allowed-urls.txt" && echo true || echo false)"
+assert_true "the failed reply kept from before is gone" "$([ ! -e "$R7/F-web-reply.txt" ] && echo true || echo false)"
+assert_eq "run.json: nothing failed any more, so the partial run reads ok, and the tries are recorded" 'ok [] ["failed","ok"]' \
+	"$(jq -r '"\(.result) \(.failed | tojson) \([.reruns[].result] | tojson)"' "$R7/run.json")"
+assert_eq "the window recorded is the one it fetched, unchanged" "$window_before" "$(jq -c '.fetch | {window_start, window_end}' "$R7/run.json")"
+assert_true "run-status.txt says it succeeded and what it brought" \
+	"$(grep -q '^F-web was rerun by hand at .* and succeeded: what it fetched is now in inputs/ (f-web.json).$' "$R7/run-status.txt" && echo true || echo false)"
+assert_eq "nothing was sent" "$sent_before" "$(sent_n)"
+assert_eq "and the status file keeps the run's own record: no run of the pass, no window moved" "$status_before" "$(jq -c '.passes.testpass' "$DESK_STATUS_FILE")"
+rerun_step --rerun-step F-web --date 2026-10-27
+assert_eq "once it succeeded, it is not rerun again" "2" "$?"
 
 echo
 echo "=== a pending run outlives the seven-day sweep; a delivered one does not ==="

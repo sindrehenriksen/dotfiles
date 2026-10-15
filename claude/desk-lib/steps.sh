@@ -1477,8 +1477,8 @@ desk_follow_up_run_status() {
 		| (($s.failed_sources // []) | join(", ")) as $failed
 		| "Its steps, in order: \($steps). "
 		+ (if $s.result == "ok" then "It finished ok: every step ran."
-			elif $s.result == "partial" then "It finished partial: these steps failed, and nothing reruns them today: \($failed). Every other step ran."
-			elif $s.result == "failed" then "It failed at step \($s.stopped_at // "unknown"), so the steps after that did not run, and nothing reruns them today."
+			elif $s.result == "partial" then "It finished partial: these steps failed, and nothing reruns them on its own: \($failed). Every other step ran."
+			elif $s.result == "failed" then "It failed at step \($s.stopped_at // "unknown"), so the steps after that did not run, and nothing reruns them on its own."
 				+ (if $failed != "" then " These sources had failed too: \($failed)." else "" end)
 			else "Its result was not recorded." end)')"
 	local notes=""
