@@ -2,7 +2,9 @@
 # Mail triage (claude/desk-lib/mail-triage.sh and the write step in
 # claude/desk-run): a fetch step's mailbox listing is sorted by the
 # instance's rules with no model involved; noise is trashed by the write
-# step, pinned per tool, and only under dry_run false; starred mail, an
+# step, pinned per tool, and only under dry_run false; a second offer
+# listing scopes what is offered and can offer starred mail, and a write
+# step with only the trash tool marks nothing read; starred mail, an
 # invitation still ahead, a person's unanswered mail and a partly listed
 # thread are never trashed or offered; the judge sees only the rest, and
 # its `mail_cleanup` is offered to the follow-up tab only where it names one
@@ -65,7 +67,17 @@ jq -cn --argjson t "$(printf '%s\n' "$answered" \
 	"$(msg d2 digest@news.example 'The daily digest' '["UNREAD","Label_9"]')" \
 	"$(msg x1 notifications@ci.example '[org/repo] Run failed: lint (0a0a0a)' '["INBOX"]' 3)" | jq -s .)" \
 	'{threads: $t}' > "$PAGE2"
-export PAGE1 PAGE2
+# The offer listing, when the config has an offer_query: the answered thread
+# and the newsletter from the inbox, an unread mail archived out of it, and
+# a starred CI run that a rule would otherwise trash.
+OFFER="$ROOT/offer.json"
+jq -cn --argjson t "$(printf '%s\n' "$answered" \
+	"$(msg c1 no-reply@vendor.example 'Your monthly newsletter' '["INBOX"]')" \
+	"$(msg o1 no-reply@vendor.example 'Your trial ends soon' '["UNREAD","Label_3"]')" \
+	"$(msg s1 notifications@ci.example '[org/repo] Run failed: release (5e5e5e)' '["INBOX","STARRED"]')" \
+	"$(jq -cn '{id: "n9", messageCount: 1, messages: [{sender: "kari@corp.example", subject: "Declined: Retro @ Thu 1 Oct 2020 13:00 (Me)", date: "2026-10-02T08:00:00Z", labelIds: ["INBOX"], snippet: "no"}]}')" | jq -s .)" \
+	'{threads: $t}' > "$OFFER"
+export PAGE1 PAGE2 OFFER
 
 FAKEBIN="$ROOT/fakebin"
 mkdir -p "$FAKEBIN"
@@ -82,7 +94,14 @@ case "$cwd" in
 	*-F-private*)
 		q="$(sed -n 's/^digest_query=//p' prompt.txt)"
 		use s1 "$SEARCH" "$(jq -cn --arg q "$q" '{query: $q}')"
-		result s1 '{}'
+		result s1 "${FAKE_DIGEST_RESULT:-{\}}"
+		n=0
+		for tid in ${FAKE_OPEN:-}; do
+			n=$((n + 1))
+			use "g$n" mcp__claude_ai_Gmail__get_thread "$(jq -cn --arg t "$tid" '{threadId: $t}')"
+			result "g$n" '{"messages":[{"plaintextBody":"the digest"}]}'
+		done
+		[ "${FAKE_FPRIVATE:-}" = fail ] && exit 1
 		;;
 	*-F-inbox*)
 		q="$(sed -n 's/^mail_triage_query=//p' prompt.txt)"
@@ -90,6 +109,11 @@ case "$cwd" in
 		result s1 "$(cat "$PAGE1")"
 		use s2 "$SEARCH" "$(jq -cn --arg q "$q" '{query: $q, pageSize: 20, pageToken: "tok-2"}')"
 		result s2 "$(cat "$PAGE2")"
+		oq="$(sed -n 's/^mail_triage_offer_query=//p' prompt.txt)"
+		if [ -n "$oq" ]; then
+			use s3 "$SEARCH" "$(jq -cn --arg q "$oq" '{query: $q, pageSize: 20}')"
+			result s3 "$(cat "$OFFER")"
+		fi
 		;;
 	*-J*)
 		cp inbox.json "$J_INBOX_COPY"
@@ -142,33 +166,40 @@ git -C "$repo" branch -M main
 
 mkdir -p "$ROOT/instance"
 echo 'digest_query={{digest_query}}' > "$ROOT/instance/f-private.md"
-echo 'mail_triage_query={{mail_triage_query}}' > "$ROOT/instance/f-inbox.md"
+printf 'mail_triage_query={{mail_triage_query}}\nmail_triage_offer_query={{mail_triage_offer_query}}\n' > "$ROOT/instance/f-inbox.md"
 echo 'judge' > "$ROOT/instance/j.md"
 echo 'mark read: {{thread_ids}} trash: {{trash_thread_ids}}' > "$ROOT/instance/w.md"
 echo '{"permissions":{"ask":["mcp__claude_ai_Gmail__trash_thread"]}}' > "$ROOT/instance/follow-up-settings.json"
 
-cfg() { # dry_run [offer_outside_inbox]
-	jq -n --arg repo "$repo" --argjson dry "$1" --argjson outside "${2:-false}" --arg s "$SEARCH" --arg u "$UNLABEL" --arg t "$TRASH" '
+cfg() { # dry_run [offer_outside_inbox] [offer listing and starred offers: true] [W's tools: trash-only] [digest rule: true]
+	jq -n --arg repo "$repo" --argjson dry "$1" --argjson outside "${2:-false}" --argjson offer "${3:-false}" --arg wtools "${4:-}" \
+		--argjson digest "${5:-false}" \
+		--arg s "$SEARCH" --arg u "$UNLABEL" --arg t "$TRASH" '
 	def steps: [
 		{id: "F-private", kind: "fetch", prompt: "f-private.md", tools: [$s, "mcp__claude_ai_Gmail__get_thread"], connector: true, timeout: 30},
 		{id: "F-inbox", kind: "fetch", prompt: "f-inbox.md", tools: [$s], connector: true, timeout: 30,
-		 mail_triage: {query: "in:inbox OR label:digest", self: ["me@corp.example"], offer_outside_inbox: $outside,
+		 mail_triage: ({query: "in:inbox OR label:digest", self: ["me@corp.example"], offer_outside_inbox: $outside,
 		   automated_senders: ["^no-?reply@", "^notifications@", "^digest@"],
 		   noise: [
 		     {name: "calendar reply", subject: "^(accepted|declined):"},
 		     {name: "past event notice", subject: "^(updated )?invitation:", past_event: true},
 		     {name: "CI run", from: "^notifications@ci\\.example$", subject: "\\] run failed:"},
-		     {name: "read digest", from: "^digest@news\\.example$", read: true},
-		     {name: "no condition at all"}]}},
+		     (if $digest then
+		        # A broader rule above the digest rule, which must not trash a digest unread.
+		        ({name: "news sender", from: "^digest@news\\.example$"}, {name: "digest", from: "^digest@news\\.example$", digest: true})
+		      else {name: "read digest", from: "^digest@news\\.example$", read: true} end),
+		     {name: "no condition at all"}]}
+		 + (if $offer then {offer_query: "in:inbox OR is:unread", offer_starred: true} else {} end))},
 		{id: "J", kind: "judge", prompt: "j.md", tools: ["Read"], connector: false, timeout: 30,
 		 input_files: ["notes.md", "inbox.json"]},
-		{id: "W", kind: "write", prompt: "w.md", tools: [$u, $t], connector: true, pinned_label: "UNREAD", timeout: 30}
+		{id: "W", kind: "write", prompt: "w.md", tools: (if $wtools == "trash-only" then [$t] else [$u, $t] end), connector: true, pinned_label: "UNREAD", timeout: 30}
 	];
 	{ notes_repo: $repo, timezone: "UTC", files: ["notes.md", "reading.md"],
 	  ticket_search_tool: "mcp__example-tickets__search", mail_search_tool: $s,
 	  ticket_status_step_id: "T", mail_fetch_step_id: "F-private",
 	  dry_run: $dry, follow_up_settings: "follow-up-settings.json",
-	  passes: {dry: {steps: steps}, live: {steps: steps}, short: {steps: steps}, outside: {steps: steps},
+	  passes: {dry: {steps: steps}, live: {steps: steps}, short: {steps: steps}, outside: {steps: steps}, offer: {steps: steps}, trashonly: {steps: steps},
+	    digestfail: {steps: steps}, digestrace: {steps: steps}, digestok: {steps: steps},
 	    triage_only: {steps: [steps[] | select(.id != "F-private")]}} }' > "$ROOT/instance/config.json"
 }
 
@@ -179,6 +210,8 @@ assert_eq "the dry pass exits ok" "0" "$?"
 noise_ids="$(grep -o 'would trash [a-z0-9]* ([^)]*)' "$ROOT/dry.out" | sort | paste -sd'|' -)"
 assert_eq "noise: the CI run, the calendar reply, the past notice and the read digest, each by its rule" \
 	"would trash d1 (read digest)|would trash n1 (CI run)|would trash n2 (calendar reply)|would trash n4 (past event notice)" "$noise_ids"
+assert_eq "noise keeps the listing's order, newest first, not the thread ids" "n1 n2 n4 d1" \
+	"$(grep -o 'would trash [a-z0-9]*' "$ROOT/dry.out" | awk '{print $3}' | paste -sd' ' -)"
 assert_true "the summary line counts the protected ones by reason" \
 	"$(grep -q 'protected invitation 1, partial 1, person 1, starred 1' "$ROOT/dry.out" && echo true || echo false)"
 assert_true "both pages were read: the listing is whole" \
@@ -239,6 +272,110 @@ assert_true "the coverage line says these are the listing, not the inbox" \
 	"$(jq -r '.coverage' "$J_INBOX_COPY" | grep -q 'the rest of the listing, in the inbox or not' && echo true || echo false)"
 assert_true "the protections still hold" \
 	"$(grep -q 'protected invitation 1, partial 1, person 1, starred 1' "$ROOT/outside.out" && echo true || echo false)"
+
+echo
+echo "=== offer_query: noise from the whole listing, offers only from the offer listing, starred ones offered ==="
+cfg true false true
+rm -f "$J_INBOX_COPY"
+DESK_CONFIG="$ROOT/instance/config.json" "$DESK_RUN" offer > "$ROOT/offer.out" 2>&1
+assert_eq "the pass exits ok" "0" "$?"
+assert_eq "noise comes from both listings, the starred CI run not among it" \
+	"would trash d1 (read digest)|would trash n1 (CI run)|would trash n2 (calendar reply)|would trash n4 (past event notice)|would trash n9 (calendar reply)" \
+	"$(grep -o 'would trash [a-z0-9]* ([^)]*)' "$ROOT/offer.out" | sort | paste -sd'|' -)"
+assert_eq "noise goes newest first across both listings, the listing's order breaking ties" "n9 n1 n2 n4 d1" \
+	"$(grep -o 'would trash [a-z0-9]*' "$ROOT/offer.out" | awk '{print $3}' | paste -sd' ' -)"
+assert_eq "the judge sees only what the offer listing listed, the archived unread mail included" "a1 c1 o1 s1" \
+	"$(jq -r '[.threads[].thread_id] | sort | join(" ")' "$J_INBOX_COPY")"
+assert_eq "a starred one is offered marked starred, the rest not" "s1" \
+	"$(jq -r '[.threads[] | select(.starred) | .thread_id] | join(" ")' "$J_INBOX_COPY")"
+assert_true "a starred thread outside the offer listing stays protected, and the person's mail outside it is left alone" \
+	"$(grep -q 'protected invitation 1, partial 1, starred 1$' "$ROOT/offer.out" && echo true || echo false)"
+assert_true "the coverage line names the offer listing and the starred flag" \
+	"$(jq -r '.coverage' "$J_INBOX_COPY" | grep -q 'what in:inbox OR is:unread lists, in the inbox or not.*a starred one says so' && echo true || echo false)"
+
+echo
+echo "=== a write step with only the trash tool marks nothing read and only trashes ==="
+cfg false false false trash-only
+rm -f "$W_PINS_COPY"
+DESK_CONFIG="$ROOT/instance/config.json" "$DESK_RUN" trashonly > "$ROOT/trash-only.out" 2>&1
+assert_eq "the pass exits ok" "0" "$?"
+assert_true "the log says it marks none read" \
+	"$(grep -q 'W: no tool to mark digests read among its tools, so it marks none read' "$ROOT/trash-only.out" && echo true || echo false)"
+assert_eq "only the trash tool is pinned, to the noise" "$TRASH:d1 n1 n2 n4" \
+	"$(jq -r 'to_entries | map("\(.key):\([.value[].threadId] | sort | join(" "))") | join("|")' "$W_PINS_COPY")"
+rm -f "$W_PINS_COPY"
+
+echo
+echo "=== a digest rule: a digest is trashed only once read, by the user or by this run's digest fetch ==="
+# dg_read is read already; dg_in the digest fetch returned and opened;
+# dg_skip it returned and did not open; dg_late landed after it, so it
+# never saw it; dg_nolabel came without labels, so whether it is read is
+# unknown; dg_two has two messages, and the read it got held one. The
+# listing stays the same on the second pass, as Gmail's would for the
+# digests still there.
+D1="$(if [ "$(uname)" = Linux ]; then date -u -d '2026-10-20 12:00' +%s; else date -u -j -f '%Y-%m-%d %H:%M' '2026-10-20 12:00' +%s; fi)"
+D2=$((D1 + 86400))
+dmsg() { # id date labels(json, or none) [messages]
+	jq -cn --arg id "$1" --arg d "$2" --arg l "$3" --argjson n "${4:-1}" '
+		({sender: "digest@news.example", subject: "The daily digest", date: $d, snippet: "digest"}
+		 + (if $l == "none" then {} else {labelIds: ($l | fromjson)} end)) as $m
+		| {id: $id, messageCount: $n, messages: [range($n) | $m]}'
+}
+PAGE2_DIG="$ROOT/page2-digest.json"
+jq -cn --argjson t "$(printf '%s\n' "$(dmsg dg_read 2026-10-19T07:00:00Z '["Label_9"]')" \
+	"$(dmsg dg_in 2026-10-19T08:00:00Z '["UNREAD","Label_9"]')" "$(dmsg dg_skip 2026-10-19T09:00:00Z '["UNREAD","Label_9"]')" \
+	"$(dmsg dg_late 2026-10-20T12:30:00Z '["UNREAD","Label_9"]')" "$(dmsg dg_nolabel 2026-10-19T06:00:00Z none)" \
+	"$(dmsg dg_two 2026-10-19T05:00:00Z '["UNREAD","Label_9"]' 2)" | jq -s .)" '{threads: $t}' > "$PAGE2_DIG"
+cfg false false false trash-only true
+digest_run() { # pass now
+	rm -f "$W_PINS_COPY"
+	DESK_NOW="$2" PAGE2="$PAGE2_DIG" DESK_CONFIG="$ROOT/instance/config.json" "$DESK_RUN" "$1" > "$ROOT/$1-$2.out" 2>&1
+}
+trashed() { jq -r --arg t "$TRASH" '[(.[$t] // [])[].threadId] | sort | join(" ")' "$W_PINS_COPY" 2> /dev/null; }
+SEARCHED='{"threads":[{"id":"dg_in"},{"id":"dg_skip"},{"id":"dg_two"}]}'
+FAKE_DIGEST_RESULT="$SEARCHED" FAKE_OPEN="dg_in dg_two" digest_run digestok "$D1"
+assert_eq "the fetch whole: the read digest and the one it opened go; the unread, unlabelled and half-read ones stay, the broader rule above notwithstanding" \
+	"dg_in dg_read n1 n2 n4" "$(trashed)"
+assert_true "the half-read and unlabelled ones are held too" \
+	"$(grep -q 'W: holding dg_two' "$ROOT/digestok-$D1.out" && grep -q 'W: holding dg_nolabel' "$ROOT/digestok-$D1.out" && echo true || echo false)"
+assert_true "each one held is logged as unread and why" \
+	"$(grep -q 'W: holding dg_skip (The daily digest) — an unread digest, and F-private did not open it' "$ROOT/digestok-$D1.out" \
+		&& grep -q 'W: holding dg_late (The daily digest) — an unread digest, and F-private did not open it' "$ROOT/digestok-$D1.out" && echo true || echo false)"
+FAKE_DIGEST_RESULT='{}' digest_run digestok "$D2"
+assert_eq "the next pass: the late and skipped digests, unread and now dated before its window, still stay" \
+	"dg_read n1 n2 n4" "$(trashed)"
+FAKE_FPRIVATE=fail FAKE_DIGEST_RESULT="$SEARCHED" FAKE_OPEN="dg_in" digest_run digestfail "$D1"
+assert_eq "the digest fetch failed: only the read digest goes, even the one it opened stays" \
+	"dg_read n1 n2 n4" "$(trashed)"
+assert_true "logged as held because the fetch failed" \
+	"$(grep -q 'W: holding dg_in (The daily digest) — an unread digest, and F-private failed this pass' "$ROOT/digestfail-$D1.out" && echo true || echo false)"
+FAKE_DIGEST_RESULT="$SEARCHED" digest_run digestfail "$D2"
+assert_eq "and on the pass after, with the fetch back but opening nothing, the unread ones still stay" \
+	"dg_read n1 n2 n4" "$(trashed)"
+assert_eq "the held ones reach the brief by id, in mail-noise.json, all unread ones with nothing opened" "dg_in dg_late dg_nolabel dg_skip dg_two" \
+	"$(DESK_NOW="$D2" PAGE2="$PAGE2_DIG" FAKE_DIGEST_RESULT="$SEARCHED" bash -c '
+		cfgp="$1"; jq ".passes.digestbrief = (.passes.digestok | .brief = {input_files: [\"notes.md\"], instructions: [\"j.md\"], send: {prompt: \"j.md\"}})" "$cfgp" > "$cfgp.b" && mv -f "$cfgp.b" "$cfgp"
+		DESK_CONFIG="$cfgp" "$2" digestbrief > /dev/null 2>&1
+		jq -r "[.held_unread[].thread_id] | sort | join(\" \")" "$DESK_RUNS_ROOT/digestbrief-$(date -u -r "$DESK_NOW" +%F 2> /dev/null || date -u -d "@$DESK_NOW" +%F)/mail-noise.json"' _ "$ROOT/instance/config.json" "$DESK_RUN")"
+D3=$((D2 + 86400))
+assert_eq "and so they do when the trash fails, with no noise listed as trashed" "dg_in dg_late dg_nolabel dg_skip dg_two|0" \
+	"$(DESK_NOW="$D3" PAGE2="$PAGE2_DIG" FAKE_W_MODE=skip-trash bash -c '
+		DESK_CONFIG="$1" "$2" digestbrief > /dev/null 2>&1
+		jq -r "([.held_unread[].thread_id] | sort | join(\" \")) + \"|\" + (.threads | length | tostring)" \
+			"$DESK_RUNS_ROOT/digestbrief-$(date -u -r "$DESK_NOW" +%F 2> /dev/null || date -u -d "@$DESK_NOW" +%F)/mail-noise.json"' _ "$ROOT/instance/config.json" "$DESK_RUN")"
+rm -f "$W_PINS_COPY"
+
+echo
+echo "=== the run status names what the write step does ==="
+status_steps() { # pass
+	bash -c 'source "$1/common.sh"; for f in status timeout model-call git-ops tool-results validate lock steps mail-triage; do source "$1/$f.sh"; done
+		DESK_CONFIG="$2" desk_follow_up_run_status "$3"' _ "$LIB" "$ROOT/instance/config.json" "$1"
+}
+assert_true "a write step with only the trash tool: trashing automated mail, nothing about marking read" \
+	"$(status_steps live | grep -q 'W (mail triage: trashing automated mail)' && echo true || echo false)"
+cfg false
+assert_true "one that also marks digests read says so" \
+	"$(status_steps live | grep -q 'W (mail triage: marking the fetched digests read and trashing automated mail)' && echo true || echo false)"
 
 echo
 echo "=== the deny hook: one tool cannot be called with the other's pins ==="

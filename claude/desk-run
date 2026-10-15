@@ -681,6 +681,37 @@ for ((i = 0; i < steps_len; i++)); do
 			# digest search below are for a pass that has one.
 			digest_in_pass="$(jq -r --arg m "$mail_fetch_step_id" \
 				'any(.steps[]; .kind == "fetch" and .id == $m)' <<< "$pass_config")"
+			# Its tools without the triage's trash tool: an instance whose
+			# triage rules trash the digests lists no tool to mark them read,
+			# and then nothing here depends on the digest fetch.
+			w_triage_step="$(jq -c '[.steps[] | select(.kind == "fetch" and .mail_triage)][0] // empty' <<< "$pass_config")"
+			w_trash=""
+			[ -z "$w_triage_step" ] || w_trash="$(desk_mail_triage_config "$w_triage_step" | jq -r '.trash_tool // empty')"
+			w_marks_read="$(jq -r --arg t "$w_trash" 'any((.tools // [])[]; . != $t)' <<< "$step_json")"
+			# The digests this run's digest fetch opened, for the triage's
+			# digest rules: of the threads its search returned, the ones a
+			# later call of the step opened, with how many messages that read
+			# held, when the step did not fail. None when there is no such
+			# search.
+			w_digest_ok="false" w_digest_ids="{}"
+			if [ "$digest_in_pass" = "true" ] && [ "$mail_fetch_failed" != "true" ]; then
+				w_digest_result="$(desk_tool_call_pairs "$PASS_SCRATCH/$mail_fetch_step_id-tool-uses.jsonl" \
+					"$PASS_SCRATCH/$mail_fetch_step_id-tool-results.jsonl" "$mail_search_tool" \
+					| jq -r --arg q "$digest_query" '[.[] | select(.input.query == $q)] | .[0].text // empty')"
+				if jq -e '(type == "object") and ((.threads | type) == "array" or . == {})' > /dev/null 2>&1 <<< "$w_digest_result"; then
+					w_digest_ok="true"
+					w_digest_ids="$(desk_mail_opened_message_counts "$PASS_SCRATCH/$mail_fetch_step_id-tool-uses.jsonl" \
+						"$PASS_SCRATCH/$mail_fetch_step_id-tool-results.jsonl" "$mail_search_tool" \
+						"$(jq -c '[(.threads // [])[] | {id}]' <<< "$w_digest_result")")"
+				fi
+			fi
+			w_digest_why="$mail_fetch_step_id failed this pass"
+			[ "$mail_fetch_failed" = "true" ] || w_digest_why="$mail_fetch_step_id did not open it"
+			[ "$digest_in_pass" = "true" ] || w_digest_why="this pass has no $mail_fetch_step_id digest fetch"
+			if [ "$w_marks_read" != "true" ]; then
+				desk_log "$pass" "$id: no tool to mark digests read among its tools, so it marks none read"
+				mail_fetch_failed="false"
+			fi
 			if [ "$mail_fetch_failed" = "true" ]; then
 				desk_log "$pass" "$id: $mail_fetch_step_id (the source it unlabels against) failed this pass — refusing to unlabel"
 				result="failed"
@@ -688,7 +719,9 @@ for ((i = 0; i < steps_len; i++)); do
 				ids_subjects="[]"
 				query_mismatch="false"
 				unreadable="false"
-				if [ "$digest_in_pass" != "true" ]; then
+				if [ "$w_marks_read" != "true" ]; then
+					:
+				elif [ "$digest_in_pass" != "true" ]; then
 					desk_log "$pass" "$id: no $mail_fetch_step_id step in this pass, so no digest to mark read"
 				else
 					pairs="$(desk_tool_call_pairs "$PASS_SCRATCH/$mail_fetch_step_id-tool-uses.jsonl" \
@@ -749,7 +782,7 @@ for ((i = 0; i < steps_len; i++)); do
 				# (desk-lib/mail-triage.sh), never a model's choice. Only when
 				# this step holds the triage's trash tool, and only from a
 				# listing this pass made.
-				trash_tool="" trash_json="[]" noise_held=0
+				trash_tool="" trash_json="[]" noise_held=0 n_digest_held=0 digest_held="[]"
 				triage_step="$(jq -c '[.steps[] | select(.kind == "fetch" and .mail_triage)][0] // empty' <<< "$pass_config")"
 				if [ -n "$triage_step" ]; then
 					trash_tool="$(desk_mail_triage_config "$triage_step" | jq -r '.trash_tool // empty')"
@@ -762,6 +795,25 @@ for ((i = 0; i < steps_len; i++)); do
 					else
 						trash_json="$(jq -c '.noise' "$triage_file")"
 						noise_held="$(jq -r '.noise_held // 0' "$triage_file")"
+						# Noise a digest rule matches, whichever rule matched first,
+						# is trashed only once it has been read: read by the labels
+						# on every message (the user, or an earlier pass's mark), or
+						# opened whole by this run's digest fetch, every message the
+						# listing counts. An unread digest nobody opened waits,
+						# whatever its date, and the brief may offer it.
+						if jq -e 'any(.[]; .digest == true)' > /dev/null 2>&1 <<< "$trash_json"; then
+							split="$(jq -c --argjson ok "$w_digest_ok" --argjson opened "$w_digest_ids" '
+								def covered: (.read == true) or ($ok and (($opened[.id] // 0) >= (.message_count // 1)));
+								{ kept: [.[] | select(.digest != true or covered)],
+								  held: [.[] | select(.digest == true and (covered | not))] }' <<< "$trash_json")"
+							trash_json="$(jq -c '.kept' <<< "$split")"
+							digest_held="$(jq -c '.held' <<< "$split")"
+							while IFS=$'\t' read -r tid subj; do
+								[ -n "$tid" ] && desk_log "$pass" "$id: holding $tid ($subj) — an unread digest, and $w_digest_why"
+							done < <(jq -r '.[] | [.id, .subject] | @tsv' <<< "$digest_held")
+							n_digest_held="$(jq 'length' <<< "$digest_held")"
+							[ "$n_digest_held" -eq 0 ] || desk_run_note "$id left $n_digest_held unread digest mail(s) untrashed because $(sed 's/ it$/ them/' <<< "$w_digest_why"); they wait until they are read."
+						fi
 					fi
 				fi
 				n_trash="$(jq 'length' <<< "$trash_json")"
@@ -787,8 +839,9 @@ for ((i = 0; i < steps_len; i++)); do
 				# a live one would trash.
 				noise_by_rule="$(jq -r 'group_by(.rule) | map("\(length) \(.[0].rule)") | join(", ")' <<< "$trash_json")"
 				write_mail_noise() { # action
-					jq -cn --arg a "$1" --argjson n "$trash_json" --argjson held "$noise_held" \
-						'{action: $a, threads: [$n[] | {from, subject, rule}], held_over_cap: $held}' \
+					jq -cn --arg a "$1" --argjson n "$trash_json" --argjson held "$noise_held" --argjson u "$digest_held" \
+						'{action: $a, threads: (if $a == "none" then [] else [$n[] | {from, subject, rule}] end), held_over_cap: $held,
+						  held_unread: [$u[] | {thread_id: .id, from, subject, date}]}' \
 						> "$PASS_SCRATCH/mail-noise.json"
 				}
 				held_note=""
@@ -817,6 +870,7 @@ for ((i = 0; i < steps_len; i++)); do
 					result="failed"
 				elif [ "$dry_run" = "true" ]; then
 					desk_log "$pass" "$id: dry_run — logged $n_ids id(s) to mark read and $n_trash to trash, no model call made"
+					[ "$n_trash" -eq 0 ] && [ "$n_digest_held" -gt 0 ] && write_mail_noise would_trash
 					if [ "$n_trash" -gt 0 ]; then
 						write_mail_noise would_trash
 						desk_run_note "$id ran dry-run, so it changed no mail: it would mark $n_ids digest thread(s) read and trash $n_trash automated mail(s) by the triage rules ($noise_by_rule), each listed in the mail triage list.$held_note"
@@ -826,6 +880,8 @@ for ((i = 0; i < steps_len; i++)); do
 					result="ok"
 				elif [ "$n_ids" -eq 0 ] && [ "$n_trash" -eq 0 ]; then
 					desk_log "$pass" "$id: nothing to mark read or trash — no model call made"
+					# The unread digests it left still reach the brief.
+					[ "$n_digest_held" -eq 0 ] || write_mail_noise trashed
 					result="ok"
 				else
 					result="$(desk_step_write "$pass" "$step_json" "$pinned_args_json" "$placeholders" "$scheduled_date")"
@@ -859,13 +915,17 @@ for ((i = 0; i < steps_len; i++)); do
 								desk_log "$pass" "$id: trashed thread ids don't match the pinned set (W count mismatch) — failing the pass"
 								desk_run_note "$id did not trash exactly the mail its triage rules matched, so the pass failed: $(sed '/^$/d' <<< "$trashed_ids" | wc -l | tr -d ' ') of $n_trash trashed."
 								result="failed"
-							elif [ "$n_trash" -gt 0 ]; then
+							elif [ "$n_trash" -gt 0 ] || [ "$n_digest_held" -gt 0 ]; then
 								write_mail_noise trashed
-								desk_run_note "$id trashed $n_trash automated mail(s) by the triage rules ($noise_by_rule).$held_note"
+								[ "$n_trash" -eq 0 ] || desk_run_note "$id trashed $n_trash automated mail(s) by the triage rules ($noise_by_rule).$held_note"
 							fi
 						fi
 					fi
 				fi
+				# The unread digests it kept reach the brief whatever came of
+				# the trash, a refused or failed one included, with none of
+				# the noise listed as trashed.
+				[ "$n_digest_held" -eq 0 ] || [ -s "$PASS_SCRATCH/mail-noise.json" ] || write_mail_noise none
 			fi
 			;;
 

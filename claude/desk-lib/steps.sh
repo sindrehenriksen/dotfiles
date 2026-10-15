@@ -1462,10 +1462,12 @@ desk_follow_up_run_status() {
 	steps="$(jq -r --arg p "$pass" '
 		.ticket_status_step_id as $t | .mail_fetch_step_id as $m
 		| any(.passes[$p].steps[]?; .kind == "fetch" and .mail_triage) as $triage
+		| ([.passes[$p].steps[]? | select(.kind == "fetch" and .mail_triage) | .mail_triage.trash_tool // "mcp__claude_ai_Gmail__trash_thread"][0]) as $trash
 		| [.passes[$p].steps[]? | .id + " (" + (
 			if .id == $t then "ticket status check"
 			elif .id == $m then "mail and chat fetch"
 			elif .mail_triage then "mailbox listing for mail triage"
+			elif .kind == "write" and $triage and ((.tools // []) | length > 0 and all(. == $trash)) then "mail triage: trashing automated mail"
 			elif .kind == "write" and $triage then "mail triage: marking the fetched digests read and trashing automated mail"
 			else {commit_push: "commit of the notes", fetch: "fetch", judge: "judge, which proposes the suggestions",
 				write: "marking the fetched mail read", capture: "session capture", close: "listing idle sessions to offer for closing",

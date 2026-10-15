@@ -163,3 +163,26 @@ desk_mail_opened_thread_ids() {
 		| [$threads[] | .id | select(. as $i | $named | index($i))]
 	' "$uses_file" 2> /dev/null || echo '[]'
 }
+
+# desk_mail_opened_message_counts <tool_uses_file> <tool_results_file>
+#   <search_tool> <threads json>
+# For each of <threads> (`[{id}]`) a call other than the search opened, as
+# desk_mail_opened_thread_ids counts opened, how many messages the largest
+# such result held: `{<id>: n}`, from a result that parses as an object
+# with a `messages` array, 0 from any other. So a caller can tell a thread
+# opened whole from one whose later messages the read never held.
+desk_mail_opened_message_counts() {
+	local uses_file="$1" results_file="$2" search_tool="$3" threads="$4"
+	if [ ! -f "$uses_file" ] || [ ! -f "$results_file" ]; then
+		echo '{}'
+		return
+	fi
+	jq -cs --arg search "$search_tool" --slurpfile results "$results_file" --argjson threads "$threads" '
+		($results | map(select(.is_error != true) | {(.tool_use_id): ('"$_DESK_JQ_RESULT_TEXT"')}) | add // {}) as $by_id
+		| [.[] | select(.name != $search) | select(($by_id[.id] // "") != "")
+			| {named: [.input | .. | strings],
+			   n: (($by_id[.id] | try fromjson catch null) as $r
+			       | if ($r | type) == "object" and (($r.messages // null) | type) == "array" then ($r.messages | length) else 0 end)}] as $calls
+		| [$threads[] | .id as $i | [$calls[] | select(.named | index($i)) | .n] | select(length > 0) | {($i): max}] | add // {}
+	' "$uses_file" 2> /dev/null || echo '{}'
+}

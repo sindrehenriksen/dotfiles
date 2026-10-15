@@ -8,11 +8,17 @@
 #   protected   starred, an invitation for an event not yet past (it may
 #               still want a reply), a thread where a person wrote and the
 #               user's own message is not the newest, or one the listing
-#               showed only part of; never trashed, never offered
+#               showed only part of; never trashed, never offered, except
+#               that `offer_starred` offers a starred one
 #   candidate   the rest of the inbox (of the whole listing with
-#               `offer_outside_inbox`), handed to the judge as inbox.json;
-#               what it lists as no longer useful is only offered to the
-#               user in the follow-up tab, never trashed by the pass
+#               `offer_outside_inbox`, or of what `offer_query` lists when
+#               it is set), handed to the judge as inbox.json; what it
+#               lists as no longer useful is only offered to the user,
+#               never trashed by the pass
+#
+# With `offer_query`, the step runs a second listing: `query` can then
+# reach the whole mailbox for noise, while only what `offer_query` lists is
+# ever offered, so the judge's listing stays the size the instance chose.
 #
 # Nothing here asks a model which thread is which: every rule is a property
 # of the listing. Files, in $PASS_SCRATCH and named after the step:
@@ -35,13 +41,16 @@ desk_mail_triage_config() {
 		    invitation_subject: (.invitation_subject // "^(updated )?invitation( with note)?:"),
 		    noise: [(.noise // [])[] | select(((.from // "") != "") or ((.subject // "") != ""))],
 		    offer_outside_inbox: (.offer_outside_inbox == true),
+		    offer_query: (if (.offer_query // "") == "" then null else .offer_query end),
+		    offer_starred: (.offer_starred == true),
 		    max_trash: (.max_trash // 100),
 		    max_offer: (.max_offer // 25) }' <<< "$1" 2> /dev/null
 }
 
 # The placeholders the step's prompt gets.
 desk_mail_triage_placeholders() {
-	jq -c '{mail_triage_query: .query, mail_triage_page_size: (.page_size | tostring)}' <<< "$1"
+	jq -c '{mail_triage_query: .query, mail_triage_offer_query: (.offer_query // ""),
+		mail_triage_page_size: (.page_size | tostring)}' <<< "$1"
 }
 
 # One listed thread to the shape triage works on, given $cfg and $today.
@@ -68,36 +77,46 @@ _DESK_MAIL_TRIAGE_SORT='
 		and ($r.past_event != true or (($m.subject | event_date) as $d | $d != null and $d < $today));
 	def automated($m): any($cfg.automated_senders[]; . as $p | $m.from | test($p; "i"));
 	def is_self($m): ($cfg.self | index($m.from)) != null;
-	{ id,
+	{ id, offered: (.offered != false),
 	  partial: ((.messageCount // null) != null and (.messageCount > ((.messages // []) | length))),
 	  view_url: (.viewUrl // null),
+	  message_count: ([.messageCount // 0, ((.messages // []) | length)] | max),
 	  messages: [(.messages // [])[] | {from: (.sender | addr), subject: (.subject // ""),
-	      date: (.date // null), labels: (.labelIds // []), snippet: (.snippet // "")}] }
+	      date: (.date // null), labels: (.labelIds // []),
+	      labelled: ((.labelIds | type) == "array" and (.labelIds | length) > 0), snippet: (.snippet // "")}] }
 	| select(.id != null and (.messages | length) > 0)
 	| ([.messages[].labels[]] | unique) as $labels
 	| . + { subject: .messages[0].subject,
 	        unread: ($labels | index("UNREAD") != null),
+	        # Read only when every message carries labels and none is UNREAD:
+	        # a message listed without them may be unread.
+	        read: (all(.messages[]; .labelled) and ($labels | index("UNREAD") == null)),
 	        starred: ($labels | index("STARRED") != null),
 	        in_inbox: ($labels | index("INBOX") != null) }
 	| . as $t
 	| (first($cfg.noise[] | . as $r | select(all($t.messages[]; rule_ok($r; $t; .))) | .name // .subject // .from) // null) as $rule
+	# Any digest rule matching, whichever rule matched first, so a broader
+	# rule above one never trashes a digest unread.
+	| any($cfg.noise[] | select(.digest == true); . as $r | all($t.messages[]; rule_ok($r; $t; .))) as $digest
 	| (any($t.messages[]; (.subject | test($cfg.invitation_subject; "i"))
 	       and ((.subject | event_date) as $d | $d == null or $d >= $today))) as $awaiting
 	| (any($t.messages[]; (is_self(.) | not) and (automated(.) | not))
 	   and (is_self($t.messages[-1]) | not)) as $person
-	| . + { class: (if $t.starred then "starred"
-	                elif $t.partial then "partial"
+	| . + { class: (if $t.partial then "partial"
 	                elif $awaiting then "invitation"
+	                elif $t.starred and (($cfg.offer_starred | not) or ($t.offered | not) or $person) then "starred"
+	                elif $t.starred then "candidate"
 	                elif $rule != null then "noise"
-	                elif ($t.in_inbox | not) and ($cfg.offer_outside_inbox | not) then "outside"
+	                elif ($t.offered | not) then "outside"
+	                elif $cfg.offer_query == null and ($t.in_inbox | not) and ($cfg.offer_outside_inbox | not) then "outside"
 	                elif $person then "person"
 	                else "candidate" end),
-	        rule: $rule,
+	        rule: $rule, digest: $digest,
 	        answered_by_user: is_self($t.messages[-1]) }'
 
 # desk_mail_triage_collect <pass> <id> <cfg> <search_tool> <today>
 # After the call: every thread the results of the calls whose query is
-# exactly the configured one listed (a saved oversized page read back from
+# exactly the configured one (or the configured offer_query) listed (a saved oversized page read back from
 # the call's spill directory), sorted, written as <id>-mail-triage.jsonl.
 # Non-zero, failing the step as a source, when no page of that query came
 # back or one could not be read: nothing is trashed on a listing that did
@@ -111,12 +130,21 @@ desk_mail_triage_collect() {
 	pairs="$(desk_tool_call_pairs "$PASS_SCRATCH/$id-tool-uses.jsonl" "$PASS_SCRATCH/$id-mail-triage-results.json" "$tool")"
 	rm -f "$PASS_SCRATCH/$id-mail-triage-results.json"
 	listing="$(jq -c --argjson cfg "$cfg" --arg today "$today" "
-		[.[] | select(.input.query == \$cfg.query) | .text | (try fromjson catch null)] as \$pages
-		| if (\$pages | length) == 0 or any(\$pages[]; type != \"object\" or ((.threads // []) | type) != \"array\")
-		  then null
-		  else { complete: ((\$pages | last | .nextPageToken // \"\") == \"\"),
-		         pages: (\$pages | length),
-		         threads: ([\$pages[] | (.threads // [])[]] | unique_by(.id) | map($_DESK_MAIL_TRIAGE_SORT)) } end" \
+		def pages(\$q): [.[] | select(.input.query == \$q) | .text | (try fromjson catch null)];
+		def unread(\$p): (\$p | length) == 0 or any(\$p[]; type != \"object\" or ((.threads // []) | type) != \"array\");
+		def whole(\$p): (\$p | last | .nextPageToken // \"\") == \"\";
+		pages(\$cfg.query) as \$pages
+		| (if \$cfg.offer_query == null then null else pages(\$cfg.offer_query) end) as \$offer
+		| if unread(\$pages) or (\$offer != null and unread(\$offer)) then null
+		  else ([(\$offer // [])[] | (.threads // [])[] | .id]) as \$offered
+		  | { complete: (whole(\$pages) and (\$offer == null or whole(\$offer))),
+		      pages: ((\$pages + (\$offer // [])) | length),
+		      threads: ([\$pages[], (\$offer // [])[] | (.threads // [])[]]
+		                | reduce .[] as \$t ({seen: {}, out: []};
+		                    if .seen[\$t.id | tostring] then . else .seen[\$t.id | tostring] = true | .out += [\$t] end)
+		                | .out
+		                | map(. + {offered: (\$offer == null or (.id as \$i | \$offered | index(\$i)) != null)})
+		                | map($_DESK_MAIL_TRIAGE_SORT)) } end" \
 		<<< "$pairs" 2> /dev/null)"
 	if [ -z "$listing" ] || [ "$listing" = "null" ]; then
 		desk_log "$pass" "$id: mail triage: the listing query did not come back, or a page could not be read — nothing sorted"
@@ -125,9 +153,11 @@ desk_mail_triage_collect() {
 	fi
 	jq -c --argjson cfg "$cfg" '
 		.threads as $t
-		| [$t[] | select(.class == "noise")] as $noise
-		| { query: $cfg.query, complete, pages, listed: ($t | length), outside_offered: $cfg.offer_outside_inbox,
-		    noise: [$noise[:$cfg.max_trash][] | {id, from: .messages[-1].from, subject, date: .messages[-1].date, rule}],
+		| ([$t | to_entries[] | select(.value.class == "noise")]
+		   | sort_by([(.value.messages[-1].date // ""), -.key]) | reverse | map(.value)) as $noise
+		| { query: $cfg.query, offer_query: $cfg.offer_query, complete, pages, listed: ($t | length),
+		    outside_offered: $cfg.offer_outside_inbox,
+		    noise: [$noise[:$cfg.max_trash][] | {id, from: .messages[-1].from, subject, date: .messages[-1].date, unread, read, digest, message_count, rule}],
 		    noise_held: ([$noise[$cfg.max_trash:][]] | length),
 		    protected: ([$t[] | select(.class | IN("starred", "partial", "invitation", "person")) | .class]
 		                | group_by(.) | map({(.[0]): length}) | add // {}),
@@ -136,7 +166,7 @@ desk_mail_triage_collect() {
 		        | { thread_id: .id, from: .messages[-1].from,
 		            senders: ([.messages[].from] | unique), subject,
 		            date: .messages[-1].date, messages: (.messages | length), unread,
-		            in_inbox, answered_by_user,
+		            in_inbox, starred, answered_by_user,
 		            snippet: (.messages[-1].snippet | if length > 200 then .[0:200] + " …" else . end) }] }' \
 		<<< "$listing" > "$out"
 	desk_log "$pass" "$id: mail triage: $(jq -r '"\(.listed) thread(s) listed\(if .complete then "" else " (cut short: a last page named another)" end): \(.noise | length) noise\(if .noise_held > 0 then " (+\(.noise_held) over max_trash)" else "" end), \(.candidates | length) for the judge, protected \(.protected | to_entries | map("\(.key) \(.value)") | join(", ") | if . == "" then "none" else . end)"' "$out")"
@@ -162,7 +192,9 @@ desk_mail_triage_file() {
 desk_mail_triage_judge_file() {
 	jq '{ coverage: ("\(.listed) thread(s) listed\(if .complete then "" else ", the listing cut short" end); "
 	                 + "\(.noise | length) automated one(s) trashed by rule and the protected ones left out, so these are the rest of "
-	                 + (if .outside_offered then "the listing, in the inbox or not (in_inbox says which)" else "the inbox" end)),
+	                 + (if .offer_query then "what \(.offer_query) lists, in the inbox or not (in_inbox says which)"
+	                    elif .outside_offered then "the listing, in the inbox or not (in_inbox says which)" else "the inbox" end)
+	                 + (if any(.candidates[]; .starred) then "; a starred one says so (starred), and is never trashed by rule" else "" end)),
 	      threads: .candidates }' "$1" > "$2"
 }
 
