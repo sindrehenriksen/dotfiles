@@ -16,7 +16,9 @@ export ANTHROPIC_DEFAULT_MODEL="opus[1m]"
 # 5-60 minutes. Since mid-October a server flag (`tengu_sequential_cloud` in
 # ~/.claude.json's cached features) does that with 5-minute entries it touches
 # every 30 s, instead of 1-hour ones; idle compaction is a separate flag
-# (`tengu_sunny_locket`). Neither is ours to set. Revisit if the touches turn
+# (`tengu_sunny_locket`), and no setting turns it on: `idleCompaction` only
+# turns it off, and it also skips any session not writing 1-hour entries.
+# Neither is ours to set. Revisit if the touches turn
 # out to count against usage limits (anthropics/claude-code#102338), or on
 # moving to API-key or cloud-provider auth: `promptCacheTtl: "1h"` in
 # settings.json then pins 1-hour writes and skips the touches.
