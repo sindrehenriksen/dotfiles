@@ -36,7 +36,7 @@
 # reach one. The field is ignored in `-p` print mode, so headless runs
 # never ring.
 #
-# `input-bell.sh --last-turn <transcript>` prints `ring` or `quiet` for
+# `input-bell.sh --last-turn <transcript>` prints `ring` or `quiet` (nothing without jq) for
 # the transcript's latest turn by the same idle check, with no dedup; it
 # reads no stdin and writes no state. reopen-sessions.sh uses it to ring a
 # resumed tab whose last turn was waiting on the user.
@@ -145,7 +145,7 @@ idle_verdict() {
             ($rung | split(" ")) as $done
             | [inputs | fromjson? | select(type == "object")] as $r
             | (if $pid != "" then $pid
-               else [$r[] | select(.type == "user" and .promptId != null) | .promptId] | last end) as $pid
+               else [$r[] | select(.type == "user" and .promptId != null) | .promptId] | last // "" end) as $pid
             | ([$r | to_entries[] | select(.value.type == "user" and .value.promptId == $pid) | .key] | last) as $i
             | if $i == null then "missing"
               elif ([label $out | $r[$i + 1:][]
