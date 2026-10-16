@@ -11,13 +11,15 @@ export RIPGREP_CONFIG_PATH="$HOME/.config/ripgrep/ripgreprc"
 # variable is only consulted when no `model` key exists — press `s` in the
 # picker to switch for the session alone and leave it that way.
 export ANTHROPIC_DEFAULT_MODEL="opus[1m]"
-# The prompt cache lifetime is left to Claude Code on purpose. On a
-# subscription it writes the 1-hour cache, which suits sessions picked up after
-# 5-60 minutes, and drops to 5 minutes in usage overage, where writes are
-# billed (1h writes cost 2x input, 5m 1.25x). Idle compaction only runs on the
-# 1-hour cache, so it pauses in overage too. Revisit on moving to API-key or
-# cloud-provider auth (then set `promptCacheTtl: "1h"` in settings.json), or
-# if a long overage makes cold re-reads cost more than 1h writes would.
+# The prompt cache lifetime is left to Claude Code on purpose: it keeps a
+# session's cache warm for about an hour, which suits sessions picked up after
+# 5-60 minutes. Since mid-October a server flag (`tengu_sequential_cloud` in
+# ~/.claude.json's cached features) does that with 5-minute entries it touches
+# every 30 s, instead of 1-hour ones; idle compaction is a separate flag
+# (`tengu_sunny_locket`). Neither is ours to set. Revisit if the touches turn
+# out to count against usage limits (anthropics/claude-code#102338), or on
+# moving to API-key or cloud-provider auth: `promptCacheTtl: "1h"` in
+# settings.json then pins 1-hour writes and skips the touches.
 
 # Platform detection
 if [[ "$(uname)" == "Darwin" ]]; then
