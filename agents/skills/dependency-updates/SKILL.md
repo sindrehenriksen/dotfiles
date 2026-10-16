@@ -16,17 +16,18 @@ gh api --paginate 'repos/{owner}/{repo}/dependabot/alerts?state=open&per_page=10
 gh run list --workflow "Dependabot Updates" --limit 30   # then: gh run view <id> --log
 ```
 
-The alerts call needs `--paginate` and `per_page`, or it returns only the first 30. An alert with no PR is still in the set, and alerts dismissed because no patched version existed don't reopen on their own: re-check them each sweep and reopen once a fix ships. Dependabot regroups between runs, so PR numbers aren't stable: re-derive the set each time, read each diff (`gh pr diff <n>`) for the actual bumps, and close what is superseded.
+The alerts call needs `--paginate` and `per_page`, or it returns only the first 30. **List `classification=malware` alerts first**: they outrank every severity. An alert with no PR is still in the set, and alerts dismissed because no patched version existed don't reopen on their own: re-check them each sweep and reopen once a fix ships. Dependabot regroups between runs, so PR numbers aren't stable: re-derive the set each time, read each diff (`gh pr diff <n>`) for the actual bumps, and close what is superseded.
 
 **Check each group PR against its job's log.** Dependabot silently drops a dependency it can't resolve from a group PR that still opens; the log's error tables, and the Dependabot updates page under Insights → Dependency graph, name it. "Nothing to update" is a quiet week, not a failure.
 
-Its PRs are a starting point, not the unit of work. Split one, combine several, or make the bumps on a branch of your own whenever that lands the change better (a coupled set, a pair it can't make, a group that only fails together), then close the PRs it replaces, except a split major group's, which stays open (see Majors).
+Its PRs are a starting point, not the unit of work. Split one, combine several, or bump on a branch of your own whenever that lands the change better, then close the PRs it replaces, except a split major group's, which stays open (see Majors).
 
 ## What Dependabot doesn't see
 
 Dependabot reads the package ecosystems its config lists, and nothing else. Look for the rest, compare each against the latest its upstream releases and its platform supports, and add what is behind to the set, aiming straight for that latest rather than each version in between:
 
 - **Toolchain pins**: mise (`.mise.toml`), `.nvmrc`, `.python-version`, `packageManager` in `package.json`, a Docker base image in a file it doesn't scan, the `python-version` / `node-version` inputs in CI workflows.
+- **Runner image**: pin `runs-on` to a specific Ubuntu image (`ubuntu-YY.04`), not `ubuntu-latest`, and move it by hand in every workflow at once, once GitHub's newer image is out of preview.
 - **Language constraints**: `requires-python`, `engines`, and the linter and type-checker targets that follow them.
 - **Platform runtimes**: a hosting project's runtime or Node version setting, a managed database's or edge runtime's version.
 - **Dev tools it can't read**: for Python it reads PEP 621 `[project]` and `[project.optional-dependencies]` and PEP 735 `[dependency-groups]`, not tool-specific environment tables (hatch envs, say). Dev and test tools belong in `[dependency-groups]`, or Dependabot never proposes them.
@@ -48,7 +49,7 @@ They take the same order as the PRs, a toolchain or runtime major with the other
 
 Majors are part of the sweep, not a separate project. **Split the major group each sweep**: land what can land, with the code adapted to the new version, and leave a heavyweight or coupled set (a language runtime, the framework the product is built on, a set that moves only with a coordinated change) open in the group PR as the visible backlog, reported to the user (below). The landable bumps go on your own branch; the Dependabot group PR stays open and untouched. Who does the work follows `team`, as for any other work.
 
-**Adopt the new version.** Take its new defaults, recommended config and idioms, and adapt the code to them rather than adding shims that keep the old behaviour (an old palette re-declared, an old spacing or hover rule restored). A changed default is usually why the release exists, and a pin-back is an unowned fork every later upgrade has to step around. Stray only for a concrete reason the code can show, such as a test or a platform constraint, written beside the deviation.
+**Adopt the new version.** Take its new defaults, recommended config, tooling and idioms, adapt the code to them rather than adding shims that keep the old behaviour (an old palette re-declared, an old spacing or hover rule restored), and remove what the release makes obsolete. A changed default is usually why the release exists, and a pin-back is an unowned fork every later upgrade has to step around. Stray only for a concrete reason the code can show, such as a test or a platform constraint, written beside the deviation. A heavyweight's tracked work covers the same adoption, not just the bump.
 
 **Verify in proportion to the change and to who uses it.** The local gates are the floor. A language, runtime or framework major (a new Python or Node major, the UI framework) is also tried where it ships: the platform supports the version, and a preview deploy or the deployed path is exercised. A product with end users gets more the further along it is (testing, pilot, beta, live). All of this comes before anything waits on the user.
 
@@ -56,13 +57,14 @@ Majors are part of the sweep, not a separate project. **Split the major group ea
 
 ## Checks on a Dependabot branch
 
-Dependabot's PRs are proposals: landing one runs the repo's normal checks (the pre-push hooks, CI on the default branch), so a sweep's evidence is those checks and the branch run locally, not a CI run on the PR.
+A sweep's evidence is CI on the PR, which says which bumps go green, plus the branch run locally; landing then runs the repo's normal checks (the pre-push hooks, CI on the default branch).
 
-- Where a repo does run CI on them, runs triggered by Dependabot get **no repo secrets**, so a secret-dependent job fails as an artifact rather than a real red: check that the underlying tests passed. If a required check depends on a secret, the PR can't merge until you push a commit (the lockfile fix, or an empty one), whose run is attributed to you and gets secrets.
+- Runs triggered by Dependabot get **no repo secrets**, so the jobs that need them skip (see Config). Where a required check waits on one, push a commit (the lockfile fix, or an empty one): its run is yours and gets secrets, which a re-run's doesn't.
+- **Check a bump before its first run with secrets** (that push, or your own branch carrying it): no bumped version younger than the cooldown, indirect packages a lockfile regeneration adds or moves included, and none flagged as malware. That run is where a fresh package's install code first meets the repo's credentials. A security fix skips the cooldown: it still gets the malware check, and its age is weighed against the advisory.
 - The common real failures are mechanical: a lockfile the bump left out of sync, a formatter whose new version reformats files. Fix them on the branch. A formatter bump (ruff, prettier) reformats even where CI doesn't check formatting: run the formatter on the bump branch and commit the result, or the next unrelated commit picks up the reformat.
 - **Pre-commit hook bumps** are usually exercised by nothing in CI: run `pre-commit run --all-files` on the branch before merging.
-- **Paired bumps.** Some versions must move together and Dependabot can only move one of them: a package and the CI image tagged to it, a runtime pinned somewhere Dependabot can't read (mise, a Dockerfile it doesn't scan) and the types or SDK that follow it. The repo's `dependabot.yml` names its pairs in comments. Carry the other half in the same change, whether that lands as a PR merge or a direct push.
-- A grouped set that cannot resolve together gets split: land what resolves, leave the entangled bumps in the group PR and report them (below). Where CI does run on the PR, trust its environment over a local resolve.
+- **Paired bumps.** Some versions must move together and Dependabot can only move one of them: a package and the CI image tagged to it, a runtime pinned somewhere Dependabot can't read (mise, a Dockerfile it doesn't scan) and the types or SDK that follow it. The repo's `dependabot.yml` names its pairs in comments. Carry the other half in the same change.
+- A grouped set that cannot resolve together gets split: land what resolves, leave the entangled bumps in the group PR and report them (below). Trust CI's environment over a local resolve.
 
 ## Landing
 
@@ -80,6 +82,10 @@ An update the sweep can't land, or isn't sure it should yet (a peer range that r
 
 The shape that works: weekly, minor and patch grouped into one PR, majors in a group of their own, a low open-PR limit, and **security updates in their own group per entry** (`applies-to: security-updates`). That group is also the only way to tell security PRs apart: `labels:` applies to every PR an entry raises, security ones included, so a label cannot mark them alone. `reviewers` is no longer a Dependabot option (removed August 2025): code owners decide who reviews.
 
+**Set the cooldown on every entry** rather than leaving GitHub's 3-day default, so it is yours and testable: pip and npm at `semver-patch-days: 3`, `semver-minor-days: 7`, `semver-major-days: 14`, `default-days: 7`; ecosystems without semver keys (github-actions, docker, pre-commit) at `default-days: 7`. Security updates are exempt by design. The cooldown only governs what Dependabot proposes, so **lock indirect dependencies** for anything that deploys: a build that resolves them fresh can pull a malicious indirect release with no PR and no cooldown. Turn on malware alerts too (Settings → Advanced security → Dependabot).
+
+**Pin every action to a full commit SHA** with a trailing `# vX.Y.Z`. Dependabot keeps those pins current, a hijacked tag can no longer land silently, and a small test that fails on an unpinned or comment-less `uses:` keeps it that way.
+
 **Every `ignore` carries a comment** saying why it exists and what would remove it (the work item, the pin it follows, the condition). An ignore without one outlives its reason unnoticed.
 
-GitHub only reads `.github/dependabot.yml` at the repository root. Dependabot's own jobs don't use Actions minutes, but in a private repo the CI they trigger does, rebases included. **Skip CI on Dependabot's PRs**, with a job-level `if` on the PR's author, since landing one runs the checks anyway: a bump that breaks something shows when a sweep lands it rather than as a red PR nobody has picked up.
+GitHub only reads `.github/dependabot.yml` at the repository root. Dependabot's own jobs don't use Actions minutes, but in a private repo the CI they trigger does, rebases included. **Keep tests and lint running on Dependabot's PRs**: their runs get no secrets, which makes them the safest place for a fresh package's install code to run first. Skip only the jobs that need secrets, with a job-level `if` on the triggering run's actor (`github.actor != 'dependabot[bot]'`) rather than the PR's author, so a commit you push gets a full run with secrets and a re-run keeps Dependabot's privileges. With no secrets in CI, nothing needs skipping. If a required check would read such a skip as a pass, make it fail instead.
