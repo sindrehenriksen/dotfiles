@@ -50,7 +50,7 @@ jq -c --argjson n "\$n" --rawfile opened "$TMP/opened-ids" '
 	(\$opened | split("\n")) as \$o
 	| if (._live_from_call // null) != null and \$n >= ._live_from_call then .live = true else . end
 	| if (.id as \$i | \$o | index(\$i)) then .live = true else . end
-	| if .live then .left_open = false else . end
+	| if .live then .left_open = false | .tty = ("ttys" + .id[0:8]) else . end
 	| del(._live_from_call)
 ' "$TMP/reader.jsonl"
 EOF
@@ -354,6 +354,35 @@ ev_start "$PREV_BOOT" 1790100000 > "$CLAUDE_SESSION_STORE/$ACTIVE.jsonl"
 reader_line "$ACTIVE" 2026-10-06T09:00:00Z
 json=$(REOPEN_CONFIRM_SECS=3 "$CLI" --json)
 assert_eq "confirmed_live true" true "$(jq '.sessions[0].confirmed_live' <<< "$json")"
+
+echo
+echo "=== a reopened session whose last turn needs the user gets the bell ==="
+reset_fixtures
+export REOPEN_TTY_DIR="$TMP/dev"
+rm -rf "$REOPEN_TTY_DIR"; mkdir -p "$REOPEN_TTY_DIR"
+# last_turn <id> <text>: the session's transcript, ending on that reply.
+last_turn() {
+	jq -nc --arg t "$2" '{type:"user", promptId:"p1", message:{role:"user", content:"go"}},
+		{type:"assistant", message:{role:"assistant", content:[{type:"text", text:$t}]}}' > "$PROJ/$1.jsonl"
+	: > "$REOPEN_TTY_DIR/ttys${1:0:8}"
+}
+ev_start "$PREV_BOOT" 1790100000 > "$CLAUDE_SESSION_STORE/$ACTIVE.jsonl"
+reader_line "$ACTIVE" 2026-10-06T09:00:00Z
+last_turn "$ACTIVE" $'Done the first half.\n\n[needs-you] Pick A or B before I go on.'
+ev_start "$PREV_BOOT" 1790100000 > "$CLAUDE_SESSION_STORE/$IDLE.jsonl"
+reader_line "$IDLE" 2026-10-06T08:00:00Z
+last_turn "$IDLE" "All done. Tests pass."
+{ ev_start "$PREV_BOOT" 1790100000; ev_start "$REOPEN_BOOT_TIME" 1791301000; } > "$CLAUDE_SESSION_STORE/$LIVE.jsonl"
+reader_line "$LIVE" 2026-10-06T07:00:00Z true
+last_turn "$LIVE" "[needs-you] Already running, never rung by this."
+json=$(REOPEN_CONFIRM_SECS=3 "$CLI" --json)
+assert_eq "BEL written to the needs-you session's tty" '\a' "$(od -An -c "$REOPEN_TTY_DIR/ttys${ACTIVE:0:8}" | tr -d ' ')"
+assert_eq "and the result says it rang" true "$(jq --arg id "$ACTIVE" '.sessions[] | select(.id == $id) | .bell_rung' <<< "$json")"
+assert_eq "a plain finish is not rung, and says so" "false 0" \
+	"$(jq --arg id "$IDLE" '.sessions[] | select(.id == $id) | .bell_rung' <<< "$json") $(wc -c < "$REOPEN_TTY_DIR/ttys${IDLE:0:8}" | tr -d ' ')"
+assert_eq "an already-running session is never rung; one rang in all" "0 1" \
+	"$(wc -c < "$REOPEN_TTY_DIR/ttys${LIVE:0:8}" | tr -d ' ') $(jq '.summary.rang' <<< "$json")"
+unset REOPEN_TTY_DIR
 
 echo
 echo "=== preflight failures ==="

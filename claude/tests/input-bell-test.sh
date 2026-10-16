@@ -88,6 +88,19 @@ printf '%s' x >"$TMP/locked.jsonl"; chmod 000 "$TMP/locked.jsonl"
 expect "idle: unreadable transcript is quiet" "" "$(idle "$TMP/locked.jsonl")"
 printf '%s' "$(idle "$TMP/locked.jsonl")" | "$HOOK" >/dev/null; [ $? -eq 0 ] && ok "idle: unreadable transcript exits 0" || bad "idle: unreadable transcript exits 0"
 
+# --last-turn: the same check on the transcript's latest turn, as
+# reopen-sessions.sh asks it, with no stdin.
+last_turn() { "$HOOK" --last-turn "$1" </dev/null; }
+transcript "$TMP/lt.jsonl" $'Done.\n\n[needs-you] Pick A or B.'
+assert_last() { if [ "$(last_turn "$2")" = "$3" ]; then ok "last-turn: $1"; else bad "last-turn: $1 (got [$(last_turn "$2")])"; fi; }
+assert_last "a marker rings" "$TMP/lt.jsonl" ring
+transcript "$TMP/lt.jsonl" "All done. Tests pass."
+assert_last "a plain finish is quiet" "$TMP/lt.jsonl" quiet
+transcript "$TMP/lt.jsonl" "[needs-you] Pick one."
+jq -nc '{type:"user", promptId:"later", message:{role:"user", content:"go on"}}, {type:"assistant", message:{role:"assistant", content:[{type:"text", text:"Done."}]}}' >>"$TMP/lt.jsonl"
+assert_last "only the latest turn counts" "$TMP/lt.jsonl" quiet
+assert_last "a missing transcript is quiet" "$TMP/none.jsonl" quiet
+
 # A ~20 MB transcript: the turn sits at the end, so only the tail is read.
 big="$TMP/big.jsonl"
 jq -nc '{type:"user", promptId:"old", message:{role:"user", content:"old"}}, {type:"assistant", message:{role:"assistant", content:[{type:"text", text:("filler " * 2000)}]}}' >"$TMP/chunk"

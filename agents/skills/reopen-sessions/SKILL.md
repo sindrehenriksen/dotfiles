@@ -26,7 +26,7 @@ One tab-separated line per session, then a summary line:
 
 ```
 <status>  <id>  <last message YYYY-MM-DD HH:MM>  <idle working days>  <name>  <cwd>  <detail>
-summary   dry_run=… opened=… would_open=… running=… idle=… failed=… older_orphans=… ended_deliberately=… idle_after_working_days=N(source) went_down_after=… booted=…
+summary   dry_run=… opened=… rang=… would_open=… running=… idle=… failed=… older_orphans=… ended_deliberately=… idle_after_working_days=N(source) went_down_after=… booted=…
 ```
 
 `--json` gives the same as `{summary, sessions: [...]}`; prefer it when you need to pick fields out.
@@ -34,7 +34,7 @@ summary   dry_run=… opened=… would_open=… running=… idle=… failed=… 
 | status | means |
 |---|---|
 | `would-open` | dry run: this one would be resumed |
-| `opened` | resumed in a background tab; `confirmed_live` (JSON) or the detail says whether it has come up yet |
+| `opened` | resumed in a background tab; `confirmed_live` (JSON) or the detail says whether it has come up yet, and `bell_rung` or the detail whether its tab got the bell |
 | `running` | was open at the shutdown and is already live again; left alone |
 | `idle` | its last human message is at least the threshold in working days old; listed, not opened |
 | `failed` | not opened; the detail says why (a malformed id, a missing cwd or transcript, a timeout, a locked screen, the tab helper declining) |
@@ -46,6 +46,7 @@ Exit codes: `0` nothing failed (including nothing to do), `1` at least one sessi
 ## Things to know
 
 - To end a session so it isn't reopened next time, tell the user: Ctrl+C twice or `/exit`. Closing the tab doesn't count; it reads the same as a shutdown.
+- The 🔔 a tab had before the restart is not restored as such. Instead, once a reopened session is live, the command rings its tab when its last turn was waiting on the user (the bell hook's own check: a `[needs-you]` line or a closing question). Name the rung ones when reporting; they are the ones to look at first.
 - On macOS a locked screen makes every open fail with that reason; ask the user to unlock and run the command again.
 - `older_orphans` counts sessions left open by an earlier boot (weeks-old crashes). They are not listed; `--all-boots` lists them if the user asks.
 - The idle threshold is the desk config's `close_after_working_days` (from `DESK_CONFIG`, else `~/.config/desk/config.json`), otherwise 3; `--idle-days N` overrides it for one run.

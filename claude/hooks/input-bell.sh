@@ -36,10 +36,21 @@
 # reach one. The field is ignored in `-p` print mode, so headless runs
 # never ring.
 #
+# `input-bell.sh --last-turn <transcript>` prints `ring` or `quiet` for
+# the transcript's latest turn by the same idle check, with no dedup; it
+# reads no stdin and writes no state. reopen-sessions.sh uses it to ring a
+# resumed tab whose last turn was waiting on the user.
+#
 # Never fails the session: every path exits 0, silently, when in doubt.
 set -u
 
-input="$(cat)"
+last_turn=false
+if [ "${1:-}" = --last-turn ]; then
+    last_turn=true
+    input='{}'
+else
+    input="$(cat)"
+fi
 command -v jq >/dev/null 2>&1 || exit 0
 
 # One jq call yields everything: kind, session id, transcript path, prompt id.
@@ -121,17 +132,20 @@ $(printf '%s\n' "$new" | grep -v '^$' | tail -n 20)"
     return 0
 }
 
-# Prints ring or quiet for the turn `prompt_id`, from the transcript tail.
-# Tool-result user records carry the turn's promptId too, so the turn is
-# everything after the last record with it, up to the next turn. Widens the tail once.
+# Prints ring or quiet for the turn `prompt_id` (empty: the latest turn),
+# from the transcript tail. Tool-result user records carry the turn's
+# promptId too, so the turn is everything after the last record with it,
+# up to the next turn. Widens the tail once.
 idle_verdict() {
     local path="$1" pid="$2" size bytes v
-    [ -n "$path" ] && [ -n "$pid" ] && [ -r "$path" ] || return 0
+    [ -n "$path" ] && [ -r "$path" ] || return 0
     size="$(wc -c <"$path" 2>/dev/null | tr -d ' ')" || return 0
     for bytes in 524288 8388608; do
         v="$(tail -c "$bytes" "$path" 2>/dev/null | jq -nrR --arg pid "$pid" --arg rung "$(rung_list)" "$MARKED_JQ"'
             ($rung | split(" ")) as $done
             | [inputs | fromjson? | select(type == "object")] as $r
+            | (if $pid != "" then $pid
+               else [$r[] | select(.type == "user" and .promptId != null) | .promptId] | last end) as $pid
             | ([$r | to_entries[] | select(.value.type == "user" and .value.promptId == $pid) | .key] | last) as $i
             | if $i == null then "missing"
               elif ([label $out | $r[$i + 1:][]
@@ -162,8 +176,15 @@ idle_verdict() {
     done
 }
 
+if [ "$last_turn" = true ]; then
+    v="$(idle_verdict "${2:-}" "")"
+    [ "$v" = ring ] || v=quiet
+    printf '%s\n' "$v"
+    exit 0
+fi
+
 if [ "$kind" = idle ]; then
-    kind="$(idle_verdict "$tpath" "$pid")"
+    [ -n "$pid" ] && kind="$(idle_verdict "$tpath" "$pid")"
 elif [ "$kind" = midturn ]; then
     kind="$(midturn_verdict)"
 fi

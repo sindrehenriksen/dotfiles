@@ -48,6 +48,16 @@
 # not be read (no session store, the reader failed, no boot time), so no
 # list was produced at all.
 #
+# The bell. Ghostty's bell marker on a tab does not survive a restart, so
+# it is derived instead: before opening a session, its transcript's latest
+# turn is judged by the bell hook's own idle check (claude/hooks/
+# input-bell.sh --last-turn: a `[needs-you]` line or a closing direct
+# question). Once the opened session is live, a needs-you one gets BEL
+# written to the tty the reader reports for it, so its background tab
+# carries the marker again. Only sessions this run opened and saw live are
+# rung; the line's detail and the JSON's `bell_rung` say which, and the
+# summary counts them as `rang`.
+#
 # Every opener call runs with stdin from /dev/null and under a hard timeout
 # that kills its process group: `hs` reads a piped stdin as more commands
 # and blocks until EOF, so an inherited stdin can hang it or eat input meant
@@ -57,7 +67,9 @@
 # Overrides (tests): $DESK_READER, $DESK_OPEN_TAB_BIN, $CLAUDE_SESSION_STORE,
 # $CLAUDE_CONFIG_DIR, $REOPEN_NOW and $REOPEN_BOOT_TIME (epochs),
 # $REOPEN_TAB_TIMEOUT_SECS (default 10), $REOPEN_CONFIRM_SECS (how long to
-# wait for an opened session to show as live, default 20; 0 skips the wait).
+# wait for an opened session to show as live, default 20; 0 skips the wait,
+# and with it the bell), $REOPEN_TTY_DIR (where the reader's tty names
+# resolve, default /dev).
 set -u
 
 usage() {
@@ -123,6 +135,8 @@ CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 # reports first when it fires; this is the backstop for everything else.
 TAB_TIMEOUT="${REOPEN_TAB_TIMEOUT_SECS:-10}"
 CONFIRM_SECS="${REOPEN_CONFIRM_SECS:-20}"
+TTY_DIR="${REOPEN_TTY_DIR:-/dev}"
+BELL_HOOK="$HERE/hooks/input-bell.sh"
 NOW="${REOPEN_NOW:-$(date +%s)}"
 # Boot ids a few minutes apart are treated as one boot: kern.boottime can be
 # nudged when the wall clock is stepped, and a new boot never follows the
@@ -259,14 +273,15 @@ older_count="$(jq --argjson r "$reader_json" '[.[] | select((.latest_boot == "ol
 # Selection, when --session narrows it: each selector must resolve to exactly
 # one candidate.
 results=()
-add_result() { # status id name cwd last_human idle_wd detail [confirmed]
+add_result() { # status id name cwd last_human idle_wd detail [confirmed] [bell_rung]
 	results+=("$(jq -cn --arg status "$1" --arg id "$2" --arg name "$3" --arg cwd "$4" \
-		--arg lh "$5" --arg wd "$6" --arg detail "$7" --arg confirmed "${8:-}" '
+		--arg lh "$5" --arg wd "$6" --arg detail "$7" --arg confirmed "${8:-}" --arg bell "${9:-}" '
 		{status: $status, id: $id, name: $name, cwd: $cwd,
 		 last_human_message: ($lh | tonumber? // null),
 		 idle_working_days: ($wd | tonumber? // null),
 		 detail: $detail}
-		+ (if $confirmed == "" then {} else {confirmed_live: ($confirmed == "true")} end)')")
+		+ (if $confirmed == "" then {} else {confirmed_live: ($confirmed == "true")} end)
+		+ (if $bell == "" then {} else {bell_rung: ($bell == "true")} end)')")
 }
 
 selected_ids=()
@@ -362,7 +377,7 @@ for line in "${cand_lines[@]+"${cand_lines[@]}"}"; do
 			continue
 			;;
 	esac
-	to_open+=("$(jq -cn --arg id "$id" --arg name "$name" --arg cwd "$cwd" --arg lh "$lh" --arg wd "$wd" --arg how "$how" '{id: $id, name: $name, cwd: $cwd, lh: $lh, wd: $wd, how: $how}')")
+	to_open+=("$(jq -cn --arg id "$id" --arg name "$name" --arg cwd "$cwd" --arg lh "$lh" --arg wd "$wd" --arg how "$how" --arg tp "$tp" '{id: $id, name: $name, cwd: $cwd, lh: $lh, wd: $wd, how: $how, tp: $tp}')")
 done
 
 # --------------------------------------------------------------------------
@@ -408,15 +423,26 @@ open_tab() { # id cwd -> sets open_detail; returns 0 when the opener reported su
 	return 0
 }
 
-confirm_live() { # id -> true once the reader reports it live, within CONFIRM_SECS
-	local id="$1" waited=0
+confirm_live() { # id -> true once the reader reports it live, within CONFIRM_SECS; sets live_tty
+	local id="$1" waited=0 e
+	live_tty=""
 	[ "$CONFIRM_SECS" -gt 0 ] 2> /dev/null || return 2
 	while [ "$waited" -lt "$CONFIRM_SECS" ]; do
 		sleep 1
 		waited=$((waited + 1))
-		[ "$(reader_entry "$id" | jq -r '.live // false' 2> /dev/null)" = "true" ] && return 0
+		e="$(reader_entry "$id")"
+		if [ "$(jq -r '.live // false' <<< "$e" 2> /dev/null)" = "true" ]; then
+			live_tty="$(jq -r '.tty // ""' <<< "$e" 2> /dev/null)"
+			return 0
+		fi
 	done
 	return 1
+}
+
+ring_tty() { # tty name as the reader reports it (ttys012, pts/3) -> 0 when BEL was written
+	[[ "$1" =~ ^[A-Za-z0-9/]+$ ]] && [[ "$1" != *..* ]] || return 1
+	[ -w "$TTY_DIR/$1" ] || return 1
+	printf '\a' 2> /dev/null > "$TTY_DIR/$1"
 }
 
 for item in "${to_open[@]+"${to_open[@]}"}"; do
@@ -426,6 +452,7 @@ for item in "${to_open[@]+"${to_open[@]}"}"; do
 	lh="$(jq -r '.lh' <<< "$item")"
 	wd="$(jq -r '.wd' <<< "$item")"
 	how="$(jq -r '.how' <<< "$item")"
+	tp="$(jq -r '.tp' <<< "$item")"
 	if [ "$dry_run" = true ]; then
 		add_result would-open "$id" "$name" "$cwd" "$lh" "$wd" "would resume in a background tab; $how"
 		continue
@@ -439,10 +466,20 @@ for item in "${to_open[@]+"${to_open[@]}"}"; do
 		add_result running "$id" "$name" "$cwd" "$lh" "$wd" "became live before it was opened (pid $(jq -r '.pid // "?"' <<< "$fresh"))"
 		continue
 	fi
+	# Judged before the open, from the transcript as the session left it.
+	needs_you="$("$BELL_HOOK" --last-turn "$tp" < /dev/null 2> /dev/null)"
 	if open_tab "$id" "$cwd"; then
 		confirm_live "$id"
 		case $? in
-			0) add_result opened "$id" "$name" "$cwd" "$lh" "$wd" "resumed in a background tab; $how" true ;;
+			0)
+				if [ "$needs_you" = ring ] && ring_tty "$live_tty"; then
+					add_result opened "$id" "$name" "$cwd" "$lh" "$wd" "resumed in a background tab; rang the bell (its last turn needs you); $how" true true
+				elif [ "$needs_you" = ring ]; then
+					add_result opened "$id" "$name" "$cwd" "$lh" "$wd" "resumed in a background tab; its last turn needs you, but its tty (${live_tty:-none}) could not be rung; $how" true false
+				else
+					add_result opened "$id" "$name" "$cwd" "$lh" "$wd" "resumed in a background tab; $how" true false
+				fi
+				;;
 			1) add_result opened "$id" "$name" "$cwd" "$lh" "$wd" "tab opened; not live yet after ${CONFIRM_SECS}s; $how" false ;;
 			*) add_result opened "$id" "$name" "$cwd" "$lh" "$wd" "tab opened; $how" ;;
 		esac
@@ -471,6 +508,7 @@ summary_json="$(jq -c \
 	 last_event_before_boot: ($down | tonumber? // null),
 	 idle_after_working_days: $thr, idle_threshold_from: $thr_src,
 	 opened: n("opened"), would_open: n("would-open"), running: n("running"),
+	 rang: (map(select(.bell_rung == true)) | length),
 	 idle: n("idle"), failed: n("failed"),
 	 older_orphans: $older, older_included: $all,
 	 ended_deliberately: $deliberate}
@@ -489,7 +527,7 @@ else
 	down_fmt="$(fmt_time "$last_before_boot" | tr ' ' T)"
 	boot_fmt="$(fmt_time "$boot_now" | tr ' ' T)"
 	jq -r --arg down "$down_fmt" --arg boot "$boot_fmt" '
-		"summary\tdry_run=\(.dry_run) opened=\(.opened) would_open=\(.would_open) running=\(.running) idle=\(.idle) failed=\(.failed) older_orphans=\(.older_orphans) ended_deliberately=\(.ended_deliberately) idle_after_working_days=\(.idle_after_working_days)(\(.idle_threshold_from)) went_down_after=\($down) booted=\($boot)"
+		"summary\tdry_run=\(.dry_run) opened=\(.opened) rang=\(.rang) would_open=\(.would_open) running=\(.running) idle=\(.idle) failed=\(.failed) older_orphans=\(.older_orphans) ended_deliberately=\(.ended_deliberately) idle_after_working_days=\(.idle_after_working_days)(\(.idle_threshold_from)) went_down_after=\($down) booted=\($boot)"
 	' <<< "$summary_json"
 fi
 
