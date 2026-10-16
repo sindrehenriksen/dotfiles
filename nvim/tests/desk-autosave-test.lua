@@ -395,6 +395,9 @@ do
 		assert(proposal.build(r, "morning", "2026-10-01", {
 			{ id = "n1", file = "notes.md", kind = "new", target = "top", before = "", after = "NEWS n1", source = "https://example.invalid/n1", headline = "headline n1" },
 			{ id = "n2", file = "notes.md", kind = "add", target = { under = "Section B" }, before = "", after = "  NEWS n2", source = "https://example.invalid/n2", headline = "headline n2" },
+			-- Left open, so the decline is not the last one, which would end
+			-- the one window's review before the disk changes.
+			{ id = "n3", file = "notes.md", kind = "add", target = { under = "Section A" }, before = "", after = "  NEWS n3", source = "https://example.invalid/n3", headline = "headline n3" },
 		}, { "notes.md", "reading.md" }))
 		local nb = open(r .. "/notes.md")
 		assert(review.open_review(nb))

@@ -479,6 +479,8 @@ In a notes buffer:
 | `Q`, `<leader>gq` | End the review in one step, as in the split. |
 | `:q` | Close the notes window, ending the review on the way, its declines recorded; nvim quitting, or the window showing another buffer, records them the same way. |
 
+Once a take or decline key, here or in the overview, leaves no suggestion open in the file, the review ends on its own, as `Q` ends it: takes and declines recorded, the notes saved, the overview closed, and the same closing line. Suggestions waiting in the other file wait for the next `<leader>gR`.
+
 To edit a suggestion, take it and edit it. Deleting a suggestion's red lines by hand takes a removal, and declines an edit, move or merge, as deleting a suggestion's lines does in the split: recorded as the review ends and named in its closing line, and `u` putting the lines back brings the suggestion back. Typing into a red line, or splitting one, is an edit of your notes instead: the suggestion no longer fits them and is left to the next pass. Deleting the line a suggestion hangs on is your edit, and where the suggestion goes is the next pass's business. `<leader>gv` switches to the split, the merged text in a review buffer above your notes, both in diff mode, keeping the cursor where it is and carrying the declines made here; it switches back from there too, and the choice is remembered for the next review in this nvim. The overview, `<leader>gc` and `<leader>gR` work as in the split.
 
 In the review split:

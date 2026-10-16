@@ -387,7 +387,6 @@ function M.save_review(s, keep_takes)
 			gone[#gone + 1] = item
 		end
 	end
-	s.view_declined, s.view_acts = {}, {}
 	table.sort(gone, function(a, b)
 		return a.id < b.id
 	end)
@@ -402,8 +401,10 @@ function M.save_review(s, keep_takes)
 		end
 	end
 	if not ledger.record_declines(s.repo, gone) then
+		-- The one window's declines stay where they were, still unrecorded.
 		return false, "could not record the declines in the ledger"
 	end
+	s.view_declined, s.view_acts = {}, {}
 	for _, item in ipairs(gone) do
 		s.declined_here[item.id] = true
 	end
@@ -2223,8 +2224,16 @@ end
 -- is the place of a move or merge the key acted on ("landing" or
 -- "removal"), nil when it named neither.
 local function act_on(s, item, verb, side)
-	if verb == "decline" and s.inline then
-		return M.view_decline(s, item)
+	-- In one window a take is the one window's own, the placement its
+	-- drawing shows; the caller redraws (M.view_acted).
+	if s.inline then
+		if verb == "decline" then
+			return M.view_decline(s, item)
+		end
+		if not M.view_take(s, { item }) then
+			return false, "could not take this suggestion: its place in your notes has changed"
+		end
+		return true
 	end
 	if verb == "decline" then
 		if not decline_item(s, item) then
@@ -2766,23 +2775,38 @@ function M.view_put(s, count)
 		end
 	end
 	M.view_take(s, items)
-	M.view_refresh(s)
-	M.refresh_overview(s)
-	M.refresh_status_line(s.notes_buf)
-	return true
+	return M.view_acted(s)
 end
 
---- The decline key in the one window: the suggestion's decoration goes,
---- and it is recorded as declined when the review ends. `u` brings it back
---- while the notes have not changed since.
+--- After a take or decline in the one window: the decorations, the
+--- overview and the bar follow, and once no suggestion is left open in the
+--- file the review ends as `Q` ends it, its takes and declines recorded,
+--- the notes saved and the overview closed. Returns true, or false, why
+--- the review could not end.
+function M.view_acted(s)
+	M.view_refresh(s)
+	local ok, why = true, nil
+	if next(s.view_shown or {}) == nil then
+		ok, why = M.close_review(s)
+		if ok then
+			return true
+		end
+	end
+	-- Still open, the auto-end refused included: the list and the bar
+	-- follow the take or decline all the same.
+	M.refresh_overview(s)
+	M.refresh_status_line(s.notes_buf)
+	return ok, why
+end
+
+--- The decline key in the one window: the suggestion's decoration goes
+--- (M.view_acted), and it is recorded as declined when the review ends.
+--- `u` brings it back while the notes have not changed since.
 function M.view_decline(s, item)
 	s.view_declined = s.view_declined or {}
 	s.view_declined[item.id] = item
 	s.view_acts = s.view_acts or {}
 	s.view_acts[#s.view_acts + 1] = { id = item.id, seq = undo_seq(s.notes_buf) }
-	M.view_refresh(s)
-	M.refresh_overview(s)
-	M.refresh_status_line(s.notes_buf)
 	return true
 end
 
@@ -2836,9 +2860,7 @@ function M.map_view_keys(s)
 			else
 				M.view_decline(s, item)
 			end
-			M.view_refresh(s)
-			M.refresh_overview(s)
-			M.refresh_status_line(nb)
+			report(M.view_acted(s))
 		end, verb == "take" and "Take the suggestion on this line" or "Decline the suggestion on this line (u brings it back)")
 	end
 	map("u", function()
@@ -3708,6 +3730,12 @@ function M.qf_act(verb)
 	end
 	if t then
 		end_take(s, t)
+	end
+	if s.inline then
+		ok, why = M.view_acted(s)
+		if not ok or sessions[s.notes_buf] ~= s then
+			return ok, why -- the last one: the review and its list are closed
+		end
 	end
 	local qwin = vim.api.nvim_get_current_win()
 	local row = vim.fn.line(".")

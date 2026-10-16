@@ -362,6 +362,130 @@ do
 	assert_true("Q ends the review", review.open_review_buf(nb) == nil)
 end
 
+print("\n=== a take from the overview redraws the notes ===")
+do
+	-- An edit of one line whose `before` carries the sub-bullet under it,
+	-- which the edit leaves as it is.
+	local notes = { "Section A", "- parent line here", "  - a sub-bullet under it", "- after", "", "Section B", "- b1" }
+	local _, nb, s = setup(notes, {
+		item("ed", { kind = "edit", target = { at = "- parent line here" }, before = "- parent line here\n  - a sub-bullet under it", after = "- parent line changed\n  - a sub-bullet under it", headline = "change the parent" }),
+		item("ad", { kind = "add", target = { under = "Section B" }, after = "- b2 added", headline = "add b2" }),
+	})
+	assert_true("the overview opens", review.overview(nb))
+	local qw = vim.api.nvim_get_current_win()
+	for i, e in ipairs(vim.fn.getqflist()) do
+		if e.text == "change the parent" then
+			vim.api.nvim_win_set_cursor(qw, { i, 0 })
+		end
+	end
+	vim.cmd("normal t")
+	assert_true("t takes the edit", line_of(nb, "- parent line changed") ~= nil and not line_of(nb, "- parent line here"))
+	local d = decor(nb)
+	assert_eq("no line is drawn as going away any more, the sub-bullet included", {}, d.struck)
+	assert_true("and the taken text is not drawn again", block_with(nb, "- parent line changed") == nil)
+	assert_true("the other suggestion still drawn where it goes", block_with(nb, "- b2 added") ~= nil)
+	assert_eq("and it is the one left to step to", { "add b2" }, vim.tbl_map(function(spot)
+		return spot.item.headline
+	end, s.view_spots))
+	vim.cmd("cclose")
+	vim.bo[nb].modified = false
+end
+
+print("\n=== the last suggestion taken or declined ends the review ===")
+do
+	for _, way in ipairs({ "t", "x", "dp", "gA", "gD" }) do
+		local r, nb, s = setup({ "Section A", "- keep one", "- old line", "", "Section B", "- b1" }, {
+			item("ed", { kind = "edit", target = { at = "- old line" }, before = "- old line", after = "- new line", headline = "rewrite the old line" }),
+			item("ad", { kind = "add", target = { under = "Section B" }, after = "- b2 added", headline = "add b2" }),
+		})
+		local said = {}
+		vim.notify = function(m)
+			said[#said + 1] = m
+		end
+		local rb = s.review_buf
+		local nw = vim.api.nvim_get_current_win()
+		vim.api.nvim_win_set_cursor(nw, { spot_row(s, "add b2"), 0 })
+		vim.cmd("normal dp")
+		assert_true(way .. ": one taken, one left: the review stays", review.open_review_buf(nb) ~= nil)
+		if way == "t" or way == "x" then
+			assert_true(way .. ": the overview opens", review.overview(nb))
+			vim.cmd("normal " .. way)
+		else
+			vim.api.nvim_win_set_cursor(nw, { line_of(nb, "- old line"), 0 })
+			if way == "dp" then
+				vim.cmd("normal dp")
+			else
+				vim.api.nvim_feedkeys(vim.keycode(way == "gA" and "<leader>gA" or "<leader>gD"), "x", false)
+			end
+		end
+		settle()
+		local taking = way == "t" or way == "dp" or way == "gA"
+		assert_true(way .. ": the review is over", not vim.api.nvim_buf_is_valid(rb) and review.open_review_buf(nb) == nil)
+		assert_true(way .. ": the overview is closed", vim.fn.getqflist({ winid = 0 }).winid == 0)
+		assert_eq(way .. ": no decoration is left", 0, #vim.api.nvim_buf_get_extmarks(nb, inline.NS, 0, -1, {}))
+		assert_true(way .. ": the notes are saved", not vim.bo[nb].modified)
+		local taken = vim.tbl_map(function(rec)
+			return rec.headline
+		end, vim.tbl_values(ledger.taken_by_id(ledger.read(r))))
+		table.sort(taken)
+		local declined = vim.tbl_map(function(rec)
+			return rec.headline
+		end, vim.tbl_values(ledger.declined(ledger.read(r)).ids))
+		assert_eq(way .. ": the takes recorded", taking and { "add b2", "rewrite the old line" } or { "add b2" }, taken)
+		assert_eq(way .. ": and the declines", taking and {} or { "rewrite the old line" }, declined)
+		local want = taking and "^desk: review closed: 2 taken; saved notes%.md with your takes$" or "^desk: review closed: 1 taken, 1 declined %(rewrite the old line%); saved notes%.md with your takes$"
+		assert_true(way .. ": and it says so as Q does", #vim.tbl_filter(function(m)
+			return m:match(want) ~= nil
+		end, said) == 1)
+		vim.notify = function() end
+	end
+end
+
+print("\n=== an end that cannot record leaves the list and the bar current ===")
+do
+	local r, nb, s = setup({ "Section A", "- keep one", "- old line", "", "Section B", "- b1" }, {
+		item("ed", { kind = "edit", target = { at = "- old line" }, before = "- old line", after = "- new line", headline = "rewrite the old line" }),
+		item("ad", { kind = "add", target = { under = "Section B" }, after = "- b2 added", headline = "add b2" }),
+	})
+	vim.api.nvim_win_set_cursor(0, { spot_row(s, "add b2"), 0 })
+	vim.cmd("normal dp")
+	assert_true("the overview opens", review.overview(nb))
+	local record = ledger.record_declines
+	ledger.record_declines = function()
+		return false
+	end
+	vim.cmd("normal x")
+	ledger.record_declines = record
+	settle()
+	assert_true("the review stays open, its end refused", review.open_review_buf(nb) ~= nil)
+	assert_eq("the overview no longer lists the declined one", {}, vim.tbl_map(function(e)
+		return e.text
+	end, vim.fn.getqflist()))
+	-- The decline is still waiting to be recorded: an edit of the notes
+	-- does not bring it back, and the next end records it.
+	vim.api.nvim_set_current_win(vim.fn.bufwinid(nb))
+	vim.api.nvim_win_set_cursor(0, { line_of(nb, "- keep one"), 0 })
+	vim.api.nvim_feedkeys("o- typed after the refused end\27", "xt", false)
+	changed(nb)
+	assert_true("after an edit the declined one stays declined, nothing left", review.status_line(nb):match("^0 left") ~= nil and spot_row(s, "rewrite the old line") == nil)
+	local said = {}
+	vim.notify = function(m)
+		said[#said + 1] = m
+	end
+	vim.api.nvim_feedkeys("Q", "x", false)
+	settle()
+	vim.notify = function() end
+	assert_true("Q then ends the review", review.open_review_buf(nb) == nil)
+	assert_eq("and records the decline the refused end could not", { "rewrite the old line" }, vim.tbl_map(function(rec)
+		return rec.headline
+	end, vim.tbl_values(ledger.declined(ledger.read(r)).ids)))
+	assert_true("saying so as it closes", #vim.tbl_filter(function(m)
+		return m:match("^desk: review closed: .*1 declined %(rewrite the old line%)") ~= nil
+	end, said) == 1)
+	vim.cmd("cclose")
+	vim.bo[nb].modified = false
+end
+
 print("\n=== the view key: to the split and back, the declines carried ===")
 do
 	local r, nb, s = setup()
