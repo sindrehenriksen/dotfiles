@@ -1903,12 +1903,17 @@ do
 	local function list_open()
 		return vim.fn.getqflist({ winid = 0 }).winid ~= 0
 	end
-	assert_true("the title names both", review.OVERVIEW_TITLE:match("q close list · Q close review$") ~= nil)
+	assert_true("the title names both", review.OVERVIEW_TITLE:match("q/Q close review$") ~= nil)
 
-	local _, nb, rb, qw = setup()
-	in_list(qw, "q")
+	local rq, nbq, rbq, qwq = setup()
+	vim.api.nvim_set_current_win(vim.fn.bufwinid(rbq))
+	go_to(vim.fn.bufwinid(rbq), rbq, "NEWS n1")
+	assert_true("decline", review.decline(rbq))
+	in_list(qwq, "q")
+	assert_eq("q records the decline as it closes", { id_by_headline(rq, "headline n1") }, declined_ids(rq))
 	assert_true("q closes the list", not list_open())
-	assert_true("and leaves the review open", vim.api.nvim_buf_is_valid(rb) and vim.fn.bufwinid(rb) ~= -1)
+	assert_true("and the split", not vim.api.nvim_buf_is_valid(rbq))
+	assert_eq("leaving the user in their notes", nbq, vim.api.nvim_get_current_buf())
 
 	local orig = review.confirm
 	local asked = 0
@@ -2706,7 +2711,7 @@ do
 	in_list("q")
 	assert_true("q saves the user's own edit", vim.tbl_contains(on_disk(r), "  mine"))
 	assert_eq("the notes are saved", false, vim.bo[nb].modified)
-	assert_true("the review stays open", vim.api.nvim_buf_is_valid(rb) and vim.fn.bufwinid(rb) ~= -1)
+	assert_true("and the review ended", not vim.api.nvim_buf_is_valid(rb))
 	assert_true("and it says so", vim.tbl_contains(said, "desk: saved notes.md"))
 
 	r, nb, rb = setup()
@@ -2727,88 +2732,13 @@ do
 		return false
 	end
 
-	-- take, q, u in the split, then the review ends: the undone take is
-	-- neither recorded nor lost.
+	-- take, q: the review ends and records the take, the notes saved.
 	r, nb, rb = setup()
 	go_to(vim.fn.bufwinid(rb), rb, "NEWS n1")
 	vim.cmd("normal dp")
 	in_list("q")
-	assert_true("q saved the take to disk", vim.tbl_contains(on_disk(r), "NEWS n1"))
-	assert_true("but did not record it while the review is open", not recorded(r))
-	vim.api.nvim_set_current_win(vim.fn.bufwinid(rb))
-	assert_true("u in the split undoes it", review.undo(rb))
-	assert_true("the take is gone from the notes", not vim.tbl_contains(lines_of(nb), "NEWS n1"))
-	assert_true("overview reopens", review.overview(nb))
-	in_list("Q")
-	assert_true("Q saves the undo", not vim.tbl_contains(on_disk(r), "NEWS n1"))
-	assert_true("and the undone take is never recorded as taken", not recorded(r))
-	assert_true("so the suggestion is still there to review", vim.tbl_contains(proposal.lines_at(r, "refs/desk/proposal", "notes.md"), "NEWS n1"))
-
-	-- take, q, then the review ends: recorded then.
-	r, nb, rb = setup()
-	go_to(vim.fn.bufwinid(rb), rb, "NEWS n1")
-	vim.cmd("normal dp")
-	in_list("q")
-	vim.api.nvim_set_current_win(vim.fn.bufwinid(rb))
-	vim.api.nvim_feedkeys(vim.keycode("<leader>gq"), "x", false)
-	tick()
-	assert_true("the review ended", not vim.api.nvim_buf_is_valid(rb))
-	assert_true("a take q saved is recorded when the review ends", recorded(r))
-
-	r, nb, rb = setup()
-	go_to(vim.fn.bufwinid(rb), rb, "NEWS n1")
-	vim.cmd("normal dp")
-	in_list("q")
-	vim.api.nvim_set_current_win(vim.fn.bufwinid(rb))
-	vim.cmd("quit")
-	tick()
-	assert_true("and when :q ends it, the take being on disk already", recorded(r))
-
-	-- take, edit the taken line, q, then :qa: quitting nvim ends the review
-	-- without wiping the split, and the take q saved is still recorded. A
-	-- real :qa, so in an nvim of its own.
-	do
-		local qr = new_repo(BASE)
-		build(qr, "2026-10-01", { item("n1"), item("n2") })
-		local here = debug.getinfo(1, "S").source:sub(2):match("^(.*)/[^/]+$")
-		local child = vim.fn.tempname() .. ".lua"
-		vim.fn.writefile(vim.split([[
-local review = require("desk.review")
-review.view = "split"
-require("desk.window").run = function(_, cb) cb(true, "none") end
-require("desk.window").owner_fn = function() return nil end
-vim.cmd("edit " .. vim.fn.fnameescape(vim.env.DESK_TEST_REPO .. "/notes.md"))
-local nb = vim.api.nvim_get_current_buf()
-review.attach(nb)
-assert(review.overview(nb))
-local rb
-for _, b in ipairs(vim.api.nvim_list_bufs()) do
-	if vim.api.nvim_buf_get_name(b):match("^desk%-review://") then rb = b end
-end
-local function line(buf, text)
-	for i, l in ipairs(vim.api.nvim_buf_get_lines(buf, 0, -1, false)) do
-		if l == text then return i end
-	end
-end
-vim.api.nvim_set_current_win(vim.fn.bufwinid(rb))
-vim.api.nvim_win_set_cursor(0, { line(rb, "NEWS n1"), 0 })
-vim.cmd("normal dp")
-local n = line(nb, "NEWS n1")
-vim.api.nvim_buf_set_lines(nb, n - 1, n, false, { "NEWS n1, edited" })
-vim.api.nvim_set_current_win(vim.fn.getqflist({ winid = 0 }).winid)
-vim.cmd("normal q")
-vim.wait(50, function() return false end)
-vim.cmd("qa")
-]], "\n"), child)
-		local res = vim.system({ vim.v.progpath, "--headless", "-u", here .. "/minimal_init.lua", "-l", child },
-			{ text = true, env = { DESK_TEST_REPO = qr }, timeout = 60000 }):wait()
-		assert_eq("the nvim that took and quit exits cleanly", 0, res.code)
-		assert_true("q saved the edited take", vim.tbl_contains(on_disk(qr), "NEWS n1, edited"))
-		assert_true("and :qa recorded it as taken", recorded(qr))
-		if res.code ~= 0 then
-			print(res.stdout, res.stderr)
-		end
-	end
+	assert_true("q saves the take", vim.tbl_contains(on_disk(r), "NEWS n1"))
+	assert_true("and records it as the review ends", recorded(r))
 
 	-- reading.md open with an edit of its own, nothing taken into it.
 	r, nb, rb = setup()

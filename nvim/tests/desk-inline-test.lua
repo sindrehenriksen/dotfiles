@@ -354,12 +354,8 @@ do
 	assert_true("x declines the next", spot_row(s, "drop the stale line") == nil)
 	vim.cmd("normal q")
 	settle()
-	assert_true("q closes the list, the review staying", vim.fn.getqflist({ winid = 0 }).winid == 0 and review.open_review_buf(nb) ~= nil)
+	assert_true("q ends the review and closes the list", vim.fn.getqflist({ winid = 0 }).winid == 0 and review.open_review_buf(nb) == nil)
 	assert_true("with the notes saved", not vim.bo[nb].modified)
-	assert_true("the overview reopens", review.overview(nb))
-	vim.cmd("normal Q")
-	settle()
-	assert_true("Q ends the review", review.open_review_buf(nb) == nil)
 end
 
 print("\n=== a take from the overview redraws the notes ===")

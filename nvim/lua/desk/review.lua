@@ -664,12 +664,6 @@ local function settle_declines(s)
 	return true
 end
 
--- Notes buffers whose takes a save must not record: the overview's `q`
--- saves mid-review, and a take recorded then would stay recorded through
--- a `u` in the split. The review's end records them (write_taken_notes,
--- and the split's wipeout for a review ended without saving).
-local holding_takes = {}
-
 --- Records the takes already on disk in the notes the review took into:
 --- a buffer with nothing unsaved holds them as written.
 local function record_saved_takes(s)
@@ -680,15 +674,15 @@ local function record_saved_takes(s)
 	end
 end
 
--- The ends that save (`:wq` in the split, the overview's `Q`, `<leader>gq`)
--- write the notes the review took into, and with `everything` (`Q`,
+-- The ends that save (`:wq` in the split, the overview's `q` and
+-- `Q`, `<leader>gq`)
+-- write the notes the review took into, and with `everything` (`q`, `Q`,
 -- `<leader>gq`) every other notes file with unsaved edits too: a take lives
 -- only in the notes buffer until that is written, so quitting nvim after
 -- ending the review would lose it. Each save is desk.autosave's, so none
 -- goes over a change on disk. The takes are recorded once on disk, here
--- rather than by BufWritePost, which a write from an autocmd need not run;
--- one already on disk from the overview's `q` is recorded now too. Says in
--- one line what it saved, and why it left any.
+-- rather than by BufWritePost, which a write from an autocmd need not run.
+-- Says in one line what it saved, and why it left any.
 --- What review `s`'s ledger gained since `before` (its records then), as
 --- "2 taken, 1 declined (headline)", or nil when nothing.
 function M.decided_since(repo, before)
@@ -1482,7 +1476,7 @@ function M.open_review(notes_buf)
 			-- In the one window auto-save runs as the user types; a take is
 			-- recorded as the review ends, so a later `u` can still take it
 			-- back.
-			if not holding_takes[notes_buf] and not (sessions[notes_buf] and sessions[notes_buf].inline) then
+			if not (sessions[notes_buf] and sessions[notes_buf].inline) then
 				M.flush_taken(notes_buf)
 			end
 			M.refresh_status_line(notes_buf, true)
@@ -3179,7 +3173,7 @@ end
 
 -- The title is the list's identity too, and the qf window's status line
 -- shows it, so it carries the list's own keys.
-M.OVERVIEW_TITLE = "Desk overview: ⏎ jump (other file: switch) · t/dp take · x/gD decline · q close list · Q close review"
+M.OVERVIEW_TITLE = "Desk overview: ⏎ jump (other file: switch) · t/dp take · x/gD decline · q/Q close review"
 M.DECLINED_TITLE = "Desk declined recently"
 M.DECLINED_WINDOW_DAYS = 14
 
@@ -3767,37 +3761,7 @@ function M.qf_check()
 	end
 end
 
---- The overview's `q`: saves the notes files with unsaved edits, as
---- desk.autosave saves them, then closes the list. Says what it saved, or
---- why it left one.
-function M.qf_close_list()
-	-- Saved, not yet recorded: the review is still open, and `u` there can
-	-- still undo a take.
-	for nb, s in pairs(sessions) do
-		if vim.api.nvim_buf_is_valid(s.review_buf) then
-			holding_takes[nb] = true
-			for b in pairs(s.took_into or {}) do
-				holding_takes[b] = true
-			end
-		end
-	end
-	local ok, wrote, left = pcall(require("desk.autosave").save_all)
-	holding_takes = {}
-	if not ok then
-		error(wrote)
-	end
-	vim.cmd("cclose")
-	vim.schedule(function()
-		if #wrote > 0 then
-			vim.notify("desk: saved " .. table.concat(wrote, " and "), vim.log.levels.INFO)
-		end
-		for _, why in ipairs(left) do
-			vim.notify("desk: " .. why, vim.log.levels.WARN)
-		end
-	end)
-end
-
---- The overview's `Q`: ends the review the list belongs to, list and
+--- The overview's `q` and `Q`: end the review the list belongs to, list and
 --- split together, as `<leader>gq` does. With no review open it closes
 --- the list. Returns true, or false, why.
 function M.qf_close_review()
@@ -4371,8 +4335,7 @@ end
 
 local leave_autocmd_installed = false
 
--- A take the overview's `q` saved waits to be recorded until its review
--- ends, and quitting nvim ends it without wiping the split: recorded here.
+-- Quitting nvim ends a review without wiping the split: takes recorded here.
 local function install_leave_autocmd()
 	if leave_autocmd_installed then
 		return
@@ -4468,7 +4431,7 @@ local function install_qf_autocmd()
 			})
 			vim.keymap.set("n", "r", M.qf_restore, { buffer = args.buf, desc = "Desk: restore this declined item" })
 			-- The overview's own keys; in any other list they keep their meaning.
-			local verbs = { t = "take", dp = "take", x = "decline", gD = "decline", q = "close list", Q = "close review" }
+			local verbs = { t = "take", dp = "take", x = "decline", gD = "decline", q = "close review", Q = "close review" }
 			for lhs, verb in pairs(verbs) do
 				vim.keymap.set("n", lhs, function()
 					if vim.fn.getqflist({ title = 0 }).title ~= M.OVERVIEW_TITLE or is_loclist_win(vim.api.nvim_get_current_win()) then
@@ -4484,9 +4447,7 @@ local function install_qf_autocmd()
 							end)
 						end
 					end
-					if verb == "close list" then
-						M.qf_close_list()
-					elseif verb == "close review" then
+					if verb == "close review" then
 						say(M.qf_close_review())
 					else
 						say(M.qf_act(verb))
