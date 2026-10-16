@@ -482,6 +482,57 @@ do
 	vim.bo[nb].modified = false
 end
 
+print("\n=== a commit's own rebuild is adopted in the one window ===")
+do
+	local r = new_repo(BASE)
+	local draft = vim.deepcopy(BASE)
+	table.insert(draft, 6, "- b1 draft")
+	write(r, "notes.md", draft)
+	assert(proposal.build(r, "morning", "2026-10-01", {
+		ITEMS[1],
+		ITEMS[2],
+		ITEMS[3],
+		item("late", { kind = "add", target = { after = "- b1 draft" }, after = "- late line", headline = "add late" }),
+	}, FILES))
+	vim.cmd("silent! %bwipeout!")
+	vim.cmd("silent! only")
+	vim.cmd("edit " .. vim.fn.fnameescape(r .. "/notes.md"))
+	local nb = vim.api.nvim_get_current_buf()
+	review.attach(nb)
+	review.view = "inline"
+	assert(review.open_review(nb))
+	local s = review.session_of(nb)
+	local said = {}
+	vim.notify = function(m)
+		said[#said + 1] = m
+	end
+	assert_true("the waiting suggestion is not shown yet", spot_row(s, "add late") == nil)
+	vim.api.nvim_win_set_cursor(0, { line_of(nb, "- old line"), 0 })
+	vim.cmd("normal dp")
+	assert_true("take", line_of(nb, "- new line") ~= nil)
+	vim.api.nvim_win_set_cursor(0, { line_of(nb, "- stale"), 0 })
+	vim.api.nvim_feedkeys(vim.keycode("<leader>gD"), "x", false)
+	assert_true("decline", spot_row(s, "drop the stale line") == nil)
+	assert_true("commit", (review.commit(nb)))
+	settle()
+	assert_eq("the review adopted the rebuilt proposal", git.ref_sha(r, review.PROPOSAL_REF), s.sha)
+	assert_true("the waiting suggestion is drawn", spot_row(s, "add late") ~= nil or line_of(nb, "- late line") ~= nil)
+	vim.api.nvim_win_set_cursor(0, { line_of(nb, "- b1 draft"), 0 })
+	vim.api.nvim_feedkeys(vim.keycode("<leader>gA"), "x", false)
+	assert_true("it can be taken at once", line_of(nb, "- late line") ~= nil)
+	assert_eq("with nothing refused or reloaded", {}, vim.tbl_filter(function(m)
+		return m:match("proposal changed") ~= nil
+	end, said))
+	vim.api.nvim_feedkeys("Q", "x", false)
+	settle()
+	vim.notify = function() end
+	assert_eq("the decline is recorded as the review ends", { "drop the stale line" }, vim.tbl_map(function(rec)
+		return rec.headline
+	end, vim.tbl_values(ledger.declined(ledger.read(r)).ids)))
+	vim.cmd("cclose")
+	vim.bo[nb].modified = false
+end
+
 print("\n=== the view key: to the split and back, the declines carried ===")
 do
 	local r, nb, s = setup()

@@ -674,15 +674,15 @@ local function record_saved_takes(s)
 	end
 end
 
--- The ends that save (`:wq` in the split, the overview's `q` and
--- `Q`, `<leader>gq`)
--- write the notes the review took into, and with `everything` (`q`, `Q`,
--- `<leader>gq`) every other notes file with unsaved edits too: a take lives
--- only in the notes buffer until that is written, so quitting nvim after
--- ending the review would lose it. Each save is desk.autosave's, so none
--- goes over a change on disk. The takes are recorded once on disk, here
--- rather than by BufWritePost, which a write from an autocmd need not run.
--- Says in one line what it saved, and why it left any.
+-- The ends that save (`:wq` in the split, the overview's `q` and `Q`,
+-- `<leader>gq`) write the notes the review took into, and with
+-- `everything` (`q`, `Q`, `<leader>gq`) every other notes file with unsaved
+-- edits too: a take lives only in the notes buffer until that is written,
+-- so quitting nvim after ending the review would lose it. Each save is
+-- desk.autosave's, so none goes over a change on disk. The takes are
+-- recorded once on disk, here rather than by BufWritePost, which a write
+-- from an autocmd need not run. Says in one line what it saved, and why it
+-- left any.
 --- What review `s`'s ledger gained since `before` (its records then), as
 --- "2 taken, 1 declined (headline)", or nil when nothing.
 function M.decided_since(repo, before)
@@ -772,9 +772,9 @@ end
 
 -- ---------------------------------------------------------------------------
 -- A stale review: the proposal ref moves while a review is open when a pass
--- lands or a session stages with desk-propose, and the split then still
--- shows the old merged text, hunks the overview no longer lists among them.
--- So entering either review window or the overview, and every take or
+-- lands or a session stages with desk-propose (a `<leader>gc` rebuild is the
+-- review's own, adopted at once), and the split then still shows the old
+-- merged text, hunks the overview no longer lists among them. So entering either review window or the overview, and every take or
 -- decline, compares the sha the review was built from with the ref. With
 -- nothing unsaved the review is rebuilt in its own windows; unsaved
 -- declines are work against the old view, never thrown away here, so the
@@ -906,6 +906,41 @@ function M.ensure_current(s, acting)
 	end
 	vim.notify("desk: " .. M.STALE_RELOADED, vim.log.levels.INFO)
 	return true
+end
+
+-- A review adopts the proposal its own commit rebuilt, as `<leader>gR`
+-- reloads one: unsaved declines are recorded first (hand edits keep the
+-- review held, as there), and nothing is refused afterwards.
+local function adopt_proposal(s)
+	local sha = git.ref_sha(s.repo, M.PROPOSAL_REF)
+	local p = sha and proposal.read(s.repo, sha)
+	if not p or s.sha == sha or sessions[s.notes_buf] ~= s or not vim.api.nvim_buf_is_valid(s.review_buf) then
+		return
+	end
+	if s.inline then
+		s.sha = p.sha
+		M.view_refresh(s)
+		M.recount_saved(s)
+		M.refresh_overview(s)
+		return
+	end
+	if M.hand_edits(s) then
+		return
+	end
+	s.reloading = true
+	local ok, why = rebuild(s, p)
+	if not ok and why == M.STALE_HELD then
+		local before = ledger.read(s.repo)
+		if M.save_review(s) then
+			vim.bo[s.review_buf].modified = false
+			local summary = M.decided_since(s.repo, before)
+			if summary then
+				vim.notify("desk: recorded " .. summary, vim.log.levels.INFO)
+			end
+			rebuild(s, p)
+		end
+	end
+	s.reloading = nil
 end
 
 --- Moves the review from `from_buf`'s file to `file` of the same repo, in
@@ -4144,6 +4179,25 @@ function M.commit(bufnr)
 		M.flush_taken(b)
 	end
 	local taken = proposal.sync_taken(repo)
+	-- A suggestion waiting on a line the user had not committed becomes
+	-- live only in a rebuilt proposal, which nothing else does before the
+	-- next pass. A commit that committed nothing can have landed none.
+	-- Those deferred for a conflict wait for the next pass, as before.
+	local waiting = false
+	for _, item in ipairs(#paths > 0 and proposal.read_items(repo) or {}) do
+		waiting = waiting or item.waits_for ~= nil
+	end
+	if waiting then
+		if proposal.build(repo, "commit", os.date("%Y-%m-%d"), {}, M.notes_files()) then
+			for _, s in pairs(sessions) do
+				if s.repo == repo then
+					adopt_proposal(s)
+				end
+			end
+		else
+			vim.notify("desk: the suggestions waiting on your lines will show at the next pass", vim.log.levels.WARN)
+		end
+	end
 	for _, b in ipairs(bufs) do
 		M.refresh_status_line(b, true)
 	end
@@ -4167,10 +4221,14 @@ function M.commit_from_review(review_buf)
 	end
 	if vim.bo[review_buf].modified then
 		local before = ledger.read(s.repo)
+		-- The save clears the unsaved flag; edits that are not declines keep
+		-- the review held through the commit's rebuild, so it stays set.
+		local hand = M.hand_edits(s)
 		local ok, n_or_err = M.save_review(s)
 		if not ok then
 			return false, n_or_err
 		end
+		vim.bo[review_buf].modified = hand
 		local summary = M.decided_since(s.repo, before)
 		if summary then
 			vim.notify("desk: recorded " .. summary, vim.log.levels.INFO)

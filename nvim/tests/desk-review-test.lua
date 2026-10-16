@@ -2936,6 +2936,105 @@ do
 	vim.cmd("silent! %bwipeout!")
 end
 
+print("\n=== a suggestion waiting on an uncommitted line is reviewable once <leader>gc commits it ===")
+do
+	local r = new_repo({ "Section A", "- a1" })
+	write(r, "notes.md", { "Section A", "- a1", "- a2 draft" })
+	local nb = open_notes(r)
+	review.attach(nb)
+	build(r, "2026-10-01", {
+		item("late", { kind = "add", target = { after = "- a2 draft" }, after = "- a3", source = "" }),
+	})
+	assert_eq("it waits, so nothing is open", 0, #proposal.open_items(r))
+	local cok = review.commit(nb)
+	assert_true("commit succeeds", cok)
+	assert_eq("it is open without another pass", { "headline late" }, vim.tbl_map(function(it)
+		return it.headline
+	end, proposal.open_items(r)))
+	vim.cmd("silent! %bwipeout!")
+end
+
+print("\n=== a commit's own rebuild leaves the open review current ===")
+do
+	local function setup_late()
+		local r = new_repo({ "Section A", "- a1" })
+		write(r, "notes.md", { "Section A", "- a1", "- a2 draft" })
+		build(r, "2026-10-01", {
+			item("n1"),
+			item("n2"),
+			item("late", { kind = "add", target = { after = "- a2 draft" }, after = "- a3", source = "" }),
+		})
+		local nb = open_notes(r)
+		review.attach(nb)
+		assert_true("review opens", review.open_review(nb))
+		local rb = review_buf_of(nb)
+		go_to(vim.fn.bufwinid(rb), rb, "NEWS n1")
+		return r, nb, rb
+	end
+
+	local r, nb, rb = setup_late()
+	assert_true("take n1", review.take(rb))
+	assert_true("commit from the split", (review.commit_from_review(rb)))
+	vim.api.nvim_set_current_win(vim.fn.bufwinid(rb))
+	go_to(vim.fn.bufwinid(rb), rb, "NEWS n2")
+	assert_true("the next decline is not refused", review.decline(rb))
+	assert_true("and takes effect in the split", line_of(rb, "NEWS n2") == nil)
+	vim.cmd("silent! %bwipeout!")
+
+	r, nb, rb = setup_late()
+	assert_true("take n1", review.take(rb))
+	go_to(vim.fn.bufwinid(rb), rb, "NEWS n2")
+	assert_true("decline n2, unsaved", review.decline(rb))
+	vim.api.nvim_set_current_win(vim.fn.bufwinid(nb))
+	assert_true("commit from the notes", (review.commit(nb)))
+	assert_true("the review is not left held", not vim.bo[rb].modified)
+	assert_true("the waiting suggestion is drawn at once", line_of(rb, "- a3") ~= nil)
+	go_to(vim.fn.bufwinid(rb), rb, "- a3")
+	assert_true("and can be taken without reloading", review.take(rb))
+	assert_eq("the unsaved decline was kept", { id_by_headline(r, "headline n2") }, declined_ids(r))
+	vim.cmd("silent! %bwipeout!")
+
+	-- A line typed in the split is not a decline: the commit leaves the
+	-- split as it is, held, and the typed line survives.
+	r, nb, rb = setup_late()
+	vim.api.nvim_buf_set_lines(rb, -1, -1, false, { "typed in the split" })
+	assert_true("commit from the split", (review.commit_from_review(rb)))
+	assert_true("the typed line is still there", line_of(rb, "typed in the split") ~= nil)
+	assert_true("and the split is still unsaved, so held", vim.bo[rb].modified)
+	vim.cmd("silent! %bwipeout!")
+
+	-- A failed rebuild says so and the commit still succeeds.
+	r, nb, rb = setup_late()
+	local said_late, build_orig, notify_orig = {}, proposal.build, vim.notify
+	proposal.build = function()
+		return nil, "boom"
+	end
+	vim.notify = function(m)
+		said_late[#said_late + 1] = m
+	end
+	vim.api.nvim_set_current_win(vim.fn.bufwinid(nb))
+	assert_true("commit still succeeds", (review.commit(nb)))
+	proposal.build = build_orig
+	vim.notify = notify_orig
+	assert_true("saying the waiting suggestions come at the next pass", vim.tbl_contains(said_late, "desk: the suggestions waiting on your lines will show at the next pass"))
+	vim.cmd("silent! %bwipeout!")
+
+	-- Deferred for a conflict, not waiting on a line: no rebuild.
+	local rc = new_repo({ "Section A", "  keep", "  other" })
+	build(rc, "2026-10-01", {
+		item("e1", { kind = "edit", target = { at = "  keep" }, before = "  keep", after = "  kept", source = "notes" }),
+		item("e2", { kind = "edit", target = { at = "  keep" }, before = "  keep", after = "  changed", source = "notes" }),
+	})
+	local nbc = open_notes(rc)
+	review.attach(nbc)
+	write(rc, "notes.md", { "Section A", "  keep", "  other, touched" })
+	vim.cmd("edit!")
+	local before_sha = git.ref_sha(rc, review.PROPOSAL_REF)
+	assert_true("commit", (review.commit(nbc)))
+	assert_eq("a conflict-deferred item does not rebuild the proposal", before_sha, git.ref_sha(rc, review.PROPOSAL_REF))
+	vim.cmd("silent! %bwipeout!")
+end
+
 print(string.format("\n=== summary: %d passed, %d failed ===", pass, fail))
 if fail > 0 then
 	os.exit(1)
