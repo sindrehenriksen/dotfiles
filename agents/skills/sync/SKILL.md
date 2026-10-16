@@ -10,12 +10,23 @@ allowed-tools: Read, Grep, Glob, Bash
 
 Pull latest from origin and apply locally.
 
+## Upstream check
+
+Before pulling, and for every checkout the sync covers (this repo's main checkout here; a layer skill can add its own), say where it stands against its upstream:
+
+1. `git -C <checkout> fetch --all --prune`.
+2. **New upstream:** `git -C <checkout> log --oneline HEAD..@{u}`.
+3. **Local and unpushed:** `git -C <checkout> log --oneline @{u}..HEAD`, plus uncommitted changes from `git -C <checkout> status --short`, and the branch it is on when that is not the one it should be parked on.
+
+Report each in a line: up to date, N new upstream, N local and unpushed, dirty, or diverged. A fetch that fails (no network, an expired credential) is said as such, never read as "up to date".
+
 ## Pull
 
-1. `git fetch origin` and check `git status`
-2. **Clean + fast-forwardable**: `git pull`
-3. **Uncommitted changes**: `git stash`, pull, report stash
-4. **Diverged**: show what differs on both sides (`git log --oneline HEAD..origin/main` and `origin/main..HEAD`). Reset to origin if incoming changes are reasonable and local commits are trivial; otherwise ask the user.
+From the upstream check's state of each checkout:
+
+1. **Clean + fast-forwardable**: `git -C <checkout> pull --ff-only`
+2. **Uncommitted changes**: `git -C <checkout> stash`, pull, report the stash
+3. **Diverged**: show what differs on both sides (`git -C <checkout> log --oneline HEAD..@{u}` and `@{u}..HEAD`). Reset to the upstream if incoming changes are reasonable and local commits are trivial; otherwise ask the user.
 
 ## Apply
 
@@ -27,6 +38,10 @@ Review the pulled diff and apply what's needed:
 - **Tool configs** (nvim plugins, ghostty, etc.): note if restart/reload/install is needed.
 - **Quick wins**: if something is easy to verify (alias, keybinding, setting), test it or prompt the user to.
 
+## Run unattended
+
+From a scheduled or briefed pass, with nobody at the keyboard, the sync does three things and nothing else: the upstream check, the pull of a checkout that is clean and fast-forwards (case 1), and the read-only half of Apply, which looks and changes nothing (a dangling-link `find`, whether a changed file needs a reload or an install). Every other case of Pull, and everything in Apply that changes something (sourcing the installer, replacing or removing a file or link, running `setup.sh`, an install), is left as it is and reported for the user to decide, with what it would take: no stash, no reset, no rebase, no fix.
+
 ## Finish
 
-Summarize: commits pulled, what was applied, anything stashed/skipped, manual steps remaining.
+Summarize: the upstream check per checkout, commits pulled, what was applied, anything stashed/skipped (and, run unattended, every checkout left unpulled and why), manual steps remaining.
