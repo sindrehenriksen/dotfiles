@@ -60,7 +60,6 @@ brew install pipx
 # if linux
 sudo apt install pipx
 pipx install hatch==1.18.1
-pip install virtualenv virtualenvwrapper
 
 #### Hammerspoon (macOS window manager — replaces Divvy)
 # if mac
