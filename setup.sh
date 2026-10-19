@@ -59,7 +59,7 @@ zsh
 brew install pipx
 # if linux
 sudo apt install pipx
-pipx install hatch
+pipx install hatch==1.18.1
 pip install virtualenv virtualenvwrapper
 
 #### Hammerspoon (macOS window manager — replaces Divvy)
@@ -113,7 +113,7 @@ chmod 600 ~/.secrets.env
 # if mac
 brew install agent-browser
 # if linux
-npm install -g agent-browser
+npm install -g agent-browser@0.33.2
 # both: install browser binary
 agent-browser install
 
@@ -124,10 +124,12 @@ agent-browser install
 command -v claude >/dev/null || curl -fsSL https://claude.ai/install.sh | bash
 
 #### MCP servers (shared / non-org-specific)
-# Playwright (browser automation) — kept alongside agent-browser for now
+# Playwright (browser automation) — kept alongside agent-browser for now.
+# Pinned: an unpinned npx fetches whatever the registry serves at each
+# launch. The dependency-updates sweep moves it, in every registration.
 
 # Claude Code (user-scoped — available in all projects)
-claude mcp add -s user playwright -- npx @playwright/mcp@latest
+claude mcp add -s user playwright -- npx -y @playwright/mcp@0.0.83
 
 #### Claude Code per-machine settings (the account's --settings overlay)
 # Add this machine's resolved $TMPDIR to permissions.additionalDirectories so
@@ -143,7 +145,7 @@ claude mcp add -s user playwright -- npx @playwright/mcp@latest
 # GitHub Copilot CLI: add to ~/.copilot/mcp-config.json (or /mcp add interactively)
 
 # OpenAI Codex CLI:
-#   codex mcp add playwright -- npx @playwright/mcp@latest
+#   codex mcp add playwright -- npx -y @playwright/mcp@0.0.83
 
 #### Install vim-plug (if not already installed)
 curl -fLo ~/.vim/autoload/plug.vim --create-dirs \
