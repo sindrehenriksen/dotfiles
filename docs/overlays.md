@@ -56,10 +56,16 @@ happened is always the shorter path.
 The two kinds of config are found by different rules, and the difference drives
 the whole design.
 
-- **Instruction files walk the whole tree.** `CLAUDE.md` loads from cwd and
+- **Instruction files walk the whole tree.** `AGENTS.md` loads from cwd and
   *every* directory above it, with no repository boundary, plus the user-level
-  one. A bridging-tier instruction file therefore reaches every session below it
-  for free.
+  `~/.claude/CLAUDE.md`. A bridging-tier instruction file therefore reaches every
+  session below it for free. The walk takes one name per tree, though: Claude
+  Code skips every `AGENTS.md` when a `CLAUDE.md` (or `.claude/CLAUDE.md`, or
+  `CLAUDE.local.md`) sits in cwd or any directory above it; the user-level file
+  does not count. So a repo's instructions live in `AGENTS.md` with no
+  `CLAUDE.md` link beside it, and a tree changes name all at once: one
+  `CLAUDE.md` left in it hides every `AGENTS.md`, the bridging tier's included,
+  from each session started at or below it.
 - **Skills stop at the repository root.** Project skills load from
   `.claude/skills/` in cwd and its parents only *up to the enclosing
   repository's root*, plus user level. A nested checkout is a wall.
@@ -69,9 +75,9 @@ Four consequences:
 **A bridging-tier skill is invisible where the work happens.** With cwd inside a
 team checkout (or one of its worktrees), the upward walk stops at that checkout's
 root and never reaches the bridging repo's `.claude/skills/` — while its
-`CLAUDE.md`, one directory further up, loads fine. The fix is to force-link it
-up: the private installer symlinks each skill directory into the skills
-directory of the *account it belongs to* — `~/.claude/skills/<name>` for a
+instruction file, one directory further up, loads fine. The fix is to
+force-link it up: the private installer symlinks each skill directory into the
+skills directory of the *account it belongs to* — `~/.claude/skills/<name>` for a
 personal overlay, `~/.claude-work/skills/<name>` for a work one — which is the
 path the agent actually reads. It does not also link into the vendor-neutral
 `~/.agents/skills/<name>`. Nothing *discovers* a skill there — a skill present

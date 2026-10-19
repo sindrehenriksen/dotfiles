@@ -574,8 +574,8 @@ desk_step_model_call() {
 		fi
 		strict_mcp="true"
 		# `instructions`: run without --restricted, so the call loads the
-		# CLAUDE.md above its cwd and the settings files a session started
-		# there loads (it has no Skill tool, so skills stay unused). Its tools
+		# instruction files above its cwd and the settings files a session
+		# started there loads (it has no Skill tool, so skills stay unused). Its tools
 		# stay exactly the step's: --tools, the allowlist and, always, the
 		# deny hook, and MCP stays strict.
 		local instructions
