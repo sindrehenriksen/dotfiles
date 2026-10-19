@@ -31,12 +31,12 @@ Dependabot reads the package ecosystems its config lists, and nothing else. Look
 - **Language constraints**: `requires-python`, `engines`, and the linter and type-checker targets that follow them.
 - **Platform runtimes**: a hosting project's runtime or Node version setting, a managed database's or edge runtime's version.
 - **Dev tools it can't read**: for Python it reads PEP 621 `[project]` and `[project.optional-dependencies]` and PEP 735 `[dependency-groups]`, not tool-specific environment tables (hatch envs, say). Dev and test tools belong in `[dependency-groups]`, or Dependabot never proposes them.
-- **Tools a runner fetches at launch**: `uvx pkg@1.2.3`, `npx -y pkg@1.2.3` and the like in setup scripts and MCP client configs, which no updater reads. Each stays pinned to an exact version, and every place that launches it moves in one change.
+- **Tools a runner fetches at launch**: `uvx pkg@1.2.3`, `npx -y pkg@1.2.3` and the like in setup scripts and MCP client configs, which no updater reads. Each stays pinned to an exact version.
 - **Ecosystems without an entry** in `dependabot.yml`, or a repo with no config at all: add the entry (see Config) rather than bumping them by hand each time. That includes `pre-commit`, which Dependabot supports as an ecosystem since 2026-03, updating hook revs.
 
 **Latest means the upstream's stable channel**, not its newest release. A release list can run ahead of it, pnpm's for one, which tags releases `next` and promotes them weeks later: for a tool published on npm, read the `latest` dist-tag (`npm view <package> dist-tags`).
 
-They take the same order as the PRs, a toolchain or runtime major with the other majors. **One version everywhere**: a tool or runtime runs at the same version wherever it appears in the repo (one Python, say), and across repos meant to share a toolchain, unless there is a reason, written beside the divergent pin. Within one project every place moves in one change, even across its separate release pipelines; rolling out one area after another is for when it pays off, typically across separate projects.
+They take the same order as the PRs, a toolchain or runtime major with the other majors. **One version everywhere**: a tool or runtime used in several places (repos, setup scripts, MCP client configs, CI) runs at one version in all of them (one Python, say), unless there is a reason, written beside the divergent pin. It moves everywhere in one change, one commit per repo in the same sweep, even across separate release pipelines; rolling out one area after another is for when that pays off, with the reason beside each pin still behind.
 
 ## Order
 
