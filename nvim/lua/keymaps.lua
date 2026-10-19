@@ -3,24 +3,22 @@ local map = vim.keymap.set
 -- Clear search highlight
 map("n", "<leader><cr>", "<cmd>noh<cr>", { silent = true, desc = "Clear search highlight" })
 
-if not vim.g.vscode then
-	-- Window navigation (Dvorak home row: h=left, t=up, n=down, s=right)
-	map("n", "<C-h>", "<C-W>h")
-	map("n", "<C-t>", "<C-W>k")
-	map("n", "<C-n>", "<C-W>j")
-	map("n", "<C-s>", "<C-W>l")
+-- Window navigation (Dvorak home row: h=left, t=up, n=down, s=right)
+map("n", "<C-h>", "<C-W>h")
+map("n", "<C-t>", "<C-W>k")
+map("n", "<C-n>", "<C-W>j")
+map("n", "<C-s>", "<C-W>l")
 
-	-- Buffer navigation
-	map("n", "<leader>j", "<cmd>bnext<cr>", { desc = "Next buffer" })
-	map("n", "<leader>k", "<cmd>bprevious<cr>", { desc = "Previous buffer" })
-	map("n", "<leader>ba", "<cmd>bufdo bd<cr>", { desc = "Delete all buffers" })
+-- Buffer navigation
+map("n", "<leader>j", "<cmd>bnext<cr>", { desc = "Next buffer" })
+map("n", "<leader>k", "<cmd>bprevious<cr>", { desc = "Previous buffer" })
+map("n", "<leader>ba", "<cmd>bufdo bd<cr>", { desc = "Delete all buffers" })
 
-	-- Tab management
-	map("n", "<leader>wo", "<cmd>only<cr>", { desc = "Close other windows" })
-	map("n", "<leader>to", "<cmd>tabonly<cr>", { desc = "Close other tabs" })
-	map("n", "<leader>tn", "<cmd>tabnew<cr>", { desc = "New tab" })
-	map("n", "<leader>tc", "<cmd>tabclose<cr>", { desc = "Close tab" })
-end
+-- Tab management
+map("n", "<leader>wo", "<cmd>only<cr>", { desc = "Close other windows" })
+map("n", "<leader>to", "<cmd>tabonly<cr>", { desc = "Close other tabs" })
+map("n", "<leader>tn", "<cmd>tabnew<cr>", { desc = "New tab" })
+map("n", "<leader>tc", "<cmd>tabclose<cr>", { desc = "Close tab" })
 
 -- Remap 0 to first non-blank character
 map("n", "0", "^")
@@ -39,18 +37,16 @@ map("v", "#", [[y?\V<C-R>=escape(@",'/\')<CR><CR>]], { silent = true })
 map({ "n", "v" }, "<leader>y", '"+y', { desc = "Copy to clipboard" })
 map("n", "<leader>p", '"+p', { desc = "Paste from clipboard" })
 
-if not vim.g.vscode then
-	-- Switch CWD to the directory of the open buffer
-	map("n", "<leader>cd", "<cmd>cd %:p:h<cr><cmd>pwd<cr>", { desc = "CWD to buffer dir" })
+-- Switch CWD to the directory of the open buffer
+map("n", "<leader>cd", "<cmd>cd %:p:h<cr><cmd>pwd<cr>", { desc = "CWD to buffer dir" })
 
-	-- Scratch buffers
-	map("n", "<leader>q", "<cmd>e ~/buffer<cr>", { desc = "Open ~/buffer" })
-	map("n", "<leader>x", "<cmd>e ~/buffer.md<cr>", { desc = "Open ~/buffer.md" })
+-- Scratch buffers
+map("n", "<leader>q", "<cmd>e ~/buffer<cr>", { desc = "Open ~/buffer" })
+map("n", "<leader>x", "<cmd>e ~/buffer.md<cr>", { desc = "Open ~/buffer.md" })
 
-	-- Edit config
-	map("n", "<leader>e", "<cmd>e ~/dotfiles/nvim/init.lua<cr>", { desc = "Edit init.lua" })
+-- Edit config
+map("n", "<leader>e", "<cmd>e ~/dotfiles/nvim/init.lua<cr>", { desc = "Edit init.lua" })
 
-	-- Sudo save
-	vim.api.nvim_create_user_command("W", "w !sudo tee % > /dev/null | edit!", {})
-end
+-- Sudo save
+vim.api.nvim_create_user_command("W", "w !sudo tee % > /dev/null | edit!", {})
 

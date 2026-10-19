@@ -4,12 +4,6 @@ vim.g.maplocalleader = " "
 
 require("options")
 require("keymaps")
-
-if vim.g.vscode then
-	-- VS Code handles UI, LSP, git, etc. — only load keymaps/options above.
-	return
-end
-
 require("autocmds")
 require("desk").setup()
 
