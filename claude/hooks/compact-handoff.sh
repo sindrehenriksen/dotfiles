@@ -11,12 +11,18 @@
 #         because an idle compaction does not reliably report as `auto`. A
 #         `/compact` given a handoff prompt gets nothing added.
 #         It also asks for a `## Waiting on you` section: what is open for the
-#         user (decisions, pending gos, things to try or review), one line
-#         each. Compaction clears the earlier conversation from the screen, so
-#         this is where they see it again.
-#   post  (PostCompact) Takes both sections out of `compact_summary` and prints
-#         them as plain text, the kick-off to copy, edit and send. Prints
-#         nothing for a section the summary lacks or leaves empty.
+#         user (decisions, gos the user has yet to give, things to try or
+#         review), one line each. Compaction clears the earlier conversation
+#         from the screen, so this is where they see it again.
+#         And a `## Gos in force` section before that one: each go the user
+#         gave that is not yet used up or withdrawn, in their own words, with
+#         what it covers and its condition. The kick-off is not acted on until
+#         they send it, so a go recorded only there would be ambiguous.
+#   post  (PostCompact) Takes the three sections out of `compact_summary` and
+#         prints them as plain text, the kick-off to copy, edit and send. The
+#         gos are shown so the user can correct what the session believes is
+#         authorized. Prints nothing for a section the summary lacks or leaves
+#         empty, or fills with a bare "none".
 #   session-start  (SessionStart, matcher `compact`) Adds context saying the
 #         session was just compacted and where its full transcript is, that
 #         the skill and file text restored are copies from when they were
@@ -38,6 +44,7 @@ set -u
 SKILL="${COMPACT_HANDOFF_SKILL:-$HOME/dotfiles/agents/skills/handoff/SKILL.md}"
 HEADING='## Suggested kick-off'
 WAITING='## Waiting on you'
+GOS='## Gos in force'
 
 pre() {
     local input instructions guidance
@@ -65,9 +72,10 @@ pre() {
     done
 
     cat <<EOF
-Write this summary per Prompt 1 below. End it with a section headed exactly \`$HEADING\`:
-a kick-off per Prompt 2, in plain text, for the user to edit and send. Nothing in it is acted on until they do.
-Before it, a section headed exactly \`$WAITING\`: what the user must do or decide (open decisions, pending gos, things for them to try or review), one line each, or empty if nothing is. The earlier conversation is cleared from their screen, so this is where they see it again. The kick-off does not restate those items.
+Write this summary per Prompt 1 below. It ends with three sections, in this order, each headed exactly as shown:
+\`$GOS\`: each go the user gave that is not yet used up or withdrawn, quoted in their own words, with what it covers and its condition, which the next session re-checks before acting. Carry forward any from an earlier summary in the transcript. Empty if there are none.
+\`$WAITING\`: what the user must do or decide (open decisions, gos the user has yet to give, things for them to try or review), one line each, or empty if nothing is. The earlier conversation is cleared from their screen, so this is where they see it again.
+\`$HEADING\`: a kick-off per Prompt 2, in plain text, for the user to edit and send. Nothing in it is acted on until they do. It points at the gos, waiting and still open items rather than restating them.
 
 $guidance
 EOF
@@ -86,8 +94,16 @@ section() {
         }'
 }
 
+# True for an empty section body, or one that only says there is nothing.
+blank() {
+    local t=${1//[[:space:]]/}
+    t=$(tr '[:upper:]' '[:lower:]' <<<"$t")
+    case "$t" in "" | none | none. | n/a | -) return 0 ;; esac
+    return 1
+}
+
 post() {
-    local input summary kickoff waiting out=""
+    local input summary kickoff waiting gos out=""
     input=$(cat)
     summary=$(jq -r '.compact_summary // ""' <<<"$input" 2>/dev/null)
     # The compactor closes its summary with `</summary>`. Cut at the last one,
@@ -95,8 +111,10 @@ post() {
     summary=${summary%</summary>*}
     kickoff=$(section "$HEADING" <<<"$summary")
     waiting=$(section "$WAITING" <<<"$summary")
-    [ -n "${waiting//[[:space:]]/}" ] && out+=$'──── Waiting on you ────\n\n'"$waiting"$'\n\n'
-    [ -n "${kickoff//[[:space:]]/}" ] && out+=$'──── Suggested kick-off ────\n\n'"$kickoff"$'\n'
+    gos=$(section "$GOS" <<<"$summary")
+    blank "$gos" || out+=$'──── Gos in force ────\n\n'"$gos"$'\n\n'
+    blank "$waiting" || out+=$'──── Waiting on you ────\n\n'"$waiting"$'\n\n'
+    blank "$kickoff" || out+=$'──── Suggested kick-off ────\n\n'"$kickoff"$'\n'
     [ -z "$out" ] && exit 0
 
     # Claude Code trims the output and puts its first line on the hook's own

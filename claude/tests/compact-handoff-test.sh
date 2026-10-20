@@ -31,7 +31,9 @@ check "pre: carries both prompt sections" '[[ $out == *"keep-list guidance"* && 
 check "pre: stops before Delivering" '[[ $out != *"fence guidance"* ]]'
 check "pre: asks for the kick-off section" '[[ $out == *"## Suggested kick-off"* ]]'
 check "pre: asks for the waiting-on-you section" '[[ $out == *"## Waiting on you"* ]]'
-check "pre: keeps the kick-off from restating it" '[[ $out == *"does not restate those items"* ]]'
+check "pre: asks for the gos-in-force section" '[[ $out == *"## Gos in force"* && $out == *"in their own words"* && $out == *"re-checks before acting"* ]]'
+check "pre: puts the gos before what waits on the user" '[[ ${out%%"## Waiting on you"*} == *"## Gos in force"* && ${out%%"## Suggested kick-off"*} == *"## Waiting on you"* ]]'
+check "pre: has the kick-off point at them" '[[ $out == *"rather than restating them"* ]]'
 
 out=$(echo '{"trigger":"manual","custom_instructions":"handoff prompt"}' | "$HOOK" pre)
 check "pre: adds nothing to given instructions" '[ -z "$out" ]'
@@ -90,6 +92,26 @@ check "post: an empty waiting section is left out" '[[ $out != *"Waiting on you"
 summary=$'## Waiting on you\n- Approve the merge.'
 out=$(jq -n --arg s "$summary" '{session_id:"w3",compact_summary:$s}' | "$HOOK" post)
 check "post: waiting without a kick-off still shows" '[[ $out == *"Approve the merge."* && $out != *"Suggested kick-off"* ]]'
+
+summary=$'## Gos in force\n\n- "merge once green": covers the PR; condition not met yet.\n\n## Waiting on you\n\n- Decide X.\n\n## Suggested kick-off\n\nGo on.\n'
+out=$(jq -n --arg s "$summary" '{session_id:"g1",compact_summary:$s}' | "$HOOK" post)
+check "post: shows the gos in force, ahead of what waits" '[[ $out == *$'"'"'──── Gos in force ────\n\n- "merge once green": covers the PR; condition not met yet.\n\n──── Waiting on you ────\n\n- Decide X.'"'"'* ]]'
+
+summary=$'## Gos in force\n\n## Suggested kick-off\nGo on.'
+out=$(jq -n --arg s "$summary" '{session_id:"g2",compact_summary:$s}' | "$HOOK" post)
+check "post: an empty gos section is left out" '[[ $out != *"Gos in force"* && $out == *"Go on."* ]]'
+
+summary=$'## Waiting on you\n- Decide X.\n\n## Suggested kick-off\nGo on.'
+out=$(jq -n --arg s "$summary" '{session_id:"g3",compact_summary:$s}' | "$HOOK" post)
+check "post: an absent gos section is left out" '[[ $out != *"Gos in force"* && $out == *"Decide X."* ]]'
+
+summary=$'## Gos in force\n- Only a go.'
+out=$(jq -n --arg s "$summary" '{session_id:"g4",compact_summary:$s}' | "$HOOK" post)
+check "post: gos without a kick-off still show" '[[ $out == *"Only a go."* && $out != *"Suggested kick-off"* ]]'
+
+summary=$'## Gos in force\n None.\n\n## Waiting on you\n-\n\n## Suggested kick-off\nN/A'
+out=$(jq -n --arg s "$summary" '{session_id:"n1",compact_summary:$s}' | "$HOOK" post)
+check "post: a bare none, dash or n/a counts as empty" '[ -z "$out" ]'
 
 out=$(echo '{"hook_event_name":"SessionStart","source":"compact"}' | "$HOOK" session-start)
 check "session-start: says to re-read what is relevant from disk" '[[ $out == *"still relevant to the work in hand, re-read it from disk"* ]]'
@@ -310,7 +332,7 @@ out=$(jq -n '{source:"compact"}' | HOME=$R "$HOOK" session-start)
 check "session-start: without a transcript, names none" '[ "$(head -1 <<<"$out")" = "This session was just compacted: the conversation above is a summary of it, not the conversation itself." ]'
 
 out=$(jq -n '{session_id:"s3",compact_summary:"## Summary\nno kick-off"}' | "$HOOK" post)
-check "post: silent without a kick-off" '[ -z "$out" ]'
+check "post: silent when the summary has none of the sections" '[ -z "$out" ]'
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
