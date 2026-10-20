@@ -14,7 +14,8 @@
 # makes none of its own; another pass's pending brief goes with this pass's
 # delivery as its own message; notes-changes.txt goes back to the last
 # judged run of any pass, says when no kept run was judged or the history
-# was rewritten (with the whole diff) or the commit is gone. A step with
+# was rewritten (with the whole diff) or the commit is gone, or that the
+# commits since it touch none of the watched files. A step with
 # `weekdays` runs only on those days. No live model call.
 set -u
 
@@ -428,6 +429,15 @@ jq -n '{notes_head: "0123456789abcdef0123456789abcdef01234567"}' > "$G/testpass-
 assert_eq "a recorded commit now gone is said as that" \
 	"The notes commit testpass-2026-11-02 recorded, 0123456789ab, is no longer in the repo, so there is nothing to compare against." \
 	"$(notes_changes "$G" testpass-2026-11-03)"
+head_before="$(git -C "$repo" rev-parse HEAD)"
+jq -n --arg h "$head_before" '{notes_head: $h}' > "$G/testpass-2026-11-02/run.json"
+echo unwatched > "$repo/unwatched.txt"
+git -C "$repo" add unwatched.txt
+git -C "$repo" commit -q -m "Touch an unwatched file"
+assert_eq "commits since it that touch none of the watched files are said as that" \
+	"The notes have commits since testpass-2026-11-02 (${head_before:0:12}), but none to the files the brief watches." \
+	"$(notes_changes "$G" testpass-2026-11-03)"
+git -C "$repo" reset -q --hard "$head_before"
 
 echo
 echo "=== edits the review settled because their lines were gone reach the brief ==="

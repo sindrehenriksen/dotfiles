@@ -144,8 +144,9 @@ _desk_brief_mtime() { # file: its mtime, 0 when it is missing
 # the oldest kept run stands in, and the file says what that misses. When
 # that commit is no longer an ancestor of <head> (the history was
 # rewritten), the file says so and holds the whole diff from it instead, so
-# a lost line shows. With no run kept, a run that recorded no commit, or
-# its commit gone, the file says which.
+# a lost line shows. With no run kept, a run that recorded no commit, its
+# commit gone, or commits since it none of which touch the configured
+# files, the file says which.
 # _desk_brief_base_run <run dir>: what this run's brief compares against,
 # as "<judged: true|false><tab><dir>": the latest judged run of any pass by
 # date (a later judgement breaking a tie within a date), else the oldest
@@ -209,8 +210,14 @@ desk_brief_notes_changes() {
 		git -C "$repo" diff --no-color "$base" "$head" -- "$@" >> "$out" 2> /dev/null \
 			|| printf 'The diff from %s could not be read.\n' "${base:0:12}" >> "$out"
 	else
-		git -C "$repo" log -p --no-color --format='commit %H%nDate: %ad%n%n    %s%n' --date=iso "$base..$head" -- "$@" >> "$out" 2> /dev/null \
-			|| printf 'The notes log since %s could not be read.\n' "${base:0:12}" >> "$out"
+		local log
+		if ! log="$(git -C "$repo" log -p --no-color --format='commit %H%nDate: %ad%n%n    %s%n' --date=iso "$base..$head" -- "$@" 2> /dev/null)"; then
+			printf 'The notes log since %s could not be read.\n' "${base:0:12}" >> "$out"
+		elif [ -z "$log" ]; then
+			printf 'The notes have commits since %s (%s), but none to the files the brief watches.\n' "$name" "${base:0:12}" >> "$out"
+		else
+			printf '%s\n' "$log" >> "$out"
+		fi
 	fi
 }
 
