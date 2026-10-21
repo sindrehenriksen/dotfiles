@@ -75,7 +75,7 @@ pre() {
 Write this summary per Prompt 1 below. It ends with three sections, in this order, each headed exactly as shown:
 \`$GOS\`: each go the user gave that is not yet used up or withdrawn, quoted in their own words, with what it covers and its condition, which the next session re-checks before acting. Carry forward any from an earlier summary in the transcript. Empty if there are none.
 \`$WAITING\`: what the user must do or decide (open decisions, gos the user has yet to give, things for them to try or review), one line each, or empty if nothing is. The earlier conversation is cleared from their screen, so this is where they see it again.
-\`$HEADING\`: a kick-off per Prompt 2, in plain text, for the user to edit and send. Nothing in it is acted on until they do. It points at the gos, waiting and still open items rather than restating them.
+\`$HEADING\`: a kick-off per Prompt 2, in plain text, for the user to edit and send. Nothing in it is acted on until they do. It points at the gos and waiting items rather than restating them.
 
 $guidance
 EOF
