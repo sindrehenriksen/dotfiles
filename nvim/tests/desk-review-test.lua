@@ -1210,6 +1210,55 @@ do
 	assert_true("and the keys for outside a review", vim.wo[win].winbar:match("^" .. vim.pesc(review.NOTES_IDLE_HINT) .. "%%=") ~= nil)
 end
 
+print("\n=== the split: two taken at one anchor stay taken over a new proposal ===")
+do
+	local r = new_repo({ "Done", "- oct 19: editors merged", "- oct 18: older", "", "Next", "- n1" })
+	build(r, "2026-10-01", {
+		item("cold", { kind = "add", target = { after = "- oct 19: editors merged" }, after = "- cold-read fixes merged", source = "notes", headline = "cold read" }),
+		item("docs", { kind = "add", target = { after = "- oct 19: editors merged" }, after = "- Docs site navigation shipped", source = "notes", headline = "docs nav" }),
+		item("other", { kind = "add", target = { under = "Next" }, after = "- n2 unrelated", source = "notes", headline = "unrelated" }),
+	})
+	local nb = open_notes(r)
+	review.attach(nb)
+	assert_true("review opens", review.open_review(nb))
+	local s = review.session_of(nb)
+	local rb = review_buf_of(nb)
+	local rw = vim.fn.bufwinid(rb)
+	local function left()
+		local out = vim.tbl_map(function(e)
+			return e.item.headline
+		end, review.remaining(s))
+		table.sort(out)
+		return out
+	end
+	local function count(buf, text)
+		return #vim.tbl_filter(function(l)
+			return l == text
+		end, lines_of(buf))
+	end
+	assert_eq("all three wait", { "cold read", "docs nav", "unrelated" }, left())
+	go_to(rw, rb, "- cold-read fixes merged")
+	vim.cmd("normal dp")
+	assert_eq("dp takes both lines of the hunk", { 1, 1 }, { count(nb, "- cold-read fixes merged"), count(nb, "- Docs site navigation shipped") })
+	assert_eq("and only the other waits", { "unrelated" }, left())
+	build(r, "2026-10-21", { item("late", { after = "- staged meanwhile", source = "notes", headline = "staged" }) })
+	vim.api.nvim_set_current_win(vim.fn.bufwinid(nb))
+	vim.api.nvim_set_current_win(rw)
+	assert_eq("entering the split rebuilds it over the new proposal", git.ref_sha(r, review.PROPOSAL_REF), s.sha)
+	assert_eq("which shows what was staged and the one left, not the takes", { "staged", "unrelated" }, left())
+	assert_eq("each taken line once in the review", { 1, 1 }, { count(s.review_buf, "- cold-read fixes merged"), count(s.review_buf, "- Docs site navigation shipped") })
+	vim.api.nvim_feedkeys("Q", "x", false)
+	vim.wait(20, function()
+		return false
+	end)
+	local taken = vim.tbl_map(function(rec)
+		return rec.headline
+	end, vim.tbl_values(ledger.taken_by_id(ledger.read(r))))
+	table.sort(taken)
+	assert_eq("both are recorded taken as the review ends", { "cold read", "docs nav" }, taken)
+	vim.bo[nb].modified = false
+end
+
 print("\n=== a removal is taken from the review split: ]c lands below its filler, where dp takes it ===")
 do
 	local r = new_repo({ "Section A", "  existing", "  - stale", "Section B", "  other" })

@@ -170,12 +170,9 @@ local function undo_seq(buf)
 	end)
 end
 
--- Whether undo state `seq` of `buf` is the current state or one it was
--- reached from: false once `seq` was undone and the buffer moved on along
--- another branch, nil when the tree no longer holds it. Undo numbers can't
--- be compared across branches, since a new branch numbers on from the
--- highest one used.
-local function undo_reaches(buf, seq)
+-- `buf`'s undo tree as each state's parent, and the current state: what
+-- undo_reaches walks, read once for any number of states.
+local function undo_parents(buf)
 	local tree = vim.api.nvim_buf_call(buf, vim.fn.undotree)
 	local parent = {}
 	local function walk(entries, from)
@@ -189,10 +186,21 @@ local function undo_reaches(buf, seq)
 		end
 	end
 	walk(tree.entries, 0)
+	return { parent = parent, cur = tree.seq_cur }
+end
+
+-- Whether undo state `seq` of `buf` is the current state or one it was
+-- reached from: false once `seq` was undone and the buffer moved on along
+-- another branch, nil when the tree no longer holds it. Undo numbers can't
+-- be compared across branches, since a new branch numbers on from the
+-- highest one used. `tree`, from undo_parents, saves reading it again.
+local function undo_reaches(buf, seq, tree)
+	tree = tree or undo_parents(buf)
+	local parent = tree.parent
 	if seq ~= 0 and parent[seq] == nil then
 		return nil
 	end
-	local at = tree.seq_cur
+	local at = tree.cur
 	while at ~= nil do
 		if at == seq then
 			return true
@@ -245,9 +253,10 @@ function M.flush_taken(notes_buf)
 		return 0, {}
 	end
 	local lines, seq = buf_lines(notes_buf), undo_seq(notes_buf)
+	local tree = undo_parents(notes_buf)
 	local items = {}
 	for _, t in pairs(pend.ids) do
-		local kept = undo_reaches(notes_buf, t.seq)
+		local kept = undo_reaches(notes_buf, t.seq, tree)
 		if kept == nil then
 			kept = seq >= t.seq
 		end
@@ -273,6 +282,38 @@ end
 local function pending_ids(notes_buf)
 	local pend = pending_taken[notes_buf]
 	return pend and pend.ids or {}
+end
+
+--- The takes waiting to be recorded for `notes_buf` that the notes' own
+--- undo has not taken back (a redo makes one a take again): id -> its
+--- pending entry.
+local function live_pending(notes_buf)
+	local out = {}
+	local loaded = vim.api.nvim_buf_is_loaded(notes_buf)
+	local tree = loaded and undo_parents(notes_buf)
+	for id, t in pairs(pending_ids(notes_buf)) do
+		if not loaded or undo_reaches(notes_buf, t.seq, tree) ~= false then
+			out[id] = t
+		end
+	end
+	return out
+end
+
+--- The suggestions taken in this review of `notes_buf`, recorded or not and
+--- not since undone: id -> true. Whether a suggestion's text is at its
+--- place in the notes can't say this alone: an edit after a take changes
+--- the text, and a take beside it can move it off the place its anchor
+--- gives. So the review leaves these out by id, over a new proposal too.
+local function taken_here(notes_buf)
+	local out = {}
+	for id in pairs(live_pending(notes_buf)) do
+		out[id] = true
+	end
+	local s = sessions[notes_buf]
+	for id in pairs(s and s.taken_saved or {}) do
+		out[id] = true
+	end
+	return out
 end
 
 -- ---------------------------------------------------------------------------
@@ -364,12 +405,7 @@ function M.save_review(s, keep_takes)
 	-- A take the notes' own undo has taken back is no take (a redo makes it
 	-- one again): it neither keeps its suggestion from a decline nor waits
 	-- to be recorded.
-	local taking = {}
-	for id, t in pairs(pending_ids(s.notes_buf)) do
-		if not vim.api.nvim_buf_is_loaded(s.notes_buf) or undo_reaches(s.notes_buf, t.seq) ~= false then
-			taking[id] = t
-		end
-	end
+	local taking = live_pending(s.notes_buf)
 	local gone = {}
 	for _, item in pairs(s.shown) do
 		local _, _, text = mark_range(s, item)
@@ -808,7 +844,7 @@ end
 -- would show. Returns true and whether the view changed, or false, why.
 local function rebuild(s, p, need_shown, force)
 	local ours = buf_lines(s.notes_buf)
-	local r, err = proposal.reviewable(s.repo, p, s.file, ours)
+	local r, err = proposal.reviewable(s.repo, p, s.file, ours, taken_here(s.notes_buf))
 	if not r then
 		return false, err
 	end
@@ -1416,7 +1452,7 @@ function M.open_review(notes_buf)
 	end
 
 	local ours = buf_lines(notes_buf)
-	local r, err = proposal.reviewable(repo, p, file, ours)
+	local r, err = proposal.reviewable(repo, p, file, ours, taken_here(notes_buf))
 	if not r then
 		return false, err
 	end
@@ -2504,12 +2540,14 @@ function M.view_refresh(s)
 	-- whose place is gone from them is the next pass's business, and a
 	-- decline made here is left out until it is recorded.
 	local declined, taken = ledger.declined(c.records).ids, ledger.taken_by_id(c.records)
+	local took = taken_here(s.notes_buf)
 	local open = {}
 	for _, item in ipairs(p.items) do
 		if
 			item.file == s.file
 			and not item.deferred
 			and not taken[item.id]
+			and not took[item.id]
 			and not declined[item.id]
 			and not s.view_declined[item.id]
 			and not proposal.proposed_in(item, ours, base)
@@ -2940,7 +2978,7 @@ function M.toggle_view(s)
 		-- the same build; the declines made here stay out of it.
 		local p = proposal.read(s.repo, s.sha)
 		local ours = buf_lines(s.notes_buf)
-		local skip = {}
+		local skip = taken_here(s.notes_buf)
 		for id in pairs(s.view_declined or {}) do
 			skip[id] = true
 		end

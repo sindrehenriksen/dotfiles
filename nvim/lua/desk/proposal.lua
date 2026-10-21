@@ -42,9 +42,12 @@ end
 
 -- The candidate start positions for an insertion's `after` lines under a
 -- landing anchor, in `lines`: where apply would put them, widened to the
--- whole block they extend. nil when the anchor says nothing (then the whole
--- file is the region).
-local function landing_window(lines, anchor)
+-- whole block they extend. With `list`, on to the end of the list that
+-- block is in, since an insertion that is a top-level `- ` item is a block
+-- of its own: of two taken at one anchor, the second sits a line further
+-- down than its anchor alone would put it. nil when the anchor says
+-- nothing (then the whole file is the region).
+local function landing_window(lines, anchor, list)
 	if anchor == nil then
 		return nil
 	end
@@ -56,7 +59,7 @@ local function landing_window(lines, anchor)
 		local idx = block.find_line(lines, anchor.quote)
 		if idx then
 			local e = anchor.kind == "under" and block.block_end(lines, idx) or select(2, block.block_containing(lines, idx))
-			return idx + 1, e + 1
+			return idx + 1, (list and block.list_end(lines, e) or e) + 1
 		end
 	end
 	-- "top", or an anchor whose quote is gone (apply lands it on top too).
@@ -206,7 +209,7 @@ end
 
 --- Whether `item`'s proposed change is present in `lines`, judged at the
 --- place it applies to rather than anywhere in the file: an insertion's `after` within the block of its landing
---- anchor (a move or merge at its landing side, not where its `before`
+--- anchor, or for a top-level `- ` item the rest of the list that block is in (a move or merge at its landing side, not where its `before`
 --- sits), a removal's anchored occurrence of `before` gone (`base`, the user's text
 --- at the proposal's pass time, pins which occurrence), an edit's `after`
 --- standing where that occurrence of its `before` was.
@@ -217,7 +220,22 @@ function M.proposed_in(item, lines, base)
 			return edit_done(item, lines, base, after)
 		end
 		local _, land = block.parse_target(item.target)
-		local first, last = landing_window(lines, land)
+		-- Only a top-level item reads as its own block, and only it may be
+		-- looked for down the list: an indented line further down belongs
+		-- to a sibling's section. A move or merge, only once its leaving
+		-- side is done, since its text sits in that list before it moves.
+		local head
+		for _, l in ipairs(after) do
+			if not l:match("^%s*$") then
+				head = l
+				break
+			end
+		end
+		local list = head ~= nil and (head:match("^%-%s") ~= nil or head == "-")
+		if list and (item.kind == "move" or item.kind == "merge") then
+			list = M.removal_done(item, lines, base)
+		end
+		local first, last = landing_window(lines, land, list)
 		if first == nil then
 			return M.contains(lines, after)
 		end

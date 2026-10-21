@@ -453,6 +453,64 @@ do
 	assert_eq("it is still open", 1, #proposal.open_items(r6))
 end
 
+print("\n=== two adds at one list item are both present once both are in ===")
+do
+	local notes = { "Done", "- oct 19: editors merged", "- oct 18: older", "", "Next", "- n1" }
+	local two = {
+		item("cold", { kind = "add", target = { after = "- oct 19: editors merged" }, after = "- cold-read fixes merged", source = "notes", headline = "cold read" }),
+		item("docs", { kind = "add", target = { after = "- oct 19: editors merged" }, after = "- Docs site navigation shipped", source = "notes", headline = "docs nav" }),
+	}
+	local r = new_repo(notes)
+	proposal.build(r, "morning", "2026-10-01", two, FILES)
+	assert_eq("both open", 2, #proposal.open_items(r))
+	write(r, "notes.md", { "Done", "- oct 19: editors merged", "- cold-read fixes merged", "- Docs site navigation shipped", "- oct 18: older", "", "Next", "- n1" })
+	commit_all(r, "both taken, one below the other")
+	assert_eq("both count as taken, the lower one too", 2, #proposal.sync_taken(r))
+	local r2 = new_repo(notes)
+	proposal.build(r2, "morning", "2026-10-01", two, FILES)
+	write(r2, "notes.md", { "Done", "- oct 19: editors merged", "- Docs site navigation shipped", "- cold-read fixes merged", "- oct 18: older", "", "Next", "- n1" })
+	commit_all(r2, "both taken, the other way round")
+	assert_eq("in either order", 2, #proposal.sync_taken(r2))
+	local r3 = new_repo(notes)
+	proposal.build(r3, "morning", "2026-10-01", two, FILES)
+	write(r3, "notes.md", { "Done", "- oct 19: editors merged", "- oct 18: older", "", "Next", "- n1", "- cold-read fixes merged" })
+	commit_all(r3, "the same text, written in the next list")
+	assert_eq("its text past the end of the list does not take it", 0, #proposal.sync_taken(r3))
+
+	-- One with sub-bullets taken above the other.
+	local r4 = new_repo(notes)
+	proposal.build(r4, "morning", "2026-10-01", {
+		item("cold", { kind = "add", target = { after = "- oct 19: editors merged" }, after = "- cold-read fixes merged\n  - two left", source = "notes", headline = "cold read" }),
+		two[2],
+	}, FILES)
+	write(r4, "notes.md", { "Done", "- oct 19: editors merged", "- cold-read fixes merged", "  - two left", "- Docs site navigation shipped", "- oct 18: older", "", "Next", "- n1" })
+	commit_all(r4, "both taken, the first with a sub-bullet")
+	assert_eq("below one with sub-bullets too", 2, #proposal.sync_taken(r4))
+
+	-- A move landing beside an add.
+	local r5 = new_repo({ "Done", "- oct 19: editors merged", "- oct 18: older", "", "Later", "- moved down here" })
+	proposal.build(r5, "morning", "2026-10-01", {
+		two[1],
+		item("mv", { kind = "move", target = { { at = "- moved down here" }, { after = "- oct 19: editors merged" } }, before = "- moved down here", after = "- moved down here", source = "notes", headline = "move it" }),
+	}, FILES)
+	write(r5, "notes.md", { "Done", "- oct 19: editors merged", "- cold-read fixes merged", "- moved down here", "- oct 18: older", "", "Later" })
+	commit_all(r5, "both taken")
+	assert_eq("a move landing below an add is taken too", 2, #proposal.sync_taken(r5))
+end
+
+print("\n=== an add's indented text in a sibling's section is not it ===")
+do
+	local notes = { "Sessions", "- session-a", "  - doing x", "- session-b", "  - waiting on review", "", "Next", "- n1" }
+	local add = item("w", { kind = "add", target = { under = "- session-a" }, after = "  - waiting on review", source = "notes", headline = "a waits" })
+	local r = new_repo(notes)
+	local _, st = proposal.build(r, "morning", "2026-10-01", { add }, FILES)
+	assert_eq("it is not skipped as already there", 0, st.skipped)
+	assert_eq("it is open", 1, #proposal.open_items(r))
+	write(r, "notes.md", { "Sessions", "- session-a", "  - doing x", "- session-b", "  - waiting on review", "", "Next", "- n1", "- more" })
+	commit_all(r, "an unrelated edit")
+	assert_eq("an unrelated commit does not take it", 0, #proposal.sync_taken(r))
+end
+
 print("\n=== a removal of a line too short to quote is judged by its lines ===")
 do
 	local r = new_repo({ "Status", "- a1", "ok", "- a2" })

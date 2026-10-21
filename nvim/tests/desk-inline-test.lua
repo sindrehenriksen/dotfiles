@@ -893,6 +893,99 @@ do
 	assert_eq("both on that line and both on the next", { "A", "- a1", "- x", "B", "- b1", "- y" }, lines_of(nb))
 end
 
+print("\n=== two taken at one anchor are both done, however they were taken ===")
+do
+	-- A take at an anchor lands just below it, so the other one taken there
+	-- ends up a line further down than its anchor alone would put it.
+	local notes = { "Done", "- oct 19: editors merged", "- oct 18: older", "", "Next", "- n1" }
+	local function items()
+		return {
+			item("cold", { kind = "add", target = { after = "- oct 19: editors merged" }, after = "- cold-read fixes merged", headline = "cold read" }),
+			item("docs", { kind = "add", target = { after = "- oct 19: editors merged" }, after = "- Docs site navigation shipped", headline = "docs nav" }),
+			item("other", { kind = "add", target = { under = "Next" }, after = "- n2 unrelated", headline = "unrelated" }),
+		}
+	end
+	local function listed()
+		return vim.tbl_map(function(e)
+			return e.text
+		end, vim.fn.getqflist())
+	end
+	local function taken(r)
+		local out = vim.tbl_map(function(rec)
+			return rec.headline
+		end, vim.tbl_values(ledger.taken_by_id(ledger.read(r))))
+		table.sort(out)
+		return out
+	end
+	local function count(nb, text)
+		return #vim.tbl_filter(function(l)
+			return l == text
+		end, lines_of(nb))
+	end
+	local function check(way, r, nb, s)
+		assert_eq(way .. ": both lines are in the notes, once each", { 1, 1 }, { count(nb, "- cold-read fixes merged"), count(nb, "- Docs site navigation shipped") })
+		assert_true(way .. ": neither is drawn", block_with(nb, "cold-read") == nil and block_with(nb, "Docs site") == nil)
+		assert_true(way .. ": nor has a spot", spot_row(s, "cold read") == nil and spot_row(s, "docs nav") == nil)
+		assert_true(way .. ": the overview opens", review.overview(nb))
+		assert_eq(way .. ": and lists only the one left", { "unrelated" }, listed())
+		vim.cmd("cclose")
+		vim.api.nvim_set_current_win(vim.fn.bufwinid(nb))
+		-- A session stages something else meanwhile: the proposal is rebuilt
+		-- from HEAD, where neither take is yet.
+		assert(proposal.build(r, "session", "2026-10-21", { item("late", { kind = "new", target = "top", after = "- staged meanwhile", headline = "staged" }) }, FILES))
+		review.ensure_current(s)
+		assert_eq(way .. ": the review follows the new proposal", git.ref_sha(r, review.PROPOSAL_REF), s.sha)
+		assert_true(way .. ": which draws what was staged", block_with(nb, "- staged meanwhile") ~= nil)
+		assert_true(way .. ": and still neither taken one", block_with(nb, "cold-read") == nil and block_with(nb, "Docs site") == nil)
+		vim.api.nvim_feedkeys("Q", "x", false)
+		settle()
+		assert_eq(way .. ": both are recorded taken as the review ends", { "cold read", "docs nav" }, taken(r))
+		vim.cmd("cclose")
+		vim.bo[nb].modified = false
+	end
+
+	local r, nb, s = setup(notes, items())
+	vim.api.nvim_win_set_cursor(0, { line_of(nb, "- oct 19: editors merged"), 0 })
+	vim.cmd("normal dp")
+	check("dp on the anchor", r, nb, s)
+
+	r, nb, s = setup(notes, items())
+	for _, headline in ipairs({ "cold read", "docs nav" }) do
+		vim.api.nvim_win_set_cursor(0, { spot_row(s, headline), 0 })
+		vim.api.nvim_feedkeys(vim.keycode("<leader>gA"), "x", false)
+	end
+	check("␣gA twice", r, nb, s)
+
+	r, nb, s = setup(notes, items())
+	assert_true("the overview opens", review.overview(nb))
+	for _, headline in ipairs({ "cold read", "docs nav" }) do
+		for i, e in ipairs(vim.fn.getqflist()) do
+			if e.text == headline then
+				vim.api.nvim_win_set_cursor(0, { i, 0 })
+			end
+		end
+		vim.cmd("normal t")
+	end
+	vim.cmd("cclose")
+	vim.api.nvim_set_current_win(vim.fn.bufwinid(nb))
+	check("t in the overview", r, nb, s)
+
+	-- A take undone is no take: it is drawn again.
+	r, nb, s = setup(notes, items())
+	vim.api.nvim_win_set_cursor(0, { line_of(nb, "- oct 19: editors merged"), 0 })
+	vim.cmd("normal dp")
+	vim.cmd("normal u")
+	assert_true("undone, both are drawn again", block_with(nb, "cold-read") ~= nil and block_with(nb, "Docs site") ~= nil)
+	-- A take edited afterwards stays taken.
+	vim.api.nvim_win_set_cursor(0, { line_of(nb, "- oct 19: editors merged"), 0 })
+	vim.cmd("normal dp")
+	local k = assert(line_of(nb, "- Docs site navigation shipped"))
+	vim.api.nvim_buf_set_lines(nb, k - 1, k, false, { "- Docs site navigation shipped, reworded" })
+	changed(nb)
+	assert_true("a take reworded is not drawn again", block_with(nb, "Docs site") == nil and spot_row(s, "docs nav") == nil)
+	vim.bo[nb].modified = false
+end
+
 print("\n=== it stays quick on a long file ===")
 do
 	local notes = {}

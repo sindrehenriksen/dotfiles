@@ -63,6 +63,21 @@ function M.block_end(lines, start_idx)
 	return n
 end
 
+--- The last line of the list that block end `e` sits in: past `e`, every
+--- line up to a blank line, a separator or a column-0 line that is not a
+--- `- ` item. `e` itself when nothing like that follows.
+function M.list_end(lines, e)
+	local i = e
+	while i < #lines do
+		local line = lines[i + 1]
+		if is_blank(line) or (is_col0(line) and (is_separator(line) or not is_dash_line(line))) then
+			break
+		end
+		i = i + 1
+	end
+	return i
+end
+
 --- The 1-indexed inclusive (start, end) of the block containing `idx`,
 --- whether or not `idx` is itself the block's first line.
 function M.block_containing(lines, idx)
