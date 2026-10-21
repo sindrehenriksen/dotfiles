@@ -1366,7 +1366,7 @@ M.NOTES_KEY_HINT = "n/N next · do take · ␣gA one · ␣gD decline · u undo 
 -- here too, and folds are not, since nothing folds there.
 M.INLINE_KEY_HINT = "n/N next · dp take · ␣gA one · ␣gD decline · u undo · ␣go list · ␣gc commit · ␣gq close · ␣gv split"
 -- And with no review open, the desk keys still being learned.
-M.NOTES_IDLE_HINT = "␣gR review · ␣gx open/jump · ␣go list · ␣gc commit"
+M.NOTES_IDLE_HINT = "␣gR review · gx open/jump · ␣go list · ␣gc commit"
 
 --- The review key: opens the merged view in a split above the notes window,
 --- and focuses it (or focuses the one already open for this proposal).
@@ -1719,8 +1719,7 @@ function M.open_review(notes_buf)
 		s.map_split_notes()
 	end
 	-- The split shows the notes' text, so the hotkey works there too;
-	-- without it ␣gx falls through to nvim's own gx, which hands a session
-	-- name to the system opener.
+	-- without it gx only follows links, with no session or ticket actions.
 	require("desk.hotkey").attach(review_buf, tokens.load() or { tokens = {} })
 
 	-- Edits by hand move the count too; the keys refresh it themselves.

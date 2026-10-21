@@ -1,5 +1,8 @@
--- the hotkey. Acts on
--- the token under the cursor (letters, digits, `_`, `-`):
+-- the hotkey, on `gx` and `<leader>gx`. First, a link under the cursor
+-- (a markdown link anywhere in its `[label](url)`, an autolink, a bare URL)
+-- is followed as mdlink does, before any token is read: a catch-all session
+-- pattern would otherwise take the `https` of a URL for a session name.
+-- Otherwise acts on the token under the cursor (letters, digits, `_`, `-`):
 --   - a url-handler token (e.g. a ticket key) opens its templated URL;
 --   - a session-handler token that's a plain in-notes mention of a section
 --     defined elsewhere in this same buffer is followed internally,
@@ -8,8 +11,6 @@
 --     (never a raw token passed to `claude`) and, live, focuses its
 --     Ghostty tab by tty, or, not live, resumes it by id in its recorded
 --     cwd; ambiguity or a failed focus is reported, never guessed past;
---   - none of those, but a markdown link under the cursor: that link is
---     followed (desk-free, in mdlink);
 --   - no match at all: a message, nothing opened.
 --
 -- Every external step (the reader, focusing a tab, opening a tab, opening
@@ -174,10 +175,25 @@ function M.default_deps()
 		follow_link = function(bufnr, win)
 			return require("mdlink").follow_at(bufnr, win)
 		end,
+		fallback_urls = M.fallback_urls,
 	}
 end
 
---- The hotkey's action for the token under the cursor in window `win`
+--- What plain gx would open at the cursor of `win` when it is no markdown
+--- link: nvim's own candidates (a `www.` host), else the file name
+--- under the cursor, as a dotted name such as `notes.md`. Read before anything async, while the
+--- cursor is still where the key was pressed.
+function M.fallback_urls(win)
+	return vim.api.nvim_win_call(win, function()
+		local ok, urls = pcall(vim.ui._get_urls)
+		if not ok or type(urls) ~= "table" then
+			urls = { vim.fn.expand("<cfile>") }
+		end
+		return urls
+	end)
+end
+
+--- The hotkey's action, following the link or acting on the token, under the cursor in window `win`
 --- (buffer `bufnr`), using `config.tokens` (desk.tokens shape) to classify
 --- it and `deps` (desk.hotkey.default_deps() shape) to act. Never blocks:
 --- every branch that reaches outside this buffer does so through an async
@@ -185,12 +201,31 @@ end
 function M.run(bufnr, win, config, deps)
 	deps = deps or {}
 	local notify = deps.notify or function() end
-	-- What the desk finds nothing in, a markdown link under the cursor may
-	-- still be: `[label](url)` or `[label](#heading)`, followed as gx does.
-	local function follow_link()
-		return (deps.follow_link or function()
-			return false
-		end)(bufnr, win)
+	-- A link under the cursor wins over every token: `[label](url)`,
+	-- `[label](#heading)`, `<url>` or a bare URL, followed as gx does.
+	if (deps.follow_link or function()
+		return false
+	end)(bufnr, win) then
+		return
+	end
+	-- Taken now, used only once the desk has found nothing: gx's reading can
+	-- take more than the token (`<cfile>` of `TICKET-7.1` is the whole of it,
+	-- openable), so a ticket template or a session must win over it.
+	local fallback = (deps.fallback_urls or function()
+		return {}
+	end)(win)
+	local function open_fallback()
+		for _, url in ipairs(fallback) do
+			if M.openable(url) then
+				(deps.open_url or function(_, cb) cb(false, "no open_url dep") end)(url, function(ok, err)
+					if not ok then
+						notify("could not open " .. url .. (err and (": " .. err) or ""))
+					end
+				end)
+				return true
+			end
+		end
+		return false
 	end
 	local cursor = vim.api.nvim_win_get_cursor(win)
 	local line_num, col = cursor[1], cursor[2]
@@ -198,10 +233,9 @@ function M.run(bufnr, win, config, deps)
 	local token = M.token_under_cursor(line, col)
 	token = token and M.clean_token(token)
 	if not token or token == "" then
-		if follow_link() then
-			return
+		if not open_fallback() then
+			notify("no token under the cursor")
 		end
-		notify("no token under the cursor")
 		return
 	end
 
@@ -221,10 +255,9 @@ function M.run(bufnr, win, config, deps)
 	end
 
 	if classification.kind == "none" then
-		if follow_link() then
-			return
+		if not open_fallback() then
+			notify("no match for '" .. token .. "'")
 		end
-		notify("no match for '" .. token .. "'")
 		return
 	end
 
@@ -263,7 +296,7 @@ function M.run(bufnr, win, config, deps)
 					names[#names + 1] = c.id or c.name or "?"
 				end
 				notify("ambiguous session '" .. token .. "': " .. table.concat(names, ", "))
-			elseif not follow_link() then
+			elseif not open_fallback() then
 				notify("no session named '" .. token .. "' found")
 			end
 			return
@@ -309,17 +342,41 @@ function M.run(bufnr, win, config, deps)
 	end)
 end
 
-M.KEYMAP = "<leader>gx"
+-- `gx` is the key; the leader form stays as the older spelling.
+M.KEYMAPS = { "gx", "<leader>gx" }
 
---- Attaches the hotkey to `bufnr` on M.KEYMAP, idempotent per buffer.
+-- The config each attached buffer's keys read, so a re-map after FileType
+-- sees the current one.
+local configs = {}
+
+--- Attaches the hotkey to `bufnr` on M.KEYMAPS. The buffer-local `gx`
+--- shadows mdlink's, which the hotkey subsumes by following links first.
+--- The maps are set again after every FileType, since the markdown ftplugin
+--- re-runs on `:e` and would put mdlink's `gx` back; only the autocmd is
+--- guarded, so attaching twice registers it once.
 function M.attach(bufnr, config)
+	configs[bufnr] = config
+	local function map()
+		if not vim.api.nvim_buf_is_valid(bufnr) then
+			return
+		end
+		for _, lhs in ipairs(M.KEYMAPS) do
+			vim.keymap.set("n", lhs, function()
+				M.run(bufnr, vim.api.nvim_get_current_win(), configs[bufnr], M.default_deps())
+			end, { buffer = bufnr, desc = "Desk: follow the link, or act on the token, under the cursor" })
+		end
+	end
+	map()
 	if vim.b[bufnr].desk_hotkey_attached then
 		return
 	end
 	vim.b[bufnr].desk_hotkey_attached = true
-	vim.keymap.set("n", M.KEYMAP, function()
-		M.run(bufnr, vim.api.nvim_get_current_win(), config, M.default_deps())
-	end, { buffer = bufnr, desc = "Desk: act on the token under the cursor" })
+	vim.api.nvim_create_autocmd("FileType", {
+		buffer = bufnr,
+		callback = function()
+			vim.schedule(map)
+		end,
+	})
 end
 
 return M

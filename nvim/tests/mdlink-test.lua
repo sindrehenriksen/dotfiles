@@ -32,6 +32,8 @@ assert_eq("on its target", "#how-it-works", mdlink.link_at(line, line:find("#how
 assert_eq("an autolink", "https://example.invalid/a", mdlink.link_at(line, line:find("<https") ))
 assert_eq("a bare URL, without the full stop", "https://example.invalid/b", mdlink.link_at(line, line:find("/b") - 1))
 assert_eq("plain prose is none", nil, mdlink.link_at(line, 0))
+assert_eq("a bare URL loses closing emphasis and quotes", "https://example.invalid/e", mdlink.link_at("see **https://example.invalid/e** now", 8))
+assert_eq("a quoted bare URL too", "https://example.invalid/q", mdlink.link_at("say 'https://example.invalid/q' now", 6))
 assert_eq("a title is dropped", "doc.md", mdlink.link_at('[x](doc.md "The doc")', 1))
 
 print("=== GitHub slugs ===")

@@ -631,31 +631,125 @@ do
 end
 
 print()
-print("=== desk first, then the markdown link under the cursor ===")
+print("=== a link under the cursor wins over the token table ===")
 
 do
-	local buf = new_buf({ "see the [collab thread](https://example.invalid/t) and TICKET-7" })
+	local mdlink = require("mdlink")
+	local opened, notes = {}, {}
+	local saved = mdlink.deps
+	mdlink.deps = {
+		open = function(t)
+			opened[#opened + 1] = t
+		end,
+		edit = function() end,
+		notify = function(m)
+			notes[#notes + 1] = m
+		end,
+	}
+	local buf = new_buf({ "see the [collab thread](https://example.invalid/t) and TICKET-7 or https://example.invalid/bare." })
 	local win = vim.api.nvim_get_current_win()
 	vim.api.nvim_win_set_buf(win, buf)
-	local function run_at(text, results)
+	local function run_at(text)
+		opened, notes = {}, {}
 		local line = vim.api.nvim_buf_get_lines(buf, 0, 1, false)[1]
 		vim.api.nvim_win_set_cursor(win, { 1, line:find(text, 1, true) - 1 })
 		local rec = new_recorder()
-		local deps = stub_deps(rec, results)
-		deps.follow_link = function(b, w)
-			record(rec, "follow_link")
-			return require("mdlink").link_at(vim.api.nvim_buf_get_lines(b, 0, 1, false)[1], vim.api.nvim_win_get_cursor(w)[2]) ~= nil
+		local deps = stub_deps(rec, { reader_resolve = { nil, {} }, open_url = { true } })
+		deps.follow_link = function(b2, w)
+			return mdlink.follow_at(b2, w)
 		end
 		hotkey.run(buf, win, config, deps)
 		vim.wait(50)
 		return rec.calls
 	end
-	local calls = run_at("thread", { reader_resolve = { nil, {} } })
-	assert_eq("a link's label that is no session: the reader first, then the link", { { "reader_resolve", "thread" }, { "follow_link" } }, calls)
-	calls = run_at("TICKET-7", { open_url = { true } })
-	assert_eq("a ticket stays the desk's", { { "open_url", "https://example.invalid/TICKET-7" } }, calls)
-	calls = run_at("and", { reader_resolve = { nil, {} } })
-	assert_eq("prose that is neither: tried, and said", "notify", calls[#calls][1])
+	local calls = run_at("https://example.invalid/t")
+	assert_eq("the URL part of a markdown link: followed, no session lookup", {}, calls)
+	assert_eq("and opened", { "https://example.invalid/t" }, opened)
+	calls = run_at("thread")
+	assert_eq("the label of a markdown link: followed, no session lookup", {}, calls)
+	assert_eq("and opened", { "https://example.invalid/t" }, opened)
+	calls = run_at("https://example.invalid/bare")
+	assert_eq("a bare URL: followed, no session lookup", {}, calls)
+	assert_eq("and opened without the sentence's full stop", { "https://example.invalid/bare" }, opened)
+	calls = run_at("TICKET-7")
+	assert_eq("a ticket outside a link stays the desk's", { { "open_url", "https://example.invalid/TICKET-7" } }, calls)
+	assert_eq("and opens nothing through mdlink", {}, opened)
+	calls = run_at("and")
+	assert_eq("a session token outside a link still goes to the reader", { "reader_resolve", "and" }, calls[1])
+
+	-- gx's own reading, once the desk has found nothing
+	local fb = new_buf({ "go www.example.com now TICKET-7.1 and release-1.2 end www.example.com/p" })
+	vim.api.nvim_win_set_buf(win, fb)
+	local function fb_at(text, results)
+		local line = vim.api.nvim_buf_get_lines(fb, 0, 1, false)[1]
+		vim.api.nvim_win_set_cursor(win, { 1, line:find(text, 1, true) - 1 })
+		local rec = new_recorder()
+		local deps = stub_deps(rec, results)
+		deps.follow_link = function(b2, w)
+			return mdlink.follow_at(b2, w)
+		end
+		deps.fallback_urls = hotkey.fallback_urls
+		hotkey.run(fb, win, config, deps)
+		vim.wait(50)
+		return rec.calls
+	end
+	calls = fb_at("www.example", { reader_resolve = { nil, {} }, open_url = { true } })
+	assert_eq("www.example.com: the reader finds no session, then plain gx's reading opens it", { { "reader_resolve", "www" }, { "open_url", "www.example.com" } }, calls)
+	calls = fb_at("TICKET-7", { open_url = { true } })
+	assert_eq("TICKET-7.1 still uses its template, though gx would open the whole of it", { { "open_url", "https://example.invalid/TICKET-7" } }, calls)
+	calls = fb_at("release", { reader_resolve = { { id = "release-1", live = false, cwd = "/x" }, {} }, open_tab = { true } })
+	assert_eq("release-1.2 still resolves the session, though gx would open the whole of it", { "reader_resolve", "release-1" }, calls[1])
+	assert_eq("and only the tab is opened", 2, #calls)
+
+	calls = fb_at("/p", { open_url = { true } })
+	assert_eq("on the / of a URL, no token: plain gx's reading opens it", { { "open_url", "www.example.com/p" } }, calls)
+
+	local no_catch = { tokens = { config.tokens[1] } }
+	vim.api.nvim_win_set_cursor(win, { 1, 3 })
+	local nrec = new_recorder()
+	local ndeps = stub_deps(nrec, { open_url = { true } })
+	ndeps.fallback_urls = hotkey.fallback_urls
+	hotkey.run(fb, win, no_catch, ndeps)
+	vim.wait(50)
+	assert_eq("kind none (no catch-all session): plain gx's reading opens www.example.com", { { "open_url", "www.example.com" } }, nrec.calls)
+
+	local anchored = new_buf({ "# Top", "", "text [back](#top) end" })
+	vim.api.nvim_win_set_buf(win, anchored)
+	vim.api.nvim_win_set_cursor(win, { 3, 7 })
+	local rec = new_recorder()
+	local deps = stub_deps(rec, {})
+	deps.follow_link = function(b2, w)
+		return mdlink.follow_at(b2, w)
+	end
+	hotkey.run(anchored, win, config, deps)
+	assert_eq("an #anchor link jumps to its heading, no session lookup", { 1, {} }, { vim.api.nvim_win_get_cursor(win)[1], rec.calls })
+	mdlink.deps = saved
+end
+
+print()
+print("=== gx is the hotkey in desk buffers only ===")
+
+do
+	local function desc_of(lhs, buf)
+		return vim.api.nvim_buf_call(buf, function()
+			return vim.fn.maparg(lhs, "n", false, true).desc
+		end)
+	end
+	local notes_buf = new_buf({ "x" })
+	hotkey.attach(notes_buf, config)
+	local plain = new_buf({ "x" })
+	local want = "Desk: follow the link, or act on the token, under the cursor"
+	assert_eq("gx in a desk buffer", want, desc_of("gx", notes_buf))
+	assert_eq("<leader>gx still works there", want, desc_of(vim.g.mapleader .. "gx", notes_buf))
+	vim.api.nvim_set_current_buf(notes_buf)
+	vim.bo[notes_buf].filetype = "markdown"
+	vim.wait(100)
+	assert_eq("gx is still the hotkey after FileType re-runs the markdown ftplugin", want, desc_of("gx", notes_buf))
+	hotkey.attach(notes_buf, config)
+	vim.bo[notes_buf].filetype = "markdown"
+	vim.wait(100)
+	assert_eq("attaching again keeps it", want, desc_of("gx", notes_buf))
+	assert_eq("gx elsewhere is not the hotkey", true, desc_of("gx", plain) ~= want)
 end
 
 print()

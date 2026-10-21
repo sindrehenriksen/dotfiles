@@ -41,7 +41,7 @@ function M.link_at(line, col)
 				break
 			end
 			if pos >= s and pos <= e then
-				return (url:gsub("[.,;:!?]+$", "")) -- the sentence's, not the URL's
+				return (url:gsub("[.,;:!?*\"']+$", "")) -- the sentence's, not the URL's
 			end
 			init = e + 1
 		end
