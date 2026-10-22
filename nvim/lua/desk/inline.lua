@@ -206,6 +206,39 @@ function M.draw(buf, view)
 	end
 end
 
+--- How many virtual lines are drawn above `buf`'s first line.
+function M.top_fill(buf)
+	local n = 0
+	for _, m in ipairs(vim.api.nvim_buf_get_extmarks(buf, M.NS, 0, { 0, -1 }, { details = true })) do
+		if m[4].virt_lines and m[4].virt_lines_above then
+			n = n + #m[4].virt_lines
+		end
+	end
+	return n
+end
+
+--- With `win`'s cursor on line 1, scrolls it to show every virtual line
+--- drawn above that line. Neovim shows those only as filler the window is
+--- scrolled into ('topfill', what <C-y> at the top reveals), and opening a
+--- file, `gg`, a jump to line 1 and moving up to it all leave it at none,
+--- so a suggestion for the top of the file would not show at all. A
+--- 'topfill' over the filler there is reset to 0, so it is set exactly; with
+--- none drawn here the window is left alone, its diff filler included.
+function M.reveal_top(win)
+	if vim.api.nvim_win_get_cursor(win)[1] ~= 1 then
+		return
+	end
+	local fill = M.top_fill(vim.api.nvim_win_get_buf(win))
+	if fill == 0 then
+		return
+	end
+	vim.api.nvim_win_call(win, function()
+		if vim.fn.winsaveview().topfill ~= fill then
+			vim.fn.winrestview({ topline = 1, topfill = fill })
+		end
+	end)
+end
+
 function M.clear(buf)
 	if vim.api.nvim_buf_is_valid(buf) then
 		vim.api.nvim_buf_clear_namespace(buf, M.NS, 0, -1)

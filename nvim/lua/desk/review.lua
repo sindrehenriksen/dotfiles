@@ -1778,6 +1778,22 @@ function M.open_review(notes_buf)
 			M.refresh_status_line(notes_buf)
 		end,
 	})
+	-- Arriving at line 1 (`gg`, `k`) shows what is drawn above it. Only on
+	-- arrival, so <C-e> from there still scrolls those lines away.
+	vim.api.nvim_create_autocmd("CursorMoved", {
+		buffer = notes_buf,
+		callback = function()
+			if sessions[notes_buf] ~= s then
+				return true
+			end
+			local win = vim.api.nvim_get_current_win()
+			local line = vim.api.nvim_win_get_cursor(win)[1]
+			if s.inline and line == 1 and s.view_line ~= 1 then
+				inline.reveal_top(win)
+			end
+			s.view_line = line
+		end,
+	})
 	-- The one window's notes leaving their last window (another buffer
 	-- shown there, the window closed) end the review, its declines recorded.
 	vim.api.nvim_create_autocmd("BufWinLeave", {
@@ -2710,6 +2726,9 @@ function M.view_draw(s)
 	end)
 	s.view_spots = spots
 	inline.draw(s.notes_buf, view)
+	if win then
+		inline.reveal_top(win)
+	end
 end
 
 --- The suggestions the cursor on notes row `line` names in the one window:
@@ -2807,6 +2826,7 @@ function M.view_next(s, win, forward, quiet)
 		line = target
 	end
 	vim.api.nvim_win_set_cursor(win, { math.min(line, vim.api.nvim_buf_line_count(s.notes_buf)), 0 })
+	inline.reveal_top(win)
 	if wrapped and not quiet then
 		vim.notify(forward and "desk: wrapped to first" or "desk: wrapped to last", vim.log.levels.INFO)
 	end
@@ -3651,6 +3671,7 @@ function M.qf_preview()
 	vim.api.nvim_win_call(win, function()
 		vim.cmd("normal! zvzz")
 	end)
+	inline.reveal_top(win)
 	preview.last = vim.api.nvim_win_get_cursor(win)
 end
 
@@ -3748,6 +3769,7 @@ function M.qf_jump()
 	vim.cmd("normal! m'")
 	vim.cmd("diffupdate")
 	vim.api.nvim_win_set_cursor(win, { math.max(lnum, 1), 0 })
+	inline.reveal_top(win)
 end
 
 --- The overview's take and decline keys (`verb` "take" or "decline"): act

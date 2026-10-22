@@ -581,6 +581,69 @@ do
 	assert_eq("and dp leaves just it", { "NEWS n1" }, lines_of(nb2))
 end
 
+print("\n=== suggestions for the top show, scrolled into above line 1 ===")
+do
+	local notes = { "# First real line" }
+	for i = 1, 60 do
+		notes[#notes + 1] = "- line " .. i
+	end
+	local _, nb, s = setup(notes, {
+		item("s1", { kind = "new", target = "top", after = "## New one\n- x\n- y", headline = "first section" }),
+		item("s2", { kind = "new", target = "top", after = "## New two\n- z", headline = "second section" }),
+		item("b", { kind = "new", target = "top", after = "- a bullet", headline = "a bullet" }),
+		item("far", { kind = "edit", target = { at = "- line 50" }, before = "- line 50", after = "- line fifty", headline = "far down" }),
+	})
+	local nw = vim.api.nvim_get_current_win()
+	local fill = inline.top_fill(nb)
+	local function topfill()
+		return vim.api.nvim_win_call(nw, vim.fn.winsaveview).topfill
+	end
+	local function first_row()
+		-- Not :redraw, which swallows the newline of the line printed before.
+		vim.api.nvim__redraw({ win = nw, valid = false, flush = true })
+		local row = vim.fn.win_screenpos(nw)[1] + (vim.wo[nw].winbar ~= "" and 1 or 0)
+		local t = {}
+		for c = 1, 10 do
+			t[c] = vim.fn.screenstring(row, c)
+		end
+		return table.concat(t)
+	end
+	assert_true("all three are drawn above line 1", fill >= 6)
+	assert_eq("the review opens scrolled to show them", fill, topfill())
+	assert_eq("so the window's first row is the first new line", "## New one", first_row())
+	vim.cmd("normal n")
+	assert_eq("n goes to the one far down", spot_row(s, "far down"), vim.api.nvim_win_get_cursor(nw)[1])
+	vim.cmd("normal N")
+	assert_eq("N back to the top shows them again", { 1, fill }, { vim.api.nvim_win_get_cursor(nw)[1], topfill() })
+	vim.cmd("normal! G")
+	vim.api.nvim_exec_autocmds("CursorMoved", { buffer = nb })
+	vim.cmd("normal! gg")
+	vim.api.nvim_exec_autocmds("CursorMoved", { buffer = nb })
+	assert_eq("gg shows them", fill, topfill())
+	vim.cmd("normal! " .. vim.keycode("<C-e>"))
+	vim.api.nvim_exec_autocmds("CursorMoved", { buffer = nb })
+	assert_eq("<C-e> there still scrolls one away", fill - 1, topfill())
+
+	vim.api.nvim_win_set_cursor(nw, { spot_row(s, "far down"), 0 })
+	assert_true("the overview opens", review.overview(nb))
+	local qw = vim.api.nvim_get_current_win()
+	local top_entry
+	for i, e in ipairs(vim.fn.getqflist()) do
+		if e.lnum == 1 and not top_entry then
+			top_entry = i
+		end
+	end
+	assert_true("the overview lists one on line 1", top_entry ~= nil)
+	vim.api.nvim_win_set_cursor(qw, { top_entry, 0 })
+	review.qf_preview()
+	assert_eq("moving onto it in the list shows the top", { 1, fill }, { vim.api.nvim_win_get_cursor(nw)[1], topfill() })
+	vim.api.nvim_win_set_cursor(nw, { spot_row(s, "far down"), 0 })
+	review.qf_jump()
+	assert_eq("<CR> on it lands in the notes", nw, vim.api.nvim_get_current_win())
+	assert_eq("showing the top", { 1, fill }, { vim.api.nvim_win_get_cursor(nw)[1], topfill() })
+	assert_eq("drawn there, not just asked for", "## New one", first_row())
+end
+
 print("\n=== new lines wrap to the window, unicode and all ===")
 do
 	local long = string.rep("æøå ", 40) .. "slutt"
