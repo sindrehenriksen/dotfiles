@@ -615,14 +615,6 @@ do
 	assert_eq("n goes to the one far down", spot_row(s, "far down"), vim.api.nvim_win_get_cursor(nw)[1])
 	vim.cmd("normal N")
 	assert_eq("N back to the top shows them again", { 1, fill }, { vim.api.nvim_win_get_cursor(nw)[1], topfill() })
-	vim.cmd("normal! G")
-	vim.api.nvim_exec_autocmds("CursorMoved", { buffer = nb })
-	vim.cmd("normal! gg")
-	vim.api.nvim_exec_autocmds("CursorMoved", { buffer = nb })
-	assert_eq("gg shows them", fill, topfill())
-	vim.cmd("normal! " .. vim.keycode("<C-e>"))
-	vim.api.nvim_exec_autocmds("CursorMoved", { buffer = nb })
-	assert_eq("<C-e> there still scrolls one away", fill - 1, topfill())
 
 	vim.api.nvim_win_set_cursor(nw, { spot_row(s, "far down"), 0 })
 	assert_true("the overview opens", review.overview(nb))
@@ -642,6 +634,166 @@ do
 	assert_eq("<CR> on it lands in the notes", nw, vim.api.nvim_get_current_win())
 	assert_eq("showing the top", { 1, fill }, { vim.api.nvim_win_get_cursor(nw)[1], topfill() })
 	assert_eq("drawn there, not just asked for", "## New one", first_row())
+end
+
+print("\n=== a take or decline from the overview goes on the way you were going ===")
+do
+	local notes = { "# First real line" }
+	for i = 1, 60 do
+		notes[#notes + 1] = "- line " .. i
+	end
+	local items = {
+		item("s1", { kind = "new", target = "top", after = "## New one\n- x", headline = "first section" }),
+		item("b", { kind = "new", target = "top", after = "- a bullet", headline = "a bullet" }),
+	}
+	for _, n in ipairs({ 20, 30, 40, 50 }) do
+		items[#items + 1] = item("e" .. n, { kind = "edit", target = { at = "- line " .. n }, before = "- line " .. n, after = "- line " .. n .. "!", headline = "edit " .. n })
+	end
+	local _, nb, s = setup(notes, items)
+	local nw = vim.api.nvim_get_current_win()
+	assert_true("the overview opens", review.overview(nb))
+	local qw = vim.api.nvim_get_current_win()
+	local function to_row(row)
+		vim.api.nvim_win_set_cursor(qw, { row, 0 })
+		review.qf_preview()
+	end
+	local function headline_at(row)
+		local text = vim.fn.getqflist()[row].text
+		return text:match("edit %d+") or text
+	end
+	assert_eq("the top ones first, then the edits", "edit 20", headline_at(3))
+	to_row(3)
+	to_row(4)
+	vim.cmd("normal t")
+	assert_eq("moving down, a take goes on to the next one down", { 4, "edit 40", spot_row(s, "edit 40") }, { vim.api.nvim_win_get_cursor(qw)[1], headline_at(4), vim.api.nvim_win_get_cursor(nw)[1] })
+	to_row(5)
+	to_row(4)
+	vim.cmd("normal x")
+	assert_eq("moving up, a decline goes on to the next one up", { 3, "edit 20", spot_row(s, "edit 20") }, { vim.api.nvim_win_get_cursor(qw)[1], headline_at(3), vim.api.nvim_win_get_cursor(nw)[1] })
+	-- A take made in the notes while the list is open leaves the list on
+	-- its row, so going back into it does not show the first one.
+	vim.api.nvim_set_current_win(nw)
+	vim.api.nvim_win_set_cursor(nw, { spot_row(s, "edit 50"), 0 })
+	vim.cmd("normal dp")
+	assert_eq("a take in the notes leaves the list's cursor on its row", 3, vim.api.nvim_win_get_cursor(qw)[1])
+	vim.api.nvim_set_current_win(qw)
+	review.qf_preview()
+	assert_eq("so back in the list it shows that row's", spot_row(s, "edit 20"), vim.api.nvim_win_get_cursor(nw)[1])
+	vim.cmd("normal q")
+	settle()
+end
+
+print("\n=== the top as keys move to it, edits under it and the split ===")
+do
+	-- CursorMoved and TextChanged fire only from a running main loop, which
+	-- `nvim -l` has none of: a second nvim runs the review, fed real keys.
+	local here = debug.getinfo(1, "S").source:sub(2):match("^(.*)/[^/]+$")
+	local notes = { "# First real line" }
+	for i = 1, 60 do
+		notes[#notes + 1] = "- line " .. i
+	end
+	local r = new_repo(notes)
+	assert(proposal.build(r, "morning", "2026-10-01", {
+		item("s1", { kind = "new", target = "top", after = "## New one\n- x\n- y", headline = "first section" }),
+		item("s2", { kind = "new", target = "top", after = "## New two\n- z", headline = "second section" }),
+		item("b", { kind = "new", target = "top", after = "- a bullet", headline = "a bullet" }),
+		item("far", { kind = "edit", target = { at = "- line 50" }, before = "- line 50", after = "- line fifty", headline = "far down" }),
+	}, FILES))
+	local ch = vim.fn.jobstart({ vim.v.progpath, "--headless", "--embed", "-u", here .. "/minimal_init.lua" }, { rpc = true })
+	local function lua(code, ...)
+		return vim.rpcrequest(ch, "nvim_exec_lua", code, { ... })
+	end
+	vim.rpcrequest(ch, "nvim_ui_attach", 80, 40, { rgb = true })
+	lua([[
+		local window = require("desk.window")
+		window.run = function(_, cb) cb(true, "none") end
+		window.owner_fn = function() return nil end
+		vim.notify = function() end
+		local review = require("desk.review")
+		review.view = "inline"
+		vim.cmd("edit " .. vim.fn.fnameescape(... .. "/notes.md"))
+		_G.nb = vim.api.nvim_get_current_buf()
+		review.attach(_G.nb)
+		assert(review.open_review(_G.nb))
+		_G.s = review.session_of(_G.nb)
+		_G.nw = vim.api.nvim_get_current_win()
+		function _G.state()
+			return {
+				line = vim.api.nvim_win_get_cursor(_G.nw)[1],
+				topfill = vim.api.nvim_win_call(_G.nw, vim.fn.winsaveview).topfill,
+				fill = require("desk.inline").top_fill(_G.nb),
+				drawn = _G.s.view_tick == vim.api.nvim_buf_get_changedtick(_G.nb),
+			}
+		end
+	]], r)
+	local function state()
+		return lua("return _G.state()")
+	end
+	-- Feeds `keys` as typed and waits for the main loop to have handled
+	-- them, the redraw on a change included.
+	local function settled()
+		vim.wait(2000, function()
+			return not vim.rpcrequest(ch, "nvim_get_mode").blocking and lua("return _G.state().drawn")
+		end)
+	end
+	local function keys(k)
+		vim.rpcrequest(ch, "nvim_input", vim.keycode(k))
+		settled()
+	end
+	local st = state()
+	local fill = st.fill
+	assert_eq("opened at the top, all shown", { 1, fill }, { st.line, st.topfill })
+	-- The split shows the top as diff filler, its own business: scrolled
+	-- part way into it, the keys leave it so.
+	keys("<Space>gv")
+	local split = lua([[
+		vim.api.nvim_set_current_win(_G.nw)
+		vim.fn.winrestview({ topline = 1, topfill = 1, lnum = 2 })
+		return { diff = vim.wo.diff, filler = vim.fn.diff_filler(1) }
+	]])
+	assert_true("the split shows the top as diff filler", split.diff and split.filler > 1)
+	keys("k")
+	st = state()
+	assert_eq("k to line 1 there leaves the filler as scrolled", { 1, 1 }, { st.line, st.topfill })
+	keys("<Space>gv")
+	st = state()
+	assert_eq("back in one window at line 1, all shown again", { 1, fill }, { st.line, st.topfill })
+	keys("G")
+	keys("gg")
+	st = state()
+	assert_eq("gg from the end shows them", { 1, fill }, { st.line, st.topfill })
+	keys("<C-e>")
+	assert_eq("<C-e> scrolls one away", fill - 1, state().topfill)
+	keys("x")
+	st = state()
+	assert_eq("an edit on line 1 leaves them as scrolled", { "First real line", fill - 1 }, { lua("return vim.api.nvim_buf_get_lines(_G.nb, 0, 1, false)[1]"):sub(2), st.topfill })
+	keys("u")
+	lua([[
+		for _, it in ipairs(_G.s.view_open) do
+			if it.headline == "far down" then
+				require("desk.review").view_take(_G.s, { it })
+			end
+		end
+	]])
+	settled()
+	st = state()
+	assert_true("a take far down", lua("return vim.fn.search('- line fifty', 'nw') > 0"))
+	assert_eq("leaves them as scrolled too", { 1, fill - 1 }, { st.line, st.topfill })
+	keys("j")
+	keys("k")
+	st = state()
+	assert_eq("k from line 2 shows them all again", { 1, fill }, { st.line, st.topfill })
+	keys("<Space>gD")
+	st = state()
+	assert_true("a decline at the top leaves fewer", st.fill > 0 and st.fill < fill)
+	assert_eq("shown exactly", st.fill, st.topfill)
+	keys("gg")
+	keys("<Space>gA")
+	st = state()
+	assert_true("a take at the top leaves fewer still", st.fill > 0 and st.fill < fill)
+	assert_eq("shown exactly", st.fill, st.topfill)
+
+	vim.fn.jobstop(ch)
 end
 
 print("\n=== new lines wrap to the window, unicode and all ===")

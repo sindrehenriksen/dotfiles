@@ -93,6 +93,10 @@ end
 
 local sessions = {} -- notes bufnr -> session
 local preview -- the overview's preview state, below
+-- Which way the user last moved between suggestions, by `n`/`N` in the one
+-- window or up and down the overview, and the list row last previewed: a
+-- take or decline from the list goes on that way (M.qf_act).
+local travel = { forward = true }
 local complete_halves -- a take of half a move finishes it, below
 
 local function live_session(bufnr)
@@ -1528,6 +1532,7 @@ function M.open_review(notes_buf)
 		built_ours = ours,
 	}
 	sessions[notes_buf] = s
+	travel.forward = true
 	M.recount_saved(s)
 	M.place_marks(s, ours)
 	M.place_del_marks(s)
@@ -2726,9 +2731,13 @@ function M.view_draw(s)
 	end)
 	s.view_spots = spots
 	inline.draw(s.notes_buf, view)
-	if win then
-		inline.reveal_top(win)
+	-- Only on the first draw or when what hangs above line 1 changed, so an
+	-- edit or a take elsewhere leaves the top as the user scrolled it.
+	local top = inline.top_fill(s.notes_buf)
+	if win and top ~= s.view_top then
+		inline.reveal_top(win, true)
 	end
+	s.view_top = top
 end
 
 --- The suggestions the cursor on notes row `line` names in the one window:
@@ -2827,6 +2836,7 @@ function M.view_next(s, win, forward, quiet)
 	end
 	vim.api.nvim_win_set_cursor(win, { math.min(line, vim.api.nvim_buf_line_count(s.notes_buf)), 0 })
 	inline.reveal_top(win)
+	travel.forward = forward
 	if wrapped and not quiet then
 		vim.notify(forward and "desk: wrapped to first" or "desk: wrapped to last", vim.log.levels.INFO)
 	end
@@ -2986,6 +2996,7 @@ function M.toggle_view(s)
 			return false, "your notes are not showing in any window"
 		end
 		inline.clear(s.notes_buf)
+		s.view_top = nil
 		unmap_notes_keys(s.notes_buf)
 		local cursor = vim.api.nvim_win_get_cursor(nw)
 		local rw
@@ -3398,11 +3409,23 @@ function M.refresh_overview(s)
 	if rb ~= s.review_buf and not stale then
 		return
 	end
+	-- A rebuild puts the list's cursor back on its first entry; it stays on
+	-- its row instead, so the entry that moves up into it is the one shown
+	-- next rather than the first, wherever the take or decline was made.
+	local qwin = vim.fn.getqflist({ winid = 0 }).winid
+	local row = qwin ~= 0 and vim.api.nvim_win_get_cursor(qwin)[1]
 	vim.fn.setqflist({}, "r", {
 		title = M.OVERVIEW_TITLE,
 		items = overview_items(s, s.repo, s.file),
 		context = { desk_review_buf = s.review_buf, desk_repo = s.repo },
 	})
+	local n = #vim.fn.getqflist()
+	if row and n > 0 then
+		row = math.min(row, n)
+		vim.api.nvim_win_set_cursor(qwin, { row, 0 })
+		vim.fn.setqflist({}, "a", { idx = row })
+		travel.row = row
+	end
 end
 
 --- True while the overview's list is open in a window.
@@ -3566,6 +3589,7 @@ function M.overview(notes_buf)
 	-- it shows are both in view. A list open elsewhere moves there.
 	vim.cmd("cclose")
 	preview = {}
+	travel.row = nil
 	vim.cmd("topleft copen " .. math.min(#items, 10))
 	M.qf_bars()
 	watch_overview_window(vim.api.nvim_get_current_win())
@@ -3651,6 +3675,10 @@ function M.qf_preview()
 	-- The list's current entry (QuickFixLine) is the one the cursor is on,
 	-- not the first, which otherwise stays marked wherever you are.
 	local row = vim.fn.line(".")
+	if travel.row and row ~= travel.row then
+		travel.forward = row > travel.row
+	end
+	travel.row = row
 	if vim.fn.getqflist({ idx = 0 }).idx ~= row then
 		vim.fn.setqflist({}, "a", { idx = row })
 	end
@@ -3782,7 +3810,8 @@ function M.qf_act(verb)
 	if info.title ~= M.OVERVIEW_TITLE then
 		return false, "not the desk overview"
 	end
-	local entry = info.items[vim.fn.line(".")]
+	local row = vim.fn.line(".")
+	local entry = info.items[row]
 	local data = entry and type(entry.user_data) == "table" and entry.user_data or {}
 	if not data.id then
 		return false, "no suggestion on this line"
@@ -3826,17 +3855,20 @@ function M.qf_act(verb)
 		end
 	end
 	local qwin = vim.api.nvim_get_current_win()
-	local row = vim.fn.line(".")
 	M.refresh_overview(s)
 	M.refresh_status_line(s.notes_buf)
-	-- The entry that moves up into this row is the one now under the cursor:
-	-- show it as moving onto it would. The cursor itself has not moved, so
-	-- no CursorMoved does it.
+	-- The next entry the way the user was going: the one that moves up into
+	-- this row, or moving up, the one above it. Shown as moving onto it
+	-- would show it, since the cursor may not have moved and no CursorMoved
+	-- would do it.
 	if vim.bo[vim.api.nvim_win_get_buf(qwin)].buftype == "quickfix" then
 		local n = #vim.fn.getqflist()
 		if n > 0 then
-			vim.api.nvim_win_set_cursor(qwin, { math.min(row, n), 0 })
+			local forward = travel.forward
+			local target = math.max(1, math.min(forward and row or row - 1, n))
+			vim.api.nvim_win_set_cursor(qwin, { target, 0 })
 			M.qf_preview()
+			travel.forward = forward
 		end
 	end
 	return true

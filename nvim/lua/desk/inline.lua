@@ -217,23 +217,22 @@ function M.top_fill(buf)
 	return n
 end
 
---- With `win`'s cursor on line 1, scrolls it to show every virtual line
---- drawn above that line. Neovim shows those only as filler the window is
---- scrolled into ('topfill', what <C-y> at the top reveals), and opening a
---- file, `gg`, a jump to line 1 and moving up to it all leave it at none,
---- so a suggestion for the top of the file would not show at all. A
---- 'topfill' over the filler there is reset to 0, so it is set exactly; with
---- none drawn here the window is left alone, its diff filler included.
-function M.reveal_top(win)
-	if vim.api.nvim_win_get_cursor(win)[1] ~= 1 then
-		return
-	end
+--- With `win`'s cursor on line 1 (or with `at_top`, its view starting at
+--- line 1), scrolls it to show every virtual line drawn above that line.
+--- Neovim shows those only as filler the window is scrolled into
+--- ('topfill', what <C-y> at the top reveals), and opening a file, `gg`, a
+--- jump to line 1, moving up to it and lines put in above it all leave it
+--- at none, so a suggestion for the top of the file would not show at all.
+--- A 'topfill' over the filler there is reset to 0, so it is set exactly;
+--- with none drawn here the window is left alone, its diff filler included.
+function M.reveal_top(win, at_top)
 	local fill = M.top_fill(vim.api.nvim_win_get_buf(win))
 	if fill == 0 then
 		return
 	end
 	vim.api.nvim_win_call(win, function()
-		if vim.fn.winsaveview().topfill ~= fill then
+		local view = vim.fn.winsaveview()
+		if (view.lnum == 1 or (at_top and view.topline == 1)) and view.topfill ~= fill then
 			vim.fn.winrestview({ topline = 1, topfill = fill })
 		end
 	end)
