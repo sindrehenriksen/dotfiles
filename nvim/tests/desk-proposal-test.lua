@@ -800,11 +800,31 @@ do
 		assert_eq(name .. ": and neither comes back", { 0, {} }, { st.carried, open_heads(r) })
 	end
 
-	-- The place stays a place: a top bullet whose text the user has further
-	-- down, past the first block that is not a section, is not taken.
-	local r = new_repo({ "Alpha", "- a1", "", "- loose", "", "- oct 22: a bullet of news" })
-	assert(proposal.build(r, "morning", "2026-10-22", { item("bullet", { after = "- oct 22: a bullet of news" }) }, FILES))
-	assert_eq("a top bullet the user has further down is still open", { "headline bullet" }, open_heads(r))
+	-- The place stays a place: only sections a suggestion put there widen
+	-- it, never the user's own, so text the user has further down is not it.
+	-- (The first held before sections widened anything; it guards that.)
+	local guards = {
+		{
+			"a top bullet the user has further down, past a loose block",
+			{ "Alpha", "- a1", "", "- loose", "", "- oct 22: a bullet of news" },
+			item("bullet", { after = "- oct 22: a bullet of news" }),
+		},
+		{
+			"a top bullet the user has in a later section of a file of sections",
+			{ "S1", "- a", "", "S2", "- b", "", "S3", "- oct 22: a bullet of news" },
+			item("bullet", { after = "- oct 22: a bullet of news" }),
+		},
+		{
+			"a section under an anchor the user has as a later section",
+			{ "Alpha", "- a1", "", "Bravo", "- b1", "", "session-one", "- where it stood" },
+			item("sec", { kind = "add", target = { under = "Alpha" }, after = "session-one\n- where it stood" }),
+		},
+	}
+	for _, g in ipairs(guards) do
+		local r = new_repo(g[2])
+		assert(proposal.build(r, "morning", "2026-10-22", { g[3] }, FILES))
+		assert_eq(g[1] .. " is still open", { g[3].headline }, open_heads(r))
+	end
 end
 
 print(string.format("\n=== summary: %d passed, %d failed ===", pass, fail))
