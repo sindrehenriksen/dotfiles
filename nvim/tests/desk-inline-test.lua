@@ -646,7 +646,7 @@ do
 		item("s1", { kind = "new", target = "top", after = "## New one\n- x", headline = "first section" }),
 		item("b", { kind = "new", target = "top", after = "- a bullet", headline = "a bullet" }),
 	}
-	for _, n in ipairs({ 20, 30, 40, 50 }) do
+	for _, n in ipairs({ 20, 30, 40, 50, 60 }) do
 		items[#items + 1] = item("e" .. n, { kind = "edit", target = { at = "- line " .. n }, before = "- line " .. n, after = "- line " .. n .. "!", headline = "edit " .. n })
 	end
 	local _, nb, s = setup(notes, items)
@@ -670,15 +670,62 @@ do
 	to_row(4)
 	vim.cmd("normal x")
 	assert_eq("moving up, a decline goes on to the next one up", { 3, "edit 20", spot_row(s, "edit 20") }, { vim.api.nvim_win_get_cursor(qw)[1], headline_at(3), vim.api.nvim_win_get_cursor(nw)[1] })
+	to_row(4)
+	vim.cmd("normal t")
+	assert_eq("down again after going up, a take goes on down", { 4, "edit 60", spot_row(s, "edit 60") }, { vim.api.nvim_win_get_cursor(qw)[1], headline_at(4), vim.api.nvim_win_get_cursor(nw)[1] })
 	-- A take made in the notes while the list is open leaves the list on
-	-- its row, so going back into it does not show the first one.
+	-- its row (here past its new end, so its last), so going back into it
+	-- does not show the first one.
 	vim.api.nvim_set_current_win(nw)
-	vim.api.nvim_win_set_cursor(nw, { spot_row(s, "edit 50"), 0 })
+	vim.api.nvim_win_set_cursor(nw, { spot_row(s, "edit 20"), 0 })
 	vim.cmd("normal dp")
 	assert_eq("a take in the notes leaves the list's cursor on its row", 3, vim.api.nvim_win_get_cursor(qw)[1])
 	vim.api.nvim_set_current_win(qw)
 	review.qf_preview()
-	assert_eq("so back in the list it shows that row's", spot_row(s, "edit 20"), vim.api.nvim_win_get_cursor(nw)[1])
+	assert_eq("so back in the list it shows that row's", spot_row(s, "edit 60"), vim.api.nvim_win_get_cursor(nw)[1])
+	vim.cmd("normal q")
+	settle()
+end
+
+print("\n=== after ⏎ moves the review to the other file, a take goes on down ===")
+do
+	local notes, reading = { "# Notes" }, { "# Reading" }
+	for i = 1, 30 do
+		notes[#notes + 1] = "- n" .. i
+		reading[#reading + 1] = "- r" .. i
+	end
+	local items = {}
+	for _, n in ipairs({ 5, 15, 25 }) do
+		items[#items + 1] = item("n" .. n, { kind = "edit", target = { at = "- n" .. n }, before = "- n" .. n, after = "- n" .. n .. "!", headline = "notes " .. n })
+		items[#items + 1] = item("r" .. n, { file = "reading.md", kind = "edit", target = { at = "- r" .. n }, before = "- r" .. n, after = "- r" .. n .. "!", headline = "read " .. n })
+	end
+	vim.cmd("silent! %bwipeout!")
+	vim.cmd("silent! only")
+	local r = new_repo(notes)
+	write(r, "reading.md", reading)
+	assert(git.run(r, { "commit", "-q", "-am", "reading" }))
+	assert(proposal.build(r, "morning", "2026-10-01", items, FILES))
+	vim.cmd("edit " .. vim.fn.fnameescape(r .. "/notes.md"))
+	local nb = vim.api.nvim_get_current_buf()
+	review.attach(nb)
+	review.view = "inline"
+	assert(review.open_review(nb))
+	assert_true("the overview opens", review.overview(nb))
+	local qw = vim.api.nvim_get_current_win()
+	local function text_at(row)
+		return vim.fn.getqflist()[row].text:match("[a-z]+ %d+")
+	end
+	for row = 1, 5 do
+		vim.api.nvim_win_set_cursor(qw, { row, 0 })
+		review.qf_preview()
+	end
+	assert_eq("down the list to one in the other file", "read 15", text_at(5))
+	review.qf_jump()
+	local row = vim.api.nvim_win_get_cursor(qw)[1]
+	assert_eq("⏎ moves the review there, the list rebuilt round it", "read 15", text_at(row))
+	vim.cmd("normal t")
+	row = vim.api.nvim_win_get_cursor(qw)[1]
+	assert_eq("a take goes on to the next one down", "read 25", text_at(row))
 	vim.cmd("normal q")
 	settle()
 end
@@ -729,15 +776,21 @@ do
 	local function state()
 		return lua("return _G.state()")
 	end
-	-- Feeds `keys` as typed and waits for the main loop to have handled
-	-- them, the redraw on a change included.
+	-- Feeds `k` as typed, followed by a mark the main loop sets only once it
+	-- has handled every key before it, and waits for that and for the
+	-- redraw a change makes; a child that never gets there stops the run.
+	local fed = 0
 	local function settled()
-		vim.wait(2000, function()
-			return not vim.rpcrequest(ch, "nvim_get_mode").blocking and lua("return _G.state().drawn")
-		end)
+		local ok = vim.wait(5000, function()
+			return lua("return (_G.fed or 0) >= ... and _G.state().drawn", fed)
+		end, 10)
+		if not ok then
+			error("the review's nvim did not settle after input " .. fed)
+		end
 	end
 	local function keys(k)
-		vim.rpcrequest(ch, "nvim_input", vim.keycode(k))
+		fed = fed + 1
+		vim.rpcrequest(ch, "nvim_input", k .. "<Cmd>lua _G.fed = " .. fed .. "<CR>")
 		settled()
 	end
 	local st = state()

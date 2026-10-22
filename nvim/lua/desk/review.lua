@@ -3780,6 +3780,8 @@ function M.qf_jump()
 			end
 		end
 		preview = {}
+		-- A new list, the cursor placed on it: no move up or down it yet.
+		travel.row = nil
 		M.qf_preview()
 		return
 	end
