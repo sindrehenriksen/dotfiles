@@ -245,7 +245,7 @@ The `close` and `retention` steps write, per session, `session.json` (its reader
 
 | Field | Meaning |
 |---|---|
-| `id` | unique within the reply; the runner rewrites it to `<pass>-<scheduled date>-<n>-<id>` |
+| `id` | unique within the reply; the runner rewrites it to `<pass>-<scheduled date>-<n>-<id>`, `n` going on from the highest that pass and date already hold |
 | `file` | one of `files` |
 | `kind` | `new`, `add`, `link` (insert); `edit`, `remove` (in place); `move`, `merge` (remove in one place, insert in another) |
 | `target` | `"top"`, `{"under": line}` (end of the block that line heads), `{"after": line}` (end of the block containing it), or `{"at": line}`, the first line of `before`, for `edit` and `remove`; `move` and `merge` take `[{"at": …}, <landing anchor>]`. A quoted line is a whole line, at least three characters, and an `at` is the first line of `before`: `desk-propose` refuses an item whose `at` is shorter or is another line, and a pass drops it, naming it in the log. An `at` that is shorter and still reaches the proposal is found by its `before` lines instead. A quote matches a line apart from trailing whitespace, which a model cannot be relied on to copy, and apart from the mark a judge's input copies carry on lines taken from suggestions, with the whitespace before it; where lines differ only in that, the one quoted exactly is the one meant. |
@@ -255,7 +255,7 @@ The `close` and `retention` steps write, per session, `session.json` (its reader
 | `headline` | a few words for the overview |
 | `tier` | optional: `act`, `worth_knowing` or `wildcard`; only tiered items are capped |
 | `also_sources` | optional: other URLs for the same story |
-| `supersedes` | optional: the id of an open item this replaces |
+| `supersedes` | optional: the id of one open item this replaces, as a string |
 
 **Where an item lands.** Every item is placed against the committed text, never against what another item made of it.
 

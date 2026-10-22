@@ -69,11 +69,12 @@ end
 --- across passes or days, so used directly, Tuesday's "j1" would inherit
 --- Monday's decision, and two same-pass captures that both call themselves
 --- "c1" would collide with each other. `seq` is assigned in `items`' own
---- order, 1-based, and bumped past every id already in the ledger or in
---- `extra_used_ids` (the ids of items being carried over from the last
---- proposal) or produced earlier in this same batch, so the result is
---- unique across all of them — also for a retried pass reusing the same
---- (pass, date). Returns a new list, same order, everything but `id`
+--- order, starting past the highest one this (pass, date) already holds in
+--- the ledger or in `extra_used_ids` (the ids of items being carried over
+--- from the last proposal), so the result is unique across all of them —
+--- also for a retried pass reusing the same (pass, date), and for a session
+--- staging several times a day, which keeps numbering on from its earlier
+--- calls. Returns a new list, same order, everything but `id`
 --- untouched.
 function M.namespace_ids(repo_dir, pass, scheduled_date, items, extra_used_ids)
 	local used = {}
@@ -85,8 +86,15 @@ function M.namespace_ids(repo_dir, pass, scheduled_date, items, extra_used_ids)
 	for _, id in ipairs(extra_used_ids or {}) do
 		used[id] = true
 	end
-	local out = {}
+	local prefix = "^" .. vim.pesc(string.format("%s-%s-", pass, scheduled_date)) .. "(%d+)%-"
 	local seq = 0
+	for id in pairs(used) do
+		local n = tonumber(tostring(id):match(prefix))
+		if n and n > seq then
+			seq = n
+		end
+	end
+	local out = {}
 	for _, item in ipairs(items) do
 		local new_id
 		repeat

@@ -65,7 +65,41 @@ jq -n '[{id: "answer2", file: "notes.md", kind: "add", target: {under: "Weekly"}
 	supersedes: "weekly-2026-10-07-1-answer"}]' > "$ROOT/items2.json"
 "$PROPOSE" --pass weekly --date 2026-10-07 "$ROOT/items2.json" > /dev/null
 assert_eq "the superseded item is gone, the other still waits" \
-	'["weekly-2026-10-07-1-answer2","weekly-2026-10-07-2-ticket"]' "$(proposal_items | jq -c 'map(.id) | sort')"
+	'["weekly-2026-10-07-2-ticket","weekly-2026-10-07-3-answer2"]' "$(proposal_items | jq -c 'map(.id) | sort')"
+
+echo "=== same-day session stagings keep each other's items and number on ==="
+repo4="$ROOT/notes4"
+desk_test_assert_repo_under_root "$repo4" "$ROOT"
+mkdir -p "$repo4"
+git -C "$repo4" init -q -b main
+git -C "$repo4" config user.email test@example.invalid
+git -C "$repo4" config user.name "Desk Test"
+printf 'Weekly\n  - posts drafted\nOther\n  - other thing\n' > "$repo4/notes.md"
+: > "$repo4/reading.md"
+: > "$repo4/.desk-notes"
+git -C "$repo4" add -A
+git -C "$repo4" commit -q -m initial
+jq -n --arg r "$repo4" '{notes_repo: $r, files: ["notes.md", "reading.md"]}' > "$ROOT/config4.json"
+jq -n '[{id: "a", file: "notes.md", kind: "add", target: {under: "Weekly"}, before: "", after: "  - one", headline: "One", source: "session:s1"},
+	{id: "b", file: "notes.md", kind: "edit", target: {at: "  - other thing"}, before: "  - other thing", after: "  - other thing, done", headline: "Two", source: "session:s1"},
+	{id: "c", file: "notes.md", kind: "new", target: "top", before: "", after: "- three", headline: "Three", source: "session:s1"}]' > "$ROOT/s1.json"
+DESK_CONFIG="$ROOT/config4.json" "$PROPOSE" --date 2026-10-21 "$ROOT/s1.json" > /dev/null
+jq -n '[{id: "d", file: "notes.md", kind: "add", target: {under: "Other"}, before: "", after: "  - four", headline: "Four", source: "session:s2"}]' > "$ROOT/s2.json"
+out="$(DESK_CONFIG="$ROOT/config4.json" "$PROPOSE" --date 2026-10-21 "$ROOT/s2.json")"
+case "$out" in *"3 still waiting from before"*) ok "a second plain call carries the first's three" ;; *) bad "a second plain call carries the first's three (got [$out])" ;; esac
+case "$out" in *"  staged session-2026-10-21-4-d: Four"*) ok "...and numbers its item past them" ;; *) bad "...and numbers its item past them (got [$out])" ;; esac
+jq -n '[{id: "e", file: "notes.md", kind: "new", target: "top", before: "", after: "- three, corrected", headline: "Three again", source: "session:s3",
+	supersedes: "session-2026-10-21-3-c"}]' > "$ROOT/s3.json"
+out="$(DESK_CONFIG="$ROOT/config4.json" "$PROPOSE" --date 2026-10-21 "$ROOT/s3.json")"
+case "$out" in "staged: 1 new, 1 replacing open ones, "*"3 still waiting from before"*) ok "a supersedes replaces only the item it names" ;;
+	*) bad "a supersedes replaces only the item it names (got [$out])" ;; esac
+assert_eq "...leaving every other session's item waiting" \
+	"session-2026-10-21-1-a session-2026-10-21-2-b session-2026-10-21-4-d session-2026-10-21-5-e" \
+	"$(DESK_CONFIG="$ROOT/config4.json" "$PROPOSE" --list | cut -f1 | sort | paste -sd' ' -)"
+jq -n '[{id: "f", file: "notes.md", kind: "new", target: "top", before: "", after: "- x", headline: "X", source: "session:s3",
+	supersedes: ["session-2026-10-21-1-a"]}]' > "$ROOT/s4.json"
+err="$(DESK_CONFIG="$ROOT/config4.json" "$PROPOSE" --date 2026-10-21 "$ROOT/s4.json" 2>&1 > /dev/null)"
+case "$err" in *"supersedes must be an id string"*) ok "a list in supersedes is refused" ;; *) bad "a list in supersedes is refused (got [$err])" ;; esac
 
 echo "=== an item that does not fit stages nothing ==="
 before_sha="$(git -C "$repo" rev-parse refs/desk/proposal)"
@@ -226,5 +260,6 @@ echo
 help="$(bash "$PROPOSE" --help 2>/dev/null)"; rc=$?
 [ "$rc" = 0 ] && ok "--help exits 0" || bad "--help exit $rc"
 printf '%s' "$help" | grep -q 'session:<its session id>' && ok "--help states the session item rules" || bad "--help lacks the session item rules"
+printf '%s' "$help" | grep -q 'one id string' && ok "--help says supersedes takes one id string" || bad "--help does not say supersedes takes one id string"
 echo "=== summary: $pass passed, $fail failed ==="
 [ "$fail" -eq 0 ]

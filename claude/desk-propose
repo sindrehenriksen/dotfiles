@@ -9,13 +9,17 @@
 #
 # <items.json> is {"items": [...]} or a bare array, in the item shape of
 # docs/desk.md ("The reply"): id, file, kind, target, before, after,
-# headline, source, and optionally tier, also_sources and supersedes. The
-# notes repo and its files come from $DESK_CONFIG (with it unset,
-# ${XDG_CONFIG_HOME:-~/.config}/desk/config.json). The proposal is rebuilt the
-# way a pass rebuilds it: from the newest HEAD, with every suggestion still
-# waiting carried over, anything declined or already in the notes dropped,
-# and an item naming an open one in `supersedes` replacing it. Ids become
-# <pass>-<date>-<n>-<id>; --pass defaults to "session" and --date to today.
+# headline, source, and optionally tier, also_sources and supersedes, which
+# is one id string (not a list). The notes repo and its files come from
+# $DESK_CONFIG (with it unset, ${XDG_CONFIG_HOME:-~/.config}/desk/config.json).
+# The proposal is rebuilt the way a pass rebuilds it: from the newest HEAD,
+# with every suggestion still waiting carried over, whichever call or
+# session staged it, anything declined or already in the notes dropped, and
+# an open item replaced only by a new one that names it in `supersedes`,
+# shares its URL source, or is the same kind of edit, removal, move or merge
+# of its line. Ids become <pass>-<date>-<n>-<id>, n going on from the
+# highest that pass and date already hold; --pass defaults to "session" and
+# --date to today.
 # A session sets each item's `source` to `session:<its session id>`, gives
 # each item its own headline, and prefers an `edit` of a stale line to an
 # `add` beneath it. It shows the user the items before staging them. An

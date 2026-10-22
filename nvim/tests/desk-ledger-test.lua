@@ -96,6 +96,19 @@ do
 end
 
 print()
+print("=== namespace_ids: n goes on from the highest this pass and date hold ===")
+do
+	local repo = new_repo()
+	ledger.append(repo, { type = "decline", id = "session-2026-10-01-4-old", file = "notes.md" })
+	local out = ledger.namespace_ids(repo, "session", "2026-10-01", {
+		{ id = "y", file = "notes.md", kind = "new", target = "top", before = "", after = "b" },
+		{ id = "z", file = "notes.md", kind = "new", target = "top", before = "", after = "c" },
+	}, { "session-2026-10-01-1-a", "session-2026-10-01-3-c", "session-2026-10-02-9-other", "morning-2026-10-01-7-m" })
+	assert_eq("past the ledger's and the carried ids of this pass and date", "session-2026-10-01-5-y", out[1].id)
+	assert_eq("...and on from there within the batch", "session-2026-10-01-6-z", out[2].id)
+end
+
+print()
 print("=== decisions: decline, restore and taken records ===")
 do
 	local repo = new_repo()
