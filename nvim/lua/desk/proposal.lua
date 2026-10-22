@@ -40,31 +40,61 @@ function M.contains(lines, block)
 	return false
 end
 
+local function is_blank(line)
+	return line ~= nil and line:match("^%s*$") ~= nil
+end
+
+-- The last line of the paragraph starting at `i` (up to a blank line) when
+-- it is a section of its own as desk.apply places one, else nil.
+local function section_end(lines, i)
+	if lines[i] == nil or is_blank(lines[i]) then
+		return nil
+	end
+	local j = i
+	while lines[j + 1] ~= nil and not is_blank(lines[j + 1]) do
+		j = j + 1
+	end
+	return apply.is_section(vim.list_slice(lines, i, j)) and j or nil
+end
+
 -- The candidate start positions for an insertion's `after` lines under a
 -- landing anchor, in `lines`: where apply would put them, widened to the
 -- whole block they extend. With `list`, on to the end of the list that
 -- block is in, since an insertion that is a top-level `- ` item is a block
 -- of its own: of two taken at one anchor, the second sits a line further
--- down than its anchor alone would put it. nil when the anchor says
--- nothing (then the whole file is the region).
-local function landing_window(lines, anchor, list)
+-- down than its anchor alone would put it. Sections landing at one spot
+-- push what lands beside them past a blank line (desk.apply sets each off
+-- by one): on top they go above the other items, so the place runs on past
+-- the sections that open the file; under an anchor they go below the
+-- others, so for a `section` insertion it runs on past the sections that
+-- follow the block. nil when the anchor says nothing (then the whole file
+-- is the region).
+local function landing_window(lines, anchor, list, section)
 	if anchor == nil then
 		return nil
 	end
 	if anchor.kind == "at" then
 		return nil
 	end
-	local first_blank = #lines + 1
 	if anchor.kind ~= "top" then
 		local idx = block.find_line(lines, anchor.quote)
 		if idx then
 			local e = anchor.kind == "under" and block.block_end(lines, idx) or select(2, block.block_containing(lines, idx))
-			return idx + 1, (list and block.list_end(lines, e) or e) + 1
+			local last = (list and block.list_end(lines, e) or e) + 1
+			while section and is_blank(lines[last]) and section_end(lines, last + 1) do
+				last = section_end(lines, last + 1) + 1
+			end
+			return idx + 1, last
 		end
 	end
 	-- "top", or an anchor whose quote is gone (apply lands it on top too).
-	for i, l in ipairs(lines) do
-		if l:match("^%s*$") then
+	local start = 1
+	while section_end(lines, start) and is_blank(lines[section_end(lines, start) + 1]) do
+		start = section_end(lines, start) + 2
+	end
+	local first_blank = #lines + 1
+	for i = start, #lines do
+		if is_blank(lines[i]) then
 			first_blank = i
 			break
 		end
@@ -235,7 +265,7 @@ function M.proposed_in(item, lines, base)
 		if list and (item.kind == "move" or item.kind == "merge") then
 			list = M.removal_done(item, lines, base)
 		end
-		local first, last = landing_window(lines, land, list)
+		local first, last = landing_window(lines, land, list, apply.is_section(after))
 		if first == nil then
 			return M.contains(lines, after)
 		end

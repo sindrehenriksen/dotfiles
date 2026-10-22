@@ -742,6 +742,71 @@ do
 	}, tip_lines(r, "notes.md"))
 end
 
+print("\n=== an insertion a section lands beside is still open, and taken once taken ===")
+do
+	-- Of items landing at one spot a section goes to the side of its blank
+	-- line: above the rest on top, below the rest under an anchor. Whatever
+	-- that pushes past the spot's first blank line is still at its place.
+	local function open_heads(r)
+		local out = vim.tbl_map(function(it)
+			return it.headline
+		end, proposal.open_items(r))
+		table.sort(out)
+		return out
+	end
+	local cases = {
+		{
+			"a bullet on top beside a section on top",
+			{ "Alpha", "- a1", "", "- loose" },
+			{
+				item("bullet", { after = "- oct 22: a bullet of news" }),
+				item("sec", { after = "Some topic: a section\n- 21 oct: how it stands\n- next: what comes" }),
+			},
+			{ "Some topic: a section", "- 21 oct: how it stands", "- next: what comes", "", "- oct 22: a bullet of news", "Alpha", "- a1", "", "- loose" },
+		},
+		{
+			"two sections on top",
+			{ "- loose", "", "Alpha", "- a1" },
+			{
+				item("one", { after = "session-one\n- where it stood" }),
+				item("two", { after = "session-two\n- where it stood" }),
+			},
+			{ "session-one", "- where it stood", "", "session-two", "- where it stood", "", "- loose", "", "Alpha", "- a1" },
+		},
+		{
+			"two sections under one anchor",
+			{ "Alpha", "- a1", "", "Bravo", "- b1" },
+			{
+				item("one", { kind = "add", target = { under = "Alpha" }, after = "session-one\n- where it stood" }),
+				item("two", { kind = "add", target = { under = "Alpha" }, after = "session-two\n- where it stood" }),
+			},
+			{ "Alpha", "- a1", "", "session-one", "- where it stood", "", "session-two", "- where it stood", "", "Bravo", "- b1" },
+		},
+	}
+	for _, case in ipairs(cases) do
+		local name, notes, items, tree = case[1], case[2], case[3], case[4]
+		local r = new_repo(notes)
+		assert(proposal.build(r, "morning", "2026-10-22", items, FILES))
+		assert_eq(name .. ": the proposal lays them out", tree, tip_lines(r, "notes.md"))
+		local want = vim.tbl_map(function(it)
+			return it.headline
+		end, items)
+		table.sort(want)
+		assert_eq(name .. ": both are open", want, open_heads(r))
+		write(r, "notes.md", tree)
+		commit_all(r, "take both")
+		assert_eq(name .. ": taking both records both", #items, #proposal.sync_taken(r))
+		local _, st = proposal.build(r, "morning", "2026-10-23", {}, FILES)
+		assert_eq(name .. ": and neither comes back", { 0, {} }, { st.carried, open_heads(r) })
+	end
+
+	-- The place stays a place: a top bullet whose text the user has further
+	-- down, past the first block that is not a section, is not taken.
+	local r = new_repo({ "Alpha", "- a1", "", "- loose", "", "- oct 22: a bullet of news" })
+	assert(proposal.build(r, "morning", "2026-10-22", { item("bullet", { after = "- oct 22: a bullet of news" }) }, FILES))
+	assert_eq("a top bullet the user has further down is still open", { "headline bullet" }, open_heads(r))
+end
+
 print(string.format("\n=== summary: %d passed, %d failed ===", pass, fail))
 if fail > 0 then
 	os.exit(1)

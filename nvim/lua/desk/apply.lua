@@ -94,6 +94,7 @@ local function is_section(insert)
 		and head:match("^[-*+]%s") == nil
 		and head:match("^%d+[.)]%s") == nil
 end
+M.is_section = is_section
 
 -- The blank line a move of committed lines `first`..`last` takes along: when
 -- they stand between blank lines (or a blank line and the file's edge),
