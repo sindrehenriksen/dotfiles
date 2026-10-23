@@ -457,6 +457,8 @@ An event's date is read from the subject after its last ` @ `, in either `Fri 9 
 
 ## Review keys
 
+A review covers one of the config's [`files`](#config-reference) at a time. "The other file" below is another of them with suggestions waiting: with the usual two, `reading.md` while you review `notes.md`, and the reverse. With more than two, `<leader>gR` moves to the first that has some; with one, there is no other file.
+
 In a notes buffer:
 
 | Key | Action |
