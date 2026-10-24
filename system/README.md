@@ -51,6 +51,15 @@ sudo cp ~/dotfiles/system/logind.conf.override /etc/systemd/logind.conf.d/overri
 sudo systemctl restart systemd-logind
 ```
 
+### Low-battery suspend (`low-battery-suspend.rules`)
+
+Suspends at 5% on battery, overriding whatever is holding the machine awake,
+so a drained battery ends in suspend rather than UPower's power-off at 2%.
+UPower can't do this itself: its critical action is power-off or hibernate
+only, and with no hibernation set up it powers off. Install lines are in the
+file. Waking it at 5% or below without a charger re-suspends it at the next
+battery update, so plug in before waking it.
+
 ### Battery optimization
 
 TLP handles most tuning automatically:

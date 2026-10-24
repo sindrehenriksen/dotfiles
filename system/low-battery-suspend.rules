@@ -1,0 +1,10 @@
+# Suspend at 5% on battery, ahead of UPower's 2% power-off.
+# Install: sudo cp ~/dotfiles/system/low-battery-suspend.rules /etc/udev/rules.d/99-low-battery-suspend.rules
+#          sudo udevadm control --reload
+#
+# UPower's critical action can only power off or hibernate, and with no
+# hibernation set up it powers off. Suspend keeps the session; if the battery
+# then runs out while suspended, the disks were already synced on the way down.
+# Ignoring inhibitors is the point: something holding the machine awake is
+# what drains it this far.
+SUBSYSTEM=="power_supply", KERNEL=="BAT0", ATTR{status}=="Discharging", ATTR{capacity}=="[0-5]", RUN+="/usr/bin/systemctl suspend --check-inhibitors=no"
