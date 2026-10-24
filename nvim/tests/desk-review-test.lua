@@ -3085,6 +3085,26 @@ do
 	vim.cmd("silent! %bwipeout!")
 end
 
+print("\n=== a line alone between blank lines: removing it leaves one blank line, declining it brings both back ===")
+do
+	local alone = { "Section A", "  one", "", "a line alone", "", "Section B", "  two" }
+	local r = new_repo(alone)
+	build(r, "2026-10-01", {
+		item("rm", { kind = "remove", target = { at = "a line alone" }, before = "a line alone", after = "", source = "notes" }),
+	})
+	local nbr = open_notes(r)
+	review.attach(nbr)
+	assert_true("open_review succeeds", (review.open_review(nbr)))
+	local rbr = review_buf_of(nbr)
+	assert_eq("the review shows one blank line where the line was",
+		{ "Section A", "  one", "", "Section B", "  two" }, lines_of(rbr))
+	vim.api.nvim_set_current_win(vim.fn.bufwinid(rbr))
+	vim.api.nvim_win_set_cursor(0, { 3, 0 })
+	assert_true("decline it", (review.decline(rbr)))
+	assert_eq("the line and its blank line are back", alone, lines_of(rbr))
+	vim.cmd("silent! %bwipeout!")
+end
+
 print(string.format("\n=== summary: %d passed, %d failed ===", pass, fail))
 if fail > 0 then
 	os.exit(1)

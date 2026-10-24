@@ -2148,8 +2148,8 @@ end
 
 -- Declines `item` in the review buffer: its added lines go (an edit's
 -- `before` returns in their place) and its deleted lines come back — an
--- ordinary edit, so `u` undoes it. A move that took a blank line along
--- brings it back too, so its old place reads as the notes do.
+-- ordinary edit, so `u` undoes it. A move or removal that took a blank
+-- line along brings it back too, so its old place reads as the notes do.
 local function decline_item(s, item)
 	local buf = s.review_buf
 	local before = snippet.split_lines(item.before)
@@ -2172,7 +2172,7 @@ local function decline_item(s, item)
 		if row then
 			local restore = before
 			local leave = block.parse_target(item.target)
-			local at = item.kind == "move" and s.base and leave and leave.kind == "at" and block.find_anchor(s.base, leave, before)
+			local at = (item.kind == "move" or item.kind == "remove") and s.base and leave and leave.kind == "at" and block.find_anchor(s.base, leave, before)
 			local blank = at and apply.bounding_blank(s.base, at + 1, at + #before)
 			local review_lines = buf_lines(buf)
 			local function is_blank(l)

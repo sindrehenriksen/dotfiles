@@ -2,7 +2,8 @@
 -- must each act on their own committed lines, whatever order they come in.
 -- An insertion landing just above a line that an edit, removal or move
 -- takes away must survive, and so must a move's landed lines. And blank
--- lines between sections: a moved section's, and those at an after's edges.
+-- lines between sections: a moved or removed section's, and those at an
+-- after's edges.
 --
 -- Run: nvim --headless -u nvim/tests/minimal_init.lua -l nvim/tests/desk-apply-test.lua
 local apply = require("desk.apply")
@@ -144,7 +145,7 @@ run("stale remove whose quote is gone is deferred and loses nothing", {
 	"# Heading A", "- a1", "- INSERTED", "- a2", "- a3", "", "# Heading B", "- b1",
 }, { rm = "deferred" })
 
-print("\n=== blank lines between sections: a moved section, and blank lines at an after's edges ===")
+print("\n=== blank lines between sections: a moved or removed section, and blank lines at an after's edges ===")
 local SECTIONS = { "Alpha", "- a1", "", "Bravo", "- b1", "", "Charlie", "- c1" }
 local function on(lines, desc, items, expected)
 	local got, results = apply.apply_file(vim.deepcopy(lines), items)
@@ -168,6 +169,20 @@ on(SECTIONS, "a section that already carries its blank line lands with just that
 on(SECTIONS, "a line moved out of a section takes no blank line and gets none", {
 	it("mv", "move", { { at = "- c1" }, { under = "Alpha" } }, "- c1", "- c1"),
 }, { "Alpha", "- a1", "- c1", "", "Bravo", "- b1", "", "Charlie" })
+local PARAS = { "one", "", "a line alone", "", "---" }
+on(PARAS, "a line standing alone between blank lines takes one along when removed", {
+	it("rm", "remove", { at = "a line alone" }, "a line alone"),
+}, { "one", "", "---" })
+on(SECTIONS, "so do removed sections, the first one taking the blank line below it", {
+	it("rb", "remove", { at = "Bravo" }, "Bravo\n- b1"),
+	it("ra", "remove", { at = "Alpha" }, "Alpha\n- a1"),
+}, { "Charlie", "- c1" })
+on(SECTIONS, "and the last one the blank line above it", {
+	it("rm", "remove", { at = "Charlie" }, "Charlie\n- c1"),
+}, { "Alpha", "- a1", "", "Bravo", "- b1" })
+on(SECTIONS, "a line removed from a section takes no blank line", {
+	it("rm", "remove", { at = "- b1" }, "- b1"),
+}, { "Alpha", "- a1", "", "Bravo", "", "Charlie", "- c1" })
 local TIGHT = { "Alpha", "- a1", "Bravo", "- b1" }
 on(TIGHT, "an edit can add the blank line between two sections", {
 	it("ed", "edit", { at = "- a1" }, "- a1", "- a1\n\n"),

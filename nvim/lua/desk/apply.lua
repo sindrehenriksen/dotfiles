@@ -96,10 +96,10 @@ local function is_section(insert)
 end
 M.is_section = is_section
 
--- The blank line a move of committed lines `first`..`last` takes along: when
--- they stand between blank lines (or a blank line and the file's edge),
--- one of those, so the gap they leave is a single blank line. The one
--- below, unless that is the file's end. nil when they don't.
+-- The blank line a move or removal of committed lines `first`..`last` takes
+-- along: when they stand between blank lines (or a blank line and the
+-- file's edge), one of those, so the gap they leave is a single blank
+-- line. The one below, unless that is the file's end. nil when they don't.
 local function bounding_blank(lines, first, last)
 	local above = first > 1 and is_blank(lines[first - 1])
 	local below = last < #lines and is_blank(lines[last + 1])
@@ -254,6 +254,10 @@ function M.apply_file(lines, items)
 				results[item.id] = "deferred"
 			else
 				claim(pos + 1, #before_lines)
+				local extra = item.kind == "remove" and bounding_blank(lines, pos + 1, pos + #before_lines)
+				if extra and free(extra, 1) then
+					claim(extra, 1)
+				end
 				put(pos, item.kind == "edit" and after_lines or {}, true)
 				results[item.id] = "applied"
 			end
