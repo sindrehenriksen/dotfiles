@@ -20,7 +20,10 @@ with nothing to install or run. Draw it from the owner's real data
 rather than invented examples;
 plausible fictions get plausible reactions, and the defects worth
 finding live in the rows that actually exist. Show the content — the
-list, the strings, the rows — not only the layout. Something the
+list, the strings, the rows — not only the layout. The product's
+own strings stay in the language they ship in; everything the
+mockup says around them — headings, annotations, state labels, what
+changed and why — is in English, whatever that language is. Something the
 owner can change directly beats a description they must react to in
 prose.
 
