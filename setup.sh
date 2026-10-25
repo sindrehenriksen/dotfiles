@@ -24,6 +24,9 @@ brew install eza ripgrep fzf tldr git-delta
 # Intel mac: brew has no git-delta bottle and builds Rust and LLVM from source
 # (a day, not minutes). delta's last Intel release is 0.18.2 — take it instead:
 #   mise use -g delta@0.18.2
+# mac: the desk and session scripts in claude/ need bash 4+, and macOS ships 3.2
+# (docs/desk.md). Without it session-status.sh fails on `declare -A`.
+brew install bash
 # if linux (ubuntu)
 sudo apt install eza ripgrep fzf tldr xclip git-delta
 
