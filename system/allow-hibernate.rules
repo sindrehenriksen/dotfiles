@@ -1,0 +1,15 @@
+// Allow hibernation, which Ubuntu's com.ubuntu.desktop.rules refuses outright.
+// Install: sudo cp ~/dotfiles/system/allow-hibernate.rules /etc/polkit-1/rules.d/50-allow-hibernate.rules
+//
+// The filename has to sort before com.ubuntu.desktop.rules: polkit takes the
+// first rule that returns a result. Root is included so UPower's critical
+// action can hibernate too.
+polkit.addRule(function(action, subject) {
+    if ((action.id == "org.freedesktop.login1.hibernate" ||
+         action.id == "org.freedesktop.login1.hibernate-multiple-sessions" ||
+         action.id == "org.freedesktop.login1.handle-hibernate-key" ||
+         action.id == "org.freedesktop.upower.hibernate") &&
+        (subject.user == "root" || (subject.local && subject.active))) {
+        return polkit.Result.YES;
+    }
+});

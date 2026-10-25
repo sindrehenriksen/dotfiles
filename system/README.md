@@ -51,14 +51,21 @@ sudo cp ~/dotfiles/system/logind.conf.override /etc/systemd/logind.conf.d/overri
 sudo systemctl restart systemd-logind
 ```
 
-### Low-battery suspend (`low-battery-suspend.rules`)
+### Hibernation (`hibernation-setup.sh`, `allow-hibernate.rules`)
 
-Suspends at 5% on battery, overriding whatever is holding the machine awake,
-so a drained battery ends in suspend rather than UPower's power-off at 2%.
-UPower can't do this itself: its critical action is power-off or hibernate
-only, and with no hibernation set up it powers off. Install lines are in the
-file. Waking it at 5% or below without a charger re-suspends it at the next
-battery update, so plug in before waking it.
+Hibernation is what lets a drained battery end without losing the session.
+UPower's critical action at 2% is hybrid sleep: memory is written to disk and
+the machine then suspends, so the session survives even if the battery runs out
+while suspended. Without hibernation that action falls back to power-off.
+
+Stock Ubuntu leaves it unusable: the swap file is too small for a RAM image,
+nothing tells the kernel where to resume from, and a polkit rule refuses it.
+`sudo ~/dotfiles/system/hibernation-setup.sh` fixes all three and takes
+effect at the next boot. The resume location is where `/swap.img` sits on
+disk, so recreating or moving that file means running the script again.
+
+Resuming asks for the disk password, as booting does, because the image is
+inside the encrypted volume.
 
 ### Battery optimization
 
