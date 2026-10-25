@@ -19,6 +19,8 @@ them.
   build tree: `rm -rf ~/src/kernel-mainline/linux-7.2 ~/src/kernel-mainline/*7.2.0*`.
 - **On trigger** — Ubuntu ships >=7.1, or 7.2 goes EOL: drop the self-built
   kernel. Both triggers and the teardown are in that same section.
+- **First time a suspended laptop runs low on battery** — confirm it hibernated
+  at 5% rather than dying; untested until then. "Hibernation".
 
 ## General (any Linux desktop)
 
@@ -66,6 +68,17 @@ disk, so recreating or moving that file means running the script again.
 
 Resuming asks for the disk password, as booting does, because the image is
 inside the encrypted volume.
+
+That covers draining while awake. Draining while suspended is covered by
+`suspend-then-hibernate.conf` (install lines in the file), which turns every
+suspend into suspend-then-hibernate, since GNOME only ever asks for a plain
+suspend. On battery, systemd arms the battery's own alarm at 5% and hibernates
+when it fires; on a charger nothing changes. Whether that alarm can wake this
+machine from s2idle is unconfirmed until it first happens: a suspended laptop
+that asks for the disk password on waking says it did, and one found powered
+off says it didn't. The fallback then is `HibernateDelaySec`, which wakes on a
+timer instead, and only once `pm_trace` is off, since it overwrites the RTC
+those timers use.
 
 ### Battery optimization
 
