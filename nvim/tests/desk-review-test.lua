@@ -3105,6 +3105,121 @@ do
 	vim.cmd("silent! %bwipeout!")
 end
 
+print("\n=== the split: a move whose landing line was deleted is drawn, and taken from its landing, at the end of the heading's section ===")
+do
+	local r = new_repo({ "Section A", "- a1", "- a2", "- a3", "", "Section C", "- c1", "- c2" })
+	build(r, "2026-10-01", { item("mv", { kind = "move", target = { { at = "- a3" }, { after = "- c1" } }, before = "- a3", after = "- a3", headline = "move a3 down" }) })
+	local nb = open_notes(r)
+	vim.api.nvim_buf_set_lines(nb, line_of(nb, "- c1") - 1, line_of(nb, "- c1"), false, {})
+	review.attach(nb)
+	assert_true("the review opens", review.open_review(nb))
+	local rb = review_buf_of(nb)
+	assert_eq("drawn after the section's last line", { "Section A", "- a1", "- a2", "", "Section C", "- c2", "- a3" }, lines_of(rb))
+	local rw = vim.fn.bufwinid(rb)
+	vim.api.nvim_set_current_win(rw)
+	vim.api.nvim_win_set_cursor(rw, { line_of(rb, "- a3"), 0 })
+	vim.cmd("diffupdate")
+	vim.cmd("normal dp")
+	assert_eq("dp on the landing takes it there", { "Section A", "- a1", "- a2", "", "Section C", "- c2", "- a3" }, lines_of(nb))
+	vim.cmd("silent! %bwipeout!")
+end
+
+print("\n=== a move whose landing line was deleted, with its own line just above that place, is shown and counted on top ===")
+do
+	local notes = { "Intro", "", "S", "- a1", "- a2", "- a3", "", "T", "- t1" }
+	local mv = item("mv", { kind = "move", target = { { at = "- a2" }, { after = "- a3" } }, before = "- a2", after = "- a2", headline = "swap" })
+	local r = new_repo(notes)
+	build(r, "2026-10-01", { mv })
+	local nb = open_notes(r)
+	vim.api.nvim_buf_set_lines(nb, line_of(nb, "- a3") - 1, line_of(nb, "- a3"), false, {})
+	review.attach(nb)
+	assert_true("the review opens", review.open_review(nb))
+	local rb = review_buf_of(nb)
+	assert_eq("drawn on top", { "- a2", "Intro", "", "S", "- a1", "", "T", "- t1" }, rb and lines_of(rb))
+	assert_true("and counted", review.status_line(nb):match("1 left") ~= nil)
+	vim.cmd("silent! %bwipeout!")
+	write(r, "notes.md", { "Intro", "", "S", "- a1", "- a2", "", "T", "- t1" })
+	assert(git.run(r, { "commit", "-qam", "delete a3" }))
+	assert_eq("still open once the deletion is committed", 1, #proposal.open_items(r))
+end
+
+print("\n=== a section move whose landing line was deleted: drawn, dp on either side and t all put it in one place ===")
+do
+	local notes = { "Intro", "- i1", "", "- lone", "", "Section C", "- c1", "- c2" }
+	local want = { "Intro", "- i1", "", "Section C", "- c2", "", "- lone" }
+	for _, how in ipairs({ "drawn", "dp on the removal", "dp on the landing", "t" }) do
+		local r = new_repo(notes)
+		build(r, "2026-10-01", { item("mv", { kind = "move", target = { { at = "- lone" }, { after = "- c1" } }, before = "- lone", after = "- lone", headline = "move lone" }) })
+		local nb = open_notes(r)
+		vim.api.nvim_buf_set_lines(nb, line_of(nb, "- c1") - 1, line_of(nb, "- c1"), false, {})
+		review.attach(nb)
+		assert_true(how .. ": the review opens", review.open_review(nb))
+		local rb = review_buf_of(nb)
+		local rw = vim.fn.bufwinid(rb)
+		vim.api.nvim_set_current_win(rw)
+		if how == "drawn" then
+			assert_eq(how, want, lines_of(rb))
+		else
+			if how == "t" then
+				review.overview(nb)
+				vim.api.nvim_set_current_win(vim.fn.getqflist({ winid = 0 }).winid)
+				vim.cmd("normal t")
+			else
+				vim.api.nvim_win_set_cursor(rw, { how == "dp on the removal" and line_of(rb, "- i1") + 1 or line_of(rb, "- lone"), 0 })
+				vim.cmd("diffupdate")
+				vim.cmd("normal dp")
+			end
+			assert_eq(how, want, lines_of(nb))
+		end
+		vim.cmd("silent! %bwipeout!")
+	end
+end
+
+print("\n=== the split: taking a move's removal whose landing line was deleted names where the move landed ===")
+do
+	local r = new_repo({ "Section A", "- a1", "- a2", "- a3", "", "Section C", "- c1", "- c2" })
+	build(r, "2026-10-01", { item("mv", { kind = "move", target = { { at = "- a3" }, { after = "- c1" } }, before = "- a3", after = "- a3", headline = "move a3 down" }) })
+	local nb = open_notes(r)
+	vim.api.nvim_buf_set_lines(nb, line_of(nb, "- c1") - 1, line_of(nb, "- c1"), false, {})
+	review.attach(nb)
+	assert_true("the review opens", review.open_review(nb))
+	local rb = review_buf_of(nb)
+	local rw = vim.fn.bufwinid(rb)
+	local said = {}
+	local orig = vim.notify
+	vim.notify = function(m) said[#said + 1] = m end
+	vim.api.nvim_set_current_win(rw)
+	vim.api.nvim_win_set_cursor(rw, { line_of(rb, "- a2") + 1, 0 })
+	vim.cmd("diffupdate")
+	vim.cmd("normal dp")
+	vim.notify = orig
+	assert_eq("the whole move is taken, landing at the end of Section C as the overview's take puts it", { "Section A", "- a1", "- a2", "", "Section C", "- c2", "- a3" }, lines_of(nb))
+	assert_eq("and the message names the line it landed after", "desk: took the whole move: removed here, added after Section C", said[#said])
+	vim.cmd("silent! %bwipeout!")
+end
+
+print("\n=== the split: taking a whole move whose landing line was deleted lands it where that line stood ===")
+do
+	local r = new_repo({ "Section A", "- a1", "- a2", "- a3", "", "Section C", "- c1", "- c2" })
+	build(r, "2026-10-01", { item("mv", { kind = "move", target = { { at = "- a3" }, { after = "- c1" } }, before = "- a3", after = "- a3", headline = "move a3 down" }) })
+	local nb = open_notes(r)
+	review.attach(nb)
+	assert_true("the review opens", review.open_review(nb))
+	vim.api.nvim_buf_set_lines(nb, line_of(nb, "- c1") - 1, line_of(nb, "- c1"), false, {})
+	review.overview(nb)
+	vim.api.nvim_set_current_win(vim.fn.getqflist({ winid = 0 }).winid)
+	local said = {}
+	local orig = vim.notify
+	vim.notify = function(m) said[#said + 1] = m end
+	vim.cmd("normal t")
+	vim.notify = orig
+	assert_eq("at the end of Section C", { "Section A", "- a1", "- a2", "", "Section C", "- c2", "- a3" }, lines_of(nb))
+	assert_true("and the message names where it went", vim.tbl_contains(vim.tbl_map(function(m)
+		return m:match("added after Section C$") ~= nil
+	end, said), true))
+	vim.cmd("silent! %bwipeout!")
+end
+
 print(string.format("\n=== summary: %d passed, %d failed ===", pass, fail))
 if fail > 0 then
 	os.exit(1)

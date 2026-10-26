@@ -36,14 +36,22 @@ local tokens = require("desk.tokens")
 
 local M = {}
 
--- `items` as they land in `lines`: an insertion whose anchor line is gone
--- from them anchored where that line stood in `base` (desk.proposal).
-local function placeable(items, lines, base)
+-- `items` as they land in `lines`: an insertion, or a move's or merge's
+-- landing side, whose anchor line is gone from them anchored where that
+-- line stood in `base`, or after an edit of it among `all`, the
+-- proposal's items (desk.proposal.reanchored).
+local function placeable(items, lines, base, all)
 	local out = {}
 	for i, item in ipairs(items) do
-		out[i] = proposal.reanchored(item, lines, base)
+		out[i] = proposal.reanchored(item, lines, base, all)
 	end
 	return out
+end
+
+-- The items of review `s`'s proposal.
+local function proposal_items(s)
+	s.view_p = s.view_p and s.view_p.sha == s.sha and s.view_p or proposal.read(s.repo, s.sha)
+	return s.view_p and s.view_p.items or {}
 end
 
 M.PROPOSAL_REF = proposal.REF
@@ -2079,7 +2087,7 @@ end
 -- nothing of a neighbouring suggestion.
 local function take_whole(s, item)
 	local notes = buf_lines(s.notes_buf)
-	local new, results = apply.apply_file(notes, { item })
+	local new, results = apply.apply_file(notes, placeable({ item }, notes, s.base, proposal_items(s)))
 	if results[item.id] ~= "applied" then
 		return false
 	end
@@ -2144,8 +2152,9 @@ complete_halves = function(s, pre)
 			local now = buf_lines(s.notes_buf)
 			local landed, removed = proposal.proposed_in(item, now, s.base), proposal.removal_done(item, now, s.base)
 			if removed and not landed and not proposal.removal_done(item, pre, s.base) then
+				local placed = proposal.reanchored(item, now, s.base, proposal_items(s))
 				if take_landing(s, item) then
-					say_whole(item, "removal")
+					say_whole(placed, "removal")
 				end
 			elseif landed and not removed and not proposal.proposed_in(item, pre, s.base) then
 				if take_removal(s, item) then
@@ -2343,7 +2352,7 @@ local function act_on(s, item, verb, side)
 		return false, "could not take this suggestion: its place in your notes has changed"
 	end
 	if whole then
-		say_whole(item, side, removed_line(pre, buf_lines(s.notes_buf)))
+		say_whole(proposal.reanchored(item, pre, s.base, proposal_items(s)), side, removed_line(pre, buf_lines(s.notes_buf)))
 	end
 	note_takes(s, pre, item)
 	return true
@@ -2587,7 +2596,7 @@ function M.view_refresh(s)
 			open[#open + 1] = item
 		end
 	end
-	local merged, results, _, placed = apply.apply_file(ours, placeable(open, ours, base))
+	local merged, results, _, placed = apply.apply_file(ours, placeable(open, ours, base, p.items))
 	local shown = {}
 	for _, item in ipairs(open) do
 		if results[item.id] == "applied" then
@@ -2782,7 +2791,7 @@ end
 --- drawing shows. Returns whether anything changed.
 function M.view_take(s, items)
 	local pre = buf_lines(s.notes_buf)
-	local new = apply.apply_file(pre, placeable(items, pre, s.base))
+	local new = apply.apply_file(pre, placeable(items, pre, s.base, proposal_items(s)))
 	if vim.deep_equal(new, pre) then
 		return false
 	end

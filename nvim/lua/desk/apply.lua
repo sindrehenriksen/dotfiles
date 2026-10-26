@@ -15,12 +15,13 @@
 -- An insertion's anchor that doesn't resolve AT ALL — its quote is simply
 -- gone — is a different failure: there's nothing specific to identify a
 -- conflict against. The build and the review first pass each add, new or
--- link through desk.proposal.reanchored, which anchors one whose line was
--- in the text the proposal was built from on the line now standing just
--- before that place, within its paragraph. One whose quote is still gone,
--- rather than being deferred forever (a dead end nothing ever surfaces
--- again), lands at the top of the file instead, same as a plain
--- "top"-anchored item, and is counted as applied. See
+-- link, and each move's or merge's landing side, through
+-- desk.proposal.reanchored, which anchors one whose line was in the text
+-- the proposal was built from on the line now standing just before that
+-- place, within its paragraph. One whose quote is still gone, rather than
+-- being deferred forever (a dead end nothing ever surfaces again), lands
+-- at the top of the file instead, same as a plain "top"-anchored item, and
+-- is counted as applied. See
 -- desk.block.find_after_anchor, which the insertion-shaped half of every
 -- kind below goes through for this; a before-shaped leave/removal anchor
 -- keeps its own distinct nil (bad anchor vs. content conflict) via

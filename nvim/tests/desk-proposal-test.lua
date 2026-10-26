@@ -733,6 +733,90 @@ do
 	assert_eq("in its section, after the rest of it", { "Intro", "- loose", "", "Section B", "- b2", "- after b1", "", "Outro" }, tip_lines(r, "notes.md"))
 end
 
+print("\n=== a carried move whose landing line the user removed lands where that line stood ===")
+do
+	local notes = { "Inbox", "- move me", "", "Team bot", "- ops bot?", "- spike holds the options", "  - one more option", "", "Countdown", "- cron" }
+	local r = new_repo(notes)
+	assert(proposal.build(r, "session", "2026-10-26", {
+		item("mv", { kind = "move", target = { { at = "- move me" }, { after = "  - one more option" } }, before = "- move me", after = "- move me", source = "" }),
+	}, FILES))
+	write(r, "notes.md", { "Inbox", "- move me", "", "Team bot", "- ops bot?", "- spike leans one way", "", "Countdown", "- cron" })
+	commit_all(r, "take")
+	assert(proposal.build(r, "session", "2026-10-26", {}, FILES))
+	assert_eq("it lands after the line now standing in that place, not on top",
+		{ "Inbox", "", "Team bot", "- ops bot?", "- spike leans one way", "- move me", "", "Countdown", "- cron" }, tip_lines(r, "notes.md"))
+	local carried = proposal.read(r).items[1]
+	assert_eq("its landing side anchored on that line from now on", { { at = "- move me" }, { after = "- spike leans one way" } }, carried and carried.target)
+	assert_eq("and still open", { carried and carried.id }, ids(proposal.open_items(r)))
+end
+
+print("\n=== a carried move whose landing line went, with its own line standing before that place, lands on top ===")
+do
+	local r = new_repo({ "Inbox", "- loose", "", "Team", "- move me", "- landing line", "- other", "", "Outro" })
+	assert(proposal.build(r, "session", "2026-10-26", {
+		item("mv", { kind = "move", target = { { at = "- move me" }, { after = "- landing line" } }, before = "- move me", after = "- move me", source = "" }),
+	}, FILES))
+	write(r, "notes.md", { "Inbox", "- loose", "", "Team", "- move me", "- other", "", "Outro" })
+	commit_all(r, "edit")
+	assert(proposal.build(r, "session", "2026-10-26", {}, FILES))
+	assert_eq("never anchored on the line it takes away: on top", { "- move me", "Inbox", "- loose", "", "Team", "- other", "", "Outro" }, tip_lines(r, "notes.md"))
+	assert_eq("and still open", 1, #proposal.open_items(r))
+end
+
+print("\n=== a carried insertion after a line the user took an edit of follows the edit ===")
+do
+	local r = new_repo({ "Intro", "- loose", "", "- the line", "", "Outro" })
+	assert(proposal.build(r, "session", "2026-10-26", {
+		item("ad", { kind = "add", target = { after = "- the line" }, after = "- the add", source = "" }),
+		item("ed", { kind = "edit", target = { at = "- the line" }, before = "- the line", after = "- the line, edited", source = "" }),
+	}, FILES))
+	write(r, "notes.md", { "Intro", "- loose", "", "- the line, edited", "", "Outro" })
+	commit_all(r, "take the edit")
+	proposal.sync_taken(r)
+	assert(proposal.build(r, "session", "2026-10-26", {}, FILES))
+	assert_eq("after the edited line, not on top", { "Intro", "- loose", "", "- the line, edited", "- the add", "", "Outro" }, tip_lines(r, "notes.md"))
+	assert_eq("and still open", 1, #proposal.open_items(r))
+end
+
+print("\n=== a carried insertion follows an edit only to the edited line itself, not an earlier line reading the same ===")
+do
+	local r = new_repo({ "Alpha", "- waiting on review", "", "Beta", "- the line", "", "Outro" })
+	assert(proposal.build(r, "session", "2026-10-26", {
+		item("ad", { kind = "add", target = { after = "- the line" }, after = "- the add", source = "" }),
+		item("ed", { kind = "edit", target = { at = "- the line" }, before = "- the line", after = "- waiting on review", source = "" }),
+	}, FILES))
+	write(r, "notes.md", { "Alpha", "- waiting on review", "", "Beta", "- waiting on review", "", "Outro" })
+	commit_all(r, "take the edit")
+	proposal.sync_taken(r)
+	assert(proposal.build(r, "session", "2026-10-26", {}, FILES))
+	assert_eq("on top, never under Alpha", { "- the add", "Alpha", "- waiting on review", "", "Beta", "- waiting on review", "", "Outro" }, tip_lines(r, "notes.md"))
+end
+
+print("\n=== a carried move whose landing line, the first under a heading, the user removed lands at the end of that section ===")
+do
+	local r = new_repo({ "Section A", "- a1", "- a2", "- a3", "", "Section C", "- c1", "- c2" })
+	assert(proposal.build(r, "session", "2026-10-26", {
+		item("mv", { kind = "move", target = { { at = "- a3" }, { after = "- c1" } }, before = "- a3", after = "- a3", source = "" }),
+	}, FILES))
+	write(r, "notes.md", { "Section A", "- a1", "- a2", "- a3", "", "Section C", "- c2" })
+	commit_all(r, "edit")
+	assert(proposal.build(r, "session", "2026-10-26", {}, FILES))
+	assert_eq("after the section's last line", { "Section A", "- a1", "- a2", "", "Section C", "- c2", "- a3" }, tip_lines(r, "notes.md"))
+end
+
+print("\n=== a carried insertion never follows an edit's new text to a line further down ===")
+do
+	local r = new_repo({ "Intro", "- i", "", "S", "- s1", "- the line", "", "Z", "- waiting" })
+	assert(proposal.build(r, "session", "2026-10-26", {
+		item("ad", { kind = "add", target = { after = "- the line" }, after = "- the add", source = "" }),
+		item("ed", { kind = "edit", target = { at = "- the line" }, before = "- the line", after = "- waiting", source = "" }),
+	}, FILES))
+	write(r, "notes.md", { "Intro", "- i", "", "S", "- s1", "", "Z", "- waiting" })
+	commit_all(r, "delete the line by hand")
+	assert(proposal.build(r, "session", "2026-10-26", {}, FILES))
+	assert_eq("where the line stood, not under Z", { "Intro", "- i", "", "S", "- s1", "- the add", "", "Z", "- waiting" }, tip_lines(r, "notes.md"))
+end
+
 print("\n=== an anchor only the user's uncommitted text has waits for the commit, then lands ===")
 do
 	local committed = { "Section A", "- a1", "", "Section B", "- b1" }

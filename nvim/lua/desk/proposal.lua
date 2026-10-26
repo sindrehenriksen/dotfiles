@@ -107,20 +107,24 @@ local function from_base_line(base, lines, j)
 	return j + delta
 end
 
-local reanchor_kind = { new = true, add = true, link = true }
+local insert_kind = { new = true, add = true, link = true, move = true, merge = true }
 
---- `item`, an insertion, anchored where it landed in `base` when its
---- anchor line is gone from `lines` but is in `base` (the text the
---- proposal was built from): a copy whose target is `{after = <line>}`,
---- the line now standing just before that place, which lands it at the
---- end of that line's block (for a heading, the end of its section).
+--- `item`, an insertion or a move's or merge's landing side, anchored where
+--- it landed in `base` when its landing anchor line is gone from `lines`
+--- but is in `base` (the text the proposal was built from): a copy whose
+--- landing anchor is `{after = <line>}`, the line now standing just before
+--- that place, which lands it at the end of that line's block (for a
+--- heading, the end of its section).
 --- `item` itself when nothing needs changing, or when that line is a blank
 --- line or the file's start, comes from outside the anchor's paragraph in
---- `base`, is too short to quote, or is not the first line of `lines` that
---- reads so: it then lands on top, visibly orphaned, rather than in a
---- section it never belonged to.
-function M.reanchored(item, lines, base)
-	if not (base and reanchor_kind[item.kind]) then
+--- `base`, is too short to quote, is not the first line of `lines` that
+--- reads so, or is one a move or merge itself takes away: it then lands on
+--- top, visibly orphaned, rather than in a section it never belonged to.
+--- An anchor that an `edit` among `items` (the proposal's) rewrote follows
+--- that edit instead: it is anchored after the edit's last new line once
+--- that line stands in `lines`.
+function M.reanchored(item, lines, base, items)
+	if not (base and insert_kind[item.kind]) then
 		return item
 	end
 	local _, land = block.parse_target(item.target)
@@ -130,8 +134,33 @@ function M.reanchored(item, lines, base)
 	if block.find_line(lines, land.quote) or not block.find_line(base, land.quote) then
 		return item
 	end
+	local leaving = item.kind == "move" or item.kind == "merge"
+	local function anchored_after(line)
+		local copy = vim.deepcopy(item)
+		copy.target = leaving and { copy.target[1], { after = line } } or { after = line }
+		return copy
+	end
 	local pos = block.find_after_anchor(base, land)
 	local j = map_from_base(base, lines, pos + 1) - 1
+	-- Where the anchor stood in `lines`, from its own line to that place.
+	local stood = map_from_base(base, lines, block.find_line(base, land.quote))
+	for _, other in ipairs(items or {}) do
+		if other.kind == "edit" and other.file == item.file and other.id ~= item.id
+			and block.find_line(snippet.split_lines(other.before or ""), land.quote) then
+			local after = snippet.split_lines(other.after or "")
+			for k = #after, 1, -1 do
+				if not is_blank(after[k]) then
+					-- Only the edit's line where the anchor stood, and the
+					-- first that reads so, which is the one a quote finds.
+					local at = block.find_line(lines, after[k])
+					if at and at >= stood and at <= math.max(j, stood) then
+						return anchored_after(after[k])
+					end
+					break
+				end
+			end
+		end
+	end
 	if j < 1 or is_blank(lines[j]) or block.find_line(lines, lines[j]) ~= j then
 		return item
 	end
@@ -145,9 +174,17 @@ function M.reanchored(item, lines, base)
 	if from_base_line(base, lines, j) < para then
 		return item
 	end
-	local copy = vim.deepcopy(item)
-	copy.target = { after = lines[j] }
-	return copy
+	-- A line the move itself takes away: judged in `base` too, so the answer
+	-- is the same whether `lines` still holds the move's lines or already
+	-- has them taken away (then `lines[j]` is the line above them).
+	if leaving then
+		local own = snippet.split_lines(item.before or "")
+		local above = base[block.find_line(base, land.quote) - 1]
+		if vim.tbl_contains(own, lines[j]) or (above and vim.tbl_contains(own, above)) then
+			return item
+		end
+	end
+	return anchored_after(lines[j])
 end
 
 -- The candidate start positions for an insertion's `after` lines under a
@@ -387,6 +424,10 @@ function M.proposed_in(item, lines, base)
 				moved_land = select(2, block.parse_target(moved.target))
 			end
 			first, last = landing_window(lines, moved_land, list, apply.is_section(after), base)
+			-- A move of a section is set off by a blank line where it lands.
+			if first and (item.kind == "move" or item.kind == "merge") and is_blank(lines[last] or "x") then
+				last = last + 1
+			end
 			return first ~= nil and contains_within(lines, after, first, last)
 		end
 		return false
@@ -558,9 +599,33 @@ function M.reviewable(repo, p, file, ours, skip, only)
 			open[#open + 1] = item
 		end
 	end
-	local clean, merged = M.merged_lines(repo, p, file, ours, open_tree(repo, p, file, base, open), base or {})
+	-- An insertion, move or merge whose landing line `ours` no longer has
+	-- is left out of the merge, which would put it where that line stood,
+	-- and placed afterwards as every take and the one window place it
+	-- (M.reanchored), so the merged view shows it where a take puts it.
+	local merging, gone = {}, {}
+	for _, item in ipairs(open) do
+		local _, land = block.parse_target(item.target)
+		if base and insert_kind[item.kind] and land and (land.kind == "after" or land.kind == "under")
+			and not block.find_line(ours, land.quote) and block.find_line(base, land.quote) then
+			gone[#gone + 1] = item
+		else
+			merging[#merging + 1] = item
+		end
+	end
+	local clean, merged = M.merged_lines(repo, p, file, ours, open_tree(repo, p, file, base, merging), base or {})
 	if not clean then
 		return nil, merged
+	end
+	if #gone > 0 then
+		local function place(lines)
+			local placed = {}
+			for i, item in ipairs(gone) do
+				placed[i] = M.reanchored(item, lines, base, p.items)
+			end
+			return (apply.apply_file(lines, placed))
+		end
+		clean, merged = place(clean), place(merged)
 	end
 	local hunks
 	local shown, conflicts = {}, {}
@@ -666,8 +731,6 @@ local function supersedes(n, e)
 	return false
 end
 
-local insert_kind = { new = true, add = true, link = true, move = true, merge = true }
-
 -- The line `item` waits for the user to commit: one its `before` or its
 -- landing anchor needs that the user's working copy of the file (`work`)
 -- has and `head` lacks. Placed against HEAD it would land on top, or a
@@ -764,7 +827,7 @@ function M.build(repo, pass, scheduled_date, new_items, files)
 		local carried, carried_ids = {}, {}
 		local function carry(item, base)
 			if item.file and head_lines[item.file] then
-				item = M.reanchored(item, head_lines[item.file], base)
+				item = M.reanchored(item, head_lines[item.file], base, prev.items)
 			end
 			item = fitted(item)
 			if carried_ids[item.id] or taken[item.id] or declined.ids[item.id] or declined.keys[ledger.content_key(item)] then

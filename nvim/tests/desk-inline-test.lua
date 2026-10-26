@@ -341,6 +341,72 @@ do
 	assert_true("a spot to take", spot_row(s, "after b1") ~= nil)
 end
 
+print("\n=== taking the removal of the line a move lands after leaves the move landing where that line stood ===")
+do
+	local notes = { "Scratch", "- loose line", "", "Section A", "- keep one", "  - answered question", "", "Section B", "- b1", "- move me" }
+	local _, nb, s = setup(notes, {
+		item("rm", { kind = "remove", target = { at = "  - answered question" }, before = "  - answered question", after = "", headline = "drop the answered question" }),
+		item("mv", { kind = "move", target = { { at = "- move me" }, { after = "  - answered question" } }, before = "- move me", after = "  - move me", headline = "move it up" }),
+	})
+	local function spot_item(headline)
+		for _, spot in ipairs(s.view_spots) do
+			if spot.item.headline == headline then
+				return spot.item
+			end
+		end
+	end
+	review.view_take(s, { spot_item("drop the answered question") })
+	changed(nb)
+	local b = block_with(nb, "  - move me")
+	assert_eq("the move's new place is drawn below the line above the removed one", { line_of(nb, "- keep one"), false }, { b and b.row, b and b.above })
+	assert_true("and still left", review.status_line(nb):match("^1 left") ~= nil)
+	vim.api.nvim_win_set_cursor(0, { line_of(nb, "- move me"), 0 })
+	vim.cmd("normal dp")
+	assert_eq("taking it moves it there", { "Scratch", "- loose line", "", "Section A", "- keep one", "  - move me", "", "Section B", "- b1" }, lines_of(nb))
+end
+
+print("\n=== a move whose landing line is deleted in the review lands where that line stood, and counts ===")
+do
+	local _, nb, s = setup({ "Section A", "- a1", "- a2", "- a3", "Section B", "- b1", "Section C", "- c1", "- c2" }, {
+		item("mv", { kind = "move", target = { { at = "- a3" }, { after = "- c1" } }, before = "- a3", after = "- a3", headline = "move a3 down" }),
+	})
+	vim.api.nvim_buf_set_lines(nb, line_of(nb, "- c1") - 1, line_of(nb, "- c1"), false, {})
+	changed(nb)
+	local b = block_with(nb, "- a3")
+	assert_eq("drawn at the end of the section it was to land in, not on top", { line_of(nb, "- c2"), false }, { b and b.row, b and b.above })
+	assert_true("and counted as left", review.status_line(nb):match("^1 left") ~= nil)
+	assert_true("a spot to take", spot_row(s, "move a3 down") ~= nil)
+end
+
+print("\n=== an addition and a move after a line another suggestion edits follow the edit, before and after it is taken ===")
+do
+	local notes = { "Intro", "- loose", "", "- the line", "", "Section B", "- b1", "- move me" }
+	local _, nb, s = setup(notes, {
+		item("ad", { kind = "add", target = { after = "- the line" }, after = "- the add", headline = "the add" }),
+		item("mv", { kind = "move", target = { { at = "- move me" }, { after = "- the line" } }, before = "- move me", after = "- move me", headline = "move it up" }),
+		item("ed", { kind = "edit", target = { at = "- the line" }, before = "- the line", after = "- the line, edited", headline = "the edit" }),
+	})
+	local function spot_item(headline)
+		for _, spot in ipairs(s.view_spots) do
+			if spot.item.headline == headline then
+				return spot.item
+			end
+		end
+	end
+	assert_true("all three left before the take", review.status_line(nb):match("^3 left") ~= nil)
+	local b = block_with(nb, "- the add")
+	assert_eq("the addition drawn below the line", { line_of(nb, "- the line"), false }, { b and b.row, b and b.above })
+	review.view_take(s, { spot_item("the edit") })
+	changed(nb)
+	b = block_with(nb, "- the add")
+	assert_eq("after the take, drawn below the edited line, not on top", { line_of(nb, "- the line, edited"), false }, { b and b.row, b and b.above })
+	local m = block_with(nb, "- move me")
+	assert_eq("and the move too", { line_of(nb, "- the line, edited"), false }, { m and m.row, m and m.above })
+	assert_true("both still left", review.status_line(nb):match("^2 left") ~= nil)
+	review.view_take(s, { spot_item("the add") })
+	assert_eq("taking the addition puts it there", { "Intro", "- loose", "", "- the line, edited", "- the add", "", "Section B", "- b1", "- move me" }, lines_of(nb))
+end
+
 print("\n=== an addition whose anchor is in neither the notes nor the text the proposal was built from shows on top ===")
 do
 	local _, nb, s = setup(BASE, {
