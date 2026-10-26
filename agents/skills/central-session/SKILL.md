@@ -19,7 +19,7 @@ The user works from one long-lived session and has other sessions do the work: o
 - **A pass's brief:** when a `[desk-brief]` message from the desk runner arrives, judge that run by the files the message names, in its order.
 - **Follow its tickets:** `desk-follow add` names the session and its keys, so the follow pass sends it the news (the `desk-follow` skill).
 - **End a session:** `close-session.sh <id>` records a deliberate end and closes its tab. Use it only when the user says the work is done or parked.
-- **Notes:** suggestions go through `desk-propose`, and an edit goes straight into the notes only when the user asks for that edit. Name sessions exactly as they are named, so `gx` finds them. A topic a session holds keeps only a pointer, lasting outcomes and what needs the user in the notes; its progress stays in the session.
+- **Notes:** suggestions go through `desk-propose`, and an edit goes straight into the notes only when the user asks for that edit. Name sessions exactly as they are named, so `gx` finds them. A topic a session holds keeps only a pointer, lasting outcomes and what needs the user in the notes; its progress, merges and releases included, stays in the session; when one lands, update or drop the what's-next line rather than add a shipped one.
 - **Docs as you go:** when the user states a preference or the work shows how something actually behaves, write it into the doc, skill or instruction file it belongs in at the time, and say which one changed.
 
 ## What it may decide and what goes to the user
