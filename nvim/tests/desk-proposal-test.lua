@@ -845,6 +845,22 @@ do
 	end
 end
 
+print("\n=== insertions after a line a staged removal takes stay open when the line after it changes too ===")
+do
+	-- The removal and the edit below it are one changed stretch, so the
+	-- place the additions are looked for runs to its end, not its start.
+	-- The line above it repeats, so nothing else finds them there.
+	local notes = { "Intro", "- spike holds the options", "", "Team bot", "- spike holds the options", "  - one more option", "- next thing", "", "Countdown" }
+	local r = new_repo(notes)
+	assert(proposal.build(r, "session", "2026-10-26", {
+		item("rm", { kind = "remove", target = { at = "  - one more option" }, before = "  - one more option", after = "", source = "" }),
+		item("ed", { kind = "edit", target = { at = "- next thing" }, before = "- next thing", after = "- next thing, reworded", source = "" }),
+		item("a1", { kind = "add", target = { after = "  - one more option" }, after = "  - first follow-up", source = "" }),
+		item("a2", { kind = "add", target = { after = "  - one more option" }, after = "  - second follow-up", source = "" }),
+	}, FILES))
+	assert_eq("all four are open", 4, #proposal.open_items(r))
+end
+
 print(string.format("\n=== summary: %d passed, %d failed ===", pass, fail))
 if fail > 0 then
 	os.exit(1)
