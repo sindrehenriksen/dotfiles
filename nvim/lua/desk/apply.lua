@@ -13,10 +13,13 @@
 -- spot), retried against the user's text at the next pass.
 --
 -- An insertion's anchor that doesn't resolve AT ALL — its quote is simply
--- gone — is a different failure: there's no longer anywhere specific to
--- identify a conflict against, so rather than defer it forever (a dead end
--- nothing ever surfaces again), it lands at the top of the file instead,
--- same as a plain "top"-anchored item, and is counted as applied. See
+-- gone — is a different failure: there's nothing specific to identify a
+-- conflict against. Before an item gets here, desk.proposal.reanchored
+-- anchors an add, new or link whose line was in the text the proposal was
+-- built from on the line now standing where it was. One whose quote is
+-- still gone, rather than being deferred forever (a dead end nothing ever
+-- surfaces again), lands at the top of the file instead, same as a plain
+-- "top"-anchored item, and is counted as applied. See
 -- desk.block.find_after_anchor, which the insertion-shaped half of every
 -- kind below goes through for this; a before-shaped leave/removal anchor
 -- keeps its own distinct nil (bad anchor vs. content conflict) via

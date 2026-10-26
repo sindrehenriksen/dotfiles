@@ -36,6 +36,16 @@ local tokens = require("desk.tokens")
 
 local M = {}
 
+-- `items` as they land in `lines`: an insertion whose anchor line is gone
+-- from them anchored where that line stood in `base` (desk.proposal).
+local function placeable(items, lines, base)
+	local out = {}
+	for i, item in ipairs(items) do
+		out[i] = proposal.reanchored(item, lines, base)
+	end
+	return out
+end
+
 M.PROPOSAL_REF = proposal.REF
 
 -- How a review shows: "inline", the notes alone with the suggestions drawn
@@ -2557,9 +2567,10 @@ function M.view_refresh(s)
 		end
 	end
 	-- What is still open, placed against the notes as they stand, as a pass
-	-- places it against HEAD: an item already in the notes is done, one
-	-- whose place is gone from them is the next pass's business, and a
-	-- decline made here is left out until it is recorded.
+	-- places it against HEAD: an item already in the notes is done, an
+	-- insertion whose anchor line is gone lands where that line stood (on
+	-- top when that place can't be found), and a decline made here is left
+	-- out until it is recorded.
 	local declined, taken = ledger.declined(c.records).ids, ledger.taken_by_id(c.records)
 	local took = taken_here(s.notes_buf)
 	local open = {}
@@ -2573,14 +2584,10 @@ function M.view_refresh(s)
 			and not s.view_declined[item.id]
 			and not proposal.proposed_in(item, ours, base)
 		then
-			local _, land = block.parse_target(item.target)
-			local placed = item.kind == "edit" or item.kind == "remove" or land == nil or land.kind == "top" or block.find_line(ours, land.quote) ~= nil
-			if placed then
-				open[#open + 1] = item
-			end
+			open[#open + 1] = item
 		end
 	end
-	local merged, results, _, placed = apply.apply_file(ours, open)
+	local merged, results, _, placed = apply.apply_file(ours, placeable(open, ours, base))
 	local shown = {}
 	for _, item in ipairs(open) do
 		if results[item.id] == "applied" then
@@ -2775,7 +2782,7 @@ end
 --- drawing shows. Returns whether anything changed.
 function M.view_take(s, items)
 	local pre = buf_lines(s.notes_buf)
-	local new = apply.apply_file(pre, items)
+	local new = apply.apply_file(pre, placeable(items, pre, s.base))
 	if vim.deep_equal(new, pre) then
 		return false
 	end

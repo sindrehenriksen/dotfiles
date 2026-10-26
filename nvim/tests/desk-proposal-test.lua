@@ -669,6 +669,24 @@ do
 	assert_eq("taking them records both as taken", 2, #proposal.sync_taken(r))
 end
 
+print("\n=== a carried insertion whose anchor line the user removed lands where that line stood ===")
+do
+	local notes = { "Scratch", "- loose", "", "Team bot", "- ops bot?", "- spike holds the options", "  - one more option", "", "Countdown", "- cron" }
+	local r = new_repo(notes)
+	assert(proposal.build(r, "session", "2026-10-26", {
+		item("ad", { kind = "add", target = { after = "  - one more option" }, after = "  - follow-up", source = "" }),
+	}, FILES))
+	-- The user takes a removal of the anchor and an edit of the line above it.
+	write(r, "notes.md", { "Scratch", "- loose", "", "Team bot", "- ops bot?", "- spike leans one way", "", "Countdown", "- cron" })
+	commit_all(r, "take")
+	assert(proposal.build(r, "session", "2026-10-26", {}, FILES))
+	assert_eq("it lands after the line now standing in that place, not on top",
+		{ "Scratch", "- loose", "", "Team bot", "- ops bot?", "- spike leans one way", "  - follow-up", "", "Countdown", "- cron" }, tip_lines(r, "notes.md"))
+	local carried = proposal.read(r).items[1]
+	assert_eq("anchored on that line from now on", { after = "- spike leans one way" }, carried and carried.target)
+	assert_eq("and still open", { carried and carried.id }, ids(proposal.open_items(r)))
+end
+
 print("\n=== an anchor only the user's uncommitted text has waits for the commit, then lands ===")
 do
 	local committed = { "Section A", "- a1", "", "Section B", "- b1" }

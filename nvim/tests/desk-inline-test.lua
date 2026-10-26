@@ -254,7 +254,7 @@ do
 	assert_true("and the commit records it taken", #vim.tbl_filter(function(rec)
 		return rec.headline == "drop the stale line"
 	end, vim.tbl_values(ledger.taken_by_id(ledger.read(r)))) == 1)
-	-- The line a suggestion hangs on deleted: its business for the next pass.
+	-- The lines a suggestion hangs on deleted: it lands where they stood.
 	vim.api.nvim_win_set_cursor(0, { line_of(nb, "- b3"), 0 })
 	vim.cmd("normal! dd")
 	changed(nb)
@@ -262,7 +262,8 @@ do
 	vim.api.nvim_win_set_cursor(0, { line_of(nb, "Section B"), 0 })
 	vim.cmd("normal! dd")
 	changed(nb)
-	assert_true("with its anchor gone the addition waits for the next pass, never on top", block_with(nb, "- b4 added") == nil)
+	local moved = block_with(nb, "- b4 added")
+	assert_eq("with its anchor gone the addition shows where the anchor stood, not on top", { line_of(nb, "- b1"), false }, { moved and moved.row, moved and moved.above })
 end
 
 print("\n=== an addition after a line a staged removal takes is open, and taken on its own ===")
@@ -289,6 +290,42 @@ do
 	review.view_take(s, { ad })
 	assert_eq("taking it alone leaves the line the removal would take", { "Scratch", "- loose line", "", "Section A", "- keep one", "  - answered question", "  - follow-up", "", "Section B", "- b1" }, lines_of(nb))
 	assert_true("and the removal is still left", review.status_line(nb):match("^1 left") ~= nil)
+end
+
+print("\n=== taking the removal of the line an addition hangs on leaves the addition where that line stood ===")
+do
+	local notes = { "Scratch", "- loose line", "", "Section A", "- keep one", "  - answered question", "", "Section B", "- b1" }
+	local _, nb, s = setup(notes, {
+		item("rm", { kind = "remove", target = { at = "  - answered question" }, before = "  - answered question", after = "", headline = "drop the answered question" }),
+		item("ad", { kind = "add", target = { after = "  - answered question" }, after = "  - follow-up", headline = "add the follow-up" }),
+	})
+	local function spot_item(headline)
+		for _, spot in ipairs(s.view_spots) do
+			if spot.item.headline == headline then
+				return spot.item
+			end
+		end
+	end
+	review.view_take(s, { spot_item("drop the answered question") })
+	changed(nb)
+	local b = block_with(nb, "- follow-up")
+	assert_eq("the addition is drawn below the line above the removed one", { line_of(nb, "- keep one"), false }, { b and b.row, b and b.above })
+	assert_true("and still left", review.status_line(nb):match("^1 left") ~= nil)
+	review.view_take(s, { spot_item("add the follow-up") })
+	assert_eq("taking it puts it there", { "Scratch", "- loose line", "", "Section A", "- keep one", "  - follow-up", "", "Section B", "- b1" }, lines_of(nb))
+end
+
+print("\n=== an addition whose anchor is in neither the notes nor the text the proposal was built from shows on top ===")
+do
+	local _, nb, s = setup(BASE, {
+		item("gone", { kind = "add", target = { after = "- a line no longer in the notes" }, after = "- lands on top", headline = "anchor gone" }),
+	})
+	local b = block_with(nb, "- lands on top")
+	assert_eq("drawn above the first line", { 1, true }, { b and b.row, b and b.above })
+	assert_true("counted as left", review.status_line(nb):match("^1 left") ~= nil)
+	vim.api.nvim_win_set_cursor(0, { spot_row(s, "anchor gone"), 0 })
+	vim.cmd("normal dp")
+	assert_eq("taking it puts it on top", "- lands on top", lines_of(nb)[1])
 end
 
 print("\n=== take, decline, n/N and undo ===")

@@ -89,6 +89,39 @@ local function map_from_base(base, lines, i, to_end)
 	return i + delta
 end
 
+local reanchor_kind = { new = true, add = true, link = true }
+
+--- `item`, an insertion, anchored where it landed in `base` when its
+--- anchor line is gone from `lines` but is in `base` (the text the
+--- proposal was built from): a copy whose target is `{after = <line>}`,
+--- the line that now stands just before that place, or the nearest
+--- quotable one above it. `item` itself when nothing needs changing or no
+--- such line is found (then it lands on top).
+function M.reanchored(item, lines, base)
+	if not (base and reanchor_kind[item.kind]) then
+		return item
+	end
+	local _, land = block.parse_target(item.target)
+	if not land or (land.kind ~= "after" and land.kind ~= "under") then
+		return item
+	end
+	if block.find_line(lines, land.quote) or not block.find_line(base, land.quote) then
+		return item
+	end
+	local pos = block.find_after_anchor(base, land)
+	local j = map_from_base(base, lines, pos + 1) - 1
+	while j >= 1 do
+		local line = lines[j]
+		if not is_blank(line) and block.find_line(lines, line) == j then
+			local copy = vim.deepcopy(item)
+			copy.target = { after = line }
+			return copy
+		end
+		j = j - 1
+	end
+	return item
+end
+
 -- The candidate start positions for an insertion's `after` lines under a
 -- landing anchor, in `lines`: where apply would put them, widened to the
 -- whole block they extend. With `list`, on to the end of the list that
@@ -130,8 +163,8 @@ local function landing_window(lines, anchor, list, section, base)
 			return first, math.max(first, map_from_base(base, lines, last, true))
 		end
 	end
-	-- "top", or an anchor whose quote was already gone when the proposal
-	-- was built (apply lands it on top too).
+	-- "top", or an anchor whose quote is gone from both (apply lands it on
+	-- top too).
 	local start = 1
 	while pushed_section_end(lines, start, base) and is_blank(lines[pushed_section_end(lines, start, base) + 1]) do
 		start = pushed_section_end(lines, start, base) + 2
@@ -313,7 +346,18 @@ function M.proposed_in(item, lines, base)
 		if first == nil then
 			return M.contains(lines, after)
 		end
-		return contains_within(lines, after, first, last)
+		if contains_within(lines, after, first, last) then
+			return true
+		end
+		-- Its anchor gone since the proposal was built: also where it lands
+		-- anchored on the line now standing in that place.
+		local moved = M.reanchored(item, lines, base)
+		if moved ~= item then
+			local _, moved_land = block.parse_target(moved.target)
+			first, last = landing_window(lines, moved_land, list, apply.is_section(after), base)
+			return first ~= nil and contains_within(lines, after, first, last)
+		end
+		return false
 	end
 	local before = snippet.split_lines(item.before)
 	if #before > 0 then
@@ -687,6 +731,9 @@ function M.build(repo, pass, scheduled_date, new_items, files)
 		-- then items the user restored that no pass has re-proposed yet.
 		local carried, carried_ids = {}, {}
 		local function carry(item, base)
+			if item.file and head_lines[item.file] then
+				item = M.reanchored(item, head_lines[item.file], base)
+			end
 			item = fitted(item)
 			if carried_ids[item.id] or taken[item.id] or declined.ids[item.id] or declined.keys[ledger.content_key(item)] then
 				return
