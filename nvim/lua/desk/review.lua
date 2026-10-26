@@ -95,14 +95,16 @@ end
 -- ---------------------------------------------------------------------------
 
 --- The merged view of the user's current text with the proposal (see
---- desk.proposal.merged_lines): the union merge, which keeps a suggestion
---- the user's own nearby edit conflicts with instead of dropping it.
+--- desk.proposal.merged_lines): the merge that keeps both sides of a
+--- conflict, so a suggestion the user's own nearby edit conflicts with
+--- still shows, at its place beside that edit, and the old text of a line
+--- the user changed never comes back.
 function M.merged_lines(repo, p, file, ours_lines)
-	local clean, union = proposal.merged_lines(repo, p, file, ours_lines)
+	local clean, merged = proposal.merged_lines(repo, p, file, ours_lines)
 	if not clean then
-		return nil, union
+		return nil, merged
 	end
-	return union
+	return merged
 end
 
 -- ---------------------------------------------------------------------------

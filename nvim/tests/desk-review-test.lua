@@ -3220,6 +3220,73 @@ do
 	vim.cmd("silent! %bwipeout!")
 end
 
+print("\n=== the split never shows, or takes, the old text of a line the user edited since the pass ===")
+do
+	local r = new_repo({ "Intro", "- loose", "", "Section", "- X old", "- Y", "", "Outro" })
+	build(r, "2026-10-01", { item("ad", { kind = "add", target = { after = "- X old" }, after = "- the add", source = "", headline = "the add" }) })
+	write(r, "notes.md", { "Intro", "- loose", "", "Section", "- X new by hand", "- Y", "", "Outro" })
+	assert(git.run(r, { "commit", "-qam", "hand edit" }))
+	local nb = open_notes(r)
+	review.attach(nb)
+	assert_true("the review opens", review.open_review(nb))
+	local rb = review_buf_of(nb)
+	assert_true("the merged view has the addition", line_of(rb, "- the add") ~= nil)
+	assert_true("but not the line's old text", line_of(rb, "- X old") == nil)
+	local rw = vim.fn.bufwinid(rb)
+	go_to(rw, rb, "- the add")
+	vim.cmd("normal dp")
+	assert_eq("taking it keeps the user's edit", { "Intro", "- loose", "", "Section", "- X new by hand", "- the add", "- Y", "", "Outro" }, lines_of(nb))
+	vim.cmd("silent! %bwipeout!")
+end
+
+print("\n=== a line of the user's that reads like a conflict separator stays the user's text ===")
+do
+	local sep = string.rep("=", 40)
+	local r = new_repo({ "S", "- A", "- B", "- C" })
+	build(r, "2026-10-01", { item("ed", { kind = "edit", target = { at = "- B" }, before = "- B", after = "- B2", source = "", headline = "edit B" }) })
+	write(r, "notes.md", { "S", "- A", "- B", sep })
+	assert(git.run(r, { "commit", "-qam", "hand edit" }))
+	local res = proposal.reviewable(r, proposal.read(r), "notes.md", head_lines(r))
+	assert_eq("merged as the user's line beside the edit", { "S", "- A", "- B2", sep }, res and res.merged)
+end
+
+print("\n=== an edit beside a line the user edited by hand since the pass is shown and counted, at its place ===")
+do
+	local cases = {
+		{
+			"a one-line edit",
+			{ item("ed", { kind = "edit", target = { at = "- B" }, before = "- B", after = "- B2", source = "", headline = "edit B" }) },
+			{ "S", "- A", "- B2", "- C2 by hand" },
+		},
+		{
+			"a one-line edit with an addition after it",
+			{
+				item("ed", { kind = "edit", target = { at = "- B" }, before = "- B", after = "- B2", source = "", headline = "edit B" }),
+				item("ad", { kind = "add", target = { after = "- B" }, after = "- after B", source = "", headline = "add after B" }),
+			},
+			{ "S", "- A", "- B2", "- after B", "- C2 by hand" },
+		},
+		{
+			"a two-line edit",
+			{ item("ed", { kind = "edit", target = { at = "- A" }, before = "- A\n- B", after = "- A2\n- B2", source = "", headline = "edit A and B" }) },
+			{ "S", "- A2", "- B2", "- C2 by hand" },
+		},
+	}
+	for _, c in ipairs(cases) do
+		local r = new_repo({ "S", "- A", "- B", "- C" })
+		build(r, "2026-10-01", c[2])
+		write(r, "notes.md", { "S", "- A", "- B", "- C2 by hand" })
+		assert(git.run(r, { "commit", "-qam", "hand edit" }))
+		assert_eq(c[1] .. ": counted open", #c[2], #proposal.open_items(r))
+		local nb = open_notes(r)
+		review.attach(nb)
+		assert_true(c[1] .. ": the review opens", review.open_review(nb))
+		local rb = review_buf_of(nb)
+		assert_eq(c[1] .. ": the merged view has it beside the user's edit, no old text back", c[3], rb and lines_of(rb))
+		vim.cmd("silent! %bwipeout!")
+	end
+end
+
 print(string.format("\n=== summary: %d passed, %d failed ===", pass, fail))
 if fail > 0 then
 	os.exit(1)

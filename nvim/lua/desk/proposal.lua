@@ -550,11 +550,102 @@ function M.sync_taken(repo)
 	return new
 end
 
+local MARKER_SIZE = 40
+local LABELS = { "desk-ours", "desk-base", "desk-theirs" }
+
+-- One conflict of a diff3 merge resolved, in the order of its base lines:
+-- each base line as the user has it now (changed, kept or deleted), else
+-- as the proposal changes it; where both changed it, the user's text and
+-- then the proposal's; and what either side adds between two base lines
+-- at that place, the user's first. A line the user changed never comes
+-- back in its old text, and the proposal's new text stays next to the
+-- line it replaces.
+local function resolve_conflict(ours, base, theirs)
+	local function side(lines)
+		local cover, text, ins = {}, {}, {}
+		for n, h in ipairs(vim.diff(snippet.join_lines(base, true), snippet.join_lines(lines, true), { result_type = "indices" })) do
+			local added = vim.list_slice(lines, h[3], h[3] + h[4] - 1)
+			if h[2] == 0 then
+				ins[h[1]] = added
+			else
+				for k = h[1], h[1] + h[2] - 1 do
+					cover[k] = n
+				end
+				text[n] = added
+			end
+		end
+		return cover, text, ins
+	end
+	local o_cover, o_text, o_ins = side(ours)
+	local t_cover, t_text, t_ins = side(theirs)
+	local out, done = {}, {}
+	for g = 0, #base do
+		vim.list_extend(out, o_ins[g] or {})
+		vim.list_extend(out, t_ins[g] or {})
+		local i = g + 1
+		if i <= #base then
+			local o, t = o_cover[i], t_cover[i]
+			if o then
+				if not done["o" .. o] then
+					done["o" .. o] = true
+					vim.list_extend(out, o_text[o])
+				end
+				-- Both changed it: the proposal's new text goes below the
+				-- user's, still shown, as conflicting with it.
+				if t and not done["t" .. t] then
+					done["t" .. t] = true
+					vim.list_extend(out, t_text[t])
+				end
+			elseif t then
+				if not done["t" .. t] then
+					done["t" .. t] = true
+					vim.list_extend(out, t_text[t])
+				end
+			else
+				out[#out + 1] = base[i]
+			end
+		end
+	end
+	return out
+end
+
+-- A diff3-marked merge (labelled LABELS, markers MARKER_SIZE long) with each
+-- conflict resolved by resolve_conflict.
+local function resolve_conflicts(lines)
+	local open_m = string.rep("<", MARKER_SIZE) .. " " .. LABELS[1]
+	local base_m = string.rep("|", MARKER_SIZE) .. " " .. LABELS[2]
+	local sep_m = string.rep("=", MARKER_SIZE)
+	local close_m = string.rep(">", MARKER_SIZE) .. " " .. LABELS[3]
+	local out, i = {}, 1
+	while i <= #lines do
+		if lines[i] == open_m then
+			local parts, part = { {}, {}, {} }, 1
+			i = i + 1
+			while i <= #lines and lines[i] ~= close_m do
+				if lines[i] == base_m then
+					part = 2
+				elseif lines[i] == sep_m and part == 2 then
+					part = 3
+				else
+					table.insert(parts[part], lines[i])
+				end
+				i = i + 1
+			end
+			vim.list_extend(out, resolve_conflict(parts[1], parts[2], parts[3]))
+		else
+			out[#out + 1] = lines[i]
+		end
+		i = i + 1
+	end
+	return out
+end
+
 --- `git merge-file` of `ours` (the user's current text) with the proposal: base is
 --- the proposal's parent version, theirs the proposal's version, or
 --- `theirs` when given. Returns the `--ours` merge (the user's text winning
---- any conflict), the `--union` merge (both sides kept where they
---- conflict), or nil, err.
+--- any conflict), the merge that keeps both sides where they conflict (each
+--- line as the user has it, the proposal's changes and additions at their
+--- place beside it: resolve_conflict), or nil, err.
 function M.merged_lines(repo, p, file, ours_lines, theirs, base)
 	base = base or (p.parent and M.lines_at(repo, p.parent, file)) or {}
 	theirs = theirs or M.lines_at(repo, p.sha, file)
@@ -568,22 +659,28 @@ function M.merged_lines(repo, p, file, ours_lines, theirs, base)
 		return path
 	end
 	local ours_path, base_path, theirs_path = put("ours", ours_lines), put("base", base), put("theirs", theirs)
-	-- Both merges at once, so the wait is one merge's.
-	local runs = {}
-	for _, mode in ipairs({ "--ours", "--union" }) do
-		runs[#runs + 1] = vim.system({ "git", "-C", repo, "merge-file", "-p", mode, ours_path, base_path, theirs_path }, { text = true })
-	end
+	-- Both merges at once, so the wait is one merge's. The second keeps
+	-- the conflicts marked, diff3-style and labelled, to be resolved by
+	-- resolve_conflicts.
+	local runs = {
+		vim.system({ "git", "-C", repo, "merge-file", "-p", "--ours", ours_path, base_path, theirs_path }, { text = true }),
+		vim.system({
+			"git", "-C", repo, "merge-file", "-p", "--diff3", "--marker-size=" .. MARKER_SIZE,
+			"-L", LABELS[1], "-L", LABELS[2], "-L", LABELS[3], ours_path, base_path, theirs_path,
+		}, { text = true }),
+	}
 	local out = {}
-	for _, run in ipairs(runs) do
+	for i, run in ipairs(runs) do
 		local res = run:wait()
-		if res.code ~= 0 then
+		-- merge-file's exit code is its count of conflicts, capped at 127.
+		if (i == 1 and res.code ~= 0) or res.code < 0 or res.code > 127 then
 			vim.fn.delete(dir, "rf")
 			return nil, "git merge-file failed: " .. (res.stderr or "")
 		end
 		out[#out + 1] = (snippet.split_lines(res.stdout or ""))
 	end
 	vim.fn.delete(dir, "rf")
-	return out[1], out[2]
+	return out[1], resolve_conflicts(out[2])
 end
 
 -- The proposal's text of `file` with only the `open` items applied: the
@@ -618,7 +715,7 @@ end
 --- whatever the ledger has recorded since)
 --- (the user's text): not deferred, not taken or declined, in the merged view but
 --- not yet in the user's text. A suggestion the user's own edit conflicts with is still
---- shown, in the union view, and listed in `conflicts` with the line of the user's
+--- shown, in the merged view, and listed in `conflicts` with the line of the user's
 --- text it sits next to. Returns { shown = id -> item, conflicts = id ->
 --- line, merged = lines }, or nil, err.
 function M.reviewable(repo, p, file, ours, skip, only)
