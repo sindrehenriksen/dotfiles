@@ -68,6 +68,27 @@ local function pushed_section_end(lines, i, base)
 	return nil
 end
 
+-- Where base line `i` (up to #base + 1, the end) stands in `lines`, by
+-- the diff between them: a line in a changed hunk maps to the start of what
+-- replaced it, or with `to_end` to just past it.
+local function map_from_base(base, lines, i, to_end)
+	local hunks = vim.diff(snippet.join_lines(base, true), snippet.join_lines(lines, true), { result_type = "indices" })
+	local delta = 0
+	for _, h in ipairs(hunks) do
+		local a_s, a_c, b_s, b_c = h[1], h[2], h[3], h[4]
+		if a_c > 0 and i >= a_s and i < a_s + a_c then
+			if to_end then
+				return (b_c > 0 and b_s or b_s + 1) + b_c
+			end
+			return b_c > 0 and b_s or b_s + 1
+		end
+		if (a_c > 0 and i >= a_s + a_c) or (a_c == 0 and i > a_s) then
+			delta = delta + b_c - a_c
+		end
+	end
+	return i + delta
+end
+
 -- The candidate start positions for an insertion's `after` lines under a
 -- landing anchor, in `lines`: where apply would put them, widened to the
 -- whole block they extend. With `list`, on to the end of the list that
@@ -98,8 +119,19 @@ local function landing_window(lines, anchor, list, section, base)
 			end
 			return idx + 1, last
 		end
+		-- Gone from `lines` but in `base`: taken away since the proposal was
+		-- built, or by an item in the proposal itself, such as a removal of
+		-- the line this insertion follows. It landed where the anchor stood.
+		local bidx = base and block.find_line(base, anchor.quote)
+		if bidx then
+			local e = anchor.kind == "under" and block.block_end(base, bidx) or select(2, block.block_containing(base, bidx))
+			local last = (list and block.list_end(base, e) or e) + 1
+			local first = map_from_base(base, lines, bidx)
+			return first, math.max(first, map_from_base(base, lines, last, true))
+		end
 	end
-	-- "top", or an anchor whose quote is gone (apply lands it on top too).
+	-- "top", or an anchor whose quote was already gone when the proposal
+	-- was built (apply lands it on top too).
 	local start = 1
 	while pushed_section_end(lines, start, base) and is_blank(lines[pushed_section_end(lines, start, base) + 1]) do
 		start = pushed_section_end(lines, start, base) + 2

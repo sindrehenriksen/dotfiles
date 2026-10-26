@@ -265,6 +265,32 @@ do
 	assert_true("with its anchor gone the addition waits for the next pass, never on top", block_with(nb, "- b4 added") == nil)
 end
 
+print("\n=== an addition after a line a staged removal takes is open, and taken on its own ===")
+do
+	-- Below the first paragraph, so a look on top would not find it.
+	local notes = { "Scratch", "- loose line", "", "Section A", "- keep one", "  - answered question", "", "Section B", "- b1" }
+	local r, nb, s = setup(notes, {
+		item("rm", { kind = "remove", target = { at = "  - answered question" }, before = "  - answered question", after = "", headline = "drop the answered question" }),
+		item("ad", { kind = "add", target = { after = "  - answered question" }, after = "  - follow-up", headline = "add the follow-up" }),
+	})
+	local open = vim.tbl_map(function(it)
+		return it.headline
+	end, proposal.open_items(r))
+	table.sort(open)
+	assert_eq("both are open, as desk-propose --list reads it", { "add the follow-up", "drop the answered question" }, open)
+	assert_true("both counted as left", review.status_line(nb):match("^2 left") ~= nil)
+	local ad
+	for _, spot in ipairs(s.view_spots) do
+		if spot.item.headline == "add the follow-up" then
+			ad = spot.item
+		end
+	end
+	assert_true("the addition is a spot of its own", ad ~= nil)
+	review.view_take(s, { ad })
+	assert_eq("taking it alone leaves the line the removal would take", { "Scratch", "- loose line", "", "Section A", "- keep one", "  - answered question", "  - follow-up", "", "Section B", "- b1" }, lines_of(nb))
+	assert_true("and the removal is still left", review.status_line(nb):match("^1 left") ~= nil)
+end
+
 print("\n=== take, decline, n/N and undo ===")
 do
 	local _, nb, s = setup()
