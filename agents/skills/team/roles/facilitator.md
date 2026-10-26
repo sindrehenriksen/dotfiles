@@ -34,12 +34,13 @@ the conventions it must follow — and the specifics of this task, the
 evidence, and the decisions already made. A role that gets only its
 own file is working from a quarter of what it needs.
 
-**Assume nobody can message you back.** Inbound sends fail or land
-somewhere else entirely — an agent *type* is not an address, and a
-role's reply to you may arrive in an unrelated session. So tell every
-role, in its brief, to **report by ending its turn**: that routes
-correctly and reaches you as an ordinary completion. Do not sit
-waiting on a message; there is nothing to wait for.
+**Roles report, and ask, by ending their turn.** Inbound sends fail
+or land elsewhere — an agent *type* is not an address — while a
+completion always reaches you. Brief every role to report that way
+and to ask that way at a fork the brief doesn't settle (the
+question's shape and route are `execution`, "Delegation prompts").
+Answer by continuing it by the agentId its spawn returned, and pass
+up only what you cannot answer.
 
 The same applies between roles. They cannot consult each other here,
 so you relay — and relaying ages: a specialist answers what it saw,

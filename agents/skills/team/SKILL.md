@@ -14,8 +14,8 @@ role — that is expected rather than exceptional. To be usable it owes
 what the others have: its own standing brief in `roles/`, written to
 outlast this round rather than living inside one brief, and the same
 independence rules as the rest — instructed by the facilitator alone,
-read-only unless it is the one writer in the checkout, reporting by
-ending its turn.
+read-only unless it is the one writer in the checkout, reporting and
+asking by ending its turn.
 
 **The default entry point, for work of any size.** What varies is how
 far a task travels: one whose shape is already agreed passes straight
@@ -107,15 +107,15 @@ independent, synthesises, and decides what the team can settle itself.
 the facilitator talks to the roles.** No traffic in either direction
 between the lead and a role. That is a messaging fact before it is a
 hierarchy: inbound sends fail or land somewhere else entirely, since
-an agent *type* is not an address (`roles/facilitator.md`, "Assume
-nobody can message you back"), so a role has no reliable address for
-a lead in the first place. Hence **a role receives its instructions
-from one source** — instructed from two places it acts on the later
-one instead of flagging that the two cannot both be true, and the
-conflict resurfaces as a defect nobody can trace back. The
+an agent *type* is not an address (`roles/facilitator.md`, "Roles
+report, and ask, by ending their turn"), so a role has no reliable
+address for a lead in the first place. Hence **a role receives its
+instructions from one source** — instructed from two places it acts on
+the later one instead of flagging that the two cannot both be true,
+and the conflict resurfaces as a defect nobody can trace back. The
 facilitator owns the channel to each role; a second voice needing
-something from a role goes through that channel. A lead fielding
-role reports also drowns in work it did not ask for.
+something from a role goes through that channel. A lead fielding role
+reports also drowns in work it did not ask for.
 
 **Each hop inward reports like the outward one.** A role handing back
 to the facilitator, the facilitator handing back to the lead: the
@@ -131,17 +131,18 @@ hardest when a round is long or unattended, which is exactly when it
 dissolves. Being the only agent still awake is not a reason to become
 the dev; it is a reason to spawn one.
 
-**The facilitator facilitates — that is the whole of the role**, and
-a second property falls out of it: the round's traffic — briefs going
+**The facilitator facilitates — that is the whole of the role**, and a
+second property falls out of it: the round's traffic — briefs going
 out, roles reporting back, reviews being convened — happens a level
 down, so the lead's main loop, which is what a human reads along,
-stays followable. The lead spawns the facilitator and the
-facilitator spawns everyone else; spawn one whenever a round runs
-more than two roles or will outlast a few exchanges. Below that the
-lead runs the round itself and **`roles/facilitator.md` binds it
-while it does** — convening, sequencing and calling reviews all live
-there, not here. When it is unclear which, spawn one: an agent is
-cheap and the loop is not.
+stays followable. The lead spawns the facilitator and the facilitator
+spawns everyone else. **When the owner reads along in the lead's
+thread, a round of more than one role gets one**, as does a round that
+will outlast a few exchanges, so that thread sees only what the
+facilitator cannot answer. Below that the lead runs the round itself
+and **`roles/facilitator.md` binds it while it does** — convening,
+sequencing and calling reviews all live there, not here. When it is
+unclear which, spawn one: an agent is cheap and the loop is not.
 
 The lead never hands over owner contact, scope, or the final report.
 
