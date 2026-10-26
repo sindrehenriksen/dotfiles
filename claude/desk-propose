@@ -22,7 +22,8 @@
 # --date to today.
 # A session sets each item's `source` to `session:<its session id>`, gives
 # each item its own headline, and prefers an `edit` of a stale line to an
-# `add` beneath it. It shows the user the items before staging them. An
+# `add` beneath it. It stages its items and then tells the user what it
+# staged, since a suggestion is visible only once staged. An
 # item anchored on a line the user has not committed yet waits, deferred,
 # until they commit it; the output names that line for the session to pass
 # on.
@@ -31,7 +32,7 @@
 # fit the shape fails the whole call, naming it, so the session can fix it
 # and run again. Text is cleaned the way a pass cleans a reply (control
 # characters, ANSI sequences, modelines and agent markers removed), but its
-# URLs are kept: the user reviews a session's items before they are staged,
+# URLs are kept: the user reviews a session's items before taking them,
 # which the runner's URL check stands in for on unattended calls.
 # --allowed-urls <file> brings that check back, for items judged from
 # fetched material (a pass's brief writes the file, one URL per line): an
