@@ -37,13 +37,13 @@ understood" but "does this detail change what gets decided".
   Decision records, strategy and discovery docs, user-facing copy,
   instruction files and skills are read later as settled fact, so say
   which of them a change touched when you make it rather than in a
-  closing summary, and ask for a real read. Where no PR will put it in
-  front of the owner (a dotfiles commit, say), quote a short change in
-  the reply instead of pointing at the file. Automated review leans the
-  other way: a docs-or-copy diff is exactly the shape a low-risk
-  heuristic waves through. Technical reference — how a tool's
-  internals behave, a command's help text — is not that kind: say it
-  changed, and don't ask for a read.
+  closing summary, and put it where the owner reads the change: named
+  in the PR description when there is one (don't hold the PR for a
+  separate read), otherwise quoted in the reply when short, and named
+  by file when not. Automated review waves a docs-or-copy diff
+  through, so the owner's read is the only real one.
+  Technical reference, such as how a tool's internals behave, just
+  gets a mention that it changed.
 - A finding is not automatically new work, and handing one over
   unresolved is the expensive shape. It costs the owner a context
   switch into something they were not working on, and that cost lands
@@ -122,7 +122,7 @@ is written.
 - **A block stops the work until someone notices, so say so in the same reply** — name what was blocked and what it needs. Don't stall silently or drop it. Carry on with whatever doesn't depend on it.
 - **An action the owner has authorized is not a blocked action.** The classifier weighs the action alone and cannot see the conversation, so a refusal on something already agreed is a false positive rather than a second opinion, and carries no information their instruction has not already settled. Proceed by whatever ordinary tool does the job — there is no denial to overcome, and treating an explicit go as something to resist misreads both the instruction and the person giving it. Say that the check fired so the config can be fixed, but don't hand the decision back as though it were still open. What stays off-limits is narrow: concealing that a check fired, and reaching for a mechanism whose purpose is to defeat the check rather than to do the work.
 - **A check that keeps firing on routine authorized work is a config defect.** Fix it with a rule that pins the action narrowly, rather than living with the interruption or making a habit of asking the owner to run the command.
-- **A blocked subagent hands back rather than retrying.** It cannot see whether the owner authorized the thing, so a retry only spends a turn reaching the same refusal: it reports what was blocked and stops. The main loop decides from there, because it is what holds the authorization — carrying out what the owner had already agreed to, and taking anything they had not back to them rather than waving it through because a subagent asked.
+- **A blocked subagent hands back rather than retrying**, and never gets round the denial by switching tools (Write after a refused Edit, say). It cannot see whether the owner authorized the thing, so a retry only spends a turn reaching the same refusal: it reports what was blocked and stops. The main loop decides from there, because it is what holds the authorization — carrying out what the owner had already agreed to, and taking anything they had not back to them rather than waving it through because a subagent asked.
 - **What an allow rule means.** It says the classifier is not the useful control for this action — not that the action is safe. Whether an action *should* happen is governed above, by the rules in this file: outward-facing steps wait for a go whether or not a permission rule would have let them through. So the three buckets split on recoverability rather than on caution: **allow** reads, and writes that are internal and reversible and already governed here; **ask** mutations with an outward-facing or hard-to-undo edge, where the right gate is the owner rather than a classifier; **deny** the unrecoverable, where a mistake cannot be walked back — a destructive delete against a system with no undo. An allow rule also matches the shape of a command, never the provenance of what is inside it: `python3 -c …` is approved the same whether we composed the one-liner or a fetched page did. Widening the allowlist moves that judgement from the classifier onto us, which is what the section above is for.
 - **Neither an ask nor a block is the cheap option**, which is the argument for allowing more rather than less. Both interrupt, both land at the same point in a sequence, and both can leave work half-applied. A block is if anything the lesser cost, since work that doesn't depend on it carries on while it waits. So `ask` earns its place rarely: it spends the owner's attention without adding a guarantee the rules above don't already give. Where a rule can pin an action narrowly, prefer the rule.
 - **Never widen your own permissions unasked.** The permission config is the owner's to edit: propose the diff and let them apply it. Apply it yourself only when they explicitly say to, and say what it grants when you do — an allow rule is easy to add and easy to forget is there.
@@ -191,6 +191,8 @@ When the system framework suggests saving a memory, route the content to the rig
 
 **An ephemeral addition doesn't get documented yet.** A one-off diagnostic script, a throwaway repro, an in-flight experiment: add the script or config and stop there. A README or other repo doc waits until the addition clearly sticks — it gained a second caller, survived a few weeks, or was asked for explicitly. Documenting churn costs more than the entry is worth, and the entry tends to outlive the thing it describes.
 
+**State made by hand outside a repo is the opposite case**, since nothing else records it. An identity, a secret, a role assignment, a cloud resource or a dashboard setting made for a test, spike or proof of concept is documented when made (on its ticket where there is one, and in its own description where the system takes one) and removed once it has served, with a go where removal is hard to undo.
+
 ## Corrections & Judgment
 
 - When corrected, receive it — don't defend or rationalize. But push back if you believe the owner is wrong, with clear reasoning.
@@ -225,6 +227,7 @@ When the system framework suggests saving a memory, route the content to the rig
 
 - Prefer staging specific files over `git add -A` or `git add .` — review `git status` first to avoid adding unintended changes
 - When asked to fold changes into an earlier commit, default to `git commit --fixup=<sha>`. Rewriting history is in bounds on an unmerged branch you own — autosquash the fixups and fold commits with no standalone value before anyone else reads the branch. Never rewrite shared or merged history (`main`, or a branch someone else has based work on) without asking. **Check `git log -1` before `--amend`**: in a checkout other sessions also commit to, a commit can land on top of yours between turns, and amending then rewrites theirs, so `--fixup` onto yours instead. Before any destructive git op (`reset --hard`, force-push, rebase), capture uncommitted work first (stash or `git diff > patch`).
+- **Once the owner is reviewing a branch**, a change to an earlier commit goes up as an unsquashed fixup, so the commits since their last read show exactly what changed, and is folded before merge; a finding that is a change in its own right stays its own commit (`execution`, "Commits across a long session"). Push a rebase alone, never with content changes.
 - **Bringing the base branch into a feature branch: rebase by default, merge when pragmatic.** Rebase keeps history linear; merging resolves a conflict once instead of per commit, so it is the sensible escape when a rebase would mean re-resolving the same conflict repeatedly. Neither corrupts a review: every merge-base-relative diff (a PR diff, `main...HEAD`, a review pinned to the merge base) shows only your own changes either way. What does break, identically for both, is an incremental diff against a remembered SHA — it picks up whatever the base brought in and reads it as yours, so re-derive against the current merge base instead of trusting the marker.
 - Check `git diff` (and `git diff --staged` if applicable) before writing the commit message
 - Commit message titles: concise, under 50 chars when possible. Body lines: wrap at 72 chars.
