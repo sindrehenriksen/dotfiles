@@ -254,7 +254,7 @@ do
 	assert_true("and the commit records it taken", #vim.tbl_filter(function(rec)
 		return rec.headline == "drop the stale line"
 	end, vim.tbl_values(ledger.taken_by_id(ledger.read(r)))) == 1)
-	-- The lines a suggestion hangs on deleted: it lands where they stood.
+	-- The line a suggestion hangs on deleted: it lands where that line stood.
 	vim.api.nvim_win_set_cursor(0, { line_of(nb, "- b3"), 0 })
 	vim.cmd("normal! dd")
 	changed(nb)
@@ -313,6 +313,32 @@ do
 	assert_true("and still left", review.status_line(nb):match("^1 left") ~= nil)
 	review.view_take(s, { spot_item("add the follow-up") })
 	assert_eq("taking it puts it there", { "Scratch", "- loose line", "", "Section A", "- keep one", "  - follow-up", "", "Section B", "- b1" }, lines_of(nb))
+end
+
+print("\n=== an addition whose whole section is deleted in the review shows on top, and counts ===")
+do
+	local _, nb, s = setup({ "Session Alpha", "- alpha item", "", "Session Beta", "- beta item" }, {
+		item("ad", { kind = "add", target = { under = "Session Beta" }, after = "- beta follow-up", headline = "beta follow-up" }),
+	})
+	vim.api.nvim_buf_set_lines(nb, 2, 5, false, {})
+	changed(nb)
+	local b = block_with(nb, "- beta follow-up")
+	assert_eq("drawn above the first line, not in the other section", { 1, true }, { b and b.row, b and b.above })
+	assert_true("and counted as left", review.status_line(nb):match("^1 left") ~= nil)
+	assert_true("a spot to take", spot_row(s, "beta follow-up") ~= nil)
+end
+
+print("\n=== an addition after the first item under a heading, that item deleted in the review: at the end of the section, and counts ===")
+do
+	local _, nb, s = setup({ "Intro", "- loose", "", "Section B", "- b1", "- b2", "", "Outro" }, {
+		item("ad", { kind = "add", target = { after = "- b1" }, after = "- after b1", headline = "after b1" }),
+	})
+	vim.api.nvim_buf_set_lines(nb, 4, 5, false, {})
+	changed(nb)
+	local b = block_with(nb, "- after b1")
+	assert_eq("drawn below the section's last line", { line_of(nb, "- b2"), false }, { b and b.row, b and b.above })
+	assert_true("and counted as left", review.status_line(nb):match("^1 left") ~= nil)
+	assert_true("a spot to take", spot_row(s, "after b1") ~= nil)
 end
 
 print("\n=== an addition whose anchor is in neither the notes nor the text the proposal was built from shows on top ===")

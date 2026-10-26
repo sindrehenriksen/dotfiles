@@ -89,14 +89,36 @@ local function map_from_base(base, lines, i, to_end)
 	return i + delta
 end
 
+-- The line of `base` that line `j` of `lines` is, by the diff between
+-- them; for a line written in place of a stretch of `base`, the first line
+-- of that stretch (the line after it, for a line added between two).
+local function from_base_line(base, lines, j)
+	local hunks = vim.diff(snippet.join_lines(base, true), snippet.join_lines(lines, true), { result_type = "indices" })
+	local delta = 0
+	for _, h in ipairs(hunks) do
+		local a_s, a_c, b_s, b_c = h[1], h[2], h[3], h[4]
+		if b_c > 0 and j >= b_s and j < b_s + b_c then
+			return a_c > 0 and a_s or a_s + 1
+		end
+		if (b_c > 0 and j >= b_s + b_c) or (b_c == 0 and j > b_s) then
+			delta = delta + a_c - b_c
+		end
+	end
+	return j + delta
+end
+
 local reanchor_kind = { new = true, add = true, link = true }
 
 --- `item`, an insertion, anchored where it landed in `base` when its
 --- anchor line is gone from `lines` but is in `base` (the text the
 --- proposal was built from): a copy whose target is `{after = <line>}`,
---- the line that now stands just before that place, or the nearest
---- quotable one above it. `item` itself when nothing needs changing or no
---- such line is found (then it lands on top).
+--- the line now standing just before that place, which lands it at the
+--- end of that line's block (for a heading, the end of its section).
+--- `item` itself when nothing needs changing, or when that line is a blank
+--- line or the file's start, comes from outside the anchor's paragraph in
+--- `base`, is too short to quote, or is not the first line of `lines` that
+--- reads so: it then lands on top, visibly orphaned, rather than in a
+--- section it never belonged to.
 function M.reanchored(item, lines, base)
 	if not (base and reanchor_kind[item.kind]) then
 		return item
@@ -110,16 +132,22 @@ function M.reanchored(item, lines, base)
 	end
 	local pos = block.find_after_anchor(base, land)
 	local j = map_from_base(base, lines, pos + 1) - 1
-	while j >= 1 do
-		local line = lines[j]
-		if not is_blank(line) and block.find_line(lines, line) == j then
-			local copy = vim.deepcopy(item)
-			copy.target = { after = line }
-			return copy
-		end
-		j = j - 1
+	if j < 1 or is_blank(lines[j]) or block.find_line(lines, lines[j]) ~= j then
+		return item
 	end
-	return item
+	-- Only a line of the anchor's own paragraph in `base`, or one written
+	-- in place of part of it: not the end of the section above, reached
+	-- because the anchor's whole section went.
+	local para = block.find_line(base, land.quote)
+	while para > 1 and not is_blank(base[para - 1]) do
+		para = para - 1
+	end
+	if from_base_line(base, lines, j) < para then
+		return item
+	end
+	local copy = vim.deepcopy(item)
+	copy.target = { after = lines[j] }
+	return copy
 end
 
 -- The candidate start positions for an insertion's `after` lines under a
@@ -350,10 +378,14 @@ function M.proposed_in(item, lines, base)
 			return true
 		end
 		-- Its anchor gone since the proposal was built: also where it lands
-		-- anchored on the line now standing in that place.
-		local moved = M.reanchored(item, lines, base)
-		if moved ~= item then
-			local _, moved_land = block.parse_target(moved.target)
+		-- placed against `lines` (M.reanchored), on the line now standing in
+		-- that place or, failing one, on top.
+		if land and land.kind ~= "top" and base and not block.find_line(lines, land.quote) and block.find_line(base, land.quote) then
+			local moved = M.reanchored(item, lines, base)
+			local moved_land = { kind = "top" }
+			if moved ~= item then
+				moved_land = select(2, block.parse_target(moved.target))
+			end
 			first, last = landing_window(lines, moved_land, list, apply.is_section(after), base)
 			return first ~= nil and contains_within(lines, after, first, last)
 		end

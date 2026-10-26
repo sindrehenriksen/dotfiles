@@ -687,6 +687,52 @@ do
 	assert_eq("and still open", { carried and carried.id }, ids(proposal.open_items(r)))
 end
 
+print("\n=== a carried insertion whose place can't be used lands on top, never in another section ===")
+do
+	local cases = {
+		{
+			"the whole section it was in deleted",
+			{ "Session Alpha", "- alpha item", "", "Session Beta", "- beta item" },
+			{ "Session Alpha", "- alpha item" },
+			{ kind = "add", target = { under = "Session Beta" }, after = "- beta follow-up" },
+		},
+		{
+			"the line before its place too short to quote",
+			{ "Intro", "- loose", "", "AB", "- target item", "", "Outro" },
+			{ "Intro", "- loose", "", "AB", "", "Outro" },
+			{ kind = "add", target = { after = "- target item" }, after = "- follow-up" },
+		},
+		{
+			"the line before its place not the first that reads so",
+			{ "Notes", "- first", "", "Notes", "- target item", "", "Outro" },
+			{ "Notes", "- first", "", "Notes", "", "Outro" },
+			{ kind = "add", target = { after = "- target item" }, after = "- follow-up" },
+		},
+	}
+	for _, c in ipairs(cases) do
+		local r = new_repo(c[2])
+		assert(proposal.build(r, "session", "2026-10-26", { item("x", vim.tbl_extend("force", c[4], { source = "" })) }, FILES))
+		write(r, "notes.md", c[3])
+		commit_all(r, "edit")
+		assert(proposal.build(r, "session", "2026-10-26", {}, FILES))
+		local want = { c[4].after }
+		vim.list_extend(want, c[3])
+		assert_eq(c[1] .. ": on top", want, tip_lines(r, "notes.md"))
+	end
+end
+
+print("\n=== a carried insertion that hung on the first item under a heading lands at the end of that section ===")
+do
+	local r = new_repo({ "Intro", "- loose", "", "Section B", "- b1", "- b2", "", "Outro" })
+	assert(proposal.build(r, "session", "2026-10-26", {
+		item("x", { kind = "add", target = { after = "- b1" }, after = "- after b1", source = "" }),
+	}, FILES))
+	write(r, "notes.md", { "Intro", "- loose", "", "Section B", "- b2", "", "Outro" })
+	commit_all(r, "edit")
+	assert(proposal.build(r, "session", "2026-10-26", {}, FILES))
+	assert_eq("in its section, after the rest of it", { "Intro", "- loose", "", "Section B", "- b2", "- after b1", "", "Outro" }, tip_lines(r, "notes.md"))
+end
+
 print("\n=== an anchor only the user's uncommitted text has waits for the commit, then lands ===")
 do
 	local committed = { "Section A", "- a1", "", "Section B", "- b1" }
