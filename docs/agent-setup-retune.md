@@ -91,5 +91,5 @@ next pass, not settled facts.
   subagent ran at the session's level; since then, well-specified jobs on the
   strong tier are asked for `medium` per call while judgement-heavy ones keep
   the session's, and the next run compares the two (the script splits tokens
-  by requested effort). Also open: how the setup behaved against the previous
-  model, and whether the provider's advisor tool earns a place.
+  by requested effort). Also open: whether the provider's advisor tool earns a
+  place.
