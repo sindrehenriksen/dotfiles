@@ -697,6 +697,18 @@ do
 			{ kind = "add", target = { under = "Session Beta" }, after = "- beta follow-up" },
 		},
 		{
+			"its section rewritten wholesale in its place",
+			{ "Session Alpha", "- alpha item", "", "Session Beta", "- beta item", "", "Outro" },
+			{ "Session Alpha", "- alpha item", "", "Session Gamma", "- gamma item", "", "Outro" },
+			{ kind = "add", target = { under = "Session Beta" }, after = "- beta follow-up" },
+		},
+		{
+			"its section rewritten wholesale, to another length",
+			{ "Session Alpha", "- alpha item", "", "Session Beta", "- beta item", "", "Outro" },
+			{ "Session Alpha", "- alpha item", "", "Session Gamma", "- gamma 1", "- gamma 2", "- gamma 3", "", "Outro" },
+			{ kind = "add", target = { under = "Session Beta" }, after = "- beta follow-up" },
+		},
+		{
 			"the line before its place too short to quote",
 			{ "Intro", "- loose", "", "AB", "- target item", "", "Outro" },
 			{ "Intro", "- loose", "", "AB", "", "Outro" },
@@ -718,6 +730,41 @@ do
 		local want = { c[4].after }
 		vim.list_extend(want, c[3])
 		assert_eq(c[1] .. ": on top", want, tip_lines(r, "notes.md"))
+	end
+end
+
+print("\n=== a carried insertion whose section was partly reworded stays in it ===")
+do
+	local cases = {
+		{
+			"the item it hung on reworded",
+			{ "Intro", "", "Section B", "- b1", "- b2", "", "Outro" },
+			{ "Intro", "", "Section B", "- b1", "- b2 reworded", "", "Outro" },
+			{ kind = "add", target = { after = "- b2" }, after = "- after b2" },
+			{ "Intro", "", "Section B", "- b1", "- b2 reworded", "- after b2", "", "Outro" },
+		},
+		{
+			"the line it hung on, alone in its paragraph, reworded by hand",
+			{ "Intro", "- loose", "", "- the lone line", "", "Outro" },
+			{ "Intro", "- loose", "", "- the lone line, reworded", "", "Outro" },
+			{ kind = "add", target = { after = "- the lone line" }, after = "- after it" },
+			{ "Intro", "- loose", "", "- the lone line, reworded", "- after it", "", "Outro" },
+		},
+		{
+			"its heading renamed",
+			{ "Intro", "", "Section B", "- b1", "- b2", "", "Outro" },
+			{ "Intro", "", "Section Bee", "- b1", "- b2", "", "Outro" },
+			{ kind = "add", target = { under = "Section B" }, after = "- b3" },
+			{ "Intro", "", "Section Bee", "- b1", "- b2", "- b3", "", "Outro" },
+		},
+	}
+	for _, c in ipairs(cases) do
+		local r = new_repo(c[2])
+		assert(proposal.build(r, "session", "2026-10-26", { item("x", vim.tbl_extend("force", c[4], { source = "" })) }, FILES))
+		write(r, "notes.md", c[3])
+		commit_all(r, "edit")
+		assert(proposal.build(r, "session", "2026-10-26", {}, FILES))
+		assert_eq(c[1] .. ": in its section", c[5], tip_lines(r, "notes.md"))
 	end
 end
 

@@ -89,6 +89,35 @@ local function map_from_base(base, lines, i, to_end)
 	return i + delta
 end
 
+-- Whether any line of the paragraph of `base` holding line `i` (up to the
+-- blank lines around it) stands unchanged in `lines`, by the diff between
+-- them. A paragraph of one line reworded one line for one, at its place,
+-- is that line reworded, so it counts as standing.
+local function paragraph_survives(base, lines, i)
+	local first, last = i, i
+	while first > 1 and not is_blank(base[first - 1]) do
+		first = first - 1
+	end
+	while last < #base and not is_blank(base[last + 1]) do
+		last = last + 1
+	end
+	local changed = {}
+	for _, h in ipairs(vim.diff(snippet.join_lines(base, true), snippet.join_lines(lines, true), { result_type = "indices" })) do
+		if first == last and h[1] == first and h[2] == 1 and h[4] == 1 then
+			return true
+		end
+		for k = h[1], h[1] + h[2] - 1 do
+			changed[k] = true
+		end
+	end
+	for k = first, last do
+		if not changed[k] then
+			return true
+		end
+	end
+	return false
+end
+
 -- The line of `base` that line `j` of `lines` is, by the diff between
 -- them; for a line written in place of a stretch of `base`, the first line
 -- of that stretch (the line after it, for a line added between two).
@@ -162,6 +191,11 @@ function M.reanchored(item, lines, base, items)
 		end
 	end
 	if j < 1 or is_blank(lines[j]) or block.find_line(lines, lines[j]) ~= j then
+		return item
+	end
+	-- Some line of the anchor's paragraph in `base` still stands unchanged:
+	-- a paragraph rewritten wholesale is another section in its place.
+	if not paragraph_survives(base, lines, block.find_line(base, land.quote)) then
 		return item
 	end
 	-- Only a line of the anchor's own paragraph in `base`, or one written
