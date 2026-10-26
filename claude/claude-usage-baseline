@@ -1,0 +1,389 @@
+#!/usr/bin/env -S python3 -I
+"""claude-usage-baseline: how a Claude Code setup delegates, measured from
+its transcripts, before and after a date such as a model switch.
+
+    claude-usage-baseline [--root DIR ...] [--since DATE] [--until DATE]
+                          [--split DATE] [--json FILE]
+
+Reads metadata fields only, never message text. From each transcript line:
+`type`, `timestamp`, `version` (the CLI's), and on assistant records
+`message.id` (falling back to `requestId`, then `uuid`), `message.model` and
+the token counts in `message.usage`; of the tool calls in an assistant
+record, only Agent calls (`Task` in older versions), and of those only their
+`id` and the `model` and `effort` inputs, never the prompt. From each
+subagent's `.meta.json`: `agentType`, `model`, `effort` if present,
+`toolUseId` (which joins it to the Agent call that started it),
+`parentAgentId`, and `description`, the caller's few-word label for the
+task, which is only matched against role keywords for a rough count and is
+never printed. A requested model or effort that is absent means the
+subagent inherited the session's.
+
+--root defaults to ${CLAUDE_CONFIG_DIR:-~/.claude}/projects; repeat it for
+a second config dir. Dates are YYYY-MM-DD, UTC, --until exclusive. With
+--split, periods are "before" and "after" it; without, one period "all".
+Tokens are counted by message timestamp, subagents and sessions by their
+first timestamp. The --json output names local project directories and
+session ids, so it stays out of any repo.
+
+One API response is written as several records sharing a message id, and
+a resumed or forked transcript repeats earlier ones, so records are deduped
+by message id across all files, keeping the field-wise maximum within a file
+and the copy in the earliest main transcript across files. Cache reads
+dominate total tokens, so output tokens are the better proxy for cost once
+output is recorded: some CLI versions wrote subagent output counts at a few
+percent of their true size, which `data_quality` shows as output per message
+by scope and version, and which the summary flags.
+"""
+
+import argparse
+import json
+import os
+import re
+import sys
+from collections import Counter, defaultdict
+
+FIELDS = ("input_tokens", "output_tokens", "cache_read_input_tokens",
+          "cache_creation_input_tokens")
+BUILTIN_TYPES = {"Explore", "general-purpose", "Plan", "claude-code-guide",
+                 "fork", "statusline-setup"}
+ROLE_WORDS = re.compile(
+    r"review|verif|critic|audit|judge|panel|round|role|challenge|check", re.I)
+
+
+def text(value):
+    return value if isinstance(value, str) else None
+
+
+def count(value):
+    return value if isinstance(value, int) and not isinstance(
+        value, bool) else 0
+
+
+def version_key(version):
+    parts = (version or "").split(".")
+    return [int(x) if x.isdigit() else -1 for x in parts]
+
+
+def family(model):
+    if not model:
+        return "unknown"
+    if model == "<synthetic>":
+        return "synthetic"
+    for name in ("fable", "opus", "sonnet", "haiku"):
+        if name in model:
+            return name
+    return "other"
+
+
+def scan(path, calls):
+    """-> ({message id: [ts, model, usage, version]}, first timestamp,
+    assistant records without a timestamp); adds {tool use id: (model,
+    effort)} for each Agent call to `calls`."""
+    msgs, first, no_ts = {}, None, 0
+    with open(path, errors="replace") as fh:
+        for line in fh:
+            try:
+                rec = json.loads(line)
+            except ValueError:
+                continue
+            if not isinstance(rec, dict):
+                continue
+            ts = text(rec.get("timestamp"))
+            if ts and (first is None or ts < first):
+                first = ts
+            msg = rec.get("message")
+            if rec.get("type") != "assistant" or not isinstance(msg, dict):
+                continue
+            no_ts += ts is None
+            content = msg.get("content")
+            for block in content if isinstance(content, list) else ():
+                if (isinstance(block, dict) and block.get("type") == "tool_use"
+                        and block.get("name") in ("Agent", "Task")
+                        and text(block.get("id"))):
+                    inp = block.get("input")
+                    inp = inp if isinstance(inp, dict) else {}
+                    calls[block["id"]] = (text(inp.get("model")),
+                                          text(inp.get("effort")))
+            mid = (text(msg.get("id")) or text(rec.get("requestId"))
+                   or text(rec.get("uuid")))
+            raw = msg.get("usage")
+            usage = ({k: count(raw.get(k)) for k in FIELDS}
+                     if isinstance(raw, dict) else None)
+            have = msgs.get(mid)
+            if have is None:
+                msgs[mid] = [ts, text(msg.get("model")), usage,
+                             text(rec.get("version"))]
+                continue
+            if usage:
+                have[2] = usage if have[2] is None else {
+                    k: max(have[2][k], usage[k]) for k in FIELDS}
+            if ts and (have[0] is None or ts < have[0]):
+                have[0] = ts
+    return msgs, first, no_ts
+
+
+def load(roots):
+    files, calls, no_ts = [], {}, 0
+    for root in roots:
+        base = os.path.expanduser(root)
+        if not os.path.isdir(base):
+            print(f"warning: {root} does not exist, skipping", file=sys.stderr)
+            continue
+        for dirpath, _, names in os.walk(base):
+            parts = os.path.relpath(dirpath, base).split(os.sep)
+            for name in names:
+                if not name.endswith(".jsonl"):
+                    continue
+                path = os.path.join(dirpath, name)
+                sub = "subagents" in parts
+                msgs, first, missing = scan(path, calls)
+                no_ts += missing
+                item = {"root": root, "project": parts[0], "sub": sub,
+                        "session": parts[parts.index("subagents") - 1]
+                        if sub else name[:-6],
+                        "first": first, "msgs": msgs}
+                if sub:
+                    meta = None
+                    try:
+                        with open(path[:-6] + ".meta.json") as fh:
+                            meta = json.load(fh)
+                    except (OSError, ValueError):
+                        pass
+                    kind = "no-meta"
+                    if isinstance(meta, dict):
+                        kind = text(meta.get("agentType")) or "untyped-meta"
+                    else:
+                        meta = {}
+                    item.update(type=kind,
+                                meta=meta,
+                                nested=bool(meta.get("parentAgentId")),
+                                role=bool(ROLE_WORDS.search(
+                                    text(meta.get("description")) or "")))
+                files.append(item)
+    # The Agent call can sit in a transcript scanned after the subagent's.
+    for f in files:
+        if f["sub"]:
+            meta = f.pop("meta")
+            call = text(meta.get("toolUseId"))
+            f["joined"] = call in calls
+            model, effort = calls.get(call, (None, None))
+            f["requested"] = text(meta.get("model")) or model or "inherit"
+            f["effort"] = text(meta.get("effort")) or effort or "inherit"
+    # Main transcripts first, earliest first: a repeated id is a copy, and
+    # its spend belongs to wherever the response was first written.
+    files.sort(key=lambda f: (f["sub"], f["first"] or "~"))
+    owner = {}
+    for i, f in enumerate(files):
+        for mid in f["msgs"]:
+            owner.setdefault(mid, i)
+    for i, f in enumerate(files):
+        f["msgs"] = {m: v for m, v in f["msgs"].items() if owner[m] == i}
+    return files, no_ts
+
+
+def main():
+    ap = argparse.ArgumentParser(
+        description=__doc__.split("\n\n")[0],
+        formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--root", action="append",
+                    help="a config dir's projects/ (repeatable)")
+    ap.add_argument("--since", default="0000-00-00")
+    ap.add_argument("--until", default="9999-99-99")
+    ap.add_argument("--split", help="date dividing before from after")
+    ap.add_argument("--json", help="write the full breakdown here")
+    args = ap.parse_args()
+    config = os.environ.get("CLAUDE_CONFIG_DIR") or "~/.claude"
+    roots = args.root or [os.path.join(config, "projects")]
+
+    def period(ts):
+        if not ts or not args.since <= ts[:10] < args.until:
+            return None
+        if not args.split:
+            return "all"
+        return "before" if ts[:10] < args.split else "after"
+
+    periods = ["before", "after"] if args.split else ["all"]
+    files, no_ts = load(roots)
+
+    tokens = defaultdict(Counter)        # (scope, period, root, family)
+    by_model = defaultdict(Counter)      # (scope, period, exact model)
+    by_version = defaultdict(Counter)    # (scope, version)
+    session = defaultdict(Counter)       # (root, project, session) -> scope
+    no_usage = 0
+    for f in files:
+        scope = "sub" if f["sub"] else "main"
+        for ts, model, usage, version in f["msgs"].values():
+            p = period(ts)
+            if p is None or family(model) == "synthetic":
+                continue
+            if usage is None:
+                no_usage += 1
+                continue
+            tokens[(scope, p, f["root"], family(model))].update(usage)
+            by_model[(scope, p, model)].update(usage)
+            by_version[(scope, version)].update(
+                messages=1, output=usage["output_tokens"])
+            session[(f["root"], f["project"], f["session"])][scope] += sum(
+                usage.values())
+
+    subs = [f for f in files if f["sub"] and period(f["first"])]
+    for s in subs:
+        s["period"] = period(s["first"])
+        models = Counter(m for _, m, _, _ in s["msgs"].values()
+                         if m and m != "<synthetic>")
+        s["actual"] = family(models.most_common(1)[0][0]) if models else "none"
+        counted = [u for ts, m, u, _ in s["msgs"].values()
+                   if u and period(ts) and m != "<synthetic>"]
+        s["total"] = sum(sum(u.values()) for u in counted)
+        s["output"] = sum(u["output_tokens"] for u in counted)
+    mains = [f for f in files if not f["sub"] and period(f["first"])]
+
+    def tok(scope, p, root=None, field=None):
+        return sum((c[field] if field else sum(c.values()))
+                   for (sc, pe, r, _), c in tokens.items()
+                   if sc == scope and pe == p and root in (None, r))
+
+    def shares(key, p, root=None):
+        c = Counter(key(s) for s in subs
+                    if s["period"] == p and root in (None, s["root"]))
+        n = sum(c.values())
+        return {k: round(v / n, 3) for k, v in c.most_common()} if n else {}
+
+    def by_effort(p, root=None):
+        """requested effort | actual family -> count, total and output"""
+        out = defaultdict(Counter)
+        for s in subs:
+            if s["period"] == p and root in (None, s["root"]):
+                out[f"{s['effort']}|{s['actual']}"].update(
+                    subagents=1, total=s["total"], output=s["output"])
+        return {k: dict(v) for k, v in sorted(out.items())}
+
+    result = {"roots": roots, "since": args.since, "until": args.until,
+              "split": args.split, "periods": {}}
+    for p in periods:
+        out = {}
+        for root in [None] + (roots if len(roots) > 1 else []):
+            fams = defaultdict(Counter)
+            for (sc, pe, r, fam), c in tokens.items():
+                if pe == p and root in (None, r):
+                    fams[sc][fam] += sum(c.values())
+                    fams[sc + "_output"][fam] += c["output_tokens"]
+            n_subs = sum(1 for s in subs
+                         if s["period"] == p and root in (None, s["root"]))
+            n_mains = sum(1 for m in mains
+                          if period(m["first"]) == p
+                          and root in (None, m["root"]))
+            out[root or "ALL"] = {
+                "main_sessions": n_mains,
+                "subagents": n_subs,
+                "tokens": {sc: {"total": tok(sc, p, root),
+                                "output": tok(sc, p, root, "output_tokens")}
+                           for sc in ("main", "sub")},
+                "tokens_by_family": {k: dict(v.most_common())
+                                     for k, v in fams.items()},
+                "subagent_requested_model": shares(
+                    lambda s: s["requested"], p, root),
+                "subagent_actual_family": shares(
+                    lambda s: s["actual"], p, root),
+                "subagent_type": shares(
+                    lambda s: s["type"] if s["type"] in BUILTIN_TYPES
+                    else "custom", p, root),
+                "subagent_started_by_subagent": shares(
+                    lambda s: s["nested"], p, root).get(True, 0.0),
+                "subagent_role_label_rough": shares(
+                    lambda s: s["role"], p, root).get(True, 0.0),
+                "subagent_requested_effort": shares(
+                    lambda s: s["effort"], p, root),
+                "subagents_by_effort_and_model": by_effort(p, root),
+            }
+        out["tokens_by_exact_model"] = {
+            f"{sc}|{m}": dict(c) for (sc, pe, m), c in by_model.items()
+            if pe == p}
+        result["periods"][p] = out
+
+    per_message = {
+        f"{sc}|{v}": {"messages": c["messages"],
+                      "output_per_message": round(
+                          c["output"] / c["messages"], 1)}
+        for (sc, v), c in sorted(by_version.items(), key=str)}
+    # A version whose subagent output per message is a small fraction of the
+    # main loop's did not record output, rather than produce less of it. The
+    # main loop is pooled across the window, since a version's own main
+    # sample is often too thin to compare against.
+    main_msgs = sum(c["messages"] for (sc, _), c in by_version.items()
+                    if sc == "main")
+    main_out = sum(c["output"] for (sc, _), c in by_version.items()
+                   if sc == "main")
+    pooled = main_out / main_msgs if main_msgs else 0
+    unrecorded = sorted(
+        (v for (sc, v), c in by_version.items()
+         if sc == "sub" and c["messages"] >= 20
+         and c["output"] / c["messages"] < 0.2 * pooled),
+        key=version_key)
+
+    heavy = sorted(session.items(), key=lambda kv: -sum(kv[1].values()))
+    n_by_session = Counter((s["root"], s["project"], s["session"])
+                           for s in subs)
+    result["heaviest_sessions"] = [
+        {"root": k[0], "project": k[1], "session": k[2],
+         "main_tokens": v["main"], "sub_tokens": v["sub"],
+         "subagents": n_by_session[k]} for k, v in heavy[:20]]
+    result["subagents"] = [
+        {"root": s["root"], "project": s["project"], "session": s["session"],
+         "period": s["period"], "type": s["type"],
+         "requested_model": s["requested"], "requested_effort": s["effort"],
+         "actual_family": s["actual"], "nested": s["nested"],
+         "total_tokens": s["total"], "output_tokens": s["output"]}
+        for s in subs]
+    result["data_quality"] = {
+        "transcripts": len(files), "subagents_in_window": len(subs),
+        "subagents_without_meta": sum(s["type"] == "no-meta" for s in subs),
+        "subagents_meta_without_agent_type": sum(
+            s["type"] == "untyped-meta" for s in subs),
+        # Unjoined means its effort could not be read and shows as inherit.
+        "subagents_not_joined_to_agent_call": sum(
+            not s["joined"] for s in subs),
+        "assistant_records_without_usage": no_usage,
+        "assistant_records_without_timestamp": no_ts,
+        "output_per_message_by_scope_and_version": per_message,
+        "main_output_per_message_pooled": round(pooled, 1),
+        "versions_with_subagent_output_unrecorded": unrecorded}
+
+    if args.json:
+        with open(args.json, "w") as fh:
+            json.dump(result, fh, indent=1)
+
+    for p in periods:
+        a = result["periods"][p]["ALL"]
+        main_t, sub_t = a["tokens"]["main"], a["tokens"]["sub"]
+        sub_fam = a["tokens_by_family"].get("sub", {})
+        sub_all = sum(sub_fam.values()) or 1
+        print(f"[{p}] {a['main_sessions']} main sessions, "
+              f"{a['subagents']} subagents")
+        print(f"  tokens main {main_t['total']:,} (output "
+              f"{main_t['output']:,}), sub {sub_t['total']:,} (output "
+              f"{sub_t['output']:,}); sub/main "
+              f"{sub_t['total'] / (main_t['total'] or 1):.2f}x total, "
+              f"{sub_t['output'] / (main_t['output'] or 1):.2f}x output")
+        print("  subagent total tokens by family: " + ", ".join(
+            f"{k} {v / sub_all:.0%}" for k, v in sub_fam.items()))
+        print("  requested model: " + ", ".join(
+            f"{k} {v:.0%}" for k, v in a["subagent_requested_model"].items()))
+        print(f"  started by a subagent: "
+              f"{a['subagent_started_by_subagent']:.0%}")
+        print("  by requested effort | model family: " + "; ".join(
+            f"{k} {v['subagents']} agents, {v['total']:,} total, "
+            f"{v['output']:,} output"
+            for k, v in a["subagents_by_effort_and_model"].items()))
+    if unrecorded:
+        print(f"warning: subagent output tokens look unrecorded in "
+              f"{len(unrecorded)} CLI versions, {unrecorded[0]} to "
+              f"{unrecorded[-1]} (listed in data_quality); don't compare "
+              f"subagent output across them")
+    if args.json:
+        print(f"full breakdown, with the heaviest sessions: {args.json}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
