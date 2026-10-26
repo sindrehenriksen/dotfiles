@@ -176,9 +176,9 @@ Two rules that cost nothing and pay:
 
 - **Relay the artifact, not a description of it.** A paragraph
   describing a screen does not provoke the question a picture does.
-  Publishing it as a page the owner can open is usually the cheapest
-  way to do that, and the lead redeploys it in place as the shape
-  moves — carrying, on the page, what changed since they last looked.
+  A plain HTML file the owner can open is usually the cheapest way to
+  do that, and the lead updates it in place as the shape moves —
+  carrying, on the page, what changed since they last looked.
   Without that they re-read the whole thing hunting for the diff, and
   stop opening it.
   Better still, let the owner talk to the role that made it — see
