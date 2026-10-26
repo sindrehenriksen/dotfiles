@@ -15,6 +15,7 @@ Personal dev environment: zsh, Neovim, Ghostty, Git, AI agent configs. Cross-pla
 | `hammerspoon/init.lua` | macOS window layout (picker on `Opt+Cmd+T`, three-column + one-off placement) — see `docs/window-layout.md` |
 | `claude/` | Claude Code global config (`settings.json`, `statusline.sh`, `keybindings.json`), symlinked into `~/.claude/` |
 | `claude/desk-run`, `claude/desk-lib/`, `nvim/lua/desk/` | Desk: scheduled passes that propose edits to a notes file, reviewed as a diff in nvim; `claude/desk-example/` is a starting instance — see `docs/desk.md` |
+| `claude/claude-usage-baseline` | Delegation and token baseline from transcript metadata, split at a date; the measurement step in `docs/agent-setup-retune.md`, on re-tuning the agent setup for a new model |
 | `agents/skills/` | Agent skills — single source, symlinked to `~/.agents/skills/` and `~/.claude/skills/` (global) plus `~/dotfiles/.claude/skills/` for repo-only skills |
 | `secrets/` | Example secrets templates (real secrets live in `~/.secrets.env`, untracked) |
 | `macos/` | macOS-only: keyboard remapping (Caps Lock, fn/Ctrl swap) via `hidutil` and a login agent — see `macos/README.md` |
