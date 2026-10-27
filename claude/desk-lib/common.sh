@@ -30,7 +30,6 @@ DESK_CLI_LUA="$DESK_REPO_DIR/nvim/lua/desk/cli.lua"
 DESK_STATE_DIR="${DESK_STATE_DIR:-$HOME/.local/state/desk}"
 DESK_STATUS_FILE="${DESK_STATUS_FILE:-$DESK_STATE_DIR/status.json}"
 DESK_LOCK_DIR="${DESK_LOCK_ROOT:-$DESK_STATE_DIR/lock}"
-DESK_GUARD_DIR="${DESK_GUARD_ROOT:-$DESK_STATE_DIR/guard}"
 # Whether the caller set the call roots itself, which wins over the
 # config's `calls_root` (desk_apply_calls_root).
 DESK_ROOTS_FROM_ENV="${DESK_SCRATCH_ROOT:+scratch}${DESK_RUNS_ROOT:+runs}"
@@ -86,7 +85,7 @@ desk_max_budget_usd() {
 	printf '%s' "${v:-$DESK_DEFAULT_MAX_BUDGET_USD}"
 }
 
-mkdir -p "$DESK_STATE_DIR" "$DESK_LOCK_DIR" "$DESK_GUARD_DIR" "$DESK_SCRATCH_ROOT" "$DESK_LOG_DIR" "$DESK_RUNS_ROOT" 2>/dev/null
+mkdir -p "$DESK_STATE_DIR" "$DESK_LOCK_DIR" "$DESK_SCRATCH_ROOT" "$DESK_LOG_DIR" "$DESK_RUNS_ROOT" 2>/dev/null
 
 # $DESK_CONFIG, or when it is unset, the machine-local default
 # ${XDG_CONFIG_HOME:-~/.config}/desk/config.json if that exists: a shell
