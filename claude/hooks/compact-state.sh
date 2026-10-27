@@ -4,16 +4,13 @@
 # from the summary's account of it. Called by compact-handoff.sh session-start
 # with the SessionStart hook input on stdin; runs by hand the same way.
 #
-#   git     The worktrees this session or its subagents acted in: the cwd's,
-#           and the one holding each path that an Edit or Write named, that a
-#           Bash command ran in (its cwd, or a `cd` in a command that also
-#           changes something there), that a
-#           `git -C` with a changing subcommand (commit, rebase, reset, ...,
-#           not log or status) named, or that `worktree add` created, read
-#           from the transcript and from those under <session>/subagents/. A path is resolved against the
-#           command's own simple `NAME=value` assignments, `$HOME` and `~/`;
-#           one it cannot resolve is skipped. Only worktrees under $HOME that
-#           still exist count. For each, its branch, how many files are
+#   git     Every worktree of the cwd's repo, other sessions' included, plus
+#           any worktree in any repo that this session or its subagents
+#           changed: one holding a file an Edit or Write named, or a path a
+#           Bash command ran a changing git subcommand in (by `git -C` or
+#           from its cwd) or created with `worktree add`. Read from the
+#           transcript and those under <session>/subagents/; a path it cannot
+#           resolve is skipped. For each, its branch, how many files are
 #           uncommitted, and how many commits are not on its upstream (or,
 #           without one, on no remote at all). The cwd's comes first.
 #   agents  Background agents this session started that have not reported
@@ -25,8 +22,6 @@
 #           stops. An agent is listed when its last launch or resume has no
 #           notification after it and happened in the current process (a
 #           process that exits takes its agents with it and records nothing).
-#           Agents started by other agents, and a foreground agent moved to
-#           the background mid-run, are not seen.
 #   COMPACT_STATE_COMMANDS
 #           A colon-separated list of executables (a leading `~/` expands),
 #           a workspace's own additions, mirroring COMPACT_HANDOFF_LAYERS.
@@ -114,119 +109,6 @@ reap() {
     done
 }
 
-# The paths a session acted in, one per line, from its transcript lines on
-# stdin: the directory of each Edit/Write/NotebookEdit file (a directory, so
-# the existence check below never turns on a file since deleted), and for each
-# Bash command its cwd and what it passed to `git -C` and `worktree add`,
-# expanded where the command itself says what a variable holds.
-read -r -d '' ACTED_JQ <<'JQ'
-def unquote: if test("^\"[^\"]*\"$") or test("^'[^']*'$") then .[1:-1] else . end;
-def tilde: if . == "~" then $home elif startswith("~/") then $home + .[1:] else . end;
-def expand($vars; $cwd):
-    unquote | tilde
-    | gsub("\\$\\{(?<v>[A-Za-z_][A-Za-z0-9_]*)\\}"; "$" + .v)
-    | reduce ([scan("\\$([A-Za-z_][A-Za-z0-9_]*)")[]] | unique[]) as $v (.;
-        if $vars[$v] != null then gsub("\\$" + $v + "(?![A-Za-z0-9_])"; $vars[$v]) else . end)
-    | select(test("[$`*?]") | not)
-    | if startswith("/") then . elif $cwd != "" then $cwd + "/" + . else empty end;
-def assigns:
-    [scan("(?:^|[\\s;&|(])([A-Za-z_][A-Za-z0-9_]*)=(\"[^\"]*\"|'[^']*'|[^\\s;&|)]+)")
-     | {key: .[0], value: (.[1] | unquote | tilde | gsub("\\$HOME(?![A-Za-z0-9_])|\\$\\{HOME\\}"; $home))}]
-    | from_entries + {HOME: $home};
-def worktree_add_path:
-    scan("worktree\\s+add\\s+([^;&|\\n]+)")[0]
-    | [splits("\\s+") | select(. != "")]
-    | reduce .[] as $t ({skip: false, path: null};
-        if .path != null then .
-        elif .skip then .skip = false
-        elif $t == "-b" or $t == "-B" or $t == "--reason" then .skip = true
-        elif $t | startswith("-") then .
-        else .path = $t end)
-    | .path // empty;
-# The path a `git -C <path> <subcommand>` names, when the subcommand changes
-# the worktree, its index or its refs: reads such as log, status or diff do
-# not count, since a session reads other sessions' worktrees all the time.
-def git_c_mutating:
-    scan("git\\s+-C\\s+(\"[^\"]*\"|'[^']*'|[^\\s;&|)]+)\\s+([^;&|\\n]*)")
-    | .[0] as $path
-    | [.[1] | splits("\\s+") | select(. != "")]
-    | reduce .[] as $t ({skip: false, sub: null};
-        if .sub != null then .
-        elif .skip then .skip = false
-        elif $t == "-c" or $t == "-C" then .skip = true
-        elif $t | startswith("-") then .
-        else .sub = $t end)
-    | select(.sub | IN("add", "am", "apply", "branch", "checkout", "cherry-pick", "clean", "commit",
-        "merge", "mv", "pull", "push", "rebase", "reset", "restore", "revert", "rm", "stash",
-        "switch", "tag", "update-ref"))
-    | $path;
-# Whether a command changes something where it runs: a changing git
-# subcommand, a redirect into a file, or a command that writes files. A `cd`
-# counts only in such a command, since one made only to read (a plugin's
-# source, another session's worktree) is not working there. Quoted text is
-# blanked first, so a `>` or `git commit` inside a search pattern is not one.
-def mutates:
-    gsub("'[^']*'"; "''") | gsub("\"[^\"]*\""; "\"\"")
-    | test("\\bgit\\s+(-c\\s+\\S+\\s+)*(add|am|apply|branch|checkout|cherry-pick|clean|commit|merge|mv|pull|push|rebase|reset|restore|revert|rm|stash|switch|tag|update-ref)\\b")
-    or test("(^|[^0-9&>])>{1,2}\\s*(?!&|/dev/null)[^\\s;&|]")
-    or test("(^|[;&|(]\\s*|\\s)(touch|mkdir|rm|mv|cp|ln|tee|install)\\s")
-    or test("\\b(sed|perl)\\s+-[A-Za-z]*i");
-select(contains("\"type\":\"tool_use\"")) | fromjson? | select(type == "object")
-| (.cwd // "") as $cwd
-| .message.content[]? | select(type == "object" and .type == "tool_use")
-| if .name == "Edit" or .name == "Write" or .name == "MultiEdit" then .input.file_path | strings | sub("/[^/]*$"; "")
-  elif .name == "NotebookEdit" then .input.notebook_path | strings | sub("/[^/]*$"; "")
-  elif .name == "Bash" then
-      (.input.command // "") as $c | ($c | assigns) as $vars
-      | ($cwd | select(. != "")),
-        ($c | git_c_mutating | expand($vars; $cwd)),
-        ($c | worktree_add_path | expand($vars; $cwd)),
-        ($c | select(mutates) | scan("(?:^|[;&|(]\\s*)cd\\s+(\"[^\"]*\"|'[^']*'|[^\\s;&|)]+)")[0] | expand($vars; $cwd))
-  else empty end
-| strings
-JQ
-
-# The acted-in paths from the transcript and its subagents' transcripts. A
-# newline after each file, since the last line of one still being written has
-# none and would swallow the next file's first.
-scan_acted() {
-    local transcript=$1 p
-    {
-        cat "$transcript"
-        echo
-        compgen -G "${transcript%.jsonl}/subagents/agent-*.jsonl" | while IFS= read -r p; do cat "$p"; echo; done
-    } | jq -R -r --arg home "$HOME" "$ACTED_JQ"
-}
-
-# The worktree roots for those paths: for each one under $HOME, the nearest
-# ancestor holding a `.git`, as long as the directory leading from that root
-# towards the path still exists. That is what drops a worktree since removed,
-# whose paths would otherwise land on whatever repo encloses it. The cwd's
-# root comes first. The scan runs as a job under the failsafe; $JOBS/acted.failed
-# marks one that failed or did not finish.
-touched_worktrees() {
-    local cwd=$1 transcript=$2 p child
-    git -C "$cwd" rev-parse --show-toplevel 2>/dev/null
-    [ -n "$transcript" ] || return 0
-    spawn acted scan_acted "$transcript"
-    reap "$DEADLINE" acted
-    # Anything on stderr, not the exit code: jq reports only the last input's.
-    [ -e "$JOBS/acted.rc" ] && [ ! -s "$JOBS/acted.err" ] || touch "$JOBS/acted.failed"
-    sed -e 's|/\./|/|g' -e 's|\(/\.\)*/*$||' "$JOBS/acted.out" | sort -u |
-        while IFS= read -r p; do
-            case $p in "$HOME"/*) ;; *) continue ;; esac
-            child=""
-            while [ "${#p}" -gt "${#HOME}" ]; do
-                if [ -e "$p/.git" ]; then
-                    { [ -z "$child" ] || [ -e "$p/$child" ]; } && echo "$p"
-                    break
-                fi
-                child=${p##*/}
-                p=${p%/*}
-            done
-        done
-}
-
 # One worktree's line, from a single `status --porcelain=v2 --branch`: its
 # branch, uncommitted files, and commits not on its upstream (or, with no
 # upstream or a gone one, on no remote).
@@ -250,18 +132,72 @@ wt_check() {
     printf '%s\t%s\n' "$head" "$(join ${notes[@]+"${notes[@]}"})"
 }
 
+# The paths a session changed something in, one per line, from transcript
+# lines on stdin.
+read -r -d '' CHANGED_JQ <<'JQ'
+def mut: "(add|am|apply|checkout|cherry-pick|clean|commit|merge|mv|pull|push|rebase|reset|restore|revert|rm|stash|switch|tag)\\b";
+def abs($cwd):
+    (if test("^\"[^\"]*\"$") or test("^'[^']*'$") then .[1:-1] else . end)
+    | (if . == "~" then $home elif startswith("~/") then $home + .[1:] else . end)
+    | gsub("\\$HOME(?![A-Za-z0-9_])|\\$\\{HOME\\}"; $home)
+    | select(test("[$`*?]") | not)
+    | if startswith("/") then . elif $cwd != "" then $cwd + "/" + . else empty end;
+select(contains("\"tool_use\"")) | fromjson? | select(type == "object")
+| (.cwd // "") as $cwd
+| .message.content[]? | select(type == "object" and .type == "tool_use")
+| if .name == "Edit" or .name == "Write" or .name == "MultiEdit" then .input.file_path | strings | sub("/[^/]*$"; "")
+  elif .name == "NotebookEdit" then .input.notebook_path | strings | sub("/[^/]*$"; "")
+  elif .name == "Bash" then
+      (.input.command // "") as $c
+      | ($c | scan("git\\s+-C\\s+(\"[^\"]*\"|'[^']*'|[^\\s;&|)]+)\\s+" + mut)[0] | abs($cwd)),
+        ($c | scan("worktree\\s+add\\s+(?:-[bB]\\s+\\S+\\s+|-\\S+\\s+)*(\"[^\"]*\"|'[^']*'|[^\\s;&|)]+)")[0] | abs($cwd)),
+        (if $c | test("(^|[;&|(]\\s*)git\\s+" + mut) then $cwd | select(. != "") else empty end)
+  else empty end
+| strings
+JQ
+
+# The worktree roots for the paths a session changed: for each, the nearest
+# ancestor holding a `.git`, as long as the directory leading from that root
+# towards the path still exists, so a removed worktree does not land on the
+# repo around it. A newline after each transcript, since the last line of one
+# still being written has none.
+changed_worktrees() {
+    local transcript=$1 p child
+    {
+        cat "$transcript"
+        echo
+        compgen -G "${transcript%.jsonl}/subagents/agent-*.jsonl" | while IFS= read -r p; do cat "$p"; echo; done
+    } | jq -R -r --arg home "$HOME" "$CHANGED_JQ" 2>/dev/null |
+        sed -e 's|/\./|/|g' -e 's|\(/\.\)*/*$||' | sort -u |
+        while IFS= read -r p; do
+            child=""
+            while [ -n "$p" ] && [ "$p" != / ]; do
+                if [ -e "$p/.git" ]; then
+                    { [ -z "$child" ] || [ -e "$p/$child" ]; } && (cd -P "$p" 2>/dev/null && pwd)
+                    break
+                fi
+                child=${p##*/}
+                p=${p%/*}
+            done
+        done | sort -u
+}
+
+# The cwd's repo's worktrees, canonical and cwd's first; bare entries and
+# ones whose directory is gone are left out.
+worktrees() {
+    local here=$1 root
+    { echo "$here"; git -C "$here" worktree list --porcelain 2>/dev/null |
+        awk '/^worktree /{p=substr($0,10)} /^bare$/{p=""} /^$/{if(p!="")print p; p=""} END{if(p!="")print p}'; } |
+        while IFS= read -r root; do (cd -P "$root" 2>/dev/null && pwd); done | awk '!seen[$0]++'
+}
+
 git_block() {
-    local cwd=$1 transcript=$2 here roots root i=0 names=()
-    here=$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null)
-    # Canonical, so `../x` and `x` are one worktree and the cwd's is marked.
-    roots=$(touched_worktrees "$cwd" "$transcript" | while IFS= read -r root; do (cd -P "$root" 2>/dev/null && pwd); done | awk '!seen[$0]++')
+    local cwd=$1 transcript=$2 here="" changed="" roots root i=0 names=()
+    here=$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null) && here=$(cd -P "$here" && pwd)
+    [ -n "$transcript" ] && [ -r "$transcript" ] && changed=$(changed_worktrees "$transcript")
+    roots=$( { [ -n "$here" ] && echo "$here"; [ -n "$changed" ] && echo "$changed"; [ -n "$here" ] && worktrees "$here"; } | awk 'NF && !seen[$0]++')
     if [ -z "$roots" ]; then
-        if [ -z "$transcript" ]; then
-            echo "Worktrees: none ($(tilde "$cwd") is not in a git repository, and the hook input names no transcript)."
-        else
-            echo "Worktrees: none ($(tilde "$cwd") is not in a git repository, and its transcripts show no other worked in)."
-        fi
-        [ -e "$JOBS/acted.failed" ] && echo "  (the transcripts could not be fully read)"
+        echo "Worktrees: none ($(tilde "$cwd") is not in a git repository, and the transcript shows none changed)."
         return
     fi
     while IFS= read -r root; do
@@ -271,19 +207,21 @@ git_block() {
     done <<<"$roots"
     reap "$DEADLINE" "${names[@]}"
 
-    echo "Worktrees this session or its subagents worked in ($i; the cwd's, and those its transcripts show an Edit or Write in, a Bash command run in or cd'd into to change something, a changing git -C, or a worktree add):"
-    [ -e "$JOBS/acted.failed" ] && echo "  (the transcripts could not be fully read, so this may be incomplete)"
-    local branch notes desc
+    echo "Worktrees ($i: the cwd's repo's, other sessions' included, and any other this session changed):"
+    local branch notes desc mark
     i=0
     while IFS= read -r root; do
         i=$((i + 1))
+        mark=""
+        [ "$root" = "$here" ] && mark="← cwd"
+        grep -qxF "$root" <<<"$changed" && mark="${mark:+$mark, }changed by this session"
         if [ ! -e "$JOBS/wt$i.rc" ]; then
             desc="  $(tilde "$root")  not read in ${TIMEOUT}s"
         elif [ "$(cat "$JOBS/wt$i.rc")" != 0 ]; then
             desc="  $(tilde "$root")  status failed: $(head -1 "$JOBS/wt$i.err")"
         else
             IFS=$'\t' read -r branch notes <"$JOBS/wt$i.out"
-            [ "$root" = "$here" ] && notes="← cwd${notes:+, $notes}"
+            notes="$mark${mark:+${notes:+, }}$notes"
             desc="  $(tilde "$root")  [$branch]${notes:+  $notes}"
         fi
         echo "$desc"
