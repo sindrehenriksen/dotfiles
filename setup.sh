@@ -45,6 +45,10 @@ zoxide import --from=z ~/.z
 #### mise
 # if mac
 brew install mise
+# Intel mac: brew has no mise bottle, and building it from source pulls in
+# Rust and LLVM (a day or more). Take the release binary instead, the same
+# way as on Linux below, and skip the brew install:
+#   curl https://mise.run | sh
 # if linux (ubuntu): install build deps for compiling python from source.
 # Needed because mise (as of 2026.3.9) defaults to freethreaded prebuilt
 # Python builds which fail ("missing lib directory"). Compiling from source
