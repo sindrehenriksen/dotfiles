@@ -516,6 +516,8 @@ In your notes window while a review is open, keys that go when it ends. The sugg
 
 Not taking something is either a decline, from either window, or leaving it alone: an untaken suggestion comes back with the next pass. A take is remembered when you make it and recorded on the next save of either buffer, or when the review ends, nvim quitting included, so a suggestion you edit right after taking stays taken.
 
+The split follows your edits in the notes window: a line you delete or change there goes the same way in the review, so no take puts it back. Declines made in the split stay declined, though `u` there no longer reaches them once you have edited your notes; edits of yours typed into the split hold it as it is.
+
 When the notes file changes on disk while you have unsaved edits in it and a review is open, the disk merge (README, Neovim) waits: it says so in one line and opens once the review ends, so the notes window is never in two diffs at once.
 
 A `move` or `merge` shows as two hunks, its removal at the old place and its landing at the new one, and is only ever taken or declined whole: every take key on either hunk takes both places and says so (`took the whole move: removed here, added under Section C`), and the decline keys decline both. One already taken in one place gets the other place on its next take, and declining it removes just its landing, leaving your notes as they are.

@@ -919,6 +919,60 @@ local function rebuild(s, p, need_shown, force)
 	return true, true
 end
 
+-- The split follows the notes: an edit of the user's there (a line
+-- deleted, say) is carried into the review text, so the diff never shows
+-- it as a suggestion and no take puts back what the user took out.
+-- Declines made in the split stay declined, though `u` there no longer
+-- reaches them; edits typed into the split hold it as it is.
+local function follow_notes(s)
+	if s.inline or not vim.api.nvim_buf_is_valid(s.review_buf) then
+		return
+	end
+	local ours = buf_lines(s.notes_buf)
+	if vim.deep_equal(ours, s.built_ours) or M.hand_edits(s) then
+		return
+	end
+	local p = proposal.read(s.repo, s.sha)
+	if not p then
+		return
+	end
+	local old = buf_lines(s.review_buf)
+	local skip, kept = taken_here(s.notes_buf), {}
+	for id, item in pairs(s.shown) do
+		if skip[id] or not proposal.proposed_in(item, old, s.base) then
+			skip[id], kept[id] = true, item
+		end
+	end
+	local r = proposal.reviewable(s.repo, p, s.file, ours, skip)
+	if not r then
+		return
+	end
+	s.built_ours = ours
+	if vim.deep_equal(r.merged, old) then
+		return
+	end
+	local rw = vim.fn.bufwinid(s.review_buf)
+	local view = rw ~= -1 and vim.api.nvim_win_call(rw, vim.fn.winsaveview)
+	local modified = vim.bo[s.review_buf].modified
+	local undolevels = vim.bo[s.review_buf].undolevels
+	vim.bo[s.review_buf].undolevels = -1
+	vim.api.nvim_buf_set_lines(s.review_buf, 0, -1, false, r.merged)
+	vim.bo[s.review_buf].undolevels = undolevels
+	vim.bo[s.review_buf].modified = modified
+	vim.api.nvim_buf_clear_namespace(s.review_buf, MARK_NS, 0, -1)
+	s.shown, s.conflicts, s.merged, s.takes = vim.tbl_extend("force", kept, r.shown), r.conflicts, r.merged, {}
+	M.place_marks(s, ours)
+	M.place_del_marks(s)
+	if view then
+		view.lnum = math.max(1, math.min(map_row(diff_indices(old, r.merged), view.lnum, false), math.max(#r.merged, 1)))
+		vim.api.nvim_win_call(rw, function()
+			vim.cmd("diffupdate")
+			vim.fn.winrestview(view)
+		end)
+	end
+	M.refresh_overview(s)
+end
+
 --- Checks that the open review `s` shows the current proposal, rebuilding
 --- it in place when it does not and nothing is unsaved. Returns true when
 --- the view is current (rebuilt or not), else false, why. On entering a
@@ -1799,6 +1853,7 @@ function M.open_review(notes_buf)
 			if sessions[notes_buf] ~= s then
 				return true -- this review is over: drop the autocmd
 			end
+			follow_notes(s)
 			M.view_refresh(s)
 			M.refresh_status_line(notes_buf)
 		end,

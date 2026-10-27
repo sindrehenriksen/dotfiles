@@ -3287,6 +3287,24 @@ do
 	end
 end
 
+print("\n=== the split follows a line deleted in the notes: dp never puts it back ===")
+do
+	local r = new_repo({ "S", "- A", "- B", "- C" })
+	build(r, "2026-10-01", { item("ad", { kind = "add", target = { after = "- A" }, after = "- the add", source = "", headline = "add" }) })
+	local nb = open_notes(r)
+	review.attach(nb)
+	assert_true("the review opens", review.open_review(nb))
+	vim.api.nvim_buf_set_lines(nb, line_of(nb, "- B") - 1, line_of(nb, "- B"), false, {})
+	vim.api.nvim_exec_autocmds("TextChanged", { buffer = nb })
+	local rb = review_buf_of(nb)
+	assert_eq("the review drops the deleted line", { "S", "- A", "- the add", "- C" }, lines_of(rb))
+	go_to(vim.fn.bufwinid(rb), rb, "- the add")
+	vim.cmd("diffupdate")
+	vim.cmd("normal dp")
+	assert_eq("dp takes the add and leaves the line deleted", { "S", "- A", "- the add", "- C" }, lines_of(nb))
+	vim.cmd("silent! %bwipeout!")
+end
+
 print(string.format("\n=== summary: %d passed, %d failed ===", pass, fail))
 if fail > 0 then
 	os.exit(1)
