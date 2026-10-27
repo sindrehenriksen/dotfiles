@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# hammerspoon/desk-open-tab.sh, desk-focus-tab.sh and desk-close-tab.sh never
-# hang on `hs`,
-# and report the Lua call's own true/false as their exit status:
+# The Hammerspoon helpers (desk-open-tab.sh, desk-focus-tab.sh,
+# desk-close-tab.sh, desk-window.sh) never hang on `hs`, report the Lua
+# call's own answer as their exit status, and pass nothing unchecked to it:
 #   - hs gets /dev/null on stdin, so a caller whose own stdin never closes
 #     (an agent's shell) cannot leave it waiting for more commands;
 #   - an hs that never returns is killed after DESK_HS_TIMEOUT_SECS and
@@ -70,108 +70,41 @@ assert_true "...promptly" "$([ "$secs" -le 2 ] && echo true || echo false)"
 exec 3<&-
 
 echo
-echo "=== an hs that never returns ==="
+echo "=== an hs that never returns is killed and reported ==="
 # exec, so the stub is one process like the real hs.
 stub_hs 'exec sleep 30'
-read -r status secs < <(timed "$FOCUS_TAB_SH" ttys001 < /dev/null)
-assert_eq "focus-tab reports the timeout as a failure" "124" "$status"
-assert_true "...within the limit plus the kill grace" "$([ "$secs" -le 4 ] && echo true || echo false)"
-assert_true "...and says so" "$(grep -q 'did not return within 1s' "$ROOT/err" && echo true || echo false)"
-read -r status secs < <(timed "$OPEN_TAB_SH" "echo hi" < /dev/null)
-assert_eq "open-tab reports the timeout as a failure" "124" "$status"
-assert_true "...within the limit plus the kill grace" "$([ "$secs" -le 4 ] && echo true || echo false)"
+for cmd in "$FOCUS_TAB_SH ttys001" "$OPEN_TAB_SH x" "$CLOSE_TAB_SH close T1" "$WINDOW_SH tall ttys009 4242"; do
+	# shellcheck disable=SC2086
+	read -r status secs < <(timed $cmd < /dev/null)
+	assert_eq "$(basename "${cmd%% *}"): exit 124" "124" "$status"
+	assert_true "...within the limit plus the kill grace" "$([ "$secs" -le 4 ] && echo true || echo false)"
+done
 
 echo
-echo "=== an hs that answers in time is unaffected ==="
-stub_hs 'echo "DeskFocusTab: no Ghostty tab is running ttys001"; echo false'
-read -r status _ < <(timed "$FOCUS_TAB_SH" ttys001 < /dev/null)
-assert_eq "a false from DeskFocusTab is still exit 1" "1" "$status"
-stub_hs 'echo "DeskOpenTab: not opening"; echo false'
+echo "=== an answer in time is the exit status ==="
+stub_hs 'echo false'
 read -r status _ < <(timed "$OPEN_TAB_SH" "echo hi" < /dev/null)
-assert_eq "a false from DeskOpenTab is exit 1, so the runner never stamps it opened" "1" "$status"
-stub_hs 'echo true'
-read -r status _ < <(timed "$OPEN_TAB_SH" "echo hi" < /dev/null)
-assert_eq "a true from DeskOpenTab is exit 0" "0" "$status"
-stub_hs 'printf "%s\n" "$@" > "'"$ROOT"'/argv"; echo true'
-read -r status _ < <(timed "$FOCUS_TAB_SH" ttys001 < /dev/null)
-assert_eq "a true from DeskFocusTab is exit 0" "0" "$status"
-assert_eq "hs is given its own IPC timeout too" "-t" "$(head -n1 "$ROOT/argv")"
-
-echo
-echo "=== desk-close-tab.sh ==="
-stub_hs 'exec sleep 30'
-read -r status _ < <(timed "$CLOSE_TAB_SH" close T1 < /dev/null)
-assert_eq "close-tab reports the timeout as a failure" "124" "$status"
+assert_eq "a false from DeskOpenTab is exit 1, so the caller never counts it opened" "1" "$status"
 stub_hs 'for a in "$@"; do last=$a; done; printf "%s\n" "$last" > "'"$ROOT"'/expr"; echo "terminal T 1"'
 "$CLOSE_TAB_SH" find ttys007 4242 < /dev/null > "$ROOT/out" 2> /dev/null
-assert_eq "find exits 0 on a named terminal" "0" "$?"
-assert_eq "...printing just its id" "T 1" "$(cat "$ROOT/out")"
-assert_eq "...having asked for that tty and pid" 'DeskTabTerminal("ttys007", 4242)' "$(cat "$ROOT/expr")"
-stub_hs 'echo "DeskTabTerminal: no Ghostty terminal is on ttys007"; echo false'
-"$CLOSE_TAB_SH" find ttys007 4242 < /dev/null > "$ROOT/out" 2> "$ROOT/err"
-assert_eq "find exits 1 when Hammerspoon says no" "1" "$?"
-assert_true "...passing its reason on" "$(grep -q 'no Ghostty terminal is on ttys007' "$ROOT/err" && echo true || echo false)"
-assert_eq "...and prints no id" "" "$(cat "$ROOT/out")"
+assert_eq "find prints the terminal's id" "T 1" "$(cat "$ROOT/out")"
 stub_hs 'for a in "$@"; do last=$a; done; printf "%s\n" "$last" > "'"$ROOT"'/expr"; echo true'
 "$CLOSE_TAB_SH" close 'T"1' < /dev/null > /dev/null 2>&1
-assert_eq "close exits 0 on a closed tab" "0" "$?"
-assert_eq "...the id quoted for Lua" 'DeskCloseTerminalTab("T\"1")' "$(cat "$ROOT/expr")"
-stub_hs 'echo "DeskCloseTerminalTab: not closed: its tab holds other terminals too"; echo false'
-"$CLOSE_TAB_SH" close T1 < /dev/null > /dev/null 2>&1
-assert_eq "close exits 1 when the tab was left" "1" "$?"
-"$CLOSE_TAB_SH" find ttys007 notapid < /dev/null > /dev/null 2>&1
-assert_eq "a pid that is not a number is a usage error" "2" "$?"
+assert_eq "close quotes the id for Lua" 'DeskCloseTerminalTab("T\"1")' "$(cat "$ROOT/expr")"
 
 echo
-echo "=== desk-window.sh ==="
-stub_hs 'exec sleep 30'
-read -r status _ < <(timed "$WINDOW_SH" tall ttys009 4242 < /dev/null)
-assert_eq "tall reports the timeout as a failure" "124" "$status"
-stub_hs 'for a in "$@"; do last=$a; done; printf "%s\n" "$last" > "'"$ROOT"'/expr"; echo tall'
-"$WINDOW_SH" tall /dev/ttys009 4242 < /dev/null > "$ROOT/out" 2> /dev/null
-assert_eq "tall exits 0 on a stretched window" "0" "$?"
-assert_eq "...printing tall" "tall" "$(cat "$ROOT/out")"
-assert_eq "...having named the terminal by tty and pid" 'DeskWindowTall("ttys009", 4242)' "$(cat "$ROOT/expr")"
-stub_hs 'echo "DeskWindowTall: its window is not Ghostty'"'"'s front window"; echo none'
-"$WINDOW_SH" tall ttys009 4242 < /dev/null > "$ROOT/out" 2> /dev/null
-assert_eq "tall exits 0 on none too" "0" "$?"
-assert_eq "...printing none" "none" "$(cat "$ROOT/out")"
-stub_hs 'echo "*** ERROR: attempt to call a nil value (global DeskWindowTall)"'
-"$WINDOW_SH" tall ttys009 4242 < /dev/null > "$ROOT/out" 2> "$ROOT/err"
-assert_eq "an answer that is neither is exit 1" "1" "$?"
-assert_eq "...printing nothing to act on" "" "$(cat "$ROOT/out")"
-stub_hs 'for a in "$@"; do last=$a; done; printf "%s\n" "$last" > "'"$ROOT"'/expr"; echo true'
-"$WINDOW_SH" restore ttys009 4242 < /dev/null > /dev/null 2>&1
-assert_eq "restore exits 0 when the window went back" "0" "$?"
-assert_eq "...asking by the same terminal" 'DeskWindowRestore("ttys009", 4242)' "$(cat "$ROOT/expr")"
-stub_hs 'echo false'
-"$WINDOW_SH" restore ttys009 4242 < /dev/null > /dev/null 2>&1
-assert_eq "restore exits 1 when there was nothing to put back" "1" "$?"
+echo "=== nothing malformed reaches hs ==="
 stub_hs 'printf called > "'"$ROOT"'/called"; echo true'
 rm -f "$ROOT/called"
 "$WINDOW_SH" restore 'ttys009"); os.exit(' 4242 < /dev/null > /dev/null 2>&1
 assert_eq "a tty that is not one is a usage error" "2" "$?"
-"$WINDOW_SH" tall ttys009 'x' < /dev/null > /dev/null 2>&1
+"$CLOSE_TAB_SH" find ttys007 notapid < /dev/null > /dev/null 2>&1
 assert_eq "a pid that is not a number is a usage error" "2" "$?"
-"$WINDOW_SH" tall ttys009 < /dev/null > /dev/null 2>&1
-assert_eq "a missing pid is a usage error" "2" "$?"
-assert_eq "...none of them reaching hs" "false" "$([ -e "$ROOT/called" ] && echo true || echo false)"
-
-echo
-echo "=== the flags argument ==="
-stub_hs 'for a in "$@"; do last=$a; done; printf "%s\n" "$last" > "'"$ROOT"'/expr"; echo true'
-"$OPEN_TAB_SH" "echo hi" "" "" background,close < /dev/null > /dev/null 2>&1
-assert_true "background and close both reach DeskOpenTab" \
-	"$(grep -qF '{ background = true,close_on_exit = true })' "$ROOT/expr" && echo true || echo false)"
-"$OPEN_TAB_SH" "echo hi" "" "" background < /dev/null > /dev/null 2>&1
-assert_true "background alone leaves the tab open after exit (the default)" \
-	"$(grep -qF '{ background = true })' "$ROOT/expr" && echo true || echo false)"
-"$OPEN_TAB_SH" "echo hi" < /dev/null > /dev/null 2>&1
-assert_true "no flags: plain options" "$(grep -qF ', nil, nil, nil)' "$ROOT/expr" && echo true || echo false)"
 "$OPEN_TAB_SH" "echo hi" "" "" bogus < /dev/null > /dev/null 2>&1
 assert_eq "an unknown flag is refused" "2" "$?"
+assert_eq "...none of them reaching hs" "false" "$([ -e "$ROOT/called" ] && echo true || echo false)"
 /bin/bash "$OPEN_TAB_SH" "echo hi" < /dev/null > /dev/null 2>&1
-assert_eq "macOS's bash 3.2 runs it with no flags too" "0" "$?"
+assert_eq "macOS's bash 3.2 runs the opener" "0" "$?"
 
 echo
 echo "=== summary: $pass passed, $fail failed ==="

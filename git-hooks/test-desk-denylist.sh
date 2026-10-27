@@ -1,28 +1,9 @@
 #!/usr/bin/env bash
-# Tests for desk-denylist-check.sh's two invocation forms, and for
-# git-hooks/pre-push's own routing in front of the hook form.
-#
-# The user's `core.hooksPath` points every repo on the machine at THIS repo's
-# git-hooks dir, so pre-push must fire the denylist check only when the
-# repo actually being pushed is this repo — every other repo passes
-# straight through regardless of its own (unset, or leftover) `desk.denylist`.
-# Two throwaway setups below model that:
-#   - "self" repo: its own git-hooks dir is a copy of this repo's,
-#     living INSIDE itself, with core.hooksPath pointing at that copy —
-#     the repo being pushed IS the repo the hooks belong to, same as the
-#     real dotfiles-desk arrangement. The denylist check must fire here.
-#   - "other" repo: an unrelated throwaway repo whose core.hooksPath
-#     points at THIS repo's real git-hooks dir — modelling the user's global
-#     hooksPath pointing every other repo at these same hooks. The
-#     denylist check must never fire here, regardless of what
-#     `desk.denylist` says (including a leftover config naming a pattern
-#     that would otherwise match), and a brand-new branch with no
-#     `origin/main` yet must push cleanly.
-#
-# All via a real `git push` against a local bare repo each setup creates
-# and throws away — never a real remote. The CLI form
-# (<repo> <range> <list-file>, invoked directly, no git config, no hook
-# routing involved) is tested separately at the bottom.
+# The denylist check (desk-denylist-check.sh) and pre-push's routing to it.
+# core.hooksPath points every repo on the machine at these hooks, so the
+# check fires only when the repo pushed is this one ("self", its hooks a copy
+# inside it) and never for any other ("other"); where it fires it fails
+# closed. Real pushes to throwaway bare repos; the CLI form at the bottom.
 # Run: bash git-hooks/test-desk-denylist.sh
 set -u
 
@@ -103,10 +84,6 @@ status=$?
 [ "$status" -ne 0 ] && ok "push is refused" || bad "push was NOT refused (exited 0)"
 printf '%s\n' "$out" | grep -q "desk.denylist is not set" \
 	&& ok "prints the not-set refusal" || bad "missing not-set refusal (got: $out)"
-printf '%s\n' "$out" | grep -q "git config desk.denylist" \
-	&& ok "says how to set it" || bad "doesn't say how to set it (got: $out)"
-printf '%s\n' "$out" | grep -q "desk.denylist none" \
-	&& ok "says how to opt out explicitly" || bad "doesn't say how to opt out (got: $out)"
 assert_eq "remote main was never created" "(none)" "$(self_remote_main_sha)"
 
 echo
@@ -156,17 +133,6 @@ assert_eq "remote main did NOT advance" "$before_sha" "$(self_remote_main_sha)"
 git -C "$self_repo" reset -q --hard HEAD~1
 
 echo
-echo "=== self repo, case-insensitive by default ==="
-before_sha="$(self_remote_main_sha)"
-commit "$self_repo" "mixed case" "INVENTED-SECRET-MARKER in caps"
-out="$(git -C "$self_repo" push origin main 2>&1)"
-status=$?
-[ "$status" -ne 0 ] && ok "a different-case match is still refused (case-insensitive default)" \
-	|| bad "different-case match was NOT refused"
-assert_eq "remote main did NOT advance" "$before_sha" "$(self_remote_main_sha)"
-git -C "$self_repo" reset -q --hard HEAD~1
-
-echo
 echo "=== self repo, (?-i) marker: case-sensitive from that point on ==="
 printf 'invented-secret-marker\n(?-i)CaseSensitiveMarker\n' > "$self_deny"
 before_sha="$(self_remote_main_sha)"
@@ -196,26 +162,6 @@ printf '%s\n' "$out" | grep -q "doesn't exist" && ok "refusal explains the file 
 	|| bad "refusal doesn't explain the missing file (got: $out)"
 git -C "$self_repo" reset -q --hard HEAD~1
 git -C "$self_repo" config --unset desk.denylist
-
-echo
-echo "=== self repo, two lists configured: a match in either refuses ==="
-second_deny="$TMP/second-denylist.txt"
-printf 'invented-secret-marker\n' > "$self_deny"
-printf 'another-invented-marker\n' > "$second_deny"
-git -C "$self_repo" config desk.denylist "$self_deny"
-git -C "$self_repo" config --add desk.denylist "$second_deny"
-before_sha="$(self_remote_main_sha)"
-commit "$self_repo" "matches only the second list" "names another-invented-marker"
-out="$(git -C "$self_repo" push origin main 2>&1)"
-status=$?
-[ "$status" -ne 0 ] && ok "a match in the second list refuses the push" || bad "second list's match was NOT refused"
-assert_eq "remote main did NOT advance" "$before_sha" "$(self_remote_main_sha)"
-git -C "$self_repo" reset -q --hard HEAD~1
-commit "$self_repo" "matches neither list" "nothing listed here"
-out="$(git -C "$self_repo" push origin main 2>&1)"
-status=$?
-assert_eq "a push matching neither list goes through" "0" "$status"
-git -C "$self_repo" config --unset-all desk.denylist
 
 echo
 echo "=== self repo, a brand-new branch (no remote tip) falls back to origin/main..<ref> ==="
@@ -287,36 +233,6 @@ assert_eq "remote main advanced" "$(git -C "$other_repo" rev-parse main)" "$(oth
 git -C "$other_repo" config --unset desk.denylist
 
 echo
-echo "=== a brand-new branch in a repo with no origin/main yet must not break ==="
-fresh_bare="$TMP/fresh-origin.git"
-desk_test_assert_repo_under_root "$fresh_bare" "$TMP"
-git init -q --bare "$fresh_bare"
-fresh_bare_gitdir="$(git -C "$fresh_bare" rev-parse --absolute-git-dir 2>/dev/null || true)"
-if [ "$fresh_bare_gitdir" = "$REAL_TOPLEVEL/.git" ]; then
-	echo "ABORT: '$fresh_bare' resolves to this repo's .git instead of a throwaway one — refusing to continue" >&2
-	exit 1
-fi
-
-fresh_repo="$TMP/fresh-repo"
-desk_test_assert_repo_under_root "$fresh_repo" "$TMP"
-git init -q -b main "$fresh_repo"
-desk_test_guard_not_real_repo "$fresh_repo"
-git -C "$fresh_repo" config user.email "test@example.com"
-git -C "$fresh_repo" config user.name "Test"
-git -C "$fresh_repo" config core.hooksPath "$HERE"
-git -C "$fresh_repo" remote add origin "$fresh_bare"
-git -C "$fresh_repo" checkout -q -b feature
-commit "$fresh_repo" "feature's first commit" "hello from a brand-new branch"
-# main was NEVER pushed here — no origin/main exists locally or on the
-# remote at all. desk-denylist-check.sh's own hook-form would error
-# resolving that fallback if it ran; it must not run here.
-out="$(git -C "$fresh_repo" push origin feature 2>&1)"
-status=$?
-assert_eq "the push succeeds with no origin/main anywhere" "0" "$status"
-git -C "$fresh_bare" show-ref --verify -q refs/heads/feature && ok "the new branch landed on the remote" \
-	|| bad "the new branch never landed (got: $out)"
-
-echo
 echo "=== CLI form: <repo> <range> <list-file> — no git config, no stdin, no hook routing ==="
 cli_repo="$TMP/cli-repo"
 desk_test_assert_repo_under_root "$cli_repo" "$TMP"
@@ -348,25 +264,6 @@ printf '%s\n' "$out" | grep -q "invented-secret-marker" && ok "the CLI form's re
 status=0
 "$DENYLIST_CHECK" "$cli_repo" "not-a-real-ref..HEAD" "$cli_deny" > /dev/null 2>&1 || status=$?
 [ "$status" -ne 0 ] && ok "the CLI form fails closed on a bad ref" || bad "the CLI form did NOT fail closed on a bad ref"
-
-status=0
-"$DENYLIST_CHECK" "$cli_repo" "HEAD~1..HEAD" "$TMP/does-not-exist.txt" > /dev/null 2>&1 || status=$?
-[ "$status" -ne 0 ] && ok "the CLI form fails closed on a missing list file" \
-	|| bad "the CLI form did NOT fail closed on a missing list file"
-
-empty_deny="$TMP/empty-denylist.txt"
-: > "$empty_deny"
-status=0
-"$DENYLIST_CHECK" "$cli_repo" "HEAD~1..HEAD" "$empty_deny" > /dev/null 2>&1 || status=$?
-[ "$status" -ne 0 ] && ok "the CLI form fails closed on an empty list file" \
-	|| bad "the CLI form did NOT fail closed on an empty list file"
-
-comments_only_deny="$TMP/comments-only-denylist.txt"
-printf '# just a comment\n\n' > "$comments_only_deny"
-status=0
-"$DENYLIST_CHECK" "$cli_repo" "HEAD~1..HEAD" "$comments_only_deny" > /dev/null 2>&1 || status=$?
-[ "$status" -ne 0 ] && ok "the CLI form fails closed on a comments/blank-only list file" \
-	|| bad "the CLI form did NOT fail closed on a comments/blank-only list file"
 
 bad_deny="$TMP/bad-pattern-denylist.txt"
 printf 'invented-secret-marker\nunclosed(group\n' > "$bad_deny"

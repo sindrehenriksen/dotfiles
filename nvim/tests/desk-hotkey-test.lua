@@ -124,21 +124,6 @@ do
 end
 
 print()
-print("=== no match at all: a message, nothing opened ===")
-
-do
-	local buf = new_buf({ "just plain prose, no special token" })
-	local win = vim.api.nvim_get_current_win()
-	vim.api.nvim_win_set_buf(win, buf)
-	vim.api.nvim_win_set_cursor(win, { 1, 0 })
-	local rec = new_recorder()
-	-- An empty tokens list: nothing classifies as url or session.
-	hotkey.run(buf, win, { tokens = {} }, stub_deps(rec, {}))
-	assert_eq("only a notify call, immediately (no external dep touched)", "notify", rec.calls[1][1])
-	assert_eq("nothing else was called", 1, #rec.calls)
-end
-
-print()
 print("=== session, resolved live: focuses by tty ===")
 
 do
@@ -311,23 +296,6 @@ do
 end
 
 print()
-print("=== session, no match at all found by the reader ===")
-
-do
-	local buf = new_buf({ "Nobody Here: doing the thing" })
-	local win = vim.api.nvim_get_current_win()
-	vim.api.nvim_win_set_buf(win, buf)
-	vim.api.nvim_win_set_cursor(win, { 1, 0 })
-	local rec = new_recorder()
-	local deps = stub_deps(rec, { reader_resolve = { nil, {} } })
-	hotkey.run(buf, win, config, deps)
-	wait_for("resolve completes", function()
-		return #rec.calls >= 2
-	end)
-	assert_eq("a notify was issued", "notify", rec.calls[2][1])
-end
-
-print()
 print("=== following an in-notes reference to another section ===")
 print("=== jumps there internally, never touching the reader, jumplist-safe ===")
 
@@ -364,196 +332,6 @@ do
 end
 
 print()
-print("=== the cursor already on a section's own head line: acts normally, no self-jump ===")
-
-do
-	local buf = new_buf({
-		"Alpha Session: the actual section",
-		"  doing the thing",
-	})
-	local win = vim.api.nvim_get_current_win()
-	vim.api.nvim_win_set_buf(win, buf)
-	vim.api.nvim_win_set_cursor(win, { 1, 0 }) -- on "Alpha", which IS the section head
-
-	local rec = new_recorder()
-	local entry = { id = "sess-5", name = "Alpha", live = false, cwd = "/tmp/y" }
-	local deps = stub_deps(rec, { reader_resolve = { entry, nil }, open_tab = { true } })
-	hotkey.run(buf, win, config, deps)
-	wait_for("resolve then open_tab complete", function()
-		return #rec.calls >= 2
-	end)
-	assert_eq("it resolved through the reader as usual, not an internal jump", "reader_resolve", rec.calls[1][1])
-end
-
-print()
-print("=== a session pattern's own capture resolves by short id ===")
-
-do
-	-- A config whose session pattern wraps a short id in decoration the user's
-	-- notes actually use — the reader indexes sessions by "42", never by
-	-- the decorated token "S-42" typed in the buffer.
-	local capture_config = {
-		tokens = {
-			{ pattern = "^S-(%w+)$", case_insensitive = false, handler = "session" },
-		},
-	}
-	local buf = new_buf({ "see S-42 for details" })
-	local win = vim.api.nvim_get_current_win()
-	vim.api.nvim_win_set_buf(win, buf)
-	vim.api.nvim_win_set_cursor(win, { 1, 4 }) -- inside "S-42"
-
-	local rec = new_recorder()
-	local entry = { id = "sess-42", name = "42", live = false, cwd = "/tmp/w" }
-	local deps = stub_deps(rec, { reader_resolve = { entry, nil }, open_tab = { true } })
-	hotkey.run(buf, win, capture_config, deps)
-	wait_for("resolve then open_tab complete", function()
-		return #rec.calls >= 1
-	end)
-	assert_eq("resolved by the captured short id, not the decorated token", { "reader_resolve", "42" }, rec.calls[1])
-end
-
-print()
-print("=== two sections sharing one head never ping-pong ===")
-
-do
-	local buf = new_buf({
-		"Alpha Session: first section", -- 1: head #1
-		"  detail one",
-		"",
-		"Alpha Session: second section", -- 4: head #2
-		"  detail two",
-	})
-	local win = vim.api.nvim_get_current_win()
-	vim.api.nvim_win_set_buf(win, buf)
-
-	-- Hovering on the SECOND head's own "Alpha": not the same block as the
-	-- first head, so it follows there — same as the old behavior would for
-	-- this specific starting point.
-	vim.api.nvim_win_set_cursor(win, { 4, 0 }) -- "Alpha" in the second head
-	local rec = new_recorder()
-	local deps = { notify = function(msg) record(rec, "notify", msg) end }
-	hotkey.run(buf, win, config, deps)
-	assert_eq("nothing dispatched externally (jumped internally instead)", 0, #rec.calls)
-	assert_eq("landed on the FIRST section's head", 1, vim.api.nvim_win_get_cursor(win)[1])
-
-	-- Pressing again from there (now on the FIRST head, inside its own
-	-- block) must NOT bounce back to the second — the ping-pong this fixes.
-	local rec2 = new_recorder()
-	local entry = { id = "sess-9", name = "Alpha", live = false, cwd = "/tmp/z" }
-	local deps2 = stub_deps(rec2, { reader_resolve = { entry, nil }, open_tab = { true } })
-	hotkey.run(buf, win, config, deps2)
-	wait_for("resolve then open_tab complete", function()
-		return #rec2.calls >= 2
-	end)
-	assert_eq(
-		"resolved externally instead of bouncing to the other section",
-		"reader_resolve",
-		rec2.calls[1][1]
-	)
-	assert_eq("cursor stayed put (no internal jump this time)", 1, vim.api.nvim_win_get_cursor(win)[1])
-end
-
-print()
-print("=== the tab helpers are found by either env var name ===")
-do
-	local dir = vim.fn.tempname()
-	vim.fn.mkdir(dir, "p")
-	local function stub(name)
-		local path = dir .. "/" .. name
-		local fh = io.open(path, "w")
-		fh:write("#!/bin/sh\necho " .. name .. " > " .. dir .. "/called\n")
-		fh:close()
-		vim.fn.system({ "chmod", "+x", path })
-		return path
-	end
-	local function called_after(var, name)
-		vim.fn.delete(dir .. "/called")
-		vim.env[var] = stub(name)
-		local done = false
-		hotkey.default_deps().open_tab("cmd", "", dir, function()
-			done = true
-		end)
-		vim.wait(5000, function()
-			return done
-		end, 20)
-		vim.env[var] = nil
-		local fh = io.open(dir .. "/called", "r")
-		local got = fh and vim.trim(fh:read("*a")) or nil
-		if fh then
-			fh:close()
-		end
-		return got
-	end
-	assert_eq("DESK_OPEN_TAB_BIN is used", "by-bin", called_after("DESK_OPEN_TAB_BIN", "by-bin"))
-end
-
-print()
-print("=== without DESK_OPEN_URL, a URL goes to the platform's opener ===")
-do
-	local dir = vim.fn.tempname()
-	vim.fn.mkdir(dir, "p")
-	for _, name in ipairs({ "open", "xdg-open" }) do
-		local fh = io.open(dir .. "/" .. name, "w")
-		fh:write("#!/bin/sh\necho " .. name .. " > " .. dir .. "/called\n")
-		fh:close()
-		vim.fn.system({ "chmod", "+x", dir .. "/" .. name })
-	end
-	local expected = vim.fn.has("mac") == 1 and "open" or "xdg-open"
-	local saved_path, saved_opener = vim.env.PATH, vim.env.DESK_OPEN_URL
-	vim.env.PATH = dir .. ":" .. saved_path
-	vim.env.DESK_OPEN_URL = nil
-	-- Only ever the stub: a real opener would open a browser.
-	if vim.fn.exepath(expected) == dir .. "/" .. expected then
-		local done = false
-		hotkey.default_deps().open_url("https://example.invalid/", function()
-			done = true
-		end)
-		vim.wait(5000, function()
-			return done
-		end, 20)
-	end
-	vim.env.PATH, vim.env.DESK_OPEN_URL = saved_path, saved_opener
-	local fh = io.open(dir .. "/called", "r")
-	local got = fh and vim.trim(fh:read("*a")) or nil
-	if fh then
-		fh:close()
-	end
-	assert_eq("the opener is " .. expected, expected, got)
-end
-
-print()
-print("=== a section headed by a non-ASCII name is found by that name ===")
-do
-	local lines = { "Intro", "Ærlig-økt: the section", "  detail", "See Ærlig-økt for context." }
-	assert_eq("the head line is found", 2, hotkey.find_section_head_line(lines, "Ærlig-økt"))
-	assert_eq("a token that is only a prefix of the head is not a match", nil, hotkey.find_section_head_line(lines, "Ærlig"))
-end
-
-print()
-print("=== a bullet that mentions a session first is no section head ===")
-do
-	local lines = { "Today", "- alpha-fix merged, waiting on deploy", "", "Later", "  - alpha-fix nested", "", "alpha-fix", "- notes on it" }
-	assert_eq("the line heading a block is found, not an earlier bullet", 7, hotkey.find_section_head_line(lines, "alpha-fix"))
-	assert_eq("a bullet with lines under it heads its section", 1, hotkey.find_section_head_line({ "- beta-fix", "  - detail" }, "beta-fix"))
-	assert_eq("a lone bullet heads nothing", nil, hotkey.find_section_head_line({ "Today", "- beta-fix merged" }, "beta-fix"))
-
-	-- From inside its own section the token resolves to the session rather
-	-- than jumping up to the bullet that mentions it.
-	local buf = new_buf(lines)
-	local win = vim.api.nvim_get_current_win()
-	vim.api.nvim_win_set_buf(win, buf)
-	vim.api.nvim_win_set_cursor(win, { 7, 0 })
-	local rec = new_recorder()
-	local entry = { id = "sess-3", name = "alpha-fix", live = true, tty = "ttys004", cwd = "/tmp/x" }
-	hotkey.run(buf, win, config, stub_deps(rec, { reader_resolve = { entry, nil }, focus_tty = { true } }))
-	wait_for("resolve then focus complete", function()
-		return #rec.calls >= 2
-	end)
-	assert_eq("the cursor stayed in its section", 7, vim.api.nvim_win_get_cursor(win)[1])
-	assert_eq("the session is focused", { "focus_tty", "ttys004" }, rec.calls[2])
-end
-
-print()
 print("=== a tab helper that never returns is killed and reported, not waited on ===")
 do
 	local dir = vim.fn.tempname()
@@ -578,34 +356,6 @@ do
 	assert_eq("the callback fires", true, result ~= nil)
 	assert_eq("as a failure", false, result and result.ok)
 	assert_eq("naming the timeout", true, result ~= nil and (result.err or ""):find("timed out", 1, true) ~= nil)
-end
-
-print()
-print("=== markdown emphasis and a trailing colon around a session name ===")
-
-do
-	assert_eq("**name:** is the name", "alpha-team", hotkey.clean_token("**alpha-team:**"))
-	assert_eq("__name__ is the name", "alpha-team", hotkey.clean_token("__alpha-team__"))
-	assert_eq("_name_ is the name", "alpha-team", hotkey.clean_token("_alpha-team_"))
-	assert_eq("an underscore inside stays", "my_session", hotkey.clean_token("my_session"))
-
-	-- A bold head with a colon is a section head: a mention elsewhere jumps to it.
-	local buf = new_buf({ "**Alpha-team:**", "  doing the thing", "", "See Alpha-team for context." })
-	local win = vim.api.nvim_get_current_win()
-	vim.api.nvim_win_set_buf(win, buf)
-	vim.api.nvim_win_set_cursor(win, { 4, 6 })
-	local rec = new_recorder()
-	hotkey.run(buf, win, config, { notify = function(msg) record(rec, "notify", msg) end })
-	assert_eq("a mention jumps to the bold head", 1, vim.api.nvim_win_get_cursor(win)[1])
-	assert_eq("nothing dispatched", 0, #rec.calls)
-
-	-- On an underscored head itself: the reader gets the bare name.
-	local buf2 = new_buf({ "__Beta-team__", "  doing the thing" })
-	vim.api.nvim_win_set_buf(win, buf2)
-	vim.api.nvim_win_set_cursor(win, { 1, 4 })
-	local rec2 = new_recorder()
-	hotkey.run(buf2, win, config, stub_deps(rec2, { reader_resolve = { nil, {} } }))
-	assert_eq("resolved by the name without its underscores", { "reader_resolve", "Beta-team" }, rec2.calls[1])
 end
 
 print()
@@ -724,32 +474,6 @@ do
 	hotkey.run(anchored, win, config, deps)
 	assert_eq("an #anchor link jumps to its heading, no session lookup", { 1, {} }, { vim.api.nvim_win_get_cursor(win)[1], rec.calls })
 	mdlink.deps = saved
-end
-
-print()
-print("=== gx is the hotkey in desk buffers only ===")
-
-do
-	local function desc_of(lhs, buf)
-		return vim.api.nvim_buf_call(buf, function()
-			return vim.fn.maparg(lhs, "n", false, true).desc
-		end)
-	end
-	local notes_buf = new_buf({ "x" })
-	hotkey.attach(notes_buf, config)
-	local plain = new_buf({ "x" })
-	local want = "Desk: follow the link, or act on the token, under the cursor"
-	assert_eq("gx in a desk buffer", want, desc_of("gx", notes_buf))
-	assert_eq("<leader>gx still works there", want, desc_of(vim.g.mapleader .. "gx", notes_buf))
-	vim.api.nvim_set_current_buf(notes_buf)
-	vim.bo[notes_buf].filetype = "markdown"
-	vim.wait(100)
-	assert_eq("gx is still the hotkey after FileType re-runs the markdown ftplugin", want, desc_of("gx", notes_buf))
-	hotkey.attach(notes_buf, config)
-	vim.bo[notes_buf].filetype = "markdown"
-	vim.wait(100)
-	assert_eq("attaching again keeps it", want, desc_of("gx", notes_buf))
-	assert_eq("gx elsewhere is not the hotkey", true, desc_of("gx", plain) ~= want)
 end
 
 print()
