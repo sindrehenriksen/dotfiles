@@ -10,10 +10,6 @@ Three-column layout (browser | terminals | nvim tabs) — design in `docs/window
 - [ ] Linux: Tiling Shell GNOME extension (try first); Forge as fallback
 - [x] Cross-window directional focus and swap on Dvorak home row (macOS: Hammerspoon; Linux: TBD in the GNOME extension)
 
-## Cleanup
-
-- [ ] Decide whether to drop `vim-slime` (installed but unused)
-
 ## Agent CLIs
 
 - [ ] Linux: gh comes from mise (`aqua:cli/cli`, machine-local `~/.config/mise/config.toml`), pinned at 2.103.2 on 2026-10-24, with `expiring_credentials` enabled (public preview): the token sits in plain text in `hosts.yml`, so a leaked copy should die within hours. The setting applies only to a new login, so the token there stays the old, non-expiring one until GitHub CLI is revoked under github.com/settings/applications and `gh auth login` is run again. Nothing here caches `gh auth token`, which is the one thing the switch breaks.

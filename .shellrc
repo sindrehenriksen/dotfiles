@@ -11,17 +11,10 @@ export RIPGREP_CONFIG_PATH="$HOME/.config/ripgrep/ripgreprc"
 # variable is only consulted when no `model` key exists — press `s` in the
 # picker to switch for the session alone and leave it that way.
 export ANTHROPIC_DEFAULT_MODEL="opus[1m]"
-# The prompt cache lifetime is left to Claude Code on purpose: it keeps a
-# session's cache warm for about an hour, which suits sessions picked up after
-# 5-60 minutes. Since mid-October a server flag (`tengu_sequential_cloud` in
-# ~/.claude.json's cached features) does that with 5-minute entries it touches
-# every 30 s, instead of 1-hour ones; idle compaction is a separate flag
-# (`tengu_sunny_locket`), and no setting turns it on: `idleCompaction` only
-# turns it off, and it also skips any session not writing 1-hour entries.
-# Neither is ours to set. Revisit if the touches turn
-# out to count against usage limits (anthropics/claude-code#102338), or on
-# moving to API-key or cloud-provider auth: `promptCacheTtl: "1h"` in
-# settings.json then pins 1-hour writes and skips the touches.
+# The prompt cache lifetime is left to Claude Code, which keeps a session's
+# cache warm for about an hour. Revisit if its keepalive touches count against
+# usage limits (anthropics/claude-code#102338), or on API-key or cloud-provider
+# auth, where `promptCacheTtl: "1h"` in settings.json pins 1-hour writes.
 
 # Platform detection
 if [[ "$(uname)" == "Darwin" ]]; then
@@ -120,9 +113,9 @@ else
 fi
 
 alias gbcp="git branch | grep '^\*' | cut -d ' ' -f 2 | tr -d '\n' | pbcopy"
-# Rebase onto updated main (taking into account that main upstream may be "main")
-alias grbm='gbcp ; git checkout main ; git pull ; git checkout $(pbpaste) ; git rebase main'
-alias grbmi='gbcp ; git checkout main ; git pull ; git checkout $(pbpaste) ; git rebase -i main'
+# Rebase onto the remote's main.
+alias grbm='git pull --rebase origin main'
+alias grbmi='git fetch origin main && git rebase -i origin/main'
 
 # Open a diff in nvim's Diffview. Defaults to the branch's own changes.
 gdv() {
