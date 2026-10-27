@@ -3314,6 +3314,14 @@ do
 	assert_eq("shown", 1, res and #vim.tbl_keys(res.shown))
 end
 
+print("\n=== an edit the user already typed by hand, beside another edit of theirs, is not drawn twice ===")
+do
+	local r = new_repo({ "S", "- A", "- B", "- C" })
+	build(r, "2026-10-01", { item("ed", { kind = "edit", target = { at = "- B" }, before = "- B", after = "- B2", source = "", headline = "edit B" }) })
+	local res = proposal.reviewable(r, proposal.read(r), "notes.md", { "S", "- A", "- B2", "- C2" })
+	assert_eq("merged as the user's text", { "S", "- A", "- B2", "- C2" }, res and res.merged)
+end
+
 print(string.format("\n=== summary: %d passed, %d failed ===", pass, fail))
 if fail > 0 then
 	os.exit(1)

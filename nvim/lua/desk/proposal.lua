@@ -600,8 +600,9 @@ local function resolve_conflict(ours, base, theirs)
 					vim.list_extend(out, o_text[o])
 				end
 				-- Both changed it: the proposal's new text goes below the
-				-- user's, still shown, as conflicting with it.
-				if t and not done["t" .. t] then
+				-- user's, still shown, as conflicting with it. The same new
+				-- text on both sides is the user's already, shown once.
+				if t and not done["t" .. t] and not vim.deep_equal(t_text[t], o_text[o]) then
 					done["t" .. t] = true
 					vim.list_extend(out, t_text[t])
 				end
