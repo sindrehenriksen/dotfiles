@@ -121,22 +121,18 @@ reports also drowns in work it did not ask for.
 to the facilitator, the facilitator handing back to the lead: the
 decision, the trade-off, what came out differently than expected,
 what is still open — not the transcript of how it was reached. The
-reasoning is `execution`, "What reaches the user"; the mechanical
-half is that the lead's main loop is what a human reads along, so a
-round reporting upward in full detail buries it one hop at a time.
+reasoning is the global instructions, "Calibrating what surfaces"; the
+mechanical half is that the lead's main loop is what a human reads
+along, so a round reporting upward in full detail buries it one hop at
+a time.
 
 **The facilitator only facilitates.** It runs no gates, writes no
 code, applies no migrations and makes no commits — and that holds
 hardest when a round is long or unattended, which is exactly when it
 dissolves. Being the only agent still awake is not a reason to become
-the dev; it is a reason to spawn one.
-
-**The facilitator facilitates — that is the whole of the role**, and a
-second property falls out of it: the round's traffic — briefs going
-out, roles reporting back, reviews being convened — happens a level
-down, so the lead's main loop, which is what a human reads along,
-stays followable. The lead spawns the facilitator and the facilitator
-spawns everyone else. **When the owner reads along in the lead's
+the dev; it is a reason to spawn one. It also keeps the round's
+traffic a level down, so the lead's main loop stays followable. The
+lead spawns the facilitator and the facilitator spawns everyone else. **When the owner reads along in the lead's
 thread, a round of more than one role gets one**, as does a round that
 will outlast a few exchanges, so that thread sees only what the
 facilitator cannot answer. Below that the lead runs the round itself
@@ -147,19 +143,13 @@ unclear which, spawn one: an agent is cheap and the loop is not.
 The lead never hands over owner contact, scope, or the final report.
 
 **Exactly one agent writes per checkout; every other role is
-read-only.** Two writers on one index is the hazard: a pre-commit
-framework stashes the whole unstaged tree, so a concurrent writer's
-in-flight edits silently revert.
+read-only** (why: `execution`, "Delegate by default").
 
 ## Debugging
 
-`execution` has how a reported defect is worked: the reproduction in
-the reported state before any hypothesis, reading the instrument the
-product already emits, naming what a measurement cannot see, and
-finding what changed before redesigning anything for a regression.
-
-What is a round's to decide is where it goes, and the answer is
-almost always **straight to a dev** — reproduce, find the cause, fix
+How a reported defect is worked is `execution`, "Debugging starts at
+a reproduction". What is a round's to decide is where it goes, and the
+answer is almost always **straight to a dev** — reproduce, find the cause, fix
 it. The trio is convened once the problem turns out to be complex or
 wide-reaching, not as the standard path. Most defects do not need a
 round.
@@ -337,27 +327,13 @@ calls compulsory.
 
 ## What reaches the owner
 
-**Short, plain, and only what changes what they decide.** They can
-follow any level of detail; the constraint is time, never background.
-So the test is never "will this be understood" but "does this detail
-change anything".
+As the global instructions say, "Calibrating what surfaces". What a
+round adds:
 
-- **Lead with what they would observe** — what happens in the app,
-  what they can and cannot do that they could before. Identifiers,
-  file paths and field names come after that, and only where a plain
-  sentence cannot carry the point. A finding built out of function
-  names hands the reading back rather than doing it.
-- **Do not relay a report.** Agents write for the lead, not for the
-  owner. One long enough that forwarding feels easier is the signal
-  to compress harder.
 - **Progress is not news.** Say something when a decision is theirs,
   when a number changes what they thought, or when something they
-  were told is now wrong. A round that is simply proceeding needs no
-  message, and a running commentary on it is worse than silence.
-- **Send only what they need to read.** Not a shorter version of
-  everything — less of it. If a paragraph would not change what they
-  do, it does not go. Length is the most common complaint and the
-  easiest to fix.
+  were told is now wrong; a round that is simply proceeding needs no
+  message.
 - **Taste question or design question?** Send the first, answer the
   second. A question only the owner can answer is worth their
   attention; one the team could settle by looking is not.
