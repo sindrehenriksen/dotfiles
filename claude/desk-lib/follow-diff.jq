@@ -34,14 +34,6 @@
 #                   in the window on either
 #   lookback        true for a --lookback-minutes run with no snapshots to
 #                   compare against
-#   ticket_digest   true for the morning pass's ticket digest (ticket-digest.sh)
-#                   rather than the follow pass: no sessions and no queues, and
-#                   it prints {tickets, prs, ticket_events, pr_events} instead
-#                   of a follow state
-#   ticket_digest_rules  the ticket digest's own counting: {self: as above;
-#                   pr_skip_authors: regexes for PR authors whose PRs are
-#                   counted (dependency bots); pr_keep: a regex on a PR's
-#                   title or labels that keeps one of those PRs anyway}
 #
 # Only substantive changes are queued: new human content, a change to scope
 # or plan, a ticket or PR new to the follow. The rest (a status or state move
@@ -59,7 +51,6 @@
 | .baseline_jira as $baseline_jira | .baseline_gh as $baseline_gh | .queue_max as $queue_max
 | (.skip.bot_authors // []) as $bot_authors | (.skip.bot_signatures // []) as $bot_signatures
 | (.lookback // false) as $lookback
-| (.ticket_digest // false) as $digest
 |
 
 # HTML comments (bots' hidden metadata) are dropped: they carry nothing a
@@ -242,12 +233,9 @@ def ticket_events:
 	        # tracked key (a new child), is news. One only first seen, with
 	        # no snapshot to compare (a mention, a lookback run), is counted:
 	        # what moved on it shows as its comments.
-	        # The ticket digest has no follow for a ticket to be new to, and a
-	        # ticket created in its window is the new-tickets fetch's to report.
 	        ((($i.created | ts) // 0) > $jira_since) as $created
 	        | { key: $i.key, title: $i.summary, at: (($i.updated | ts) // $now), creator: (if $created then $i.creator else null end),
-	            skip: (if $digest then (if $created then "new tickets" else "first-seen tickets" end)
-	                   elif $created or (($i.parent != null) and (all_keys | index($i.parent)) != null and ($lookback | not))
+	            skip: (if $created or (($i.parent != null) and (all_keys | index($i.parent)) != null and ($lookback | not))
 	                   then null else "first-seen tickets" end),
 	            what: ((if $created then "created" else "new under the follow" end)
 	                   + " (\($i.type // "ticket"), \($i.status)\(if $i.assignee then ", " + $i.assignee else "" end))") },
@@ -304,15 +292,6 @@ def pr_field_changes($prev):
 		 then {text: ($p | checks_line), skip: "check results"} else empty end)
 	];
 
-# The ticket digest's split for a PR: it covers work no follow session
-# holds, so a PR moving through its life (opened, ready for review, merged,
-# closed) is the news there, and its ongoing work (commits, a retitle,
-# description edits) is counted instead.
-def digest_pr_split:
-	if .kind == "state" or .kind == "ready" then .skip = null
-	elif .kind == "update" then .skip = "PR updates"
-	else . end;
-
 def pr_comment_changes($prev):
 	. as $p
 	| if $p.comments == null then []
@@ -332,7 +311,7 @@ def pr_events:
 	($state.prs // {}) as $snap
 	| [ ($prs // [])[] | . as $p
 	    | ($snap[$p.id] // null) as $prev
-	    | {key: $p.id, title: $p.title, pr_keys: $p.keys, url: $p.url, pr_author: ($p.author // null), pr_labels: ($p.labels // [])} as $base
+	    | {key: $p.id, title: $p.title, pr_keys: $p.keys, url: $p.url, pr_author: ($p.author // null)} as $base
 	    | if $baseline_gh then empty
 	      elif $prev == null then
 	        # A PR opened in the window is news; one only first seen (it
@@ -344,7 +323,7 @@ def pr_events:
 	                          + " (\($p.state | ascii_downcase)\(if $p.draft then ", draft" else "" end), branch \($p.branch))")},
 	          ($p | pr_comment_changes({}) | .[] | $base + .)
 	      else
-	        (($p | pr_field_changes($prev) | if $digest then map(digest_pr_split) else . end) as $f
+	        (($p | pr_field_changes($prev)) as $f
 	         | field_event($f) | $base + {at: (($p.updated | ts) // $now), kinds: [$f[].kind // empty]} + .),
 	          ($p | pr_comment_changes($prev) | .[] | $base + .)
 	      end ];
@@ -381,16 +360,13 @@ def ticket_index:
 	| reduce $all[] as $i ({}; .[$i.key] = ((.[$i.key] // {}) * $i
 		| .text = ([.summary, .desc, (.comments // [])[].body] | map(select(. != null)) | join("\n"))));
 
-# The user's own moves are counted, by both the follow pass and the ticket
-# digest, and the digest's own counting rules on top, applied to events
-# still forwarded. A ticket's own creation is told apart by its creator and
-# its comments by their author; its field moves, which a search result
-# gives no author, by its changelog (follow.sh's desk_follow_own_field_moves).
-(.ticket_digest_rules.self // .self // []) as $self
+# The user's own moves are counted. A ticket's own creation is told apart by
+# its creator and its comments by their author; its field moves, which a
+# search result gives no author, by its changelog (follow.sh's
+# desk_follow_own_field_moves).
+(.self // []) as $self
 | (.own_field_moves // {}) as $own_field_moves
 | (.own_check // "off") as $own_check
-| (.ticket_digest_rules.pr_skip_authors // []) as $pr_skip_authors
-| (.ticket_digest_rules.pr_keep // null) as $pr_keep
 |
 def is_self($who): ($who // "") as $w | any($self[]; ascii_downcase == ($w | ascii_downcase));
 def skip_unless($kind): if .skip == null then .skip = $kind else . end;
@@ -415,26 +391,9 @@ def own_pr_rules:
 	# user's; new commits, a retitle or a description edit may be someone
 	# else's, so the follow pass forwards an event carrying one, and the
 	# user's newly opened PR when anyone else has committed to it (or its
-	# commits could not be read). The ticket digest counts those as PR
-	# updates anyway.
-	elif is_self(.pr_author) and ($digest or (((.kinds // []) | index("update") | not) and (others_committed | not))) then skip_unless("own PR moves")
+	# commits could not be read).
+	elif is_self(.pr_author) and ((.kinds // []) | index("update") | not) and (others_committed | not) then skip_unless("own PR moves")
 	else . end;
-def digest_pr_rules:
-	if (.pr_author // "") as $a | any($pr_skip_authors[]; . as $re | $a | test($re; "i"))
-		and ($pr_keep == null or (([.title] + .pr_labels) | any(.[]; test($pr_keep; "i"))) | not)
-	then skip_unless("dependency PRs")
-	else own_pr_rules end;
-
-# Snapshots the ticket digest has not seen move for this long are dropped, so its
-# state stays bounded; a ticket that comes back is first-seen again.
-def recent: with_entries(select(((.value.updated | ts) // $now) > $now - 180 * 86400));
-
-if $digest then
-	{ tickets: (new_ticket_snapshots | recent),
-	  prs: (if $prs == null then ($state.prs // {}) else new_pr_snapshots end | recent),
-	  ticket_events: [ticket_events[] | own_ticket_rules],
-	  pr_events: [pr_events[] | digest_pr_rules] }
-else
 scope_maps as $maps
 | ticket_index as $tix
 | [ticket_events[] | own_ticket_rules] as $tev
@@ -481,4 +440,3 @@ scope_maps as $maps
 	(tracked($ent.value) | map($tickets[.].done // false)) as $done
 	| if ($done | length) > 0 and ($done | all)
 	  then .[$ent.key] = ($state.all_closed[$ent.key] // $now) else . end))
-end

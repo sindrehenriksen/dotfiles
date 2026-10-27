@@ -55,10 +55,10 @@ extract_budget() {
 echo "=== every call gets the failsafe ceiling ==="
 PASS_SCRATCH="$(desk_scratch_dir test-pass)"
 step_default='{"id":"F","kind":"fetch","tools":["Read"],"connector":false,"timeout":30}'
-desk_step_fetch testpass "$step_default" "" '{}' > /dev/null
+desk_step_model_call testpass "$step_default" > /dev/null
 assert_eq "the generic default, 25" "25" "$(extract_budget)"
 step_custom='{"id":"F2","kind":"fetch","tools":["Read"],"connector":false,"timeout":30,"max_budget_usd":5}'
-desk_step_fetch testpass "$step_custom" "" '{}' > /dev/null
+desk_step_model_call testpass "$step_custom" > /dev/null
 assert_eq "a step's own value is ignored" "25" "$(extract_budget)"
 rm -rf "$PASS_SCRATCH"
 
@@ -66,7 +66,7 @@ echo
 echo "=== the config's default_max_budget_usd is the one ceiling when set ==="
 PASS_SCRATCH="$(desk_scratch_dir test-pass)"
 echo '{"default_max_budget_usd": 40}' > "$DESK_CONFIG"
-desk_step_fetch testpass "$step_custom" "" '{}' > /dev/null
+desk_step_model_call testpass "$step_custom" > /dev/null
 assert_eq "the config's value" "40" "$(extract_budget)"
 rm -rf "$PASS_SCRATCH"
 

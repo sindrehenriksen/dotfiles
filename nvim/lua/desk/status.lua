@@ -5,17 +5,10 @@
 -- since which plugin (if any) is a per-machine choice outside desk's
 -- remit.
 --
--- The per-pass fields (`last_run`, `result`, `stopped_at`,
--- `failed_sources`) are pinned; the rest is the runner's own shape
--- (claude/desk-lib/status.sh, read-only here): `proposal` is `{state:
--- "pending"|"partial"|"none", partial, overflow: {act, worth_knowing,
--- wildcard}, counts, untaken, dropped}` — `untaken` is how many suggestions still
--- wait on the user (not taken, not declined), `dropped` how many the pass
--- threw out for an unverifiable source URL, and `state` alone doesn't mean
--- "something's unresolved", so the segment only shows when `untaken` is
--- nonzero. `closes` / `refused_closes` / `failed_closes` / `lockouts` are
--- each a plain count. If the runner ends up writing something else, this is
--- the one place to change.
+-- The file's shape is claude/desk-lib/status.sh's. `proposal.untaken` is
+-- how many suggestions still wait on the user; `state` alone doesn't mean
+-- something is unresolved, so the segment shows only when `untaken` is
+-- nonzero.
 local M = {}
 
 --- The status file path: `$DESK_STATUS_FILE`, else `status.json` in
@@ -74,9 +67,8 @@ function M.live_count(left, saved)
 	return string.format("%d left (%d saved)", left, saved or left)
 end
 
---- The proposal segment: "proposal pending", "proposal partial", and any
---- "+N ACT held back" / worth_knowing / wildcard counts of items over the caps. Only
---- shown while at least one suggestion still waits on the user (`untaken`).
+--- The proposal segment: "proposal pending" or "proposal partial", shown
+--- while at least one suggestion still waits on the user (`untaken`).
 local function proposal_segments(status, opts)
 	local out = {}
 	local p = status.proposal or {}
@@ -94,36 +86,6 @@ local function proposal_segments(status, opts)
 			return out
 		end
 		out[#out + 1] = string.format("proposal %s (%d untaken)", (p.state and p.state ~= "none") and p.state or "pending", untaken)
-	end
-	local tier_labels = { act = "ACT", worth_knowing = "worth knowing", wildcard = "wildcard" }
-	for _, tier in ipairs({ "act", "worth_knowing", "wildcard" }) do
-		local n = p.overflow and p.overflow[tier]
-		if n and n > 0 then
-			out[#out + 1] = string.format("+%d %s held back", n, tier_labels[tier])
-		end
-	end
-	return out
-end
-
---- Segments for any closes/refusals/lockouts — each only shown when it's
---- actually nonzero, so a clean status line stays a clean status line. The
---- real closes name the sessions closed most recently (`closed_names`).
-local function counts_segments(status)
-	local out = {}
-	-- "closes" (real, successful closes) never had a segment at all —
-	-- only its refused/failed/lockout counterparts did, so a clean run's
-	-- own closes were invisible next to its failures.
-	for _, field in ipairs({ "closes", "refused_closes", "failed_closes", "lockouts" }) do
-		local n = status[field]
-		if n and n > 0 then
-			local label = string.format("%d %s", n, (field:gsub("_", " ")))
-			local names = field == "closes" and status.closed_names
-			if type(names) == "table" and #names > 0 then
-				local shown = vim.list_slice(names, math.max(1, #names - 2))
-				label = label .. " (" .. table.concat(shown, ", ") .. ")"
-			end
-			out[#out + 1] = label
-		end
 	end
 	return out
 end
@@ -156,9 +118,6 @@ function M.summary(status, opts)
 	-- Shown even with nothing else waiting, so no suggestion waits unseen.
 	if opts and (opts.deferred or 0) > 0 then
 		segments[#segments + 1] = string.format("%d deferred", opts.deferred)
-	end
-	for _, s in ipairs(counts_segments(status)) do
-		segments[#segments + 1] = s
 	end
 	return table.concat(segments, " · ")
 end

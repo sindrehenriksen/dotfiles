@@ -3,7 +3,7 @@
 # proposal, for review like any pass's (docs/desk.md, "Edits from sessions").
 # Installed as ~/.local/bin/desk-propose.
 #
-#   desk-propose [--pass <name>] [--date <YYYY-MM-DD>] [--allowed-urls <file>] [--dry-run] <items.json>
+#   desk-propose [--pass <name>] [--date <YYYY-MM-DD>] [--dry-run] <items.json>
 #   desk-propose --withdraw [--dry-run] <id>...
 #   desk-propose --list
 #
@@ -30,15 +30,9 @@
 #
 # Every item is checked before anything is staged, and one that does not
 # fit the shape fails the whole call, naming it, so the session can fix it
-# and run again. Text is cleaned the way a pass cleans a reply (control
-# characters, ANSI sequences, modelines and agent markers removed), but its
-# URLs are kept: the user reviews a session's items before taking them,
-# which the runner's URL check stands in for on unattended calls.
-# --allowed-urls <file> brings that check back, for items judged from
-# fetched material (a pass's brief writes the file, one URL per line): an
-# item whose URL `source` is not in it fails the whole call, an
-# `also_sources` URL not in it is dropped, and any other URL in an item's
-# text becomes `[url removed]`, except one an edit's `before` carries.
+# and run again. Text is cleaned (control characters, ANSI sequences,
+# modelines and agent markers removed); its
+# URLs are kept, since the user reviews every item before taking it.
 # --dry-run checks and prints the cleaned items without staging them.
 #
 # A staging prints the id the proposal gave each item it staged, which is
@@ -66,7 +60,6 @@ while [ -h "$_src" ]; do
 done
 DESK_PROPOSE_DIR="$(cd -P "$(dirname "$_src")" && pwd)"
 source "$DESK_PROPOSE_DIR/desk-lib/common.sh"
-source "$DESK_PROPOSE_DIR/desk-lib/git-ops.sh"
 source "$DESK_PROPOSE_DIR/desk-lib/validate.sh"
 
 usage() { sed -n '6p' "$DESK_PROPOSE_DIR/desk-propose" | sed 's/^#   //' >&2; exit 2; }
@@ -75,7 +68,6 @@ die() { echo "desk-propose: $1" >&2; exit "${2:-2}"; }
 pass="session"
 date_arg=""
 dry_run=false
-allowed_path=""
 items_path=""
 withdraw=false
 withdraw_ids=()
@@ -84,7 +76,6 @@ while [ $# -gt 0 ]; do
 	case "$1" in
 		--pass) [ $# -ge 2 ] || usage; pass="$2"; shift 2 ;;
 		--date) [ $# -ge 2 ] || usage; date_arg="$2"; shift 2 ;;
-		--allowed-urls) [ $# -ge 2 ] || usage; allowed_path="$2"; shift 2 ;;
 		--dry-run) dry_run=true; shift ;;
 		--withdraw) withdraw=true; shift ;;
 		--list) list=true; shift ;;
@@ -107,7 +98,6 @@ fi
 [ -n "$date_arg" ] || date_arg="$(date +%F)"
 [[ "$date_arg" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || die "--date takes YYYY-MM-DD"
 [ "$withdraw" = true ] || [ "$list" = true ] || [ -r "$items_path" ] || die "cannot read $items_path"
-[ -z "$allowed_path" ] || [ -r "$allowed_path" ] || die "cannot read $allowed_path"
 
 desk_resolve_config
 [ -n "$DESK_CONFIG" ] && [ -f "$DESK_CONFIG" ] \
@@ -187,16 +177,6 @@ while IFS= read -r item; do
 	at_problem="$(desk_item_at_problem "$item")"
 	[ -z "$at_problem" ] || problems+="${problems:+$'\n'}item $n ($(jq -r '.id // "no id"' <<< "$item")): $at_problem"
 done < <(jq -c '.[]' <<< "$items_json")
-if [ -n "$allowed_path" ]; then
-	allowed="$(cat "$allowed_path")"
-	n=0
-	while IFS= read -r item; do
-		n=$((n + 1))
-		jq -e 'type == "object"' > /dev/null 2>&1 <<< "$item" || continue
-		desk_source_allowed "$item" "$allowed" \
-			|| problems+="${problems:+$'\n'}item $n ($(jq -r '.id // "no id"' <<< "$item")): its source $(jq -r '.source' <<< "$item") is not in $allowed_path"
-	done < <(jq -c '.[]' <<< "$items_json")
-fi
 if [ -n "$problems" ]; then
 	printf '%s\n' "$problems" >&2
 	echo "desk-propose: nothing staged" >&2
@@ -204,18 +184,9 @@ if [ -n "$problems" ]; then
 fi
 
 cleaned="[]"
-if [ -n "$allowed_path" ]; then
-	while IFS= read -r item; do
-		item="$(desk_validate_also_sources "$item" "$allowed")"
-		cleaned="$(jq -c --argjson it "$(desk_sanitize_item_text "$item" "$allowed" "$repo")" '. + [$it]' <<< "$cleaned")"
-	done < <(jq -c '.[]' <<< "$items_json")
-else
-	# Every URL the items carry is allowed: the check is the user's, not this one's.
-	all_urls="$(jq -r '.. | strings' <<< "$items_json" | grep -oE 'https?://[^[:space:]"'"'"'<>)]+' | sort -u)"
-	while IFS= read -r item; do
-		cleaned="$(jq -c --argjson it "$(desk_sanitize_item_text "$item" "$all_urls")" '. + [$it]' <<< "$cleaned")"
-	done < <(jq -c '.[]' <<< "$items_json")
-fi
+while IFS= read -r item; do
+	cleaned="$(jq -c --argjson it "$(desk_sanitize_item_text "$item")" '. + [$it]' <<< "$cleaned")"
+done < <(jq -c '.[]' <<< "$items_json")
 
 if [ "$dry_run" = true ]; then
 	jq '{items: .}' <<< "$cleaned"

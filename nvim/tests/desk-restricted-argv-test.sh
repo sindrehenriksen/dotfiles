@@ -57,7 +57,7 @@ echo '{"mcpServers":{"only-this":{"type":"http","url":"https://example.invalid"}
 echo '{}' > "$ROOT/cfg/config.json"
 export DESK_CONFIG="$ROOT/cfg/config.json"
 
-for f in common status timeout model-call tool-results validate steps; do
+for f in common status timeout model-call tool-results steps; do
 	# shellcheck source=/dev/null
 	source "$LIB/$f.sh"
 done
@@ -68,7 +68,7 @@ has_flag() { grep -qx -- "$1" "$ARGV_LOG" && echo true || echo false; }
 run_step() { # <step-json>
 	PASS_SCRATCH="$(mktemp -d)"
 	: > "$ARGV_LOG"
-	desk_step_model_call testpass "$1" x '{}' "" > /dev/null
+	desk_step_model_call testpass "$1" > /dev/null
 	rm -rf "$PASS_SCRATCH"
 }
 
@@ -87,8 +87,6 @@ check() { # <label> <step-json> <expected --tools> <mcp content kind: empty|file
 
 check F-web '{"id":"F-web","kind":"fetch","tools":["WebSearch"],"connector":false,"timeout":30}' WebSearch empty
 check T '{"id":"T","kind":"fetch","tools":["mcp__example-tickets__search"],"connector":false,"mcp_config":"mcp/t.json","timeout":30}' "" file
-check J '{"id":"J","kind":"judge","tools":["Read"],"connector":false,"timeout":30}' Read empty
-check close '{"id":"close","kind":"close","tools":["Read"],"connector":false,"timeout":30}' Read empty
 
 # A pattern loads its tool by name; the pattern itself restricts it, in the
 # allowlist and in the deny hook a pattern brings with it.
@@ -104,18 +102,7 @@ else
 	bad "F-gh: a step with a tool pattern gets the deny hook as --settings"
 fi
 check F-web-again '{"id":"F-web","kind":"fetch","tools":["WebSearch"],"connector":false,"timeout":30}' WebSearch empty
-assert_eq "F-web: no pattern, no Read: no --settings" false "$(has_flag --settings)"
-
-# `instructions`: no --restricted, so the cwd's instructions load, while the
-# tools stay the step's: --tools, strict MCP, and the deny hook every time.
-run_step '{"id":"J","kind":"judge","tools":["Read"],"connector":false,"instructions":true,"timeout":30}'
-assert_eq "J with instructions: no --restricted" false "$(has_flag --restricted)"
-assert_eq "...--tools is still just Read" Read "$(value_after --tools)"
-assert_eq "...--strict-mcp-config" true "$(has_flag --strict-mcp-config)"
-assert_eq "...an empty server set" '{"mcpServers":{}}' "$(jq -c . "$MCP_LOG")"
-assert_eq "...and the deny hook" true "$(has_flag --settings)"
-run_step '{"id":"F-web","kind":"fetch","tools":["WebSearch"],"connector":false,"instructions":true,"timeout":30}'
-assert_eq "F-web with instructions: the deny hook even with no pattern or Read" true "$(has_flag --settings)"
+assert_eq "F-web: no pattern: no --settings" false "$(has_flag --settings)"
 
 echo
 echo "=== summary: $pass passed, $fail failed ==="

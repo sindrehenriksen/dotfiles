@@ -15,8 +15,7 @@
 # delivery as its own message; notes-changes.txt goes back to the last
 # judged run of any pass, says when no kept run was judged or the history
 # was rewritten (with the whole diff) or the commit is gone, or that the
-# commits since it touch none of the watched files. A step with
-# `weekdays` runs only on those days. No live model call.
+# commits since it touch none of the watched files. No live model call.
 set -u
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -113,18 +112,8 @@ case "$(pwd -P)" in
 		[ -z "${BRIEF_TEST_WEB_PROMPT:-}" ] || cp prompt.txt "$BRIEF_TEST_WEB_PROMPT"
 		emit_use u1 WebSearch '{"query":"news"}'
 		emit_text_result u1 'A post: https://example.com/a and more'
-		if [ -n "${FAKE_WEB_REPLY:-}" ]; then
-			jq -cn --arg t "$FAKE_WEB_REPLY" '{type:"assistant",message:{content:[{type:"text",text:$t}]}}'
-		else
-			jq -cn '{type:"assistant",message:{content:[{type:"text",text:({candidates:[{url:"https://example.com/a",summary:"a post"}]} | tojson)}]}}'
-		fi
-		[ -z "${FAKE_WEB_TRAILER+x}" ] || jq -cn --arg t "$FAKE_WEB_TRAILER" '{type:"assistant",message:{content:[{type:"text",text:$t}]}}'
 		;;
 esac
-if [ -n "${FAKE_RESULT_TEXT:-}" ]; then
-	jq -cn --arg t "$FAKE_RESULT_TEXT" '{type:"result",subtype:"success",total_cost_usd:0.01,result:$t}'
-	exit 0
-fi
 echo '{"type":"result","subtype":"success","total_cost_usd":0.01}'
 FAKE
 chmod +x "$FAKEBIN/claude"
@@ -159,7 +148,7 @@ git -C "$repo" add notes.md reading.md
 git -C "$repo" commit -q -m initial
 git -C "$repo" branch -M main
 
-echo 'fetch the news {{window_start}} {{window_end}} {{mode}} {{today}}' > "$ROOT/web.md"
+echo 'fetch the news {{mode}} {{today}}' > "$ROOT/web.md"
 export BRIEF_TEST_WEB_PROMPT="$ROOT/web-prompt.txt"
 printf 'Judge the run in {{run_dir}} from {{inputs}}, caps {{caps}}, for {{pass}} of {{scheduled_date}}.\n' > "$ROOT/brief.md"
 printf 'Offer the sessions in {{run_dir}}/close.\n' > "$ROOT/close.md"
@@ -168,8 +157,7 @@ printf 'Send to {{to}}:\n-----BEGIN MESSAGE-----\n{{message}}\n-----END MESSAGE-
 cfg="$ROOT/config.json"
 jq -n --arg repo "$repo" --arg central "$CENTRAL" '{
 	notes_repo: $repo, timezone: "UTC",
-	ticket_search_tool: "mcp__t__search", mail_search_tool: "mcp__m__search",
-	ticket_status_step_id: "T-none", mail_fetch_step_id: "F-none",
+	ticket_search_tool: "mcp__t__search", ticket_status_step_id: "T-none",
 	files: ["notes.md", "reading.md"],
 	caps: {daily: {act: 3, worth_knowing: 3, wildcard: 1}},
 	central_session: $central,
@@ -179,11 +167,10 @@ jq -n --arg repo "$repo" --arg central "$CENTRAL" '{
 			steps: [
 				{id: "commit-push", kind: "commit_push"},
 				{id: "F-web", kind: "fetch", prompt: "web.md", tools: ["WebSearch"], connector: false, timeout: 30},
-				{id: "F-mon", kind: "fetch", prompt: "web.md", tools: [], connector: false, timeout: 30, weekdays: [1]},
 				{id: "close", kind: "close"}
 			],
 			brief: {
-				input_files: ["notes.md", "f-web.json", "open-items.json"],
+				input_files: ["notes.md", "open-items.json"],
 				instructions: ["brief.md", "close.md"],
 				send: {prompt: "send.md"}
 			}
@@ -205,12 +192,10 @@ sessions <<< "$CENTRAL central-x false"
 run 2026-10-05
 assert_eq "the pass exits ok" "0" "$?"
 R1="$DESK_RUNS_ROOT/testpass-2026-10-05"
-assert_true "the inputs are seeded: the committed notes and the fetch's reply" \
-	"$([ -f "$R1/inputs/notes.md" ] && jq -e '.candidates[0].url == "https://example.com/a"' "$R1/inputs/f-web.json" > /dev/null 2>&1 && echo true || echo false)"
+assert_true "the inputs are seeded" "$([ -f "$R1/inputs/notes.md" ] && [ -f "$R1/inputs/open-items.json" ] && echo true || echo false)"
 assert_eq "the instruction files are rendered with the run's own paths and caps" \
 	"Judge the run in $R1 from $R1/inputs, caps about 3 ACT, 3 worth knowing, 1 wildcard, for testpass of 2026-10-05." \
 	"$(cat "$R1/instructions/brief.md" 2> /dev/null)"
-assert_eq "the links a suggestion may cite are the fetch's" "https://example.com/a" "$(cat "$R1/allowed-urls.txt" 2> /dev/null)"
 assert_eq "run.json has the result and the instruction files, in the config's order" \
 	"[\"ok\",[\"$R1/instructions/brief.md\",\"$R1/instructions/close.md\"]]" "$(jq -c '[.result, .instructions]' "$R1/run.json" 2> /dev/null)"
 assert_true "run-status.txt says how the run went" "$(grep -q 'It finished ok' "$R1/run-status.txt" 2> /dev/null && echo true || echo false)"
@@ -222,17 +207,9 @@ assert_eq "the message it waits with starts with the marker" \
 	"[desk-brief] The testpass pass of 2026-10-05 is ready for you to judge. Not from the user." "$(head -n1 <<< "$msg")"
 assert_contains "it names the run directory" "Run directory: $R1" "$msg"
 assert_contains "and the instruction files to judge by, in order" "- Judge it by: $R1/instructions/brief.md, then $R1/instructions/close.md" "$msg"
-assert_contains "and the inputs" "- inputs/: f-web.json, notes.md, open-items.json" "$msg"
+assert_contains "and the inputs" "- inputs/: notes.md, open-items.json" "$msg"
 assert_contains "and how it went" "- How it went: finished ok." "$msg"
-also="- Also there: notes-changes.txt (the notes' own commits since the last judged brief), allowed-urls.txt"
-assert_contains "an empty staged.json goes unmentioned" "$also." "$msg"
 assert_eq "the first brief has no run to compare the notes against" "No earlier brief run is kept, so there is nothing to compare the notes against." "$(cat "$R1/notes-changes.txt")"
-jq -n '{staged: [{headline: "a capture"}], held_back: []}' > "$ROOT/staged-probe.json"
-mkdir -p "$ROOT/probe-run" && cp -R "$R1/." "$ROOT/probe-run/" && cp "$ROOT/staged-probe.json" "$ROOT/probe-run/staged.json"
-assert_contains "one holding something is named" "$also, staged.json." \
-	"$(bash -c 'source "$1/common.sh"; source "$1/brief.sh"; desk_brief_message testpass "$2"' _ "$LIB" "$ROOT/probe-run")"
-
-assert_true "a Monday-only step runs on a Monday" "$(grep -q 'model call: F-mon' "$ROOT/run.out" && echo true || echo false)"
 
 echo
 echo "=== a later run the same day, the central session live: it is sent ==="
@@ -259,9 +236,6 @@ run 2026-10-06
 assert_eq "sent to its new name" "central-renamed" "$(jq -rs '.[-1].to' "$BRIEF_TEST_SENT")"
 assert_true "the next run lists the notes' own commit since the judged brief, with its diff" \
 	"$(grep -q '^    Add a line$' "$DESK_RUNS_ROOT/testpass-2026-10-06/notes-changes.txt" && grep -q '^+  a line the user added$' "$DESK_RUNS_ROOT/testpass-2026-10-06/notes-changes.txt" && echo true || echo false)"
-assert_true "a Monday-only step is skipped on a Tuesday" \
-	"$(grep -q 'step F-mon (fetch): skipped (it runs on weekdays 1 only)' "$ROOT/run.out" && ! grep -q 'model call: F-mon' "$ROOT/run.out" && echo true || echo false)"
-assert_eq "and the pass is not partial for it" "ok" "$(jq -r '.passes.testpass.result' "$DESK_STATUS_FILE")"
 
 echo
 echo "=== a run of a new day sends every pending run in one message, oldest first ==="
@@ -303,11 +277,6 @@ m="$(jq -rs '.[-1].message' "$BRIEF_TEST_SENT")"
 assert_contains "the message lists the idle session, never the central one" \
 	"- close/: 1 idle session to offer for closing, each in close/<session id>/ with session.json and transcript.txt: idle-one (" "$m"
 assert_true "its directory is there" "$([ -f "$R5/close/$IDLE/session.json" ] && [ -f "$R5/close/$IDLE/transcript.txt" ] && echo true || echo false)"
-mkdir -p "$R5/retention"
-jq -cn '[{session_id: "x", name: "old-spike", deletion_date: "2026-10-20", days_left: 8, dir: "d"}]' > "$R5/retention/candidates.json"
-assert_contains "the retention step's list reaches the message" \
-	"- retention/: 1 session the notes name whose transcripts Claude Code deletes soon, each in retention/<session id>/ with session.json and transcript.txt: old-spike (deleted 2026-10-20)." \
-	"$(bash -c 'source "$1/common.sh"; source "$1/brief.sh"; desk_brief_message testpass "$2"' _ "$LIB" "$R5")"
 
 echo
 echo "=== a name that does not address the central session alone, or none, holds the brief ==="
@@ -364,7 +333,7 @@ assert_contains "and the message names it" ", notes-diff.md." "$(jq -rs '.[-1].m
 echo
 echo "=== a brief another pass left pending goes with this pass's delivery, as its own message ==="
 jq '.passes.otherpass = {steps: [{id: "F-web", kind: "fetch", prompt: "web.md", tools: ["WebSearch"], connector: false, timeout: 30}],
-	brief: {input_files: ["notes.md", "f-web.json"], instructions: ["brief.md"], send: {prompt: "send.md"}}}' "$cfg" > "$ROOT/cfg-two.json"
+	brief: {input_files: ["notes.md"], instructions: ["brief.md"], send: {prompt: "send.md"}}}' "$cfg" > "$ROOT/cfg-two.json"
 run_as() { # pass date
 	DESK_CONFIG="$ROOT/cfg-two.json" DESK_NOW="$(day "$2")" TZ=UTC "$DESK_RUN" "$1" > "$ROOT/run.out" 2>&1
 }
@@ -462,74 +431,8 @@ bash -c 'source "$1/common.sh"; source "$1/brief.sh"; DESK_RUNS_ROOT="$2"; desk_
 assert_eq "only the edits settled as gone since the judged brief, still declined, in the notes' files, with their text" \
 	'[{"id":"g1","after":"  new g1"}]' "$(jq -c '[.[] | {id, after}]' "$GE/testpass-2026-11-02/gone-edits.json" 2> /dev/null)"
 assert_contains "and the message names the file" ", gone-edits.json." \
-	"$(bash -c 'source "$1/common.sh"; source "$1/brief.sh"; echo "{\"scheduled_date\":\"2026-11-02\"}" > "$2/run.json"; echo "{}" > "$2/staged.json"; desk_brief_message testpass "$2"' _ "$LIB" "$GE/testpass-2026-11-02")"
+	"$(bash -c 'source "$1/common.sh"; source "$1/brief.sh"; echo "{\"scheduled_date\":\"2026-11-02\"}" > "$2/run.json"; desk_brief_message testpass "$2"' _ "$LIB" "$GE/testpass-2026-11-02")"
 git -C "$repo" update-ref -d refs/desk/ledger
-
-echo
-echo "=== a fetch reply is read as JSON however it is wrapped, and one with none fails the source ==="
-sessions <<< "$CENTRAL central-x true"
-FAKE_WEB_REPLY=$'Here it is:\n```json\n{"candidates": [{"url": "https://example.com/a", "summary": "fenced"}]}\n```' run 2026-10-26
-assert_eq "a reply in a code fence is still the step's file" "fenced" \
-	"$(jq -r '.candidates[0].summary' "$DESK_RUNS_ROOT/testpass-2026-10-26/inputs/f-web.json" 2> /dev/null)"
-FAKE_WEB_TRAILER="" FAKE_RESULT_TEXT='{"candidates": [{"url": "https://example.com/a", "summary": "from the result line"}]}' run 2026-10-28
-assert_eq "a final text held by the result line, the last message empty, is still read" "from the result line" \
-	"$(jq -r '.candidates[0].summary' "$DESK_RUNS_ROOT/testpass-2026-10-28/inputs/f-web.json" 2> /dev/null)"
-FAKE_WEB_REPLY="I read the channels but ran out of room before the JSON." run 2026-10-27
-R7="$DESK_RUNS_ROOT/testpass-2026-10-27"
-cp "$BRIEF_TEST_WEB_PROMPT" "$ROOT/web-prompt-1027.txt"
-assert_eq "a reply holding no JSON fails the source, so the pass reads partial" "partial F-web" \
-	"$(jq -r '"\(.passes.testpass.result) \(.passes.testpass.failed_sources | join(","))"' "$DESK_STATUS_FILE" 2> /dev/null)"
-assert_true "the run status says so, never ok" "$(grep -q 'its reply was not the JSON the step asks for' "$R7/run-status.txt" && echo true || echo false)"
-assert_eq "and the reply is kept in the run directory" "I read the channels but ran out of room before the JSON." "$(cat "$R7/F-web-reply.txt" 2> /dev/null)"
-assert_true "run.json records the window the run fetched, for a step rerun" \
-	"$(jq -e '.fetch.window_start != null and .fetch.window_end != null and .fetch.mode != null and .fetch.today != null' "$R7/run.json" > /dev/null 2>&1 && echo true || echo false)"
-
-echo
-echo "=== a failed fetch is rerun by hand into its run's directory, and only that step runs ==="
-rerun_step() { # args after the pass; output to $ROOT/rerun.out
-	DESK_NOW="$(day 2026-10-29)" TZ=UTC "$DESK_RUN" testpass "$@" > "$ROOT/rerun.out" 2>&1
-}
-status_before="$(jq -c '.passes.testpass' "$DESK_STATUS_FILE")"
-sent_before="$(sent_n)"
-window_before="$(jq -c '.fetch | {window_start, window_end}' "$R7/run.json")"
-jq '.failed += ["close"]' "$R7/run.json" > "$ROOT/rj.json" && mv -f "$ROOT/rj.json" "$R7/run.json"
-rerun_step --rerun-step close --date 2026-10-27
-assert_eq "a step that is not a fetch is refused, even one that failed" "2" "$?"
-assert_true "for not being a fetch" "$(grep -q 'this pass has no fetch step close; only a fetch step is rerun' "$ROOT/rerun.out" && echo true || echo false)"
-jq '.failed -= ["close"]' "$R7/run.json" > "$ROOT/rj.json" && mv -f "$ROOT/rj.json" "$R7/run.json"
-rerun_step --rerun-step F-mon --date 2026-10-27
-assert_eq "a fetch that did not fail in that run is refused" "2" "$?"
-assert_true "saying why" "$(grep -q 'F-mon did not fail in that run (failed: F-web); only a failed step is rerun' "$ROOT/rerun.out" && echo true || echo false)"
-rerun_step --rerun-step F-web --date 2026-10-02
-assert_eq "a date with no run directory is refused" "2" "$?"
-rerun_step --rerun-step F-web --date yesterday
-assert_eq "a date not written YYYY-MM-DD is a usage error" "2" "$?"
-FAKE_WEB_REPLY="Still no JSON." rerun_step --rerun-step F-web --date 2026-10-27
-assert_eq "a rerun that fails again exits 1" "1" "$?"
-assert_true "run-status.txt says it failed again, and why" \
-	"$(grep -q '^F-web was rerun by hand at .* and failed again: its call ran, but its reply was not the JSON' "$R7/run-status.txt" && echo true || echo false)"
-assert_eq "it is still failed in run.json" '["F-web"]' "$(jq -c '.failed' "$R7/run.json")"
-# A mode and date other than the ones a run on the rerun's own day would
-# get, so the prompt shows whether the recorded ones were used.
-jq '.fetch.mode = "RECORDED-MODE" | .fetch.today = "2026-10-27"' "$R7/run.json" > "$ROOT/rj.json" && mv -f "$ROOT/rj.json" "$R7/run.json"
-rerun_step --rerun-step F-web --date 2026-10-27
-assert_eq "a rerun that succeeds exits 0" "0" "$?"
-assert_eq "it fetched the run's own window, not one ending at the rerun" \
-	"$(awk 'NR == 1 {print $4, $5}' "$ROOT/web-prompt-1027.txt")" "$(awk 'NR == 1 {print $4, $5}' "$BRIEF_TEST_WEB_PROMPT")"
-assert_eq "with the mode and date the run recorded" "RECORDED-MODE 2026-10-27" "$(awk 'NR == 1 {print $6, $7}' "$BRIEF_TEST_WEB_PROMPT")"
-assert_eq "only that step ran: one model call, F-web's" "F-web" "$(sed -n 's/.*model call: \([^ ]*\)$/\1/p' "$ROOT/rerun.out" | paste -sd, -)"
-assert_eq "its reply is the run's input now" "https://example.com/a" "$(jq -r '.candidates[0].url' "$R7/inputs/f-web.json" 2> /dev/null)"
-assert_true "its links are allowed" "$(grep -qxF 'https://example.com/a' "$R7/allowed-urls.txt" && echo true || echo false)"
-assert_true "the failed reply kept from before is gone" "$([ ! -e "$R7/F-web-reply.txt" ] && echo true || echo false)"
-assert_eq "run.json: nothing failed any more, so the partial run reads ok, and the tries are recorded" 'ok [] ["failed","ok"]' \
-	"$(jq -r '"\(.result) \(.failed | tojson) \([.reruns[].result] | tojson)"' "$R7/run.json")"
-assert_eq "the window recorded is the one it fetched, unchanged" "$window_before" "$(jq -c '.fetch | {window_start, window_end}' "$R7/run.json")"
-assert_true "run-status.txt says it succeeded and what it brought" \
-	"$(grep -q '^F-web was rerun by hand at .* and succeeded: what it fetched is now in inputs/ (f-web.json).$' "$R7/run-status.txt" && echo true || echo false)"
-assert_eq "nothing was sent" "$sent_before" "$(sent_n)"
-assert_eq "and the status file keeps the run's own record: no run of the pass, no window moved" "$status_before" "$(jq -c '.passes.testpass' "$DESK_STATUS_FILE")"
-rerun_step --rerun-step F-web --date 2026-10-27
-assert_eq "once it succeeded, it is not rerun again" "2" "$?"
 
 echo
 echo "=== a pending run outlives the seven-day sweep; a delivered one does not ==="

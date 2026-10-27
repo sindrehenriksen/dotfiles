@@ -26,7 +26,6 @@ desk_lib_dir() {
 DESK_LIB_DIR="$(desk_lib_dir)"
 DESK_REPO_DIR="$(cd -P "$DESK_LIB_DIR/../.." && pwd)"
 DESK_CLI_LUA="$DESK_REPO_DIR/nvim/lua/desk/cli.lua"
-DESK_SESSION_RECORDER_BIN="${DESK_SESSION_RECORDER_BIN:-$DESK_REPO_DIR/claude/hooks/session-recorder.sh}"
 
 DESK_STATE_DIR="${DESK_STATE_DIR:-$HOME/.local/state/desk}"
 DESK_STATUS_FILE="${DESK_STATUS_FILE:-$DESK_STATE_DIR/status.json}"
@@ -37,15 +36,13 @@ DESK_GUARD_DIR="${DESK_GUARD_ROOT:-$DESK_STATE_DIR/guard}"
 DESK_ROOTS_FROM_ENV="${DESK_SCRATCH_ROOT:+scratch}${DESK_RUNS_ROOT:+runs}"
 DESK_SCRATCH_ROOT="${DESK_SCRATCH_ROOT:-$DESK_STATE_DIR/scratch}"
 DESK_LOG_DIR="${DESK_LOG_DIR:-$DESK_STATE_DIR/logs}"
-# Durable per-call scratch dirs for a "visible" (persisted) call: kept here, never under
-# $DESK_SCRATCH_ROOT (which desk-run's own trap sweeps every invocation),
-# so a `claude --resume` after the pass finishes still finds its cwd. See
-# claude/desk-lib/model-call.sh's desk_pass_scratch_dir/desk_prune_old_runs.
+# Each brief's run directory, <pass>-<date>, kept a week
+# (model-call.sh's desk_prune_old_runs).
 DESK_RUNS_ROOT="${DESK_RUNS_ROOT:-$DESK_STATE_DIR/runs}"
 
 # desk_apply_calls_root <config-json> <config-dir>: the config's
-# `calls_root`, when set, is where every model call runs: visible calls
-# under <calls_root>/runs, the rest under <calls_root>/scratch. A leading
+# `calls_root`, when set, holds the run directories under <calls_root>/runs
+# and every model call's cwd under <calls_root>/scratch. A leading
 # `~` is expanded and a relative path is taken from the config's directory.
 # A DESK_RUNS_ROOT or DESK_SCRATCH_ROOT the caller set still wins.
 desk_apply_calls_root() {
@@ -127,22 +124,8 @@ desk_log() {
 # $DESK_NOW (epoch seconds) pins the clock for tests.
 desk_now() { echo "${DESK_NOW:-$(date +%s)}"; }
 
-# The pid this whole desk-run invocation belongs to, so a lock/guard can
-# record and later liveness-check its owner.
-desk_pid() { echo $$; }
-
 desk_pid_alive() {
 	kill -0 "$1" 2>/dev/null
-}
-
-# A fresh lowercase UUID for a "visible" call's own --session-id. uuidgen's own output is
-# uppercase; Claude Code's session ids are lowercase.
-desk_new_session_id() {
-	if command -v uuidgen > /dev/null 2>&1; then
-		uuidgen | tr '[:upper:]' '[:lower:]'
-	else
-		cat /proc/sys/kernel/random/uuid 2> /dev/null
-	fi
 }
 
 # nvim -l wrapper: every cli.lua call goes through here so error output lands
@@ -151,11 +134,8 @@ desk_nvim_cli() {
 	nvim -l "$DESK_CLI_LUA" "$@"
 }
 
-# A single POSIX-shell-safe single-quoted token for $1 — the one place a
-# value ever needs re-quoting into shell syntax at all is desk_step_open_tab
-# assembling its whole launch command as one *string* (Ghostty's own
-# `command:` field takes a shell command line, never an argv array), so
-# every argument goes through this rather than being hand-escaped inline.
+# $1 as one single-quoted shell word, for a command built as a string (a
+# hook's `command`).
 desk_shq() {
 	printf "'%s'" "${1//\'/\'\\\'\'}"
 }

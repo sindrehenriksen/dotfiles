@@ -131,12 +131,8 @@ source "$LIB/status.sh"
 source "$LIB/timeout.sh"
 # shellcheck source=../../claude/desk-lib/model-call.sh
 source "$LIB/model-call.sh"
-# shellcheck source=../../claude/desk-lib/git-ops.sh
-source "$LIB/git-ops.sh"
 # shellcheck source=../../claude/desk-lib/tool-results.sh
 source "$LIB/tool-results.sh"
-# shellcheck source=../../claude/desk-lib/validate.sh
-source "$LIB/validate.sh"
 # shellcheck source=../../claude/desk-lib/lock.sh
 source "$LIB/lock.sh"
 # shellcheck source=../../claude/desk-lib/steps.sh
@@ -185,7 +181,7 @@ pid_central="$(spawn_throwaway)"
 { session_line 11111111-1111-4111-8111-111111111111 a-session "$pid1"
   session_line 12121212-1212-4121-8121-121212121212 kept-session "$pid_kept"
   session_line "$CENTRAL" central "$pid_central"; } > "$SESSION_STATUS_FIXTURE"
-result="$(desk_step_close "testpass" "$step_json" "$config_json" "$repo" "2026-09-28" "${files[@]}")"
+result="$(desk_step_close "testpass" "$config_json" "2026-09-28")"
 assert_eq "the step reports ok" "ok" "$result"
 sleep 1
 assert_true "the session is still alive" "$(kill -0 "$pid1" 2> /dev/null && echo true || echo false)"
@@ -203,9 +199,8 @@ assert_eq "its first entry, uuid first, newlines flattened" "aaaaaaaa  user: sta
 assert_true "a long tool result is cut, so a read of many lines stays readable" \
 	"$(sed -n 2p "$readable" | awk '{ exit !(length < 1000) }' && sed -n 2p "$readable" | grep -q '\[cut\]$' && echo true || echo false)"
 assert_true "what the user wrote is kept whole" "$(sed -n 3p "$readable" | awk '{ exit !(length > 5000) }' && echo true || echo false)"
-assert_true "the raw transcript copy stays in the pass's scratch" "$([ ! -e "$dir/transcript.jsonl" ] && ls "$PASS_SCRATCH" | grep -q 'close-.*-transcript.jsonl' && echo true || echo false)"
 kill "$pid1" 2> /dev/null
-result="$(desk_step_close "testpass" "$step_json" "$config_json" "$repo" "2026-09-28" "${files[@]}")"
+result="$(desk_step_close "testpass" "$config_json" "2026-09-28")"
 assert_eq "a run again that day starts from a clean list" "[]" "$(listed '.' 2026-09-28)"
 assert_true "and the old directory is gone" "$([ ! -d "$dir" ] && echo true || echo false)"
 kill "$pid_kept" "$pid_central" 2> /dev/null
@@ -224,7 +219,7 @@ jq -n '{entries: {
 jq -n '{all_closed: {"33333333-3333-4333-8333-333333333333": 1791100000}}' > "$STATE/follow-state.json"
 { session_line 22222222-2222-4222-8222-222222222222 followed-open "$pid2"
   session_line 33333333-3333-4333-8333-333333333333 followed-done "$pid3"; } > "$SESSION_STATUS_FIXTURE"
-result="$(desk_step_close "testpass" "$step_json" "$config_json" "$repo" "2026-09-29" "${files[@]}")"
+result="$(desk_step_close "testpass" "$config_json" "2026-09-29")"
 assert_eq "the step reports ok" "ok" "$result"
 assert_eq "both are listed with their follow" '[["followed-open","open epic",null],["followed-done","done epic",1791100000]]' \
 	"$(listed '[.[] | [.name, .followed.label, .followed.all_closed_since]]' 2026-09-29)"
@@ -240,7 +235,7 @@ mkdir -p "$STATE"
 PASS_SCRATCH="$(mktemp -d)"
 pid4="$(spawn_throwaway)"
 session_line 44444444-4444-4444-8444-444444444444 d-session "$pid4" > "$SESSION_STATUS_FIXTURE"
-result="$(desk_step_close "otherpass" "$step_json" "$config_json" "$repo" "2026-09-30" "${files[@]}")"
+result="$(desk_step_close "otherpass" "$config_json" "2026-09-30")"
 assert_eq "the step still reports ok" "ok" "$result"
 assert_true "and writes no list" "$([ ! -e "$DESK_RUNS_ROOT/otherpass-2026-09-30/close" ] && echo true || echo false)"
 kill "$pid4" 2> /dev/null
@@ -257,7 +252,7 @@ jq --argjson t "$long_ago" '.passes.testpass |= (.last_run = $t | .last_ok_run =
 	"$DESK_STATUS_FILE" > "$DESK_STATUS_FILE.tmp" && mv -f "$DESK_STATUS_FILE.tmp" "$DESK_STATUS_FILE"
 pid5="$(spawn_throwaway)"
 session_line 55555555-5555-4555-8555-555555555555 e-session "$pid5" > "$SESSION_STATUS_FIXTURE"
-result="$(desk_step_close "testpass" "$step_json" "$config_json" "$repo" "2026-10-01" "${files[@]}")"
+result="$(desk_step_close "testpass" "$config_json" "2026-10-01")"
 assert_eq "the step reports ok" "ok" "$result"
 assert_true "nothing is listed" "$([ ! -e "$DESK_RUNS_ROOT/testpass-2026-10-01/close/candidates.json" ] && echo true || echo false)"
 kill "$pid5" 2> /dev/null

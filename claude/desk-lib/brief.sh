@@ -6,13 +6,11 @@
 # the message names.
 #
 # After the pass, desk_brief_after_pass writes the run directory
-# ($DESK_RUNS_ROOT/<pass>-<date>/): the judge-style inputs under inputs/,
-# the instruction files rendered under instructions/, the URLs a suggestion
-# may cite in allowed-urls.txt, how the run went in run-status.txt and
-# run.json, what the pass staged itself in staged.json, the mail triage's
-# noise in mail-noise.json, and beside them the close step's close/ and the
-# retention step's retention/. Then it
-# marks the run `brief.pending` and delivers.
+# ($DESK_RUNS_ROOT/<pass>-<date>/): the inputs under inputs/, the
+# instruction files rendered under instructions/, how the run went in
+# run-status.txt and run.json, the notes' own changes in notes-changes.txt,
+# and beside them the close step's close/. Then it marks the run
+# `brief.pending` and delivers.
 #
 # Delivery is the follow pass's: the address check (desk_follow_address) and
 # the one restricted, pinned SendMessage call (desk_follow_send). A brief
@@ -35,14 +33,14 @@ desk_brief_config() { jq -c '.brief // empty | select(type == "object")' <<< "$1
 
 desk_brief_run_dir() { printf '%s/%s-%s' "$DESK_RUNS_ROOT" "$1" "$2"; }
 
-# desk_brief_prepare <pass> <brief json> <config> <pass_config> <repo>
-#   <scheduled_date> <pass_ctx json> <placeholders json> <file>...
+# desk_brief_prepare <pass> <brief json> <repo> <scheduled_date>
+#   <pass_ctx json> <placeholders json> <file>...
 # Writes the run directory described above and marks it pending. Prints
 # the run directory; returns 1 when the brief names no instruction file
 # that exists, since a message naming none would ask for judging by nothing.
 desk_brief_prepare() {
-	local pass="$1" brief="$2" config="$3" pass_config="$4" repo="$5" scheduled_date="$6" pass_ctx="$7" placeholders="$8"
-	shift 8
+	local pass="$1" brief="$2" repo="$3" scheduled_date="$4" pass_ctx="$5" placeholders="$6"
+	shift 6
 	local files=("$@") run files_json ctx
 	run="$(desk_brief_run_dir "$pass" "$scheduled_date")"
 	mkdir -p "$run"
@@ -52,8 +50,7 @@ desk_brief_prepare() {
 
 	files_json="$(printf '%s\n' "${files[@]}" | jq -R . | jq -cs .)"
 	ctx="$(jq -c --argjson files "$files_json" '. + {files: $files}' <<< "$pass_ctx")"
-	desk_seed_inputs "$(desk_input_files_json "$brief" "$files_json")" "$run/inputs" "$ctx"
-	desk_pass_allowed_urls "$pass_config" "$config" | sed '/^$/d' | sort -u > "$run/allowed-urls.txt"
+	desk_seed_inputs "$(jq -c '.input_files // []' <<< "$brief")" "$run/inputs" "$ctx"
 
 	local ph rel src
 	local -a rendered=()
@@ -74,52 +71,20 @@ desk_brief_prepare() {
 		return 1
 	fi
 
-	desk_follow_up_run_status "$pass" > "$run/run-status.txt"
+	desk_run_status "$pass" > "$run/run-status.txt"
 	local head
 	head="$(git -C "$repo" rev-parse -q --verify HEAD 2> /dev/null)"
-	# `fetch` is what a step rerun needs to fetch as the run did: its window
-	# (epoch seconds), mode and date.
 	desk_status_read | jq --arg p "$pass" --arg d "$scheduled_date" --arg head "$head" \
-		--argjson instructions "$(printf '%s\n' "${rendered[@]}" | jq -R . | jq -cs .)" \
-		--argjson ph "$placeholders" '
+		--argjson instructions "$(printf '%s\n' "${rendered[@]}" | jq -R . | jq -cs .)" '
 		(.passes[$p] // {}) as $s
 		| {pass: $p, scheduled_date: $d, result: ($s.result // "unknown"),
 		   stopped_at: ($s.stopped_at // null), failed: ($s.failed_sources // []),
-		   instructions: $instructions, notes_head: $head,
-		   fetch: {window_start: ($ph.slack_oldest // null), window_end: ($ph.slack_latest // null),
-		           mode: ($ph.mode // null), today: ($ph.today // null)}}' > "$run/run.json"
-
-	# What the pass staged itself (a capture step's lines), and what it
-	# held back over the caps, so the brief can say so.
-	local open capped='[]'
-	open="$(desk_nvim_cli proposal-open "$repo" 2> /dev/null)"
-	jq -e '.items | type == "array"' > /dev/null 2>&1 <<< "$open" || open='{"items":[]}'
-	if [ -n "${PASS_SCRATCH:-}" ] && [ -s "$PASS_SCRATCH/capped.json" ]; then
-		capped="$(cat "$PASS_SCRATCH/capped.json")"
-		jq -e 'type == "array"' > /dev/null 2>&1 <<< "$capped" || capped='[]'
-	fi
-	jq --arg prefix "$pass-$scheduled_date-" --argjson capped "$capped" '
-		{staged: [.items[] | select(.id | startswith($prefix))
-		          | {file, kind, headline, tier, source, before, after, capture_kind}
-		          | with_entries(select(.value != null and .value != ""))],
-		 held_back: $capped}' <<< "$open" > "$run/staged.json"
-	if [ -n "${PASS_SCRATCH:-}" ] && [ -s "$PASS_SCRATCH/mail-noise.json" ]; then
-		cp -f "$PASS_SCRATCH/mail-noise.json" "$run/mail-noise.json"
-	fi
-	# A fetch reply that held no JSON, kept so what it fetched can still be read.
-	rm -f "$run"/*-reply.txt
-	if [ -n "${PASS_SCRATCH:-}" ]; then
-		local reply
-		for reply in "$PASS_SCRATCH"/*-reply.txt; do
-			[ -f "$reply" ] && cp -f "$reply" "$run/"
-		done
-	fi
+		   instructions: $instructions, notes_head: $head}' > "$run/run.json"
 
 	desk_brief_notes_changes "$pass" "$run" "$repo" "$head" "${files[@]}"
 	desk_brief_gone_edits "$run" "$repo" "${files[@]}"
-	# The user's own notes changes since a weekday and time, as an open_tab
-	# step writes them (desk_write_notes_diff), for a brief whose
-	# instructions want them.
+	# The user's own notes changes since a weekday and time, for a brief
+	# whose instructions want them.
 	local since_kind
 	since_kind="$(jq -c '.notes_diff_since // empty' <<< "$brief" | sed -E 's/^"(.*)"$/\1/')"
 	[ -z "$since_kind" ] || desk_write_notes_diff "$repo" "$run/notes-diff.md" "$since_kind" "${files[@]}"
@@ -275,7 +240,7 @@ desk_brief_message() {
 		printf '%s %s %s passes are ready for you to judge, oldest first: %s. The earlier ones could not be delivered when they ran. Not from the user.\n' \
 			"$DESK_BRIEF_MARKER" "${#runs[@]}" "$pass" "$dates"
 	fi
-	local instr inputs close_line retention_line
+	local instr inputs close_line
 	for r in "${runs[@]}"; do
 		instr="$(jq -r '(.instructions // []) | join(", then ")' "$r/run.json" 2> /dev/null)"
 		inputs="$(for f in "$r/inputs"/*; do [ -f "$f" ] && basename "$f"; done | paste -sd ',' - | sed 's/,/, /g')"
@@ -287,11 +252,6 @@ desk_brief_message() {
 					+ ([.[] | "\(.name) (\(.idle_working_days) working days idle\(if .followed then ", followed" else "" end))"] | join(", ")) + "."
 				end' "$r/close/candidates.json" 2> /dev/null)"
 		fi
-		retention_line=""
-		if [ -f "$r/retention/candidates.json" ] && [ "$(jq 'length' "$r/retention/candidates.json" 2> /dev/null)" != "0" ]; then
-			retention_line="$(jq -r '"- retention/: \(length) session\(if length == 1 then "" else "s" end) the notes name whose transcripts Claude Code deletes soon, each in retention/<session id>/ with session.json and transcript.txt: "
-				+ ([.[] | "\(.name) (deleted \(.deletion_date))"] | join(", ")) + "."' "$r/retention/candidates.json" 2> /dev/null)"
-		fi
 		printf '\nRun directory: %s\n' "$r"
 		jq -r '"- How it went: " + (
 			if .result == "ok" then "finished ok."
@@ -301,11 +261,8 @@ desk_brief_message() {
 		printf -- '- Judge it by: %s\n' "${instr:-(no instruction file was written)}"
 		printf -- '- inputs/: %s\n' "${inputs:-(nothing was seeded)}"
 		[ -z "$close_line" ] || printf '%s\n' "$close_line"
-		[ -z "$retention_line" ] || printf '%s\n' "$retention_line"
-		# staged.json only when the pass staged or held back anything itself.
-		printf -- '- Also there: notes-changes.txt (the notes'"'"' own commits since the last judged brief), allowed-urls.txt%s%s.\n' \
-			"$(jq -e '((.staged // []) + (.held_back // [])) | length > 0' "$r/staged.json" > /dev/null 2>&1 && printf ', staged.json')" \
-			"$([ -f "$r/mail-noise.json" ] && printf ', mail-noise.json')$([ -f "$r/notes-diff.md" ] && printf ', notes-diff.md')$([ -f "$r/gone-edits.json" ] && printf ', gone-edits.json')"
+		printf -- '- Also there: notes-changes.txt (the notes'"'"' own commits since the last judged brief)%s.\n' \
+			"$([ -f "$r/notes-diff.md" ] && printf ', notes-diff.md')$([ -f "$r/gone-edits.json" ] && printf ', gone-edits.json')"
 	done
 }
 
@@ -413,8 +370,7 @@ desk_brief_after_pass() {
 	if [ "${DESK_PASS_WEEKEND_SKIP:-false}" = "true" ]; then
 		desk_log "$pass" "brief: weekend slot — no brief of its own"
 	else
-		desk_brief_prepare "$pass" "$brief" "$config" "$pass_config" "$repo" "$scheduled_date" \
-			"$pass_ctx" "$placeholders" "$@" > /dev/null
+		desk_brief_prepare "$pass" "$brief" "$repo" "$scheduled_date" "$pass_ctx" "$placeholders" "$@" > /dev/null
 	fi
 	desk_brief_deliver_all "$pass" "$brief" "$config"
 }
@@ -441,107 +397,28 @@ desk_brief_retry() {
 	rm -rf "$work"
 }
 
-# ---------------------------------------------------------------------------
-# A step rerun (`desk-run <pass> --rerun-step <id> [--date <date>]`): one
-# fetch that failed in a brief's run, run again by hand once its source is
-# fixed, into that run's directory, so the central session can judge the run
-# whole without the pass running again. It fetches the run's own window, and
-# moves neither the fetch window nor the ticket digest's snapshots: like any
-# partial pass, the next pass still covers that window. Nothing is sent, and
-# the status file keeps the run's own result.
-# ---------------------------------------------------------------------------
-
-# desk_brief_rerun_check <pass_config> <run dir> <step id>: whether that step
-# can be rerun into that run, printing why not when it can't.
-desk_brief_rerun_check() {
-	local pass_config="$1" run="$2" id="$3"
-	if [ -z "$(desk_brief_config "$pass_config")" ]; then
-		printf 'this pass has no brief, so it has no run directory to rerun a step into'
-		return 1
-	fi
-	if ! jq -e --arg id "$id" 'any(.steps[]?; .id == $id and .kind == "fetch")' > /dev/null 2>&1 <<< "$pass_config"; then
-		printf 'this pass has no fetch step %s; only a fetch step is rerun' "$id"
-		return 1
-	fi
-	if [ ! -f "$run/run.json" ]; then
-		printf 'no run directory for that date (%s)' "$run"
-		return 1
-	fi
-	if ! jq -e '(.fetch.window_start // "") != "" and (.fetch.window_end // "") != ""' > /dev/null 2>&1 "$run/run.json"; then
-		printf 'that run recorded no fetch window, so a step cannot fetch what the run did'
-		return 1
-	fi
-	if ! jq -e --arg id "$id" '(.failed // []) | index($id) != null' > /dev/null 2>&1 "$run/run.json"; then
-		printf '%s did not fail in that run (failed: %s); only a failed step is rerun' "$id" \
-			"$(jq -r '(.failed // []) | if length == 0 then "none" else join(", ") end' "$run/run.json" 2> /dev/null)"
-		return 1
-	fi
-}
-
-# desk_step_input_names <step json> <config> <brief json>: the brief inputs
-# this fetch step's results feed, one per line: its own <id>.json, and
-# f-private.json, ticket-digest.json, inbox.json or tickets.json when it is
-# the mail step, has a ticket digest or a mail triage, or is the ticket
-# status check.
-desk_step_input_names() {
-	jq -rn --argjson step "$1" --argjson config "$2" --argjson brief "$3" '
-		([$brief.input_files[]? | strings]) as $names
-		| [(($step.id | ascii_downcase) + ".json"),
-		   (if $step.id == $config.mail_fetch_step_id then "f-private.json" else empty end),
-		   (if $step.ticket_digest then "ticket-digest.json" else empty end),
-		   (if $step.mail_triage then "inbox.json" else empty end),
-		   (if $step.id == $config.ticket_status_step_id then "tickets.json" else empty end)]
-		| unique[] | select(. as $n | $names | index($n))'
-}
-
-_desk_brief_clock() { # epoch: local date and time
-	date -r "$1" '+%F %H:%M' 2> /dev/null || date -d "@$1" '+%F %H:%M'
-}
-
-# desk_brief_rerun_apply <pass> <pass_config> <config> <run dir> <step id>
-#   <result> <pass_ctx json> <file>...
-# After the rerun's fetch: on success, reseeds the inputs it feeds, adds its
-# links to allowed-urls.txt, takes it off run.json's failed list (a partial
-# run with none left reads ok) and says so in run-status.txt; on failure,
-# says why there and keeps its reply. Either way run.json records the try.
-# Returns 1 when the step failed again.
-desk_brief_rerun_apply() {
-	local pass="$1" pass_config="$2" config="$3" run="$4" id="$5" result="$6" pass_ctx="$7"
-	shift 7
-	local at step brief files_json ctx names fresh name reason
-	at="$(desk_now)"
-	step="$(jq -c --arg id "$id" '[.steps[] | select(.id == $id)][0]' <<< "$pass_config")"
-	brief="$(desk_brief_config "$pass_config")"
-	if [ "$result" != "ok" ]; then
-		reason="$(desk_failed_source_reason "$id" "$result")"
-		[ -f "$PASS_SCRATCH/$id-reply.txt" ] && cp -f "$PASS_SCRATCH/$id-reply.txt" "$run/"
-		printf '%s was rerun by hand at %s and failed again: %s.\n' "$id" "$(_desk_brief_clock "$at")" "$reason" >> "$run/run-status.txt"
-		jq --arg id "$id" --argjson at "$at" '.reruns = ((.reruns // []) + [{step: $id, at: $at, result: "failed"}])' \
-			"$run/run.json" > "$run/run.json.tmp" && mv -f "$run/run.json.tmp" "$run/run.json"
-		desk_log "$pass" "--rerun-step: $id failed again for $(basename "$run"): $reason"
-		return 1
-	fi
-
-	files_json="$(printf '%s\n' "$@" | jq -R . | jq -cs .)"
-	ctx="$(jq -c --argjson files "$files_json" '. + {files: $files}' <<< "$pass_ctx")"
-	names="$(desk_step_input_names "$step" "$config" "$brief" | jq -R . | jq -cs .)"
-	fresh="$PASS_SCRATCH/rerun-inputs"
-	mkdir -p "$fresh" "$run/inputs"
-	desk_seed_inputs "$names" "$fresh" "$ctx"
-	while IFS= read -r name; do
-		[ -f "$fresh/$name" ] && mv -f "$fresh/$name" "$run/inputs/$name"
-	done < <(jq -r '.[]' <<< "$names")
-	rm -f "$run/$id-reply.txt"
-	{
-		cat "$run/allowed-urls.txt" 2> /dev/null
-		desk_pass_allowed_urls "$pass_config" "$config"
-	} | sed '/^$/d' | sort -u > "$run/allowed-urls.txt.tmp" && mv -f "$run/allowed-urls.txt.tmp" "$run/allowed-urls.txt"
-	jq --arg id "$id" --argjson at "$at" '
-		.failed = ((.failed // []) - [$id])
-		| (if .result == "partial" and (.failed | length) == 0 then .result = "ok" else . end)
-		| .reruns = ((.reruns // []) + [{step: $id, at: $at, result: "ok"}])' \
-		"$run/run.json" > "$run/run.json.tmp" && mv -f "$run/run.json.tmp" "$run/run.json"
-	printf '%s was rerun by hand at %s and succeeded: what it fetched is now in inputs/ (%s).\n' "$id" "$(_desk_brief_clock "$at")" \
-		"$(jq -r 'if length == 0 then "nothing the brief reads" else join(", ") end' <<< "$names")" >> "$run/run-status.txt"
-	desk_log "$pass" "--rerun-step: $id succeeded for $(basename "$run"); inputs: $(jq -r 'join(", ")' <<< "$names")"
+# desk_run_status <pass>: one paragraph on how the pass's run went, from the
+# status file it has just written: its steps, whether they all ran, which
+# failed or where it stopped, then each step's own note (desk_run_note).
+desk_run_status() {
+	local pass="$1" steps summary notes=""
+	steps="$(jq -r --arg p "$pass" '
+		.ticket_status_step_id as $t
+		| [.passes[$p].steps[]? | .id + " (" + (
+			if .id == $t then "ticket status check"
+			else {commit_push: "commit of the notes", fetch: "fetch",
+				close: "listing idle sessions to offer for closing"}[.kind] // .kind end) + ")"]
+		| join(", ")' "$DESK_CONFIG" 2> /dev/null)"
+	summary="$(desk_status_read | jq -r --arg p "$pass" --arg steps "$steps" '
+		(.passes[$p] // {}) as $s
+		| (($s.failed_sources // []) | join(", ")) as $failed
+		| "Its steps, in order: \($steps). "
+		+ (if $s.result == "ok" then "It finished ok: every step ran."
+			elif $s.result == "partial" then "It finished partial: these steps failed, and nothing reruns them on its own: \($failed). Every other step ran."
+			elif $s.result == "failed" then "It failed at step \($s.stopped_at // "unknown"), so the steps after that did not run, and nothing reruns them on its own."
+				+ (if $failed != "" then " These steps had failed too: \($failed)." else "" end)
+			else "Its result was not recorded." end)')"
+	[ -n "${PASS_SCRATCH:-}" ] && [ -s "$PASS_SCRATCH/run-notes.txt" ] \
+		&& notes="$(tr '\n' ' ' < "$PASS_SCRATCH/run-notes.txt" | sed 's/ *$//')"
+	printf '%s%s\n' "$summary" "${notes:+ $notes}"
 }

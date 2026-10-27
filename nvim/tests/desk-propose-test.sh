@@ -126,26 +126,6 @@ for want in "item 1 (short): its at line \"ok\" is shorter than three characters
 done
 case "$err" in *"(fine)"*) bad "...an at that is before's first line passes (got [$err])" ;; *) ok "...an at that is before's first line passes" ;; esac
 
-echo "=== --allowed-urls: a judged item keeps only links the fetches returned ==="
-printf 'https://news.example.com/a\nhttps://news.example.com/b\n' > "$ROOT/allowed.txt"
-jq -n '[{id: "news", file: "notes.md", kind: "new", target: "top", before: "",
-	after: "- WK: a launch [the post](https://news.example.com/a), also https://evil.example.com/x", headline: "A launch", tier: "worth_knowing",
-	source: "https://news.example.com/a", also_sources: ["https://news.example.com/b", "https://evil.example.com/y"]}]' > "$ROOT/judged.json"
-out="$("$PROPOSE" --dry-run --allowed-urls "$ROOT/allowed.txt" "$ROOT/judged.json")"
-assert_eq "an allowed source passes" "0" "$?"
-assert_eq "...a link no fetch returned is removed from its text" \
-	"- WK: a launch [the post](https://news.example.com/a), also [url removed]" "$(jq -r '.items[0].after' <<< "$out")"
-assert_eq "...and from also_sources" '["https://news.example.com/b"]' "$(jq -c '.items[0].also_sources' <<< "$out")"
-jq '.[0].source = "https://evil.example.com/x"' "$ROOT/judged.json" > "$ROOT/judged-bad.json"
-before_sha="$(git -C "$repo" rev-parse refs/desk/proposal)"
-err="$("$PROPOSE" --allowed-urls "$ROOT/allowed.txt" "$ROOT/judged-bad.json" 2>&1 > /dev/null)"
-assert_eq "a source no fetch returned fails the call" "1" "$?"
-case "$err" in *"item 1 (news): its source https://evil.example.com/x is not in $ROOT/allowed.txt"*) ok "...naming it" ;; *) bad "...naming it (got [$err])" ;; esac
-assert_eq "...and stages nothing" "$before_sha" "$(git -C "$repo" rev-parse refs/desk/proposal)"
-jq -n '[{id: "tick", file: "notes.md", kind: "new", target: "top", before: "", after: "- ACT: answer it (ABC-1)", headline: "A ticket", tier: "act", source: "ticket:ABC-1"}]' > "$ROOT/judged-ticket.json"
-"$PROPOSE" --dry-run --allowed-urls "$ROOT/allowed.txt" "$ROOT/judged-ticket.json" > /dev/null
-assert_eq "a non-URL source is not checked against the file" "0" "$?"
-
 echo "=== --dry-run checks and prints, staging nothing ==="
 out="$("$PROPOSE" --dry-run "$ROOT/items2.json")"
 assert_eq "it prints the cleaned items" "answer2" "$(jq -r '.items[0].id' <<< "$out")"
@@ -214,7 +194,7 @@ out="$("$PROPOSE" --withdraw "$wid")"
 assert_eq "withdrawing succeeds" "0" "$?"
 case "$out" in "withdrew 1: "*) ok "...and says so" ;; *) bad "...and says so (got [$out])" ;; esac
 assert_eq "the suggestion is gone from the open proposal" "" "$(nvim -l "$CLI" proposal-open "$repo" | jq -r --arg id "$wid" '.items[] | select(.id == $id) | .id')"
-assert_eq "it is recorded as declined" "$wid" "$(nvim -l "$CLI" declined-recent "$repo" | jq -r --arg id "$wid" '.items[] | select(.id == $id) | .id')"
+assert_eq "it is recorded as declined" "$wid" "$(git -C "$repo" cat-file -p refs/desk/ledger | jq -r --arg id "$wid" 'select(.type == "decline" and .id == $id) | .id')"
 assert_eq "the other suggestions still wait" "true" "$(nvim -l "$CLI" proposal-open "$repo" | jq '[.items[].id] | any(endswith("-ticket"))')"
 "$PROPOSE" --pass morning --date 2026-10-14 "$ROOT/wd.json" > /dev/null
 assert_eq "staging the same text again does not bring it back" "" \
@@ -238,15 +218,7 @@ before_sha="$(git -C "$repo" rev-parse refs/desk/proposal)"
 out="$("$PROPOSE" --withdraw --dry-run "$lid")"
 assert_eq "--withdraw --dry-run says what it would withdraw" "would withdraw $lid: One to list" "$out"
 assert_eq "...and changes nothing" "$before_sha" "$(git -C "$repo" rev-parse refs/desk/proposal)"
-assert_eq "...not even the ledger" "" "$(nvim -l "$CLI" declined-recent "$repo" | jq -r --arg id "$lid" '.items[] | select(.id == $id) | .id')"
-
-echo "=== a retention warning keeps the fields its dedup reads ==="
-jq -n '[{id: "ret", file: "notes.md", kind: "new", target: "top", before: "", after: "old-spike (transcript deleted 2026-10-20 unless resumed)", headline: "old-spike: transcript deleted 2026-10-20", source: "session:abcd", session_id: "abcd", capture_kind: "retention:2026-10-20"}]' > "$ROOT/ret.json"
-"$PROPOSE" --pass morning --date 2026-10-16 "$ROOT/ret.json" > /dev/null
-assert_eq "session_id and capture_kind reach the proposal" "abcd retention:2026-10-20" \
-	"$(proposal_items | jq -r '.[] | select(.id | endswith("-ret")) | "\(.session_id) \(.capture_kind)"')"
-assert_eq "...where the ledger state reads them" "abcd" \
-	"$(nvim -l "$CLI" ledger-state "$repo" | jq -r '.items[] | select(.capture_kind == "retention:2026-10-20") | .session_id')"
+assert_eq "...not even the ledger" "" "$(git -C "$repo" cat-file -p refs/desk/ledger | jq -r --arg id "$lid" 'select(.type == "decline" and .id == $id) | .id')"
 
 echo "=== config and usage ==="
 DESK_CONFIG="" DESK_CONFIG_DEFAULT="$ROOT/none.json" "$PROPOSE" "$ROOT/items.json" > /dev/null 2>&1

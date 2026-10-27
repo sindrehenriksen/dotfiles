@@ -1,11 +1,7 @@
 #!/usr/bin/env bash
-# The notes-repo git operations: the daily commit-and-push of the user's on-disk
-# files exactly as they are, and the one proposal commit per pass. Every
-# ledger/proposal write goes through nvim/lua/desk/cli.lua — this file only
-# orchestrates: which files to commit, what the refused-commit conditions
-# are, how a pass's new items reach the proposal builder, and the exact
-# push invocation. Never `git pull`, `git fetch`, `merge`, `rebase`, or a
-# `--force`/`-f` push — none of those verbs appear below.
+# The commit_push step: the daily commit of the user's files exactly as they
+# are on disk, and the push. Never `git pull`, `git fetch`, `merge`,
+# `rebase`, or a `--force`/`-f` push: none of those verbs appear below.
 set -u
 
 DESK_NOTES_REMOTE="${DESK_NOTES_REMOTE:-origin}"
@@ -134,34 +130,4 @@ desk_ledger_wrap() {
 	commit="$(git -C "$repo" commit-tree "$tree" ${prev:+-p "$prev"} -m ledger)" || return 1
 	git -C "$repo" update-ref refs/desk/ledger-pushed "$commit" ${prev:+"$prev"} || return 1
 	printf '%s' "$commit"
-}
-
-# ---------------------------------------------------------------------------
-# Proposal staging: one proposal commit per pass (nvim/lua/desk/proposal.lua).
-# ---------------------------------------------------------------------------
-
-# Builds the proposal commit for this pass and moves refs/desk/proposal to
-# it: the user's newest HEAD, plus the previous proposal's items the user has neither
-# taken nor declined (an untaken one returning is "not now"), plus this
-# pass's new items — all applied to the configured files. Id namespacing,
-# dropping what the user declined (by id or source URL), and superseding a carried
-# item a new one replaces all happen inside the builder. Prints the new
-# proposal commit sha, or nothing (and a non-zero exit) on failure.
-#
-# $1 repo, $2 pass, $3 scheduled_date (the guard's own key — new ids are
-# namespaced against it), $4 new-items-file ({"items":[...]} or a bare
-# array), $5.. the configured files (notes.md reading.md).
-desk_stage_and_write_proposal() {
-	local repo="$1" pass="$2" scheduled_date="$3" new_items_file="$4"
-	shift 4
-	local files=("$@")
-
-	local items_file out
-	items_file="$(mktemp)"
-	jq -c 'if type == "object" and has("items") then {items: .items} else {items: .} end' "$new_items_file" > "$items_file" \
-		|| { rm -f "$items_file"; return 1; }
-	out="$(desk_nvim_cli proposal-build "$repo" "$pass" "$scheduled_date" "$items_file" "${files[@]}")"
-	rm -f "$items_file"
-	jq -e '.sha' > /dev/null 2>&1 <<< "$out" || return 1
-	jq -r '.sha' <<< "$out"
 }

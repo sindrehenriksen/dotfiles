@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# claude/desk-lib/git-ops.sh's desk_stage_and_write_proposal: an untaken
+# The proposal build (cli.lua's proposal-build, as desk-propose stages): an untaken
 # item from the last proposal is carried into the next (a "not now"), and a
 # new item replaces a carried one only when it names it (`supersedes: <id>`),
 # shares its `source`, or is an in-place edit/remove/move/merge of the same
@@ -30,8 +30,9 @@ export DESK_STATE_DIR="$ROOT/state"
 
 # shellcheck source=../../claude/desk-lib/common.sh
 source "$LIB/common.sh"
-# shellcheck source=../../claude/desk-lib/git-ops.sh
-source "$LIB/git-ops.sh"
+stage() { # repo pass date items-file
+	desk_nvim_cli proposal-build "$1" "$2" "$3" "$4" notes.md reading.md
+}
 
 new_repo() {
 	local repo="$1"
@@ -47,7 +48,7 @@ new_repo() {
 		{id:"p1", file:"notes.md", kind:"add", target:{under:"Section A"}, before:"", after:"  carried add", source:"https://example.com/p1", headline:"p1"},
 		{id:"q1", file:"notes.md", kind:"new", target:"top", before:"", after:"NEWS Q1", source:"https://example.com/q1", headline:"q1"}
 	]}' > "$seed"
-	desk_stage_and_write_proposal "$repo" "morning" "2026-09-27" "$seed" notes.md reading.md > /dev/null
+	stage "$repo" "morning" "2026-09-27" "$seed" > /dev/null
 }
 
 has_headline() { # proposal-json headline
@@ -59,7 +60,7 @@ repo="$ROOT/notes-a"
 new_repo "$repo"
 items="$ROOT/items-a.json"
 jq -n '{items: [{id:"n1", file:"notes.md", kind:"new", target:"top", before:"", after:"NEWS N1", source:"https://example.com/n1", headline:"n1"}]}' > "$items"
-desk_stage_and_write_proposal "$repo" "morning" "2026-09-28" "$items" notes.md reading.md > /dev/null
+stage "$repo" "morning" "2026-09-28" "$items" > /dev/null
 proposal="$(git -C "$repo" show refs/desk/proposal:proposal.json)"
 assert_true "p1 carried" "$(has_headline "$proposal" p1)"
 assert_true "q1 carried" "$(has_headline "$proposal" q1)"
@@ -72,7 +73,7 @@ repo="$ROOT/notes-b"
 new_repo "$repo"
 items="$ROOT/items-b.json"
 jq -n '{items: [{id:"a1", file:"notes.md", kind:"add", target:{after:"Section A"}, before:"", after:"  a1", source:"https://example.com/q1", headline:"a1"}]}' > "$items"
-desk_stage_and_write_proposal "$repo" "morning" "2026-09-28" "$items" notes.md reading.md > /dev/null
+stage "$repo" "morning" "2026-09-28" "$items" > /dev/null
 proposal="$(git -C "$repo" show refs/desk/proposal:proposal.json)"
 assert_true "q1 (same source) is dropped, superseded" "$([ "$(has_headline "$proposal" q1)" = false ] && echo true || echo false)"
 assert_true "the new item a1 is present" "$(has_headline "$proposal" a1)"
@@ -84,7 +85,7 @@ repo="$ROOT/notes-c"
 new_repo "$repo"
 items="$ROOT/items-c.json"
 jq -n '{items: [{id:"b1", file:"notes.md", kind:"new", target:"top", before:"", after:"NEWS B1", source:"https://example.com/unrelated-b", headline:"b1"}]}' > "$items"
-desk_stage_and_write_proposal "$repo" "morning" "2026-09-29" "$items" notes.md reading.md > /dev/null
+stage "$repo" "morning" "2026-09-29" "$items" > /dev/null
 proposal="$(git -C "$repo" show refs/desk/proposal:proposal.json)"
 assert_true "q1 survives" "$(has_headline "$proposal" q1)"
 assert_true "b1 is present too" "$(has_headline "$proposal" b1)"
@@ -96,7 +97,7 @@ new_repo "$repo"
 q1_id="$(git -C "$repo" show refs/desk/proposal:proposal.json | jq -r '.items[] | select(.headline == "q1") | .id')"
 items="$ROOT/items-d.json"
 jq -n --arg id "$q1_id" '{items: [{id:"c1", file:"notes.md", kind:"add", target:{after:"Section A"}, before:"", after:"  c1", source:"https://example.com/unrelated-c", supersedes:$id, headline:"c1"}]}' > "$items"
-desk_stage_and_write_proposal "$repo" "morning" "2026-09-30" "$items" notes.md reading.md > /dev/null
+stage "$repo" "morning" "2026-09-30" "$items" > /dev/null
 proposal="$(git -C "$repo" show refs/desk/proposal:proposal.json)"
 assert_true "q1 is dropped, explicitly superseded" "$([ "$(has_headline "$proposal" q1)" = false ] && echo true || echo false)"
 
@@ -106,7 +107,7 @@ repo="$ROOT/notes-e"
 new_repo "$repo"
 items="$ROOT/items-e.json"
 jq -n '{items: [{id:"d1", file:"notes.md", kind:"add", target:{under:"Section A"}, before:"", after:"  a newer take", headline:"d1"}]}' > "$items"
-desk_stage_and_write_proposal "$repo" "morning" "2026-10-01" "$items" notes.md reading.md > /dev/null
+stage "$repo" "morning" "2026-10-01" "$items" > /dev/null
 proposal="$(git -C "$repo" show refs/desk/proposal:proposal.json)"
 assert_true "p1 (same heading, same kind) is still carried" "$(has_headline "$proposal" p1)"
 assert_true "d1 is present" "$(has_headline "$proposal" d1)"
