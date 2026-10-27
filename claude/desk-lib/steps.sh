@@ -164,6 +164,17 @@ desk_caps_string() {
 	act="$(jq -r '.act // "?"' <<< "$caps_json")"
 	wk="$(jq -r '.worth_knowing // "?"' <<< "$caps_json")"
 	wc="$(jq -r '.wildcard // "?"' <<< "$caps_json")"
+	printf 'ACT ≤%s, worth knowing ≤%s, wildcard ≤%s' "$act" "$wk" "$wc"
+}
+
+# The same entry worded for the central session's brief, where it is a rough
+# usual size and not a limit: a headless judge step is held to the limit
+# wording above by desk_apply_caps, the brief is not held to anything.
+desk_usual_size_string() {
+	local caps_json="$1" act wk wc
+	act="$(jq -r '.act // "?"' <<< "$caps_json")"
+	wk="$(jq -r '.worth_knowing // "?"' <<< "$caps_json")"
+	wc="$(jq -r '.wildcard // "?"' <<< "$caps_json")"
 	printf 'about %s ACT, %s worth knowing, %s wildcard' "$act" "$wk" "$wc"
 }
 

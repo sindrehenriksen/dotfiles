@@ -175,7 +175,7 @@ done
 
 echo
 echo "=== the pass's own caps entry is used ==="
-assert_true "the judge prompt shows the tight usual size" "$(grep -qF 'about 1 ACT' "$judge_rec/prompt.txt" && echo true || echo false)"
+assert_true "the judge prompt shows the tight cap" "$(grep -qF 'ACT ≤1' "$judge_rec/prompt.txt" && echo true || echo false)"
 proposal="$(git -C "$notes" show refs/desk/proposal:proposal.json 2> /dev/null)"
 assert_eq "the second act item overflowed: counted in the status file" "1" "$(jq -r '.proposal.overflow.act' "$FAKE_HOME/.local/state/desk/status.json")"
 assert_true "and no overflow summary item is in the proposal" \

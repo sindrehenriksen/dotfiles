@@ -992,7 +992,7 @@ export DESK_PASS_WEEKEND_SKIP
 desk_open_follow_up_tab "$pass" "$scheduled_date" "$follow_up_step" "$repo" > /dev/null
 # A pass with a brief hands its run to the central session (brief.sh).
 desk_brief_after_pass "$pass" "$pass_config" "$config" "$repo" "$scheduled_date" "$pass_ctx" \
-	"$(jq -c --arg caps "$(desk_caps_string "$(desk_pass_caps_json "$pass" "$pass_config" "$config")")" \
+	"$(jq -c --arg caps "$(desk_usual_size_string "$(desk_pass_caps_json "$pass" "$pass_config" "$config")")" \
 		'. + {caps: $caps}' <<< "$common_placeholders")" "${files[@]}"
 
 # -----------------------------------------------------------------------
