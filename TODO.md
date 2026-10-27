@@ -16,8 +16,6 @@ Three-column layout (browser | terminals | nvim tabs) — design in `docs/window
 
 ## Agent CLIs
 
-- [ ] Test Copilot CLI end-to-end, adapt skills/prompts where needed
-- [ ] Test Codex CLI end-to-end (reads `AGENTS.md` for project context)
 - [ ] Linux: gh comes from mise (`aqua:cli/cli`, machine-local `~/.config/mise/config.toml`), pinned at 2.103.2 on 2026-10-24, with `expiring_credentials` enabled (public preview): the token sits in plain text in `hosts.yml`, so a leaked copy should die within hours. The setting applies only to a new login, so the token there stays the old, non-expiring one until GitHub CLI is revoked under github.com/settings/applications and `gh auth login` is run again. Nothing here caches `gh auth token`, which is the one thing the switch breaks.
 - [ ] Re-tune for Opus 5.5, what is still open. Method and findings are in `docs/agent-setup-retune.md`. Open: subagent effort levels, which were not measured — the move of well-specified Opus-class jobs to `medium` gets checked around mid-November 2026, comparing rework and tokens of medium against high subagent jobs with `claude/claude-usage-baseline`, which records effort per call; and whether the provider's advisor tool would earn its place beside the question path.
 - [ ] Decide whether agent-workflow nvim keymaps are worth adding (`<leader>dv` for DiffviewOpen, etc.) or if the defaults are fine

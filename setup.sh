@@ -134,7 +134,7 @@ command -v claude >/dev/null || curl -fsSL https://claude.ai/install.sh | bash
 # Pinned: an unpinned npx fetches whatever the registry serves at each
 # launch. The dependency-updates sweep moves it, in every registration.
 
-# Claude Code (user-scoped — available in all projects)
+# User-scoped, so available in all projects:
 claude mcp add -s user playwright -- npx -y @playwright/mcp@0.0.83
 
 #### Claude Code per-machine settings (the account's --settings overlay)
@@ -147,11 +147,6 @@ claude mcp add -s user playwright -- npx -y @playwright/mcp@0.0.83
 # ~/.shellrc.early and passed as --settings by the wrapper in .shellrc; see
 # docs/overlays.md. Not a settings.local.json beside the user settings.json:
 # the agent reads no such file, so a rule put there is silently lost.
-
-# GitHub Copilot CLI: add to ~/.copilot/mcp-config.json (or /mcp add interactively)
-
-# OpenAI Codex CLI:
-#   codex mcp add playwright -- npx -y @playwright/mcp@0.0.83
 
 #### Linux system setup (if linux)
 # Keyboard layer, window grid and GNOME settings: linux/README.md, "First run".
