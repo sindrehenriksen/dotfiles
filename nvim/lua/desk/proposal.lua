@@ -567,6 +567,15 @@ local function resolve_conflict(ours, base, theirs)
 			local added = vim.list_slice(lines, h[3], h[3] + h[4] - 1)
 			if h[2] == 0 then
 				ins[h[1]] = added
+			elseif h[2] == h[4] then
+				-- Rewritten line for line: each base line keeps its own new
+				-- text, so what the other side adds between two of them
+				-- stays between them.
+				for k = 0, h[2] - 1 do
+					local key = n .. "." .. k
+					cover[h[1] + k] = key
+					text[key] = { added[k + 1] }
+				end
 			else
 				for k = h[1], h[1] + h[2] - 1 do
 					cover[k] = n

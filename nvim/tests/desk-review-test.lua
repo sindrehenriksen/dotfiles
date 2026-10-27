@@ -3305,6 +3305,15 @@ do
 	vim.cmd("silent! %bwipeout!")
 end
 
+print("\n=== an add between two lines the user reworded by hand stays between them, and shows ===")
+do
+	local r = new_repo({ "S", "- a", "  - sub1", "- b", "- c" })
+	build(r, "2026-10-01", { item("ad", { kind = "add", target = { after = "- a" }, after = "  - new sub", source = "", headline = "add" }) })
+	local res = proposal.reviewable(r, proposal.read(r), "notes.md", { "S", "- a", "  - sub1 by hand", "- b by hand", "- c" })
+	assert_eq("merged under its own parent", { "S", "- a", "  - sub1 by hand", "  - new sub", "- b by hand", "- c" }, res and res.merged)
+	assert_eq("shown", 1, res and #vim.tbl_keys(res.shown))
+end
+
 print(string.format("\n=== summary: %d passed, %d failed ===", pass, fail))
 if fail > 0 then
 	os.exit(1)
