@@ -25,7 +25,7 @@ desk_repo_committable() {
 
 # Commits the user's on-disk files exactly as they are (only the configured
 # files, only if something changed), records any suggestion now in the user's HEAD
-# as taken, then pushes main + refs/desk/ledger. Prints one status word to
+# as taken, then pushes main and the ledger. Prints one status word to
 # stdout: "ok" (ran, whether or not there was anything new to commit),
 # "skipped" (HEAD isn't main / mid-rebase — reported, never attempted), or
 # "error" (the commit or the taken-sync failed — a loud failure). The push
@@ -84,7 +84,7 @@ desk_step_commit_push() {
 }
 
 # The one push desk-run ever makes for the notes repo: a pinned refspec
-# (main, plus refs/desk/ledger when it exists locally), BatchMode +
+# (main, plus the ledger wrapped in a commit when there is one), BatchMode +
 # ConnectTimeout, never a pull/fetch/merge/rebase beforehand and never
 # --force. A single attempt — a rejected push is recorded (status.json's
 # `push` field) and left for the next pass, never retried in a loop here.
@@ -101,13 +101,9 @@ desk_push_notes() {
 		return 0
 	fi
 
-	# refs/desk/ledger may not exist yet (a brand-new repo, or one that's
-	# never had a pass stage anything) — a refspec naming a
-	# ref that doesn't exist locally fails the ENTIRE push, main included,
-	# so it's only ever added when it's actually there to push.
-	local refspecs=(refs/heads/main:refs/heads/main)
-	if git -C "$repo" show-ref --verify --quiet refs/desk/ledger; then
-		refspecs+=(refs/desk/ledger:refs/desk/ledger)
+	local refspecs=(refs/heads/main:refs/heads/main) wrapped
+	if wrapped="$(desk_ledger_wrap "$repo")"; then
+		refspecs+=("$wrapped:refs/desk/ledger")
 	fi
 
 	local push_err
@@ -118,6 +114,26 @@ desk_push_notes() {
 		desk_log commit_push "push failed (recorded, not retried this run): $push_err"
 		desk_status_set_string_field push "failed"
 	fi
+}
+
+# desk_ledger_wrap <repo>: the commit the ledger is pushed as. The ledger
+# ref is a bare blob, which GitHub refuses to store, so each push sends a
+# commit whose tree holds it as ledger.jsonl, parented on the last one sent
+# (refs/desk/ledger-pushed) so every push fast-forwards. Prints nothing and
+# fails when there is no ledger yet, since a refspec naming a missing ref
+# fails the whole push, main included.
+desk_ledger_wrap() {
+	local repo="$1" blob prev tree commit
+	blob="$(git -C "$repo" rev-parse -q --verify 'refs/desk/ledger^{blob}' 2> /dev/null)" || return 1
+	prev="$(git -C "$repo" rev-parse -q --verify 'refs/desk/ledger-pushed^{commit}' 2> /dev/null)"
+	if [ -n "$prev" ] && [ "$(git -C "$repo" rev-parse -q --verify "$prev:ledger.jsonl" 2> /dev/null)" = "$blob" ]; then
+		printf '%s' "$prev"
+		return 0
+	fi
+	tree="$(printf '100644 blob %s\tledger.jsonl\n' "$blob" | git -C "$repo" mktree)" || return 1
+	commit="$(git -C "$repo" commit-tree "$tree" ${prev:+-p "$prev"} -m ledger)" || return 1
+	git -C "$repo" update-ref refs/desk/ledger-pushed "$commit" ${prev:+"$prev"} || return 1
+	printf '%s' "$commit"
 }
 
 # ---------------------------------------------------------------------------
