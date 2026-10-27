@@ -105,7 +105,6 @@ local function setup(notes, items)
 	vim.cmd("edit " .. vim.fn.fnameescape(r .. "/notes.md"))
 	local nb = vim.api.nvim_get_current_buf()
 	review.attach(nb)
-	review.view = "inline"
 	assert(review.open_review(nb))
 	return r, nb, review.session_of(nb)
 end
@@ -173,10 +172,7 @@ local function settle()
 	end)
 end
 
-print("=== one window is the default; the split is the view key away ===")
-assert_eq("a review opens in one window", "inline", review.view)
-
-print("\n=== one window: the notes themselves, suggestions drawn over them ===")
+print("=== one window: the notes themselves, suggestions drawn over them ===")
 do
 	local _, nb = setup()
 	assert_eq("one window", "leaf", vim.fn.winlayout()[1])
@@ -654,7 +650,6 @@ do
 	vim.cmd("edit " .. vim.fn.fnameescape(r .. "/notes.md"))
 	local nb = vim.api.nvim_get_current_buf()
 	review.attach(nb)
-	review.view = "inline"
 	assert(review.open_review(nb))
 	local s = review.session_of(nb)
 	local said = {}
@@ -686,32 +681,6 @@ do
 	end, vim.tbl_values(ledger.declined(ledger.read(r)).ids)))
 	vim.cmd("cclose")
 	vim.bo[nb].modified = false
-end
-
-print("\n=== the view key: to the split and back, the declines carried ===")
-do
-	local r, nb, s = setup()
-	vim.api.nvim_win_set_cursor(0, { line_of(nb, "- stale"), 0 })
-	vim.api.nvim_feedkeys(vim.keycode("<leader>gD"), "x", false)
-	vim.api.nvim_feedkeys(vim.keycode("<leader>gv"), "x", false)
-	assert_eq("two windows", "col", vim.fn.winlayout()[1])
-	local rb = s.review_buf
-	assert_true("the split in diff mode", vim.wo[vim.fn.bufwinid(rb)].diff and vim.wo[vim.fn.bufwinid(nb)].diff)
-	assert_true("the declined removal not proposed there: its line stays", line_of(rb, "- stale") ~= nil)
-	assert_eq("no decoration in the split", 0, #vim.api.nvim_buf_get_extmarks(nb, inline.NS, 0, -1, {}))
-	vim.api.nvim_set_current_win(vim.fn.bufwinid(rb))
-	vim.api.nvim_feedkeys(vim.keycode("<leader>gv"), "x", false)
-	assert_eq("back to one window", "leaf", vim.fn.winlayout()[1])
-	assert_eq("on the notes", nb, vim.api.nvim_get_current_buf())
-	local closed = false
-	for l = 1, vim.api.nvim_buf_line_count(nb) do
-		closed = closed or vim.fn.foldclosed(l) ~= -1
-	end
-	assert_true("out of diff mode, nothing folded or bound", not vim.wo.diff and not closed and not vim.wo.scrollbind)
-	assert_true("drawn again, the decline still out", #decor(nb).blocks > 0 and not vim.tbl_contains(decor(nb).struck, line_of(nb, "- stale")))
-	vim.api.nvim_feedkeys("Q", "x", false)
-	settle()
-	assert_eq("the decline is recorded as it ends", 1, #vim.tbl_keys(ledger.declined(ledger.read(r)).ids))
 end
 
 print("\n=== the top and the end of the file, and an empty one ===")
@@ -863,7 +832,6 @@ do
 	vim.cmd("edit " .. vim.fn.fnameescape(r .. "/notes.md"))
 	local nb = vim.api.nvim_get_current_buf()
 	review.attach(nb)
-	review.view = "inline"
 	assert(review.open_review(nb))
 	assert_true("the overview opens", review.overview(nb))
 	local qw = vim.api.nvim_get_current_win()
@@ -885,7 +853,7 @@ do
 	settle()
 end
 
-print("\n=== the top as keys move to it, edits under it and the split ===")
+print("\n=== the top as keys move to it, and edits under it ===")
 do
 	-- CursorMoved and TextChanged fire only from a running main loop, which
 	-- `nvim -l` has none of: a second nvim runs the review, fed real keys.
@@ -912,7 +880,6 @@ do
 		window.owner_fn = function() return nil end
 		vim.notify = function() end
 		local review = require("desk.review")
-		review.view = "inline"
 		vim.cmd("edit " .. vim.fn.fnameescape(... .. "/notes.md"))
 		_G.nb = vim.api.nvim_get_current_buf()
 		review.attach(_G.nb)
@@ -951,21 +918,6 @@ do
 	local st = state()
 	local fill = st.fill
 	assert_eq("opened at the top, all shown", { 1, fill }, { st.line, st.topfill })
-	-- The split shows the top as diff filler, its own business: scrolled
-	-- part way into it, the keys leave it so.
-	keys("<Space>gv")
-	local split = lua([[
-		vim.api.nvim_set_current_win(_G.nw)
-		vim.fn.winrestview({ topline = 1, topfill = 1, lnum = 2 })
-		return { diff = vim.wo.diff, filler = vim.fn.diff_filler(1) }
-	]])
-	assert_true("the split shows the top as diff filler", split.diff and split.filler > 1)
-	keys("k")
-	st = state()
-	assert_eq("k to line 1 there leaves the filler as scrolled", { 1, 1 }, { st.line, st.topfill })
-	keys("<Space>gv")
-	st = state()
-	assert_eq("back in one window at line 1, all shown again", { 1, fill }, { st.line, st.topfill })
 	keys("G")
 	keys("gg")
 	st = state()
@@ -1053,24 +1005,6 @@ do
 	assert_eq("on its line", spot_row(s, "headline x"), vim.api.nvim_win_get_cursor(nw)[1])
 end
 
-print("\n=== declines made in the split carry to the one window ===")
-do
-	local r, nb = setup()
-	vim.api.nvim_feedkeys(vim.keycode("<leader>gv"), "x", false)
-	local s = review.session_of(nb)
-	local rb = s.review_buf
-	vim.api.nvim_set_current_win(vim.fn.bufwinid(rb))
-	vim.api.nvim_win_set_cursor(0, { line_of(rb, "- b4 added"), 0 })
-	assert_true("declined in the split", review.decline(rb))
-	vim.api.nvim_feedkeys(vim.keycode("<leader>gv"), "x", false)
-	assert_true("not drawn in the one window", block_with(nb, "- b4 added") == nil)
-	vim.api.nvim_feedkeys("Q", "x", false)
-	settle()
-	assert_eq("recorded as it ends", { "add b4" }, vim.tbl_map(function(rec)
-		return rec.headline
-	end, vim.tbl_values(ledger.declined(ledger.read(r)).ids)))
-end
-
 print("\n=== a new proposal under the open window is drawn ===")
 do
 	local r, nb = setup()
@@ -1112,37 +1046,6 @@ do
 	vim.api.nvim_feedkeys(vim.keycode("<leader>gA"), "x", false)
 	assert_eq("of two on line 1, ␣gA takes the first drawn", "- p", lines_of(nb2)[1])
 	_ = s2
-end
-
-print("\n=== in the split, typing in the notes is no edit of the review's ===")
-do
-	review.view = "split"
-	local r = new_repo(BASE)
-	assert(proposal.build(r, "morning", "2026-10-01", ITEMS, FILES))
-	vim.cmd("silent! %bwipeout!")
-	vim.cmd("edit " .. vim.fn.fnameescape(r .. "/notes.md"))
-	local nb = vim.api.nvim_get_current_buf()
-	review.attach(nb)
-	assert(review.open_review(nb))
-	local rb = review.open_review_buf(nb)
-	vim.api.nvim_set_current_win(vim.fn.bufwinid(rb))
-	vim.api.nvim_win_set_cursor(0, { line_of(rb, "- b4 added"), 0 })
-	assert_true("declined", review.decline(rb))
-	vim.api.nvim_set_current_win(vim.fn.bufwinid(nb))
-	vim.api.nvim_feedkeys("Go- typed in the notes\27", "xt", false)
-	local said = {}
-	vim.notify = function(m)
-		said[#said + 1] = m
-	end
-	vim.api.nvim_feedkeys("Q", "x", false)
-	settle()
-	assert_true("Q closes cleanly", review.open_review_buf(nb) == nil and not vim.tbl_contains(said, "desk: " .. review.HAND_EDITS))
-	assert_eq("recording the decline", { "add b4" }, vim.tbl_map(function(rec)
-		return rec.headline
-	end, vim.tbl_values(ledger.declined(ledger.read(r)).ids)))
-	assert_true("and the typing is in the notes", line_of(nb, "- typed in the notes") ~= nil)
-	vim.notify = function() end
-	review.view = "inline"
 end
 
 print("\n=== declines are recorded however the one window ends ===")
@@ -1254,40 +1157,6 @@ do
 	assert_eq("declined, not taken", { { "drop the stale line" }, 0 }, { vim.tbl_map(function(rec)
 		return rec.headline
 	end, vim.tbl_values(ledger.declined(records).ids)), #vim.tbl_keys(ledger.taken_by_id(records)) })
-end
-
-print("\n=== the view key over typing: no false stop either way ===")
-do
-	local r, nb = setup()
-	vim.api.nvim_feedkeys("Go- typed in one window\27", "xt", false)
-	changed(nb)
-	vim.api.nvim_feedkeys(vim.keycode("<leader>gv"), "x", false)
-	local rb = review.open_review_buf(nb)
-	vim.api.nvim_set_current_win(vim.fn.bufwinid(rb))
-	vim.api.nvim_win_set_cursor(0, { line_of(rb, "- b4 added"), 0 })
-	assert_true("declined in the split", review.decline(rb))
-	local said = {}
-	vim.notify = function(m)
-		said[#said + 1] = m
-	end
-	vim.api.nvim_feedkeys("Q", "x", false)
-	settle()
-	assert_true("Q closes, no edit of the review's found", review.open_review_buf(nb) == nil and not vim.tbl_contains(said, "desk: " .. review.HAND_EDITS))
-	assert_eq("recording the decline", { "add b4" }, vim.tbl_map(function(rec)
-		return rec.headline
-	end, vim.tbl_values(ledger.declined(ledger.read(r)).ids)))
-	-- And back: typing in the split's notes window, then to one window.
-	local nb2 = select(2, setup())
-	vim.api.nvim_feedkeys(vim.keycode("<leader>gv"), "x", false)
-	vim.api.nvim_set_current_win(vim.fn.bufwinid(nb2))
-	vim.api.nvim_feedkeys("Go- typed in the split\27", "xt", false)
-	vim.api.nvim_set_current_win(vim.fn.bufwinid(review.open_review_buf(nb2)))
-	local ok, why = review.toggle_view(review.session_of(nb2))
-	assert_true("back to one window over notes typed in the split (" .. tostring(why) .. ")", ok)
-	vim.api.nvim_feedkeys("Q", "x", false)
-	settle()
-	assert_true("and Q closes there", review.open_review_buf(nb2) == nil)
-	vim.notify = function() end
 end
 
 print("\n=== typing into or splitting a struck line is an edit, not a decline ===")
@@ -1432,7 +1301,6 @@ do
 	print(string.format("     (an edit and its redraw: %.1f ms)", ms))
 	assert_true("an edit and its redraw stay well under a tenth of a second", ms < 100)
 	assert_true("still drawn", #s.view_spots > 0)
-	review.view = "split"
 end
 
 print(string.format("\n=== summary: %d passed, %d failed ===", pass, fail))

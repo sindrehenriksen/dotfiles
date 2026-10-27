@@ -5,12 +5,7 @@
 -- still what this buffer last read or wrote, and no merge is pending or
 -- open. A desk pass or session that wrote the file meanwhile is merged with,
 -- never overwritten.
---
--- It pauses while a desk review in two windows is open on the buffer: a
--- save there records the review's takes (review.lua, flush_taken), and a
--- take undone after that would stay recorded. The review's own close keys
--- save instead. The one-window review, where the user types in the notes
--- themselves, does not pause it; its saves hold the takes until it ends.
+-- A review's saves hold its takes until it ends (review.lua).
 local M = {}
 
 local function hash(lines)
@@ -126,21 +121,10 @@ function M.save_all(except)
 	return wrote, left
 end
 
--- A review in two windows pauses auto-save; the one window, where the notes
--- are what the user types in, does not (its takes wait for its end).
-local function reviewing(buf)
-	local ok, review = pcall(require, "desk.review")
-	if not (ok and review.open_review_buf and review.open_review_buf(buf) ~= nil) then
-		return false
-	end
-	local s = review.session_of and review.session_of(buf)
-	return not (s and s.inline)
-end
-
 --- One automatic save of `buf`. A save it holds back is said once until the
 --- reason changes, since the events come often.
 function M.auto(buf)
-	if not M.is_notes(buf) or not vim.bo[buf].modified or reviewing(buf) then
+	if not M.is_notes(buf) or not vim.bo[buf].modified then
 		return
 	end
 	local ok, why = M.save(buf)
