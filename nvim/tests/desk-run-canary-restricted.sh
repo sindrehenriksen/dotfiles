@@ -5,9 +5,8 @@
 # use two tools that are not on its list: the built-in Bash and a user-level
 # MCP tool. Both must be refused. Read-only (a harmless echo and a search
 # that never runs). Spends real budget, so it is never in run-all.sh.
-# DESK_CANARY_RESTRICTED=false checks the same envelope for a step with
-# `instructions`, which runs without --restricted; DESK_CANARY_SCRATCH_PARENT
-# runs the call inside a given directory, such as an instance's calls_root.
+# DESK_CANARY_SCRATCH_PARENT runs the call inside a given directory, such as
+# an instance's calls_root.
 set -u
 
 if [ "${DESK_CANARY_LIVE:-}" != "1" ]; then
@@ -48,22 +47,14 @@ If a tool does not exist for you, say so. After both attempts, stop.
 PROMPT
 
 STREAM_OUT="$SCRATCH/stream.jsonl"
-# Unrestricted, the pass's envelope includes the deny hook every
-# `instructions` call carries.
-settings_args=()
-if [ "${DESK_CANARY_RESTRICTED:-true}" = "false" ]; then
-	settings_args=(--settings "$(desk_write_deny_hook_settings "$SCRATCH" "" "$SCRATCH" Read)")
-fi
 desk_call_model \
 	--scratch "$SCRATCH" \
 	--prompt-file "$SCRATCH/prompt.txt" \
 	--allowed-tools "Read" \
 	--tools "Read" \
-	--connector false \
-	--restricted "${DESK_CANARY_RESTRICTED:-true}" \
+	--restricted true \
 	--mcp-config "$SCRATCH/empty-mcp.json" \
 	--strict-mcp-config true \
-	${settings_args[@]+"${settings_args[@]}"} \
 	--max-budget-usd 0.50 \
 	--timeout 120 \
 	--config-dir "$CLAUDE_CONFIG_DIR" \

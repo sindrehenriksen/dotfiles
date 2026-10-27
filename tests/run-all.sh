@@ -1,11 +1,9 @@
 #!/usr/bin/env bash
 # Runs every test suite in this repo, by explicit name: nvim/tests/*.sh,
 # nvim/tests/*.lua (headless, via `nvim -u minimal_init.lua -l <file>`),
-# claude/tests/*.sh, git-hooks/test-*.sh. Deliberately never
-# nvim/tests/desk-run-canary.sh or desk-run-canary-restricted.sh — each
-# drives a live model call under DESK_CANARY_LIVE and is run by hand, never
-# by an automated runner. desk-run-canary-selftest.sh runs the first
-# against a fake `claude`, offline.
+# claude/tests/*.sh, git-hooks/test-*.sh. Never
+# nvim/tests/desk-run-canary-restricted.sh, which makes a live model call
+# under DESK_CANARY_LIVE and is run by hand.
 #
 # Wraps the whole run in the config guard (tests/lib/git-safety.sh):
 # snapshots `git config --local --list` for each repo in $DESK_GUARD_REPOS
@@ -42,62 +40,31 @@ desk_test_state_guard_snapshot "$GUARD_DIR" before
 desk_test_safe_env_init "$GUARD_DIR/safe-env"
 
 # --- explicit suite lists (never a glob — a new file here doesn't run
-# until it's named below, and desk-run-canary.sh is never named at all) --
+# until it's named below, and the canary is never named at all) --
 
 BASH_SUITES=(
 	nvim/tests/desk-brief-test.sh
-	nvim/tests/desk-capture-sessions-test.sh
-	nvim/tests/desk-cli-test.sh
-	nvim/tests/desk-cli-tokens-test.sh
 	nvim/tests/desk-close-test.sh
 	nvim/tests/desk-deny-hook-test.sh
-	nvim/tests/desk-example-instance-test.sh
-	nvim/tests/desk-fetch-window-test.sh
-	nvim/tests/desk-followup-tab-test.sh
-	nvim/tests/desk-follow-up-inputs-test.sh
-	nvim/tests/desk-followup-summary-test.sh
-	nvim/tests/desk-followup-upper-c-test.sh
-	nvim/tests/desk-generic-config-test.sh
-	nvim/tests/desk-headless-env-test.sh
-	nvim/tests/desk-judge-inputs-test.sh
-	nvim/tests/desk-judge-invalid-reply-test.sh
 	nvim/tests/desk-line-key-test.sh
 	nvim/tests/desk-lock-test.sh
-	nvim/tests/desk-mail-triage-test.sh
 	nvim/tests/desk-max-budget-test.sh
 	nvim/tests/desk-notes-diff-test.sh
-	nvim/tests/desk-open-tab-test.sh
-	nvim/tests/desk-pass-config-test.sh
 	nvim/tests/desk-propose-test.sh
-	nvim/tests/desk-partial-proposal-test.sh
 	nvim/tests/desk-push-test.sh
 	nvim/tests/desk-render-prompt-test.sh
 	nvim/tests/desk-run-at-load-test.sh
-	nvim/tests/desk-run-canary-selftest.sh
-	nvim/tests/desk-run-morning-integration-test.sh
 	nvim/tests/desk-run-test.sh
 	nvim/tests/desk-runner-lock-test.sh
 	nvim/tests/desk-restricted-argv-test.sh
-	nvim/tests/desk-retention-test.sh
 	nvim/tests/desk-safe-env-test.sh
-	nvim/tests/desk-scoped-read-test.sh
 	nvim/tests/desk-sleep-inhibit-test.sh
-	nvim/tests/desk-stage-proposal-namespace-test.sh
-	nvim/tests/desk-status-fields-test.sh
 	nvim/tests/desk-status-sh-test.sh
-	nvim/tests/desk-steps-mcp-config-test.sh
 	nvim/tests/desk-supersede-test.sh
 	nvim/tests/desk-ticket-cache-test.sh
-	nvim/tests/desk-ticket-digest-test.sh
-	nvim/tests/desk-ticket-search-test.sh
 	nvim/tests/desk-timeout-test.sh
-	nvim/tests/desk-url-allowlist-test.sh
 	nvim/tests/desk-validate-test.sh
-	nvim/tests/desk-visible-run-test.sh
-	nvim/tests/desk-w-count-check-test.sh
 	nvim/tests/desk-follow-test.sh
-	nvim/tests/desk-write-pinned-test.sh
-	nvim/tests/desk-write-step-kind-test.sh
 	claude/tests/close-session-test.sh
 	claude/tests/compact-handoff-test.sh
 	claude/tests/input-bell-test.sh

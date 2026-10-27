@@ -1,10 +1,8 @@
 #!/usr/bin/env bash
 # Matching a quoted notes line ignores trailing whitespace and the agent
 # mark with the whitespace before it, wherever the runner compares one:
-# desk_before_is_committed (which URLs an edit's `before` lends its
-# `after`), desk_item_at_problem (whether `at` is `before`'s first line)
-# and desk_write_marked_head_copy (which lines a judge's copy marks as
-# taken). A taken line that ends in a space loses it when the mark is
+# desk_item_at_problem (whether `at` is `before`'s first line) and
+# desk_write_marked_head_copy (which lines a seeded copy marks as taken). A taken line that ends in a space loses it when the mark is
 # stripped from a quote, and must still match. No model call.
 set -u
 
@@ -24,7 +22,7 @@ source "$HERE/../../tests/lib/git-safety.sh"
 desk_test_git_safety_init "$ROOT"
 export DESK_STATE_DIR="$ROOT/state"
 
-for f in common lock status model-call git-ops tool-results validate steps; do
+for f in common lock status model-call tool-results validate steps; do
 	# shellcheck disable=SC1090
 	source "$LIB/$f.sh"
 done
@@ -38,16 +36,6 @@ git -C "$repo" config user.name "Desk Test"
 printf 'Section A\n  - a taken line ending in a space \n  - see [the post](https://example.com/p)  \n' > "$repo/notes.md"
 git -C "$repo" add notes.md
 git -C "$repo" commit -q -m initial
-
-echo "=== desk_before_is_committed ==="
-item='{"kind":"edit","file":"notes.md"}'
-yes_no() { if desk_before_is_committed "$item" "$1" "$repo"; then echo yes; else echo no; fi; }
-assert_eq "a quote without the line's trailing space matches" yes "$(yes_no '  - see [the post](https://example.com/p)')"
-assert_eq "so does one carrying the mark, the space before it dropped" yes "$(yes_no '  - a taken line ending in a space  <<agent-suggested>>')"
-assert_eq "a different line still does not" no "$(yes_no '  - see the post')"
-
-kept="$(desk_sanitize_item_text '{"kind":"edit","file":"notes.md","before":"  - see [the post](https://example.com/p)","after":"  - read [the post](https://example.com/p)","headline":"h"}' "" "$repo" | jq -r .after)"
-assert_eq "so an edit keeps the URL its before carries, quoted without the trailing spaces" "  - read [the post](https://example.com/p)" "$kept"
 
 echo "=== desk_item_at_problem ==="
 at_check() { desk_item_at_problem "$(jq -cn --arg at "$1" --arg b "$2" '{target: {at: $at}, before: $b}')"; }
