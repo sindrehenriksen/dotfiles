@@ -208,7 +208,7 @@ R1="$DESK_RUNS_ROOT/testpass-2026-10-05"
 assert_true "the inputs are seeded: the committed notes and the fetch's reply" \
 	"$([ -f "$R1/inputs/notes.md" ] && jq -e '.candidates[0].url == "https://example.com/a"' "$R1/inputs/f-web.json" > /dev/null 2>&1 && echo true || echo false)"
 assert_eq "the instruction files are rendered with the run's own paths and caps" \
-	"Judge the run in $R1 from $R1/inputs, caps ACT ≤3, worth knowing ≤3, wildcard ≤1, for testpass of 2026-10-05." \
+	"Judge the run in $R1 from $R1/inputs, caps about 3 ACT, 3 worth knowing, 1 wildcard, for testpass of 2026-10-05." \
 	"$(cat "$R1/instructions/brief.md" 2> /dev/null)"
 assert_eq "the links a suggestion may cite are the fetch's" "https://example.com/a" "$(cat "$R1/allowed-urls.txt" 2> /dev/null)"
 assert_eq "run.json has the result and the instruction files, in the config's order" \

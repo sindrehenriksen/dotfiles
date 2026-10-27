@@ -206,7 +206,7 @@ A prompt is plain text with `{{name}}` placeholders, filled in one pass; a place
 | `digest_query`, `inbox_query` | fetch, judge, write | `label:"<digest_gmail_label>" after:<epoch> before:<epoch>`, and the same for `in:inbox` |
 | `sources` | fetch, judge, write | the whole sources file |
 | `jql` | the `ticket_status_step_id` fetch | `key in (...)` over every ticket key the notes mention |
-| `caps` | judge | e.g. `ACT ≤3, worth knowing ≤3, wildcard ≤1` |
+| `caps` | judge | e.g. `about 3 ACT, 3 worth knowing, 1 wildcard`, a rough usual size rather than a limit |
 | `thread_ids`, `trash_thread_ids` | write | the pinned digest ids to mark read, and the noise ids to trash, one per line |
 | `mail_triage_query`, `mail_triage_offer_query`, `mail_triage_page_size` | a fetch step with `mail_triage` | the listing query and the offer listing's (empty when there is none), which the call must run character for character, and the page size to ask for |
 | `run_dir`, `inputs`, `pass`, `scheduled_date` | a brief's instruction files | the run directory, its `inputs/`, the pass's name and its scheduled date; the fetch window, `mode`, `today` and `caps` are filled too |

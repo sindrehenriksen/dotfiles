@@ -164,7 +164,7 @@ desk_caps_string() {
 	act="$(jq -r '.act // "?"' <<< "$caps_json")"
 	wk="$(jq -r '.worth_knowing // "?"' <<< "$caps_json")"
 	wc="$(jq -r '.wildcard // "?"' <<< "$caps_json")"
-	printf 'ACT ≤%s, worth knowing ≤%s, wildcard ≤%s' "$act" "$wk" "$wc"
+	printf 'about %s ACT, %s worth knowing, %s wildcard' "$act" "$wk" "$wc"
 }
 
 # A fixed, sed-safe (no /, &, \) literal suffix marking a scratch-copy line
