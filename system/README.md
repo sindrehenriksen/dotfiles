@@ -24,23 +24,10 @@ them.
 
 ## General (any Linux desktop)
 
-### GNOME keybindings & input (`gnome-keybindings.sh`)
+### GNOME settings
 
-Run once (idempotent):
-
-```bash
-~/dotfiles/system/gnome-keybindings.sh
-```
-
-Sets up:
-- **Super+Q** → lock screen (frees Super+L for dock)
-- **Super+L** → dock overlay numbers (dash-to-dock)
-- **Alt+Shift** → switch input method (default Super+Space conflicts)
-- **Right Alt** → AltGr/Level 3 (Norwegian letters å ø æ via RAlt+a/o/e on Programmer Dvorak)
-- **Caps Lock** ↔ **Escape** swap
-
-To adapt for another machine: edit the `input-sources` and `xkb-options`
-lines for your keyboard layout. The keybindings are layout-independent.
+Touchpad, input sources and keybindings are set by `linux/gnome-shortcuts.sh`
+(idempotent); see `linux/README.md`.
 
 ### Power button (`logind.conf.override`)
 

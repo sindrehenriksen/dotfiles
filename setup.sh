@@ -153,18 +153,7 @@ claude mcp add -s user playwright -- npx -y @playwright/mcp@0.0.83
 # OpenAI Codex CLI:
 #   codex mcp add playwright -- npx -y @playwright/mcp@0.0.83
 
-#### Install vim-plug (if not already installed)
-curl -fLo ~/.vim/autoload/plug.vim --create-dirs \
-    https://raw.githubusercontent.com/junegunn/vim-plug/master/plug.vim
-
-#### Run zsh
-zsh
-
-#### Install vim plugins
-# Open vim and run :PlugInstall
-
 #### Linux system setup (if linux)
-# See system/ for configs and scripts. General steps:
-~/dotfiles/system/gnome-keybindings.sh
+# Keyboard layer, window grid and GNOME settings: linux/README.md, "First run".
 # Lenovo-specific (battery conservation, keyboard resume fix, power button):
 # See system/README.md for install instructions

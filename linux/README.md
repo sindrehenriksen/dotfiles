@@ -12,7 +12,7 @@ The Linux half of the model in [../docs/keyboard.md](../docs/keyboard.md) — re
 | `gnome-extension/` | the window placement grid; the model is in [../docs/window-layout.md](../docs/window-layout.md) |
 | `install.sh` | fetches xremap and its GNOME extension; no root |
 | `setup-input.sh` | input-device permissions, and removes keyd; needs root |
-| `gnome-shortcuts.sh` | clears the GNOME defaults that collide with Super |
+| `gnome-shortcuts.sh` | GNOME settings: touchpad, input sources, and clearing the defaults that collide with Super |
 
 ## First run
 

@@ -1,7 +1,25 @@
 #!/usr/bin/env bash
-# GNOME defaults that collide with Super as the app-command modifier.
+# GNOME settings: touchpad, input sources, and the defaults that collide with
+# Super as the app-command modifier.
 # Idempotent; safe to re-run. See ../docs/keyboard.md for what stays and why.
 set -euo pipefail
+
+# Two-finger tap/click is right-click.
+gsettings set org.gnome.desktop.peripherals.touchpad click-method 'fingers'
+
+# Lock screen on Super+Q, which frees Super+L for the dash-to-dock overlay
+# numbers (needs that extension).
+gsettings set org.gnome.settings-daemon.plugins.media-keys screensaver "['<Super>q']"
+gsettings set org.gnome.shell.extensions.dash-to-dock shortcut "['<Super>l']"
+gsettings set org.gnome.shell.extensions.dash-to-dock shortcut-text "'<Super>l'"
+
+# Programmer Dvorak plus the physical keyboard's layout ('no' here).
+gsettings set org.gnome.desktop.input-sources sources "[('xkb', 'us+dvp'), ('xkb', 'no')]"
+
+# Not settable here: middle-click paste is turned off by hand, with
+# `gtk-enable-primary-paste = false` under [Settings] in both
+# ~/.config/gtk-3.0/settings.ini and ~/.config/gtk-4.0/settings.ini.
+# The power button is logind's, not GNOME's: ../system/logind.conf.override.
 
 # Super+V is paste and Super+N is new-window, so the notification bindings move
 # out of the way. Super+M goes with the tray since it is the same action.
