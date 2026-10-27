@@ -120,7 +120,7 @@ desk_test_assert_repo_under_root() {
 }
 
 #
-# Config guard (used by tests/run-all.sh and git-hooks/pre-commit — the
+# Config guard (used by tests/run-all.sh — the
 # belt to the rest of this file's suspenders): snapshots each of
 # $DESK_GUARD_REPOS' (colon-separated repo paths) own `git config --local
 # --list` before a test run and fails loudly if any changed by the end,
@@ -187,7 +187,7 @@ desk_test_guard_not_real_repo() {
 }
 
 #
-# Real state guard (used by tests/run-all.sh and git-hooks/pre-commit,
+# Real state guard (used by tests/run-all.sh,
 # alongside the config guard above): every desk-lib/*.sh path (DESK_STATE_DIR,
 # CLAUDE_SESSION_STORE, DESK_TICKET_CACHE, ...) already resolves through an
 # env var override first, so a well-behaved test never touches real state at
