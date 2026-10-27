@@ -590,6 +590,8 @@ The defaults are the safe side of every outward-facing switch: `dry_run` (no wri
 
 ## Tests
 
+**This is personal tooling, so the testing bar is a plain one.** A test guards a regression that would actually bother the user: their edits undone, a suggestion lost or wrongly counted, a pass acting where it shouldn't. Formatting, wording and exact output are not worth one. Fewer, plainer tests are the norm: a fix gets one regression test that fails without it, in the existing style, and no test frameworks or generators.
+
 **Change desk code in a worktree, never in the main checkout.** The scheduled passes run their code straight from the clone at `~/dotfiles` (`install_symlinks.sh` links it into `~/.local/bin`), so a half-made edit there is live at the next slot: make desk changes in a `git worktree` of this repo and bring them into the main checkout only as finished, tested commits.
 
 ```sh
