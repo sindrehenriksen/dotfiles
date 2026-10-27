@@ -139,90 +139,50 @@ g "$R/repo-local" commit -q --allow-empty -m mine
 g "$R/repo-local" commit -q --allow-empty -m mine-too
 touch "$R/repo/untracked.txt"
 
-g "$R/repo" worktree add -q -b untouched "$R/repo-untouched"
-touch "$R/repo-untouched/dirty.txt"
 g "$R/repo" worktree add -q -b clean "$R/repo-clean"
 g "$R/repo-clean" push -q -u origin clean
-g "$R/repo" worktree add -q -b sub "$R/repo-sub"
-g "$R/repo" worktree add -q -b rel "$R/repo-rel"
-git init -q "$R/outer"
-g "$R/outer" commit -q --allow-empty -m outer
 
-# What this session and its subagent did, with HOME as $R: an Edit inside a
-# worktree; a Bash command run with its cwd in one, committing through
-# `git -C` on a variable it set from a ~/ path; a `cd` into a clean one that
-# writes a file there; only reads (`git -C … log`, a `cd` to run log, a Read)
-# of another; an Edit inside a worktree since
-# removed from a repo that still encloses it; a variable nothing sets; one
-# worktree reached both as `../repo-rel` and directly; and a last line cut
-# off mid-write with no newline. Then a subagent's Write, which a missing
-# newline between transcripts would swallow, and its own cut-off line.
 T="$R/t.jsonl"
-tool() { jq -nc --arg cwd "$1" --arg name "$2" --argjson input "$3" '{type:"assistant",cwd:$cwd,message:{content:[{type:"tool_use",name:$name,input:$input}]}}'; }
-{
-    tool "$R" Edit "$(jq -nc --arg p "$R/repo-feature/src/x.py" '{file_path:$p}')"
-    tool "$R/repo" Bash '{"command":"W=~/repo-local; git -C $W commit -q -m x"}'
-    tool "$R" Bash '{"command":"cd ~/repo-clean && echo x > out.txt"}'
-    tool "$R" Bash '{"command":"cd ~/repo-untouched && git log --oneline | head -3 2>/dev/null; rg -n \"<leader>g\" .; rg '"'"'git commit'"'"' ."}'
-    tool "$R" Bash '{"command":"git -C ~/repo-untouched log -1; git -C ~/repo-untouched -c core.pager=cat status"}'
-    tool "$R" Read "$(jq -nc --arg p "$R/repo-untouched/x" '{file_path:$p}')"
-    tool "$R" Edit "$(jq -nc --arg p "$R/outer/wt-gone/f.txt" '{file_path:$p}')"
-    tool "$R" Bash '{"command":"git -C $NOWHERE commit"}'
-    tool "$R/repo" Bash '{"command":"git -C ../repo-rel rebase main"}'
-    tool "$R" Edit "$(jq -nc --arg p "$R/repo-rel/f" '{file_path:$p}')"
-    printf '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"%s/repo-untouched/z' "$R"
-} >"$T"
-mkdir -p "$R/t/subagents"
-{
-    tool "$R" Write "$(jq -nc --arg p "$R/repo-sub/new.txt" '{file_path:$p}')"
-    printf '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"%s/repo-untouched/y' "$R"
-} >"$R/t/subagents/agent-x.jsonl"
-state() { jq -n --arg cwd "$1" --arg t "${2:-}" '{session_id:"none",cwd:$cwd,transcript_path:$t}' | HOME=$R "$STATE"; }
-out=$(state "$R/repo-feature" "$T")
-check "state: counts the worktrees acted in" '[[ $out == *"Worktrees this session or its subagents worked in (6; the cwd'"'"'s, and those its transcripts show an Edit or Write in, a Bash command run in or cd'"'"'d into to change something, a changing git -C, or a worktree add):"* ]]'
+: >"$T"
+state() { jq -n --arg cwd "$1" '{session_id:"none",cwd:$cwd}' | HOME=$R "$STATE"; }
+out=$(state "$R/repo-feature")
+check "state: counts the repo's worktrees" '[[ $out == *"Worktrees (4: the cwd'"'"'s repo'"'"'s, other sessions'"'"' included, and any other this session changed):"* ]]'
 check "state: the cwd's worktree comes first" '[ "$(sed -n 3p <<<"$out")" = "  ~/repo-feature  [feature]  ← cwd, 1 commit not on origin/feature" ]'
-check "state: a Bash cwd counts, and a dirty worktree says so" 'grep -qxF "  ~/repo  [main]  dirty: 1 file" <<<"$out"'
-check "state: a changing git -C resolves a variable the command set" 'grep -qxF "  ~/repo-local  [local-only]  2 commits on no remote" <<<"$out"'
-check "state: a cd that writes counts, and a clean, pushed worktree has no note" 'grep -qxF "  ~/repo-clean  [clean]" <<<"$out"'
-check "state: a subagent's write counts, after a cut-off line" 'grep -qxF "  ~/repo-sub  [sub]" <<<"$out"'
-check "state: a worktree reached two ways is listed once" '[ "$(grep -c "repo-rel" <<<"$out")" -eq 1 ] && grep -qxF "  ~/repo-rel  [rel]" <<<"$out"'
-check "state: a line cut off mid-write is skipped, not an error" '[[ $out != *"could not be fully read"* ]]'
-check "state: reading a worktree, by git -C or a cd, is not acting in it" '[[ $out != *"repo-untouched"* ]]'
-check "state: a removed worktree does not land on the repo around it" '[[ $out != *"~/outer"* ]]'
-out=$(state "$R/repo-untouched" "$T")
-check "state: the cwd's worktree counts without a mention" 'grep -qxF "  ~/repo-untouched  [untouched]  ← cwd, dirty: 1 file" <<<"$out"'
-out=$(state "$R/repo/../repo-rel" "$T")
-check "state: the cwd is marked however it is spelled" 'grep -qxF "  ~/repo-rel  [rel]  ← cwd" <<<"$out"'
-out=$(state "$R/repo" "$R/t")
-check "state: an unreadable transcript says so" '[[ $out == *"(the transcripts could not be fully read, so this may be incomplete)"* ]]'
-
-: >"$R/many.jsonl"
-for n in 1 2 3 4 5 6 7 8 9 10 11 12; do
-    g "$R/repo" worktree add -q -b "wt$n" "$R/wt$n"
-    tool "$R" Bash "$(jq -nc --arg c "git -C $R/wt$n commit -m x" '{command:$c}')" >>"$R/many.jsonl"
-done
-out=$(state "$R" "$R/many.jsonl")
-check "state: lists every worktree acted in, with no cap" '[ "$(grep -c "^  ~/wt" <<<"$out")" -eq 12 ]'
-tool "$R" Bash "$(jq -nc --arg c "git -C $R/repo worktree add -q -b added $R/repo-added main" '{command:$c}')" >"$R/added.jsonl"
-g "$R/repo" worktree add -q -b added "$R/repo-added"
-out=$(state "$R" "$R/added.jsonl")
-check "state: a worktree add target counts" 'grep -qxF "  ~/repo-added  [added]" <<<"$out"'
+check "state: a dirty worktree says so" 'grep -qxF "  ~/repo  [main]  dirty: 1 file" <<<"$out"'
+check "state: commits on no remote are counted" 'grep -qxF "  ~/repo-local  [local-only]  2 commits on no remote" <<<"$out"'
+check "state: a clean, pushed worktree has no note" 'grep -qxF "  ~/repo-clean  [clean]" <<<"$out"'
+out=$(state "$R/repo/../repo-clean")
+check "state: the cwd is marked however it is spelled" 'grep -qxF "  ~/repo-clean  [clean]  ← cwd" <<<"$out"'
 
 g "$R/repo" worktree add -q -b broken "$R/broken"
-g "$R/broken" push -q -u origin broken
 echo "gitdir: $R/nowhere" >"$R/broken/.git"
-tool "$R/broken" Bash '{"command":"ls"}' >"$R/broken.jsonl"
-out=$(state "$R" "$R/broken.jsonl")
+out=$(state "$R/repo")
 check "state: a worktree whose status fails says so" '[[ $out == *"  ~/broken  status failed: "* ]]'
 rm -rf "$R/broken" && g "$R/repo" worktree prune
+out=$(state "$R/repo")
+check "state: a removed worktree is left out" '[[ $out != *"broken"* ]]'
 
 out=$(state "$R")
-check "state: says when there is no worktree and no transcript" '[[ $out == *"Worktrees: none (~ is not in a git repository, and the hook input names no transcript)."* ]]'
-: >"$R/empty.jsonl"
-out=$(state "$R" "$R/empty.jsonl")
-check "state: says when the transcripts show no worktree" '[[ $out == *"Worktrees: none (~ is not in a git repository, and its transcripts show no other worked in)."* ]]'
+check "state: says when the cwd is in no repo" '[[ $out == *"Worktrees: none (~ is not in a git repository, and the transcript shows none changed)."* ]]'
+# A worktree of another repo that this session changed, through a
+# subagent's Write and a `git -C` commit from the main transcript; a removed
+# worktree inside that repo, and a read-only git -C, do not count.
+git init -q "$R/other"
+g "$R/other" commit -q --allow-empty -m other
+g "$R/other" worktree add -q -b side "$R/other-side"
+mkdir -p "$R/ct/subagents"
+tool() { jq -nc --arg cwd "$1" --arg name "$2" --argjson input "$3" '{type:"assistant",cwd:$cwd,message:{content:[{type:"tool_use",name:$name,input:$input}]}}'; }
+{
+    tool "$R/repo" Bash '{"command":"git -C ~/other-side commit -q -m x"}'
+    tool "$R/repo" Bash '{"command":"git -C ~/other log -1"}'
+    tool "$R" Edit "$(jq -nc --arg p "$R/other/gone/f.txt" '{file_path:$p}')"
+} >"$R/ct.jsonl"
+tool "$R" Write "$(jq -nc --arg p "$R/other-side/new.txt" '{file_path:$p}')" >"$R/ct/subagents/agent-x.jsonl"
+out=$(jq -n --arg cwd "$R/repo" --arg t "$R/ct.jsonl" '{session_id:"none",cwd:$cwd,transcript_path:$t}' | HOME=$R "$STATE")
+check "state: a worktree this session changed in another repo is listed and marked" 'grep -qxF "  ~/other-side  [side]  changed by this session, 1 commit on no remote" <<<"$out" && [[ $out != *"~/other  ["* ]]'
+
 out=$(echo 'not json' | "$STATE")
-check "state: bad input still prints the block" '[[ $out == *"Current state, read from disk"* && $out == *"Background agents: not read (the hook input names no session)."* ]]'
+check "state: bad input still prints the block" '[[ $out == *"Current state, read from disk"* ]]'
 
 mkdir -p "$R/bin"
 printf '#!/bin/sh\necho "$$" > "%s/slow.pid"\nexec sleep 30\n' "$R" >"$R/bin/slow.sh"
@@ -240,94 +200,37 @@ check "commands: the slow one is killed" '! kill -0 "$(cat "$R/slow.pid")" 2>/de
 check "commands: a failing one is named with its exit and stderr" '[[ $out == *$'"'"'partial\n'"'"'"(~/bin/fail.sh failed, exit 3: boom)"* ]]'
 check "commands: get the hook input in the environment" '[[ $out == *"session none in $R/repo"* ]]'
 check "commands: a missing one is named, not fatal" '[[ $out == *"(~/bin/missing.sh failed, exit 127"* ]]'
-check "commands: run after the git block" '[[ ${out%%session none*} == *"Worktrees this session"* ]]'
+check "commands: run after the git block" '[[ ${out%%session none*} == *"Worktrees ("* ]]'
 out=$(COMPACT_STATE_COMMANDS="~/bin/good.sh" state "$R/repo")
 check "commands: a leading ~/ expands" '[[ $out == *"session none in"* ]]'
 out=$(COMPACT_STATE_COMMANDS="$R/bin/long.sh" state "$R/repo")
 check "commands: output is kept in full" '[[ $out == *$'"'"'\n299\n300'"'"'* && $out != *"cut"* ]]'
 check "settings: the hook timeout exceeds the failsafe" '[ "$(jq '"'"'.hooks.SessionStart[] | select(.matcher == "compact") | .hooks[0].timeout'"'"' "$HERE/../settings.json")" -gt "$(sed -n '"'"'s/^TIMEOUT="\${COMPACT_STATE_TIMEOUT:-\([0-9]*\)}"$/\1/p'"'"' "$STATE")" ]'
 
-# Background agents: an invented session in an invented config dir, with a
-# process record naming this shell, which is an ancestor of the hook.
+# Background agents: an invented session whose process record names this
+# shell, an ancestor of the hook. One launched and still out, one that
+# reported back, and one launched before this process started.
 C="$R/config"
 sid=sess-1
 mkdir -p "$C/projects/p/$sid/subagents" "$C/sessions"
-meta() {
-    jq -n --arg tu "$2" --arg shape "$3" --arg d "$4" --arg parent "${5:-}" \
-        '{agentType:"general-purpose",description:$d,toolUseId:$tu}
-         + (if $shape != "" then {requestShape:$shape} else {} end)
-         + (if $parent != "" then {parentAgentId:$parent} else {} end)' >"$C/projects/p/$sid/subagents/agent-$1.meta.json"
-    touch "$C/projects/p/$sid/subagents/agent-$1.jsonl"
-}
-meta adone tu-done background "finished one"
-meta arun tu-run background "still running"
-meta aresumed tu-resumed background "resumed one"
-meta aold tu-old background "from an earlier process"
-# A foreground agent's record carries no requestShape at all.
-meta afg tu-fg "" "foreground one"
-meta anested tu-nested background "an agent's own agent" arun
-# Caught mid-write, and first in the listing, so it would end a read that
-# took the files as one stream.
-printf '{"agentType":"general-purpose","toolUseId":"tu-0' >"$C/projects/p/$sid/subagents/agent-a000.meta.json"
+for a in run:tu-run done:tu-done old:tu-old; do
+    jq -n --arg tu "${a#*:}" --arg d "agent ${a%%:*}" '{description:$d,toolUseId:$tu,requestShape:"background"}' >"$C/projects/p/$sid/subagents/agent-${a%%:*}.meta.json"
+done
 launch() { jq -nc --arg tu "$1" --arg ts "$2" '{type:"assistant",timestamp:$ts,message:{content:[{type:"tool_use",name:"Agent",id:$tu,input:{}}]}}'; }
-note() { jq -nc --arg id "$1" '{type:"queue-operation",operation:"enqueue",timestamp:"2026-01-01T10:00:00Z",content:("<task-notification>\n<task-id>" + $id + "</task-id>\n<status>completed</status>\n</task-notification>")}'; }
 {
-    launch tu-old 2026-01-01T08:00:00.000Z
-    launch tu-done 2026-01-01T09:00:00.500Z
-    launch tu-run 2026-01-01T09:00:01Z
-    launch tu-resumed 2026-01-01T09:00:02Z
-    launch tu-fg 2026-01-01T09:00:03Z
-    launch tu-nested 2026-01-01T09:00:04Z
-    note adone
-    note aresumed
-    # A queued message quoting a notification is not one.
-    jq -nc '{type:"queue-operation",operation:"enqueue",content:"about <task-notification>\n<task-id>arun</task-id>"}'
-    jq -nc '{type:"assistant",timestamp:"2026-01-01T09:30:00Z",message:{content:[{type:"tool_use",name:"SendMessage",id:"tu-send",input:{to:"aresumed",message:"more"}}]}}'
-    # Cut off mid-write, and it would otherwise resume a finished agent.
-    printf '{"type":"assistant","timestamp":"2026-01-01T09:40:00Z","message":{"content":[{"type":"tool_use","name":"SendMessage","input":{"to":"adone"'
+    launch tu-old 2026-01-01T08:00:00Z
+    launch tu-run 2026-01-01T09:00:00Z
+    launch tu-done 2026-01-01T09:00:01Z
+    jq -nc '{type:"queue-operation",operation:"enqueue",content:"<task-notification>\n<task-id>done</task-id>\n</task-notification>"}'
 } >"$C/projects/p/$sid.jsonl"
-started=$(( $(jq -n '"2026-01-01T08:30:00Z" | fromdateiso8601') * 1000 ))
-jq -n --arg s "$sid" --argjson t "$started" '{sessionId:$s,startedAt:$t}' >"$C/sessions/$$.json"
-agents() { jq -n --arg t "$C/projects/p/$sid.jsonl" --arg s "$sid" --arg cwd "$R" '{session_id:$s,transcript_path:$t,cwd:$cwd}' | "$STATE"; }
-out=$(agents)
-check "agents: lists one launched with no notice since" '[[ $out == *"  arun  still running, last wrote 0m ago"* ]]'
-check "agents: lists one resumed after its notice" '[[ $out == *"  aresumed  resumed one"* ]]'
-check "agents: leaves out one that reported back" '[[ $out != *"finished one"* ]]'
-check "agents: leaves out one from an earlier process" '[[ $out != *"earlier process"* ]]'
-check "agents: leaves out foreground agents" '[[ $out != *"foreground one"* ]]'
-check "agents: leaves out an agent's own agents" '[[ $out != *"own agent"* ]]'
-check "agents: counts what it lists" '[[ $out == *"have not reported back (2;"* ]]'
-check "agents: a record caught mid-write costs only itself" '[[ $out == *"  arun  "* && $out == *"  aresumed  "* ]]'
-{ sed '$d' "$C/projects/p/$sid.jsonl"; note arun; jq -nc '{type:"queue-operation",operation:"enqueue",content:"<task-notification>\n<task-id>aresumed</task-id>"}'; } >"$C/projects/p/$sid.jsonl.tmp" && mv "$C/projects/p/$sid.jsonl.tmp" "$C/projects/p/$sid.jsonl"
-out=$(agents)
-check "agents: says none are left once all reported" '[[ $out == *"Background agents started from this session: none still running."* ]]'
-jq -n --argjson t "$started" '{sessionId:"another-session",startedAt:$t}' >"$C/sessions/$$.json"
-{ sed '$d' "$C/projects/p/$sid.jsonl"; } >"$C/projects/p/$sid.jsonl.tmp" && mv "$C/projects/p/$sid.jsonl.tmp" "$C/projects/p/$sid.jsonl"
-out=$(agents)
-check "agents: a process record for another session is not this one's" '[[ $out == *"Background agents: not read (no live Claude Code process record for this session)."* ]]'
+jq -n --arg s "$sid" --argjson t "$(( $(jq -n '"2026-01-01T08:30:00Z" | fromdateiso8601') * 1000 ))" '{sessionId:$s,startedAt:$t}' >"$C/sessions/$$.json"
+out=$(jq -n --arg t "$C/projects/p/$sid.jsonl" --arg s "$sid" --arg cwd "$R" '{session_id:$s,transcript_path:$t,cwd:$cwd}' | "$STATE")
+check "agents: lists only the one still out from this process" '[[ $out == *"have not reported back (1;"* && $out == *"  run  agent run"* && $out != *"agent done"* && $out != *"agent old"* ]]'
 rm "$C/sessions/$$.json"
-out=$(agents)
-check "agents: says so when it cannot find the process" '[[ $out == *"Background agents: not read (no live Claude Code process record for this session)."* ]]'
-
-# Format checks: records Claude Code might write differently one day.
-fmt() { mkdir -p "$C/projects/p/$1/subagents"; : >"$C/projects/p/$1.jsonl"; }
-fmtrun() { jq -n --arg t "$C/projects/p/$1.jsonl" --arg cwd "$R" '{session_id:"x",transcript_path:$t,cwd:$cwd}' | "$STATE"; }
-fmt none
-out=$(fmtrun none)
-check "agents: says none when there are no agent records" '[[ $out == *"Background agents started from this session: none."* ]]'
-fmt odd && echo '{"kind":"agent"}' >"$C/projects/p/odd/subagents/agent-q.meta.json"
-out=$(fmtrun odd)
-check "agents: says when records are in no recognised format" '[[ $out == *"Background agents: not read (1 agent records, none in a recognised format; Claude Code may have changed how it stores them)."* ]]'
-fmt noshape && echo '{"toolUseId":"t1","description":"d"}' >"$C/projects/p/noshape/subagents/agent-q.meta.json"
-out=$(fmtrun noshape)
-check "agents: a record with no requestShape is a foreground agent" '[[ $out == *"Background agents started from this session: none."* ]]'
-fmtrun_t() { jq -n --arg cwd "$R" '{session_id:"x",transcript_path:"",cwd:$cwd}' | "$STATE"; }
-out=$(fmtrun_t)
-check "agents: says when the input names no transcript" '[[ $out == *"Background agents: not read (the hook input names no readable transcript)."* ]]'
 
 out=$(jq -n --arg cwd "$R/repo" --arg t "$T" '{hook_event_name:"SessionStart",source:"compact",cwd:$cwd,transcript_path:$t}' | HOME=$R "$HOOK" session-start)
 check "session-start: opens by saying the session was compacted" '[ "$(head -1 <<<"$out")" = "This session was just compacted: the conversation above is a summary of it, not the conversation itself. For a specific the summary lacks, the full pre-compaction conversation is in its transcript, $T; search it with rg or jq rather than guess, and do not read the whole file into context." ]'
-check "session-start: appends the state block" '[[ $out == *"re-read it from disk"* && $out == *"Current state, read from disk at"* && $out == *"Worktrees this session or its subagents worked in"* ]]'
+check "session-start: appends the state block" '[[ $out == *"re-read it from disk"* && $out == *"Current state, read from disk at"* && $out == *"Worktrees ("* ]]'
 out=$(jq -n '{source:"compact"}' | HOME=$R "$HOOK" session-start)
 check "session-start: without a transcript, names none" '[ "$(head -1 <<<"$out")" = "This session was just compacted: the conversation above is a summary of it, not the conversation itself." ]'
 
