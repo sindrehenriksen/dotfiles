@@ -7,7 +7,7 @@ Personal dev environment: zsh, Neovim, Ghostty, Git, AI agent configs. Cross-pla
 | Path | What |
 |---|---|
 | `.zshrc`, `.zprofile`, `.bashrc`, `.profile`, `.shellrc` | Shell init; `.shellrc` is sourced by both bash and zsh |
-| `.gitconfig`, `.gitlint` | Git config and commit linting |
+| `.gitconfig` | Git config |
 | `.fzf_config` | fzf defaults (rg-backed file list) |
 | `ripgrep/ripgreprc`, `.ignore` | ripgrep: skip VCS ignore files and read hidden ones, so a search crosses into nested repos; `.ignore` holds what stays out regardless |
 | `nvim/` | Neovim Lua config (lazy.nvim, native LSP, blink.cmp, telescope, gitsigns, diffview, gruvbox.nvim) |
