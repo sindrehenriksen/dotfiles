@@ -80,7 +80,8 @@ desk_step_commit_push() {
 }
 
 # The one push desk-run ever makes for the notes repo: a pinned refspec
-# (main, plus the ledger wrapped in a commit when there is one), BatchMode +
+# (main, plus the ledger wrapped in a commit as refs/desk/ledger-log when
+# there is one), BatchMode +
 # ConnectTimeout, never a pull/fetch/merge/rebase beforehand and never
 # --force. A single attempt — a rejected push is recorded (status.json's
 # `push` field) and left for the next pass, never retried in a loop here.
@@ -99,7 +100,7 @@ desk_push_notes() {
 
 	local refspecs=(refs/heads/main:refs/heads/main) wrapped
 	if wrapped="$(desk_ledger_wrap "$repo")"; then
-		refspecs+=("$wrapped:refs/desk/ledger")
+		refspecs+=("$wrapped:refs/desk/ledger-log")
 	fi
 
 	local push_err
@@ -113,9 +114,10 @@ desk_push_notes() {
 }
 
 # desk_ledger_wrap <repo>: the commit the ledger is pushed as. The ledger
-# ref is a bare blob, which GitHub refuses to store, so each push sends a
-# commit whose tree holds it as ledger.jsonl, parented on the last one sent
-# (refs/desk/ledger-pushed) so every push fast-forwards. Prints nothing and
+# ref is a bare blob, and git will not update a remote ref that holds one
+# without --force, so each push sends a commit whose tree holds it as
+# ledger.jsonl, parented on the last one sent (refs/desk/ledger-pushed), to
+# refs/desk/ledger-log, so every push fast-forwards. Prints nothing and
 # fails when there is no ledger yet, since a refspec naming a missing ref
 # fails the whole push, main included.
 desk_ledger_wrap() {

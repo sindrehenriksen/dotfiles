@@ -129,7 +129,7 @@ assert_eq "the remote's own main now matches the local commit" "$local_main" "$r
 
 echo
 echo "=== the ledger goes up as a commit holding it, each push fast-forwarding the last ==="
-# GitHub refuses a ref that points at a blob, which a local bare remote does not.
+# Pushed as a commit to refs/desk/ledger-log, so it fast-forwards with no force.
 set_ledger() {
 	git -C "$repo2" update-ref refs/desk/ledger "$(printf '%s' "$1" | git -C "$repo2" hash-object -w --stdin)"
 }
@@ -137,14 +137,25 @@ set_ledger $'{"type":"decline","id":"one"}\n'
 printf 'Section A\n  a third change\n' > "$repo2/notes.md"
 DESK_CONFIG="$cfg2" "$DESK_RUN" testpass --rerun > "$ROOT/case2b.out" 2>&1
 assert_eq "the push succeeds" "ok" "$(jq -r '.push' "$DESK_STATUS_FILE")"
-assert_eq "the remote's ledger is a commit" "commit" "$(git -C "$ROOT/case2/remote.git" cat-file -t refs/desk/ledger)"
+assert_eq "the remote's ledger log is a commit" "commit" "$(git -C "$ROOT/case2/remote.git" cat-file -t refs/desk/ledger-log)"
 assert_eq "holding the ledger as it stands" "one" \
-	"$(git -C "$ROOT/case2/remote.git" cat-file -p refs/desk/ledger:ledger.jsonl | jq -r .id)"
+	"$(git -C "$ROOT/case2/remote.git" cat-file -p refs/desk/ledger-log:ledger.jsonl | jq -r .id)"
 set_ledger $'{"type":"decline","id":"one"}\n{"type":"decline","id":"two"}\n'
 DESK_CONFIG="$cfg2" "$DESK_RUN" testpass --rerun > "$ROOT/case2c.out" 2>&1
 assert_eq "the next push of a grown ledger succeeds too, with no force" "ok" "$(jq -r '.push' "$DESK_STATUS_FILE")"
 assert_eq "and the remote has the newer ledger" "one two" \
-	"$(git -C "$ROOT/case2/remote.git" cat-file -p refs/desk/ledger:ledger.jsonl | jq -r .id | paste -sd' ' -)"
+	"$(git -C "$ROOT/case2/remote.git" cat-file -p refs/desk/ledger-log:ledger.jsonl | jq -r .id | paste -sd' ' -)"
+
+echo
+echo "=== a remote still holding an old blob refs/desk/ledger: the push goes through, and leaves that ref alone ==="
+old_blob="$(printf '{"type":"decline","id":"old"}\n' | git -C "$repo2" hash-object -w --stdin)"
+git -C "$repo2" push -q origin "$old_blob:refs/desk/ledger"
+set_ledger $'{"type":"decline","id":"one"}\n{"type":"decline","id":"two"}\n{"type":"decline","id":"three"}\n'
+DESK_CONFIG="$cfg2" "$DESK_RUN" testpass --rerun > "$ROOT/case2d.out" 2>&1
+assert_eq "the push succeeds" "ok" "$(jq -r '.push' "$DESK_STATUS_FILE")"
+assert_eq "the ledger log has the newest ledger" "three" \
+	"$(git -C "$ROOT/case2/remote.git" cat-file -p refs/desk/ledger-log:ledger.jsonl | jq -r .id | tail -n1)"
+assert_eq "the old remote ref is untouched" "$old_blob" "$(git -C "$ROOT/case2/remote.git" rev-parse refs/desk/ledger)"
 
 echo
 echo "=== weekday-only pass on a weekend: commit_push still runs, the fetch step doesn't ==="
