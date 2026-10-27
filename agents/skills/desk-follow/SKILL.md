@@ -1,6 +1,6 @@
 ---
 name: desk-follow
-description: 'Following tickets from a Claude Code session: this session gets the news on them (comments, edits, new children and links, PRs) as a message from the desk follow pass, and decides whether the user needs to look. USE FOR: "follow this epic", "follow ABC-123 in this session", "track these tickets here", "also follow ABC-456", "stop following", "this epic is done", "what am I following", "check for news now" or "check for news before I review", the same asks phrased as watching ("watch this epic", "stop watching", "what am I watching"), and a [desk-follow] message arriving in this session. DO NOT USE FOR: reading a ticket once (use the ticket tools), notifications for other people, the morning pass itself, a follow-up tab of a desk pass.'
+description: 'Following tickets from a Claude Code session: this session gets the news on them (comments, edits, new children and links, PRs) as a message from the desk follow pass, and decides whether the user needs to look. USE FOR: "follow this epic", "follow ABC-123 in this session", "track these tickets here", "also follow ABC-456", "stop following", "this epic is done", "what am I following", "check for news now" or "check for news before I review", the same asks phrased as watching ("watch this epic", "stop watching", "what am I watching"), and a [desk-follow] message arriving in this session. DO NOT USE FOR: reading a ticket once (use the ticket tools), notifications for other people, the morning pass itself.'
 allowed-tools: Bash, Read
 ---
 
