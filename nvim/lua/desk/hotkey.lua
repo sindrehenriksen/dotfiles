@@ -265,9 +265,8 @@ function M.run(bufnr, win, config, deps)
 	-- this same buffer is followed internally — the ' mark is set first, so Ctrl-O returns to where the user was.
 	-- "Elsewhere" means the cursor isn't already inside the block that
 	-- section head starts (block.block_containing): jumping there from
-	-- within it would just be a no-op self-jump, and — when two sections
-	-- share the same head token — is what used to make following bounce
-	-- between them (see find_section_head_line). Not already there: jump
+	-- within it would be a self-jump, and with two sections sharing a head
+	-- token would bounce between them (find_section_head_line). Not already there: jump
 	-- to the section head. Already there: nowhere internal left to go, so
 	-- fall through and resolve the token externally instead.
 	local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)

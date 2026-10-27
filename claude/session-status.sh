@@ -59,8 +59,8 @@
 # must refuse outright rather than trust that choice). close_failed is
 # true once a `close-failed` event (claude/hooks/session-recorder.sh) has
 # been recorded after the session's own last start — a close step's own
-# SIGTERM that the session survived. The event log keeps the close's "end"
-# event as written; the reader no longer counts it as ending the run.
+# SIGTERM that the session survived; the close's "end" event then does not
+# count as ending the run.
 #
 # Two modes:
 #   session-status.sh            one JSON line per session, as above.
@@ -304,9 +304,8 @@ fi
 # 2. Pid files: always Claude Code's own valid JSON, so one batched read is
 #    safe outright. Grouped by sessionId rather than collapsed 1:1 — a
 #    resumed session, or a stale pid file Claude Code never cleaned up,
-#    can leave more than one pid file naming the same sessionId, and a
-#    plain `from_entries` used to just let the last one silently win with
-#    no trace anything was wrong. Every group's own liveness is checked
+#    can leave more than one pid file naming the same sessionId, which a
+#    plain `from_entries` would settle silently. Every group's own liveness is checked
 #    entry by entry (two pid files for the same session can name two
 #    different pids); the live one (if any — never more than one really
 #    should be) is what "the" pid file means downstream, and

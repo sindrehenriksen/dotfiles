@@ -8,7 +8,7 @@
 #   desk-propose --list
 #
 # <items.json> is {"items": [...]} or a bare array, in the item shape of
-# docs/desk.md ("The reply"): id, file, kind, target, before, after,
+# docs/desk.md ("Edits from sessions"): id, file, kind, target, before, after,
 # headline, source, and optionally tier, also_sources and supersedes, which
 # is one id string (not a list). The notes repo and its files come from
 # $DESK_CONFIG (with it unset, ${XDG_CONFIG_HOME:-~/.config}/desk/config.json).

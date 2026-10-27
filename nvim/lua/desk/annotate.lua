@@ -224,11 +224,8 @@ function M.refresh(bufnr, config)
 	local session_hits = M.scan(lines, tokens_config, "session")
 	local ticket_hits = M.scan(lines, tokens_config, "url")
 
-	-- Cleared unconditionally, before either kind paints: previously this
-	-- only happened inside "if cache then", so a refresh with no ticket
-	-- cache yet (a real, common startup state) never cleared at all, and
-	-- session labels from every past refresh piled up on top of each
-	-- other.
+	-- Cleared whether or not there is a ticket cache yet, or the session
+	-- labels of every refresh pile up.
 	vim.api.nvim_buf_clear_namespace(bufnr, M.ns, 0, -1)
 
 	-- Tickets: synchronous (a local file, no external process) — paint

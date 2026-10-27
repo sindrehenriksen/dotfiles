@@ -499,12 +499,10 @@ local function shell_single_quote(s)
   return "'" .. tostring(s):gsub("'", "'\\''") .. "'"
 end
 
--- Every tab command (the follow-up tab, the hotkey's resume, the
--- Wednesday tab) runs through the user's own login+interactive shell rather than
--- however Ghostty's own `command:` field would otherwise invoke it —
--- the desk launch envelope assumes CLAUDE_CONFIG_DIR and PATH
--- (~/.local/bin, mise shims, ...) come from the user's shell rc files, which a
--- bare exec of the command never sources.
+-- Every tab command (the hotkey's resume, reopened sessions) runs through
+-- the user's login+interactive shell, for the CLAUDE_CONFIG_DIR and PATH
+-- (~/.local/bin, mise shims, ...) the shell rc files set, which a bare exec
+-- of the command never sources.
 local function wrap_in_login_shell(cmd)
   return "/bin/zsh -lic " .. shell_single_quote(cmd)
 end
