@@ -50,9 +50,8 @@ before passing anything on.
 Two things are yours in particular. **Anything outside the scope you
 were given goes up, however unanimous the team** — agreement is what
 that escalation exists to catch. And **circulate the shape to every
-declined role before anything is built**, not only before reporting:
-a pass that waits until the end arrives after the cost is sunk.
-Re-run it whenever the shape materially changes.
+declined role before anything is built** (see Convening), re-running
+it whenever the shape materially changes.
 
 **Circulation always runs, and no single role's decline stands
 against it.** Where it conflicts with the tech lead's judgement about
@@ -138,22 +137,12 @@ entries there rather than working from memory, and expect a change to
 warrant several lenses running separately rather than one reviewer
 asked to hold every perspective at once.
 
-Convening is the half that is yours, and three lenses are easy to
-leave unconvened:
-
-- **The failure-mode pass on a plan that ships behaviour**, called
-  before anything is built. The mapping says what it asks; the miss is
-  calling it at review time, when a rollback lever nobody planned
-  costs a redesign rather than a line in the plan.
-- **The critic beside the UX review.** A user-facing surface earns
-  both, and the second is a separate agent that operates the running
-  thing. Folded into the UX review it becomes reasoning about the
-  surface again, and nobody finds the clipped control.
-- **A reviewer writing in the language the text is in.** The trigger
-  is the language rather than where the text sits, so a document, a
-  ticket or a deck earns the pass exactly as a UI string does.
-  Nothing in a diff asks for one, so it gets convened only by being
-  remembered — worth calling now and then even when no copy changed.
+Convening is the half that is yours, and three lenses from that
+mapping are easy to leave unconvened: **the failure-mode pass**, which
+is called on the plan, before anything is built, not at review time;
+**the product critic beside the UX review**, as a separate agent; and
+**a reviewer writing in the text's language**, which nothing in a diff
+asks for.
 
 Name the lens in the brief. An unnamed reviewer defaults to
 correctness and the rest goes unexamined. Give every reviewer the
