@@ -4,7 +4,7 @@
 # real remote), and a fake `claude` on PATH that behaves however each case
 # needs (hangs, fails, or succeeds) without ever making a real model call.
 # Covers: a slept-through slot, an
-# offline slot, a rejected push, a dead lock owner, HEAD off main / mid-
+# offline slot, a rejected push, HEAD off main / mid-
 # rebase; and that desk-run never pulls, forces, or writes the working
 # file. The one live call (the canary) is its own script,
 # desk-run-canary.sh, kept separate so this suite never spends API budget.
@@ -236,43 +236,6 @@ assert_eq "local HEAD still has the user's committed text (not reset, not merged
 	"$(git -C "$repo" show HEAD:notes.md | grep -c 'a change only the user could have made')"
 assert_eq "desk-run never fetched/pulled — no FETCH_HEAD written" "1" \
 	"$([ ! -e "$repo/.git/FETCH_HEAD" ] && echo 1 || echo 0)"
-
-echo
-echo "=== a dead lock owner: broken immediately, the run proceeds ==="
-# Deterministic by construction, never a real two-process race (same
-# reasoning as desk-lock-race-test.sh's own header comment, which is where
-# desk_lock_acquire's own "broke it immediately, never waited out the
-# grace/poll windows" timing proof already lives, tightly and reliably,
-# against the function directly): meta.json is hand-written naming a pid
-# guaranteed not to exist (never a real forked process to race against)
-# plus a deliberately mismatched owner_start, the same shape a dead
-# owner's pid later reused by an unrelated process would produce. What
-# this case adds on top, end to end through the real desk-run binary
-# rather than desk_lock_acquire alone, is that a stale lock never fails
-# the run: desk-run itself exits 1 without ever reaching a step
-# ("gave up waiting for the lock") whenever desk_lock_acquire gives up, so
-# rc==0 already is the proof the lock got broken rather than waited out —
-# a second, wall-clock proof over this whole run (git commit, git push,
-# the fake model call, ...) was dropped: nothing here bounds how long
-# those unrelated steps take, so a real machine under load could blow any
-# fixed bound without the lock itself ever having been waited on.
-rm -rf "$STATE"
-repo="$(new_notes_repo "$ROOT/case4")"
-cfg="$ROOT/case4/config.json"
-write_commit_push_config "$cfg" "$repo"
-mkdir -p "$STATE/lock"
-# The lock is a single one shared across every pass (lock.sh's own
-# DESK_LOCK_NAME), never named after this test's own "testpass".
-mkdir -p "$STATE/lock/runner.lock"
-dead_pid=$((70000 + RANDOM % 5000))
-while kill -0 "$dead_pid" 2> /dev/null; do dead_pid=$((dead_pid + 1)); done
-jq -n --argjson pid "$dead_pid" --argjson t 1 --argjson owner_start 1 \
-	'{pid: $pid, started_at: $t, owner_start: $owner_start}' \
-	> "$STATE/lock/runner.lock/meta.json"
-run_desk "$cfg" > "$ROOT/case4.out" 2>&1
-rc=$?
-assert_eq "the run succeeds despite the stale lock (never gave up waiting for it)" "0" "$rc"
-assert_true "the lock is released again afterward" "$([ ! -d "$STATE/lock/runner.lock" ] && echo true || echo false)"
 
 echo
 echo "=== HEAD off main: the commit is skipped and reported, not attempted ==="

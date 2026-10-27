@@ -62,7 +62,6 @@ BASH_SUITES=(
 	nvim/tests/desk-judge-inputs-test.sh
 	nvim/tests/desk-judge-invalid-reply-test.sh
 	nvim/tests/desk-line-key-test.sh
-	nvim/tests/desk-lock-race-test.sh
 	nvim/tests/desk-lock-test.sh
 	nvim/tests/desk-mail-triage-test.sh
 	nvim/tests/desk-max-budget-test.sh

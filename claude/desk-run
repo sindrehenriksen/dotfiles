@@ -91,8 +91,7 @@ weekday_only_pass="$(jq -r --arg d "$weekday_default" 'if .weekdays_only == null
 
 # One lock for every pass, taken before anything reads or writes the status
 # file: they share the notes repo, the ledger and the status file.
-lockdir="$(desk_lock_acquire "$pass")"
-if [ -z "$lockdir" ]; then
+if ! desk_lock_acquire; then
 	desk_log "$pass" "gave up waiting for the lock"
 	exit 1
 fi

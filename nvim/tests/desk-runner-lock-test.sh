@@ -1,13 +1,7 @@
 #!/usr/bin/env bash
-# a single lock shared across every pass
-# (claude/desk-lib/lock.sh's own DESK_LOCK_NAME), taken before the once-
-# a-day guard check and before any status.json write. Before this fix the
-# lock was keyed per pass name, so "morning" and "evening" — invoked
-# concurrently, as their own launchd slots genuinely can be — never
-# contended for the same lock at all and could run at once against the
-# same notes repo/ledger/status.json. This drives desk-run itself, twice,
-# overlapping in time, and checks the second literally never starts its
-# own model call until the first's has finished.
+# The runner lock (claude/desk-lib/lock.sh): one for every pass, so two
+# passes started together run one after the other; a run that gives up on
+# it writes nothing; and a holder killed outright leaves no lock behind.
 set -u
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -87,10 +81,6 @@ cfg="$ROOT/config.json"
 jq -n --arg repo "$repo" --arg prompt "$prompt" '{
 	notes_repo: $repo,
 	timezone: "UTC",
-	ticket_search_tool: "mcp__example-tickets__search",
-	mail_search_tool: "mcp__claude_ai_Gmail__search_threads",
-	ticket_status_step_id: "T",
-	mail_fetch_step_id: "F-private",
 	files: ["notes.md", "reading.md"],
 	passes: {
 		morning: { weekdays_only: false, steps: [ { id: "F", kind: "fetch", prompt: $prompt, tools: ["Read"], connector: false, timeout: 30 } ] },
@@ -131,8 +121,19 @@ assert_eq "the late run gives up" "1" "$?"
 assert_true "the slow run still held the lock then" "$(kill -0 "$slow_bg" 2> /dev/null && echo true || echo false)"
 assert_eq "the late run did not write status.json under the holder" "$status_before" "$(cat "$DESK_STATUS_FILE")"
 wait "$slow_bg"
-assert_eq "the holder counts the lockout once it finishes" "1" "$(jq -r '.lockouts // 0' "$DESK_STATUS_FILE")"
-assert_eq "and its own result is kept" "ok" "$(jq -r '.passes.slow.result' "$DESK_STATUS_FILE")"
+assert_eq "the holder's own result is kept" "ok" "$(jq -r '.passes.slow.result' "$DESK_STATUS_FILE")"
+
+echo
+echo "=== a holder killed outright leaves no lock behind ==="
+: > "$LOG"
+DESK_CONFIG="$cfg" "$DESK_RUN" slow --rerun > "$ROOT/slow2.out" 2>&1 &
+slow_bg=$!
+for _ in $(seq 1 50); do grep -q '^slow-F-.* start ' "$LOG" && break; sleep 0.2; done
+kill -9 "$slow_bg"
+wait "$slow_bg" 2> /dev/null
+pkill -f "$ROOT/fakebin/claude" 2> /dev/null
+DESK_LOCK_MAX_WAIT_SECS=1 DESK_CONFIG="$cfg" "$DESK_RUN" late --rerun > "$ROOT/late2.out" 2>&1
+assert_eq "the next run takes the lock at once" "0" "$?"
 
 echo
 echo "=== summary: $pass passed, $fail failed ==="

@@ -71,14 +71,6 @@ desk_apply_calls_root() {
 DESK_LOCK_MAX_WAIT_SECS="${DESK_LOCK_MAX_WAIT_SECS:-1800}"
 DESK_LOCK_POLL_SECS="${DESK_LOCK_POLL_SECS:-5}"
 DESK_KILL_GRACE_SECS="${DESK_KILL_GRACE_SECS:-5}"
-# How long a waiter tolerates a lock dir with no meta.json yet before
-# treating it as a crash rather than another acquirer mid-publish (lock.sh's
-# desk_lock_acquire holds off a lock with no meta for a short grace period) — and the pid-reuse tolerance for comparing
-# a lock's recorded owner start time against the same pid's current one
-# (same idea as session-status.sh's own LIVENESS_TOLERANCE_SECS, duplicated
-# in lock.sh since it's sourced standalone, without that script loaded).
-DESK_LOCK_NO_META_GRACE_SECS="${DESK_LOCK_NO_META_GRACE_SECS:-10}"
-DESK_LOCK_LIVENESS_TOLERANCE_SECS="${DESK_LOCK_LIVENESS_TOLERANCE_SECS:-3}"
 
 # Failsafes on every model call, set high enough that normal work never
 # reaches them: they are there to stop a runaway call, not to size one. The

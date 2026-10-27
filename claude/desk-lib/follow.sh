@@ -988,16 +988,14 @@ desk_follow_main() {
 
 	# Its own lock, never the runner's: the follow pass touches nothing a morning
 	# pass does. Waits a minute at most for another follow run.
-	local lockdir
-	lockdir="$(DESK_LOCK_NAME=follow DESK_LOCK_MAX_WAIT_SECS="${DESK_FOLLOW_LOCK_WAIT_SECS:-60}" desk_lock_acquire "$pass")"
-	if [ -z "$lockdir" ]; then
+	if ! DESK_LOCK_NAME=follow DESK_LOCK_MAX_WAIT_SECS="${DESK_FOLLOW_LOCK_WAIT_SECS:-60}" desk_lock_acquire; then
 		desk_log "$pass" "follow: another follow run holds the lock — skipping"
 		return 0
 	fi
 	local work
 	work="$(desk_scratch_dir "$pass-follow")"
 	# shellcheck disable=SC2064
-	trap "DESK_LOCK_NAME=follow desk_lock_release; rm -rf '$work'" EXIT
+	trap "desk_lock_release; rm -rf '$work'" EXIT
 	export DESK_FOLLOW_COSTS="$work/costs.log"
 	: > "$DESK_FOLLOW_COSTS"
 	DESK_DENY_HOOK_SCRIPT="$work/deny-unlisted-tool.sh"

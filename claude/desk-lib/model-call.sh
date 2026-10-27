@@ -145,11 +145,13 @@ desk_call_model() {
 
 	local prompt_text rc
 	prompt_text="$(cat "$prompt_file")"
+	# Without the lock's fd 9 (lock.sh), so a call left running when its
+	# runner is killed does not hold the lock on.
 	(
 		cd "$scratch" || exit 2
 		export CLAUDE_CONFIG_DIR="$config_dir"
 		run_with_timeout "$timeout_secs" "$out" "${argv[@]}" -- "$prompt_text" < /dev/null
-	)
+	) 9>&-
 	rc=$?
 
 	# run_with_timeout keeps stderr out of the stream, in "$out.stderr".

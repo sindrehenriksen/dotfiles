@@ -1,11 +1,7 @@
 #!/usr/bin/env bash
-# The once-a-day guard and the mutual-exclusion lock.
-#
-# The two are deliberately separate: the guard answers "has this pass
-# already run today" (so a later slot the same day is a no-op), reusing the status file as its own record rather than a second
-# on-disk marker; the lock answers "is another desk-run for this pass
-# running right now" (so two slots firing close together, or a manual run
-# overlapping a scheduled one, never race the same pass concurrently).
+# The once-a-day guard, which reads the status file for whether this
+# scheduled date already had a run, and the lock, which keeps two runs from
+# overlapping.
 set -u
 
 # True (exit 0) if /proc/stat is readable — the same Linux/macOS branch
@@ -147,197 +143,24 @@ desk_guard_already_ran_today() {
 	[ "$last_scheduled_date" = "$scheduled_date" ]
 }
 
-# One lock, shared across every pass (no two passes may run at once — they
-# share the same notes repo, ledger and status.json, so two passes racing
-# each other is exactly as unsafe as the same pass running
-# twice). $1 (the pass name) is recorded in the lock's own meta.json purely
-# for a waiting caller's diagnostics — it never changes which lock is taken.
+# One lock for every scheduled pass, which share the notes repo, the ledger
+# and the status file; the follow pass takes its own (DESK_LOCK_NAME=follow).
+# It is flock(2) on an open file, taken through perl since macOS has no
+# flock command: the lock lives on the open file description that this
+# shell keeps on fd 9, so it outlives the perl that took it and goes with
+# this shell however that ends. A run that died leaves nothing to break.
 DESK_LOCK_NAME="runner"
 
-# Seconds-since-epoch $1 (a pid) started, via `ps -o etime=` — arithmetic
-# only, no locale-sensitive date parsing (the same technique
-# session-status.sh's own parse_etime_secs uses, duplicated here since
-# lock.sh is sourced standalone by tests that never load that script).
-# Empty (and non-zero exit) if the pid isn't running or etime can't be
-# parsed.
-desk_pid_start_epoch() {
-	local pid="$1" etime
-	etime="$(ps -o etime= -p "$pid" 2>/dev/null | tr -d ' ')"
-	[ -n "$etime" ] || return 1
-	local dd=0 hh=0 mm='' ss='' rest=$etime a b c
-	case "$etime" in
-		*-*)
-			dd=${etime%%-*}
-			rest=${etime#*-}
-			;;
-	esac
-	IFS=: read -r a b c <<< "$rest"
-	if [ -n "${c:-}" ]; then
-		hh=$a
-		mm=$b
-		ss=$c
-	else
-		mm=$a
-		ss=$b
-	fi
-	[ -n "${mm:-}" ] && [ -n "${ss:-}" ] || return 1
-	local etime_secs=$((10#$dd * 86400 + 10#$hh * 3600 + 10#$mm * 60 + 10#$ss))
-	echo $(($(desk_now) - etime_secs))
-}
-
-# $1's own mtime (epoch seconds), or empty if it doesn't exist — used to
-# time a lock dir's own "no meta yet" grace period off the directory's own
-# creation time (mkdir sets it) rather than a second bookkeeping file.
-desk_lock_dir_mtime() {
-	local d="$1"
-	if [ ! -e "$d" ]; then
-		return 1
-	fi
-	if desk_is_linux; then
-		stat -c %Y "$d" 2>/dev/null
-	else
-		stat -f %m "$d" 2>/dev/null
-	fi
-}
-
-# Called by a waiter that has judged the lock's owner dead, just before it
-# acts on that judgement. A no-op; a test overrides it to hold a waiter at
-# exactly the point where another waiter may win the race.
-desk_lock_pre_break() { :; }
-
-# Breaks the lock at $1, which the caller read as owned by the dead $2 (pid).
-# Only one waiter may do it, and never to a lock someone else has since taken:
-#   - a waiter first wins `mkdir "$1.break"`; a loser does nothing and
-#     re-reads the lock on its next iteration;
-#   - the winner re-reads the owner under that guard (the lock it judged dead
-#     may meanwhile have been broken and re-taken), and breaks only if it is
-#     still $2;
-#   - the break is an atomic rename of the lock dir to a unique stale name,
-#     then a remove. A failed rename means another waiter already did it.
-# A guard left by a waiter that died mid-break is removed once it is older
-# than the no-meta grace period.
-desk_lock_break_dead() {
-	local lockdir="$1" dead_pid="$2" guard="$1.break"
-	if ! mkdir "$guard" 2> /dev/null; then
-		local gm now
-		gm="$(desk_lock_dir_mtime "$guard" 2> /dev/null)" || gm=""
-		now="$(desk_now)"
-		if [ -n "$gm" ] && [ "$((now - gm))" -ge "$DESK_LOCK_NO_META_GRACE_SECS" ]; then
-			rmdir "$guard" 2> /dev/null
-		fi
-		return 1
-	fi
-	local current
-	current="$(jq -r '.pid // empty' "$lockdir/meta.json" 2> /dev/null)"
-	if [ "$current" = "$dead_pid" ]; then
-		local stale="$lockdir.stale.$$.$RANDOM"
-		if mv "$lockdir" "$stale" 2> /dev/null; then
-			rm -rf "$stale" 2> /dev/null
-		fi
-	fi
-	rmdir "$guard" 2> /dev/null
-	return 0
-}
-
-# Acquires the mkdir-based runner lock, waiting out a live holder up to
-# $DESK_LOCK_MAX_WAIT_SECS and breaking a dead one immediately. Prints the
-# lock directory and returns 0 on success; returns 1 (prints nothing) if it
-# gave up waiting.
-#
-# meta.json is built in a temp dir under the lock's own parent (never
-# inside $lockdir itself) and moved into place with a single same-
-# filesystem file rename right after `mkdir "$lockdir"` succeeds — mkdir
-# stays the actual mutex (portable, unlike relying on `mv`'s own directory-
-# vs-file rename semantics), and this shrinks the window during which the
-# lock dir exists with no meta.json to as close to zero as a local rename
-# gets. That window can never be fully closed by construction alone, so a
-# waiter that sees a meta-less lock dir treats it as held for a short grace
-# period
-# rather than tearing it down the instant it's seen — which is what made
-# the old "dead lock owner" test flaky: two real processes racing meant a
-# waiter could observe the winner's lock dir microseconds before its
-# meta.json landed, and would previously destroy it out from under the
-# winner. Once meta.json exists, the owner's aliveness is checked by pid
-# AND by comparing its recorded start time against that same pid's current
-# one (desk_pid_start_epoch) — a dead owner's pid reused by an unrelated
-# process must never read as "still the lock's owner".
+# Takes the lock, waiting for its holder up to $DESK_LOCK_MAX_WAIT_SECS.
+# Returns 1 when it gave up. Called in this shell, never a subshell, which
+# would hold the lock only as long as itself.
 desk_lock_acquire() {
-	local pass="$1" lockdir="$DESK_LOCK_DIR/$DESK_LOCK_NAME.lock" waited=0
-	while true; do
-		if [ ! -e "$lockdir" ]; then
-			local tmpdir
-			tmpdir="$(mktemp -d "$DESK_LOCK_DIR/.tmp-lock.XXXXXX" 2>/dev/null)"
-			if [ -n "$tmpdir" ]; then
-				local my_start
-				my_start="$(desk_pid_start_epoch "$$" 2>/dev/null)" || my_start=""
-				desk_write_atomic "$tmpdir/meta.json" \
-					"$(jq -n --arg pass "$pass" --argjson pid "$$" --argjson started_at "$(desk_now)" \
-						--argjson owner_start "${my_start:-null}" \
-						'{pass: $pass, pid: $pid, started_at: $started_at, owner_start: $owner_start}')"
-				if mkdir "$lockdir" 2>/dev/null; then
-					mv -f "$tmpdir/meta.json" "$lockdir/meta.json" 2>/dev/null
-					rmdir "$tmpdir" 2>/dev/null
-					echo "$lockdir"
-					return 0
-				fi
-				rm -rf "$tmpdir" 2>/dev/null
-			fi
-		fi
-
-		local meta_exists="false" owner_pid="" owner_start=""
-		if [ -f "$lockdir/meta.json" ]; then
-			meta_exists="true"
-			owner_pid="$(jq -r '.pid // empty' "$lockdir/meta.json" 2>/dev/null)"
-			owner_start="$(jq -r '.owner_start // empty' "$lockdir/meta.json" 2>/dev/null)"
-		fi
-
-		if [ "$meta_exists" != "true" ]; then
-			# Either genuinely no lock dir at all (the mkdir above just lost
-			# a race to someone else, in the instant between our own mkdir
-			# attempt and this check), or one that exists but hasn't had its
-			# meta.json rename land yet. Either way: never torn down on
-			# sight — only once it's been sitting there with no meta for
-			# longer than the grace period does this read as a crash between
-			# mkdir and the rename (never a real one so far in this codebase,
-			# but the whole reason for the grace period rather than trusting
-			# the rename to be instant).
-			local now dir_mtime
-			now="$(desk_now)"
-			dir_mtime="$(desk_lock_dir_mtime "$lockdir" 2>/dev/null)" || dir_mtime=""
-			if [ -z "$dir_mtime" ]; then
-				: # no lock dir at all right now — just retry the mkdir below
-			elif [ "$((now - dir_mtime))" -ge "$DESK_LOCK_NO_META_GRACE_SECS" ]; then
-				rm -rf "$lockdir" 2>/dev/null
-			fi
-		else
-			local live="false"
-			if [ -n "$owner_pid" ] && desk_pid_alive "$owner_pid"; then
-				if [ -z "$owner_start" ]; then
-					# No start time recorded (shouldn't happen for a lock
-					# this build wrote, but never trust a state this file
-					# can't fully explain as automatically dead): pid
-					# liveness alone decides.
-					live="true"
-				else
-					local cur_start diff
-					cur_start="$(desk_pid_start_epoch "$owner_pid" 2>/dev/null)" || cur_start=""
-					if [ -n "$cur_start" ]; then
-						diff=$((cur_start > owner_start ? cur_start - owner_start : owner_start - cur_start))
-						[ "$diff" -le "$DESK_LOCK_LIVENESS_TOLERANCE_SECS" ] && live="true"
-					fi
-				fi
-			fi
-			if [ "$live" != "true" ]; then
-				# The owner is dead, or its pid has been reused by a
-				# different process since (start-time mismatch): break the
-				# lock and retry the mkdir immediately, never counting this
-				# iteration against the wait budget.
-				desk_lock_pre_break
-				desk_lock_break_dead "$lockdir" "$owner_pid" && continue
-			fi
-		fi
-
+	local waited=0
+	mkdir -p "$DESK_LOCK_DIR" 2> /dev/null
+	exec 9>> "$DESK_LOCK_DIR/$DESK_LOCK_NAME.flock" || return 1
+	until perl -MFcntl=:flock -e 'open(my $fh, ">&=", 9) or exit 2; flock($fh, LOCK_EX | LOCK_NB) or exit 1'; do
 		if [ "$waited" -ge "$DESK_LOCK_MAX_WAIT_SECS" ]; then
+			exec 9>&-
 			return 1
 		fi
 		sleep "$DESK_LOCK_POLL_SECS"
@@ -345,18 +168,8 @@ desk_lock_acquire() {
 	done
 }
 
-# Releases the runner lock only if THIS process is the one meta.json
-# records as owning it —
-# never a bare rm -rf, which would just as happily destroy a lock some
-# other process has since (legitimately) acquired, e.g. after this
-# process's own lock was broken as dead by a waiter that gave up on it.
 desk_lock_release() {
-	local lockdir="$DESK_LOCK_DIR/$DESK_LOCK_NAME.lock"
-	[ -d "$lockdir" ] || return 0
-	local owner_pid
-	owner_pid="$(jq -r '.pid // empty' "$lockdir/meta.json" 2>/dev/null)"
-	[ "$owner_pid" = "$$" ] || return 0
-	rm -rf "$lockdir" 2>/dev/null
+	exec 9>&-
 }
 
 # The exact count of Mon-Fri calendar dates strictly after $1's own date and
