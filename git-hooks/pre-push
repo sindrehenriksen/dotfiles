@@ -53,6 +53,13 @@ if [ -n "$this_repo_common_dir" ] && [ "$pushed_common_dir" = "$this_repo_common
     printf '%s\n' "$input" | "$here/desk-denylist-check.sh" || exit 1
 fi
 
+# Git LFS uploads a push's large files from its own pre-push hook, which this
+# shared hooks dir would otherwise shadow. Only where git-lfs is installed and
+# the repo tracks something with it.
+if [ -n "$input" ] && command -v git-lfs &>/dev/null && git grep -q 'filter=lfs' -- '*.gitattributes' 2>/dev/null; then
+    printf '%s\n' "$input" | git lfs pre-push "$@" || exit 1
+fi
+
 if [ -f .pre-commit-config.yaml ] && command -v pre-commit &>/dev/null; then
     # No trailing newline: hook-impl splits each stdin line into four fields,
     # so a blank line from an empty push would fail to parse.
