@@ -87,6 +87,13 @@ next pass, not settled facts.
   output went unrecorded rather than was produced less. Nothing recovers it,
   and the window straddles the switch, so subagent output is not compared
   across it here.
+- Tiers, checked 2026-09-28: Opus 5.5 is better than Fable 5.1 across the
+  board, faster and cheaper, so Opus-class is the strongest tier and Fable
+  has no current use. Pricing, verified 2026-09-23: Fable 5.1 is 2.5x Opus
+  5.5 on fresh input and output ($10/$50 against $4/$20 per MTok) and dearer
+  on cache reads ($0.25 against $0.20). On a subscription the binding cost
+  is the weekly allocation rather than the per-token price, and frontier
+  models draw it faster and stop at half of it.
 - Open: effort levels for subagents. None was ever set per call, so every
   subagent ran at the session's level; since then, well-specified jobs on the
   strong tier are asked for `medium` per call while judgement-heavy ones keep
