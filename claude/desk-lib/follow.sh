@@ -7,7 +7,8 @@
 # Two files, both machine-local, because session ids only exist on this
 # machine:
 #   $DESK_FOLLOW_FILE        the follow list, edited only by the CLI:
-#                           {"entries": {<session id>: {label, keys, related, added_at}}}
+#                           {"entries": {<session id>: {label, keys, related, repos, added_at}}}
+#                           (repos: whole GitHub repositories, as owner/name)
 #   $DESK_FOLLOW_STATE_FILE  the runner's own state: snapshots, scope, the
 #                           per-session queues, last runs. Written only by
 #                           a non-dry run, under the follow lock.
@@ -66,6 +67,7 @@ desk_follow_resolve_session() {
 }
 
 _desk_follow_valid_key() { [[ "$1" =~ ^[A-Z][A-Z0-9]+-[0-9]+$ ]]; }
+_desk_follow_valid_repo() { [[ "$1" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; }
 
 # desk_follow_address <session id>: the name a message to that session goes
 # to. Prints its current name and returns 0 only while it is live, one
@@ -104,7 +106,8 @@ desk_follow_intro_text() {
 	jq -r '
 		"This session is now a followed session. It follows "
 		+ ([(if (.keys | length) > 0 then "\(.keys | join(", ")) (with their children and linked tickets)" else empty end),
-		    (if ((.related // []) | length) > 0 then "\(.related | join(", ")) (only as themselves)" else empty end)] | join(", and "))
+		    (if ((.related // []) | length) > 0 then "\(.related | join(", ")) (only as themselves)" else empty end),
+		    (if ((.repos // []) | length) > 0 then "the GitHub repo\(if (.repos | length) > 1 then "s" else "" end) \(.repos | join(", ")) (every PR in it, and its failed CI runs)" else empty end)] | join(", and "))
 		+ ". A background follow pass sends it updates on them as [desk-follow] messages. Load the desk-follow skill now if it is not loaded: it says how to take an update in and when to involve the user. On /handoff or before compacting, carry what its \"Before compacting\" section lists."' <<< "$1"
 }
 
@@ -151,43 +154,50 @@ _desk_follow_load_send_libs() {
 	done
 }
 
-# desk_follow_cli_add <session id> <label or ""> <keys csv> <related csv>
+# desk_follow_cli_add <session id> <label or ""> <keys csv> <related csv> [<repos csv>]
 # From outside the session (its id is not $CLAUDE_CODE_SESSION_ID), a new
-# follow or new keys also send the session its intro.
+# follow, new keys or a new repo also send the session its intro.
 desk_follow_cli_add() {
-	local sid="$1" label="$2" keys="$3" related="$4" k entries before after
+	local sid="$1" label="$2" keys="$3" related="$4" repos="${5:-}" k entries before after
 	for k in ${keys//,/ } ${related//,/ }; do
 		_desk_follow_valid_key "$k" || { echo "desk-follow: '$k' is not a ticket key (like ABC-123)" >&2; return 2; }
 	done
-	[ -n "$keys$related" ] || { echo "desk-follow: name at least one ticket key" >&2; return 2; }
+	for k in ${repos//,/ }; do
+		_desk_follow_valid_repo "$k" || { echo "desk-follow: '$k' is not a GitHub repo (like owner/name)" >&2; return 2; }
+	done
+	[ -n "$keys$related$repos" ] || { echo "desk-follow: name at least one ticket key or --repo" >&2; return 2; }
 	if [ -z "$label" ]; then
 		label="$(_desk_follow_reader resolve "$sid" 2> /dev/null | jq -r '.name // empty' 2> /dev/null)"
 		[ -n "$label" ] || label="${sid:0:8}"
 	fi
 	entries="$(desk_follow_entries)"
-	before="$(jq -c --arg sid "$sid" '.[$sid] // {} | [(.keys // []), (.related // [])]' <<< "$entries")"
-	entries="$(jq -c --arg sid "$sid" --arg label "$label" --arg keys "$keys" --arg related "$related" \
+	before="$(jq -c --arg sid "$sid" '.[$sid] // {} | [(.keys // []), (.related // []), (.repos // [])]' <<< "$entries")"
+	# A repo is one repo whatever its case, as GitHub has it; the first
+	# spelling stays.
+	entries="$(jq -c --arg sid "$sid" --arg label "$label" --arg keys "$keys" --arg related "$related" --arg repos "$repos" \
 		--argjson now "$(desk_now)" '
 		def csv: split(",") | map(select(. != ""));
 		.[$sid] = ((.[$sid] // {added_at: $now, keys: [], related: []})
 			| .label = $label
 			| .keys = ((.keys + ($keys | csv)) | unique)
-			| .related = ((.related + ($related | csv)) - .keys | unique))' <<< "$entries")"
-	after="$(jq -c --arg sid "$sid" '.[$sid] | [.keys, .related]' <<< "$entries")"
+			| .related = ((.related + ($related | csv)) - .keys | unique)
+			| .repos = (((.repos // []) + ($repos | csv)) | reduce .[] as $r ([]; if any(.[]; ascii_downcase == ($r | ascii_downcase)) then . else . + [$r] end))
+			| if (.repos | length) == 0 then del(.repos) else . end)' <<< "$entries")"
+	after="$(jq -c --arg sid "$sid" '.[$sid] | [.keys, .related, (.repos // [])]' <<< "$entries")"
 	# Inside the target session itself the skill is loaded already, and an
 	# intro still waiting is moot.
 	if [ "$sid" = "${CLAUDE_CODE_SESSION_ID:-}" ]; then
 		entries="$(jq -c --arg sid "$sid" '.[$sid] |= del(.intro_due_at)' <<< "$entries")"
 	fi
 	_desk_follow_write_list "$entries"
-	jq -r --arg sid "$sid" '.[$sid] | "following \(.keys + .related | join(", ")) for \(.label)"' <<< "$entries"
+	jq -r --arg sid "$sid" '.[$sid] | "following \(.keys + .related + (.repos // []) | join(", ")) for \(.label)"' <<< "$entries"
 	if [ "$before" != "$after" ] && [ "$sid" != "${CLAUDE_CODE_SESSION_ID:-}" ]; then
 		desk_follow_cli_intro "$sid" "$(jq -c --arg sid "$sid" '.[$sid]' <<< "$entries")"
 	fi
 }
 
-# desk_follow_cli_remove <session id> [keys csv]: without keys, the whole
-# follow goes; with keys, only those.
+# desk_follow_cli_remove <session id> [keys and repos csv]: without any,
+# the whole follow goes; with some, only those.
 desk_follow_cli_remove() {
 	local sid="$1" keys="${2:-}" entries
 	entries="$(desk_follow_entries)"
@@ -198,12 +208,15 @@ desk_follow_cli_remove() {
 	entries="$(jq -c --arg sid "$sid" --arg keys "$keys" '
 		($keys | split(",") | map(select(. != ""))) as $drop
 		| if ($drop | length) == 0 then del(.[$sid])
-		  else .[$sid].keys -= $drop | .[$sid].related -= $drop
-		  | if ((.[$sid].keys + .[$sid].related) | length) == 0 then del(.[$sid]) else . end
+		  else ($drop | map(ascii_downcase)) as $drop_lc
+		  | .[$sid].keys -= $drop | .[$sid].related -= $drop
+		  | .[$sid].repos = [(.[$sid].repos // [])[] | select(ascii_downcase as $r | $drop_lc | index($r) | not)]
+		  | if (.[$sid].repos | length) == 0 then .[$sid] |= del(.repos) else . end
+		  | if ((.[$sid].keys + .[$sid].related + (.[$sid].repos // [])) | length) == 0 then del(.[$sid]) else . end
 		  end' <<< "$entries")"
 	_desk_follow_write_list "$entries"
 	if jq -e --arg sid "$sid" 'has($sid)' <<< "$entries" > /dev/null; then
-		jq -r --arg sid "$sid" '.[$sid] | "still following \(.keys + .related | join(", ")) for \(.label)"' <<< "$entries"
+		jq -r --arg sid "$sid" '.[$sid] | "still following \(.keys + .related + (.repos // []) | join(", ")) for \(.label)"' <<< "$entries"
 	else
 		echo "stopped following for session ${sid:0:8}"
 	fi
@@ -234,7 +247,7 @@ desk_follow_cli_list() {
 	jq -r '
 		if length == 0 then "nothing is followed"
 		else .[] | "\(.label)  (\(.session_id[0:8]), \(if .live then "live" else "not running" end)\(if .name and .name != .label then ", now named " + .name else "" end))\n"
-			+ "  tracks: \(.keys | join(", "))\(if (.related | length) > 0 then "; related: " + (.related | join(", ")) else "" end)\n"
+			+ "  tracks: \(if (.keys | length) > 0 then .keys | join(", ") else "no tickets" end)\(if (.related | length) > 0 then "; related: " + (.related | join(", ")) else "" end)\(if ((.repos // []) | length) > 0 then "; repos: " + (.repos | join(", ")) else "" end)\n"
 			+ "  queued: \(.queued)\(if .queued_since then " since " + (.queued_since | strflocaltime("%a %d %b %H:%M")) else "" end)"
 			+ "; last update sent: \(if .last_sent then (.last_sent.at | strflocaltime("%a %d %b %H:%M")) else "never" end)"
 			+ (if .all_closed_since then "\n  everything it tracks is closed (since \(.all_closed_since | strflocaltime("%d %b"))): retire it?" else "" end)
@@ -482,6 +495,12 @@ desk_follow_fetch_jira() {
 
 	local tracked keys_only scope_keys scope_jql="none" changes_jql="none"
 	tracked="$(jq -c '[.[] | (.keys // []) + (.related // []) | .[]] | unique' <<< "$entries")"
+	# Only repos followed: no ticket to search, and nothing that failed.
+	if [ "$(jq 'length' <<< "$tracked")" -eq 0 ]; then
+		echo '[]' > "$out_dir/scope.json"
+		echo '[]' > "$out_dir/changes.json"
+		return 0
+	fi
 	keys_only="$(jq -c '[.[] | (.keys // [])[]] | unique' <<< "$entries")"
 	if [ "$scope_due" = "true" ]; then
 		scope_jql="key in ($(_desk_follow_jql_keys "$tracked"))"
@@ -689,41 +708,101 @@ desk_follow_own_field_moves() {
 }
 
 
-# gh, read-only: `pr list` and `pr view` and nothing else.
+# gh, read-only: `pr list`, `pr view`, `run list` and `repo view`, never
+# with --web (which opens a browser), and nothing else.
 desk_follow_gh() {
+	local a
+	for a in "$@"; do
+		if [ "$a" = "--web" ]; then
+			desk_log - "follow: refusing gh $* (--web)"
+			return 2
+		fi
+	done
 	case "${1:-} ${2:-}" in
-		"pr list" | "pr view") "$DESK_GH_BIN" "$@" ;;
+		"pr list" | "pr view" | "run list" | "repo view") "$DESK_GH_BIN" "$@" ;;
 		*)
-			desk_log - "follow: refusing gh $* (only pr list and pr view)"
+			desk_log - "follow: refusing gh $* (only pr list, pr view, run list and repo view)"
 			return 2
 			;;
 	esac
 }
 
+DESK_FOLLOW_PR_FIELDS="number,title,headRefName,state,isDraft,updatedAt,createdAt,reviewDecision,reviewRequests,assignees,headRefOid,labels,url,body,statusCheckRollup,author"
+DESK_FOLLOW_RUN_FIELDS="databaseId,attempt,workflowName,displayTitle,headBranch,event,status,conclusion,createdAt,updatedAt,url"
+
+# _desk_follow_norm_prs <repo> <keys json or null>: a `gh pr list` reply on
+# stdin, normalized to the shape follow-diff.jq reads, keeping a PR only
+# when <keys> is null or its title or branch carries one of them.
+_desk_follow_norm_prs() {
+	jq -c --arg repo "$1" --argjson keys "$2" '
+		def pass_c: IN("SUCCESS", "NEUTRAL", "SKIPPED");
+		def fail_c: IN("FAILURE", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "ERROR", "STARTUP_FAILURE");
+		[.[] | ([(.title + " " + .headRefName) | scan("[A-Za-z][A-Za-z0-9]+-[0-9]+") | ascii_upcase] | unique) as $k
+		 | select($keys == null or (($k - ($k - $keys)) | length > 0))
+		 | (.statusCheckRollup // []) as $c
+		 | { id: "\($repo)#\(.number)", repo: $repo, number, title, branch: .headRefName, url,
+		     state, draft: .isDraft, review: (.reviewDecision // null) | (if . == "" then null else . end),
+		     head: .headRefOid, labels: ([.labels[]?.name] | sort), body: (.body // ""),
+		     updated: .updatedAt, created: .createdAt, keys: $k,
+		     # gh names an app "app/<name>" and says is_bot; as "<name>[bot]"
+		     # it matches the bot patterns a comment author does.
+		     author: (if .author.is_bot == true then (.author.login // "app" | sub("^app/"; "")) + "[bot]" else (.author.login // null) end),
+		     # A team is "team <slug>": a login holds no space.
+		     requested: ([(.reviewRequests // [])[] | if .__typename == "Team" then "team " + (.slug // .name // "?") else .login end
+		                  | select(. != null and . != "")] | sort),
+		     assignees: ([(.assignees // [])[] | .login | select(. != null)] | sort),
+		     checks: {
+		       pass: ([$c[] | select(((.conclusion // .state // "") | pass_c))] | length),
+		       fail: ([$c[] | select(((.conclusion // .state // "") | fail_c)) | (.name // .context // "check")] | unique),
+		       pending: ([$c[] | select((.status // "COMPLETED") != "COMPLETED" or IN(.state; "PENDING", "EXPECTED"))] | length) },
+		     comments: null, commits: null }]'
+}
+
+# desk_follow_repo_set <pass_config> <entries json>: the repos a run lists
+# PRs from, as [{repo, all}]: the configured github_repos, whose PRs count
+# only by the keys they carry, and every followed repo, all of whose PRs
+# count. A repo is one whatever its case: the configured spelling, or for a
+# repo only followed its lowercase, so its PRs' snapshot ids never change
+# with the spellings the follows happen to use.
+desk_follow_repo_set() {
+	jq -cn --argjson c "$1" --argjson e "$2" '
+		[(($c.github_repos // [])[] | {repo: ., all: false}), ($e[] | (.repos // [])[] | {repo: ., all: true})]
+		| group_by(.repo | ascii_downcase)
+		| map(. as $g | {repo: ([$g[] | select(.all | not) | .repo] | first // ($g[0].repo | ascii_downcase)), all: any($g[]; .all)})'
+}
+
 # desk_follow_fetch_prs <pass> <pass_config> <state> <keys json> <since epoch> <with_comments true|false> <out> [<limit>] [oldest_first]
-# Every PR in the configured repos updated since <since> whose title or
-# branch carries one of <keys> (every PR when <keys> is null), normalized,
-# as one JSON array in <out>; returns non-zero (and writes null) when a
-# listing fails. <limit> is per repo, default 100. With `oldest_first`
-# each listing runs oldest update first, and one that reaches the limit is
-# logged and sets DESK_FOLLOW_PRS_REACHED to the newest update it got to
-# (the earliest across repos): the window is covered only that far.
+# Every PR in the run's repos updated since <since>: in a configured repo,
+# one whose title or branch carries one of <keys> (any, when <keys> is
+# null), in a followed repo every one. The repos are the pass config's
+# `repo_set` (desk_follow_repo_set), or its github_repos when it has none.
+# Normalized, as one JSON array in <out>; returns non-zero (and writes
+# null) when a listing fails. <limit> is per repo, default 100. With
+# `oldest_first` each listing runs oldest update first, and one that
+# reaches the limit is logged and sets DESK_FOLLOW_PRS_REACHED to the
+# newest update it got to (the earliest across repos): the window is
+# covered only that far.
 desk_follow_fetch_prs() {
 	local pass="$1" pass_config="$2" state="$3" keys="$4" since="$5" with_comments="$6" out="$7" limit="${8:-100}" order="${9:-}"
-	local repos since_iso all='[]' repo listed search reached
+	local since_iso all='[]' repo listed search reached n_repos r repo_keys
 	DESK_FOLLOW_PRS_REACHED=""
 	echo null > "$out"
-	mapfile -t repos < <(jq -r '(.github_repos // [])[]' <<< "$pass_config")
-	if [ "${#repos[@]}" -eq 0 ]; then
+	local repo_set
+	repo_set="$(jq -c '.repo_set // [(.github_repos // [])[] | {repo: ., all: false}]' <<< "$pass_config")"
+	n_repos="$(jq 'length' <<< "$repo_set")"
+	if [ "$n_repos" -eq 0 ]; then
 		echo '[]' > "$out"
 		return 0
 	fi
 	since_iso="$(date -u -r "$since" +%Y-%m-%dT%H:%M:%SZ 2> /dev/null || date -u -d "@$since" +%Y-%m-%dT%H:%M:%SZ)"
 	search="updated:>=$since_iso"
 	[ "$order" = "oldest_first" ] && search="$search sort:updated-asc"
-	for repo in "${repos[@]}"; do
+	for ((r = 0; r < n_repos; r++)); do
+		repo="$(jq -r ".[$r].repo" <<< "$repo_set")"
+		repo_keys="$keys"
+		[ "$(jq -r ".[$r].all" <<< "$repo_set")" = "true" ] && repo_keys=null
 		listed="$(desk_follow_gh pr list --repo "$repo" --state all --limit "$limit" --search "$search" \
-			--json number,title,headRefName,state,isDraft,updatedAt,createdAt,reviewDecision,reviewRequests,assignees,headRefOid,labels,url,body,statusCheckRollup,author 2> /dev/null)" \
+			--json "$DESK_FOLLOW_PR_FIELDS" 2> /dev/null)" \
 			|| { desk_log "$pass" "follow: gh pr list failed for $repo"; return 1; }
 		jq -e 'type == "array"' > /dev/null 2>&1 <<< "$listed" || { desk_log "$pass" "follow: gh pr list for $repo was not a list"; return 1; }
 		if [ "$order" = "oldest_first" ] && jq -e --argjson l "$limit" 'length >= $l' > /dev/null 2>&1 <<< "$listed"; then
@@ -733,25 +812,7 @@ desk_follow_fetch_prs() {
 				DESK_FOLLOW_PRS_REACHED="$reached"
 			fi
 		fi
-		listed="$(jq -c --arg repo "$repo" --argjson keys "$keys" '
-			def pass_c: IN("SUCCESS", "NEUTRAL", "SKIPPED");
-			def fail_c: IN("FAILURE", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "ERROR", "STARTUP_FAILURE");
-			[.[] | ([(.title + " " + .headRefName) | scan("[A-Za-z][A-Za-z0-9]+-[0-9]+") | ascii_upcase] | unique) as $k
-			 | select($keys == null or (($k - ($k - $keys)) | length > 0))
-			 | (.statusCheckRollup // []) as $c
-			 | { id: "\($repo)#\(.number)", repo: $repo, number, title, branch: .headRefName, url,
-			     state, draft: .isDraft, review: (.reviewDecision // null) | (if . == "" then null else . end),
-			     head: .headRefOid, labels: ([.labels[]?.name] | sort), body: (.body // ""),
-			     updated: .updatedAt, created: .createdAt, keys: $k, author: (.author.login // null),
-			     # A team is "team <slug>": a login holds no space.
-			     requested: ([(.reviewRequests // [])[] | if .__typename == "Team" then "team " + (.slug // .name // "?") else .login end
-			                  | select(. != null and . != "")] | sort),
-			     assignees: ([(.assignees // [])[] | .login | select(. != null)] | sort),
-			     checks: {
-			       pass: ([$c[] | select(((.conclusion // .state // "") | pass_c))] | length),
-			       fail: ([$c[] | select(((.conclusion // .state // "") | fail_c)) | (.name // .context // "check")] | unique),
-			       pending: ([$c[] | select((.status // "COMPLETED") != "COMPLETED" or IN(.state; "PENDING", "EXPECTED"))] | length) },
-			     comments: null, commits: null }]' <<< "$listed")"
+		listed="$(_desk_follow_norm_prs "$repo" "$repo_keys" <<< "$listed")"
 		all="$(jq -c --argjson a "$all" '$a + .' <<< "$listed")"
 	done
 	if [ "$with_comments" = "true" ]; then
@@ -780,6 +841,58 @@ desk_follow_fetch_prs() {
 	printf '%s\n' "$all" > "$out"
 }
 
+# desk_follow_seed_repos <pass> <repos json> <out>
+# A repo just followed: its open PRs, snapshotted without being diffed, so
+# that a later merge of a PR opened before the follow is a change and not
+# a first sighting; and its default branch, which CI runs are read
+# against. Writes {prs: [...], repos: {<repo, lowercased>: {default_branch}}}
+# to <out> for the repos that came back; returns non-zero when any did
+# not, which is then seeded again next run.
+desk_follow_seed_repos() {
+	local pass="$1" repos="$2" out="$3" repo listed branch result='{"prs": [], "repos": {}}' ok=0
+	while IFS= read -r repo; do
+		[ -n "$repo" ] || continue
+		listed="$(desk_follow_gh pr list --repo "$repo" --state open --limit 200 --json "$DESK_FOLLOW_PR_FIELDS" 2> /dev/null)" \
+			&& jq -e 'type == "array"' > /dev/null 2>&1 <<< "$listed" \
+			&& branch="$(desk_follow_gh repo view "$repo" --json defaultBranchRef 2> /dev/null | jq -r '.defaultBranchRef.name // empty' 2> /dev/null)" \
+			&& [ -n "$branch" ] || {
+			desk_log "$pass" "follow: couldn't read $repo's open PRs or default branch — following it starts on the next run that can"
+			ok=1
+			continue
+		}
+		jq -e 'length >= 200' > /dev/null <<< "$listed" && desk_log "$pass" "follow: $repo has 200 or more open PRs; only the 200 listed are snapshotted"
+		result="$(jq -c --arg r "$repo" --arg b "$branch" --argjson p "$(_desk_follow_norm_prs "$repo" null <<< "$listed")" \
+			'.prs += $p | .repos[$r | ascii_downcase] = {default_branch: $b}' <<< "$result")"
+	done < <(jq -r '.[]' <<< "$repos")
+	printf '%s\n' "$result" > "$out"
+	return "$ok"
+}
+
+# desk_follow_fetch_runs <pass> <repos json: {<repo>: <default branch>}> <since epoch> <out>
+# The followed repos' CI runs that failed (failure, timed out, or could
+# not start; a cancelled run is usually one superseded), listed from two
+# hours before <since> so a long run that ends in the window is seen; the
+# diff keeps those that ended in it, on the default branch or an open PR.
+# One JSON array in <out>, or null (and non-zero) when a listing fails.
+desk_follow_fetch_runs() {
+	local pass="$1" repos="$2" since="$3" out="$4" repo branch listed all='[]' from_iso
+	echo null > "$out"
+	from_iso="$(date -u -r "$((since - 7200))" +%Y-%m-%dT%H:%M:%SZ 2> /dev/null || date -u -d "@$((since - 7200))" +%Y-%m-%dT%H:%M:%SZ)"
+	while IFS=$'\t' read -r repo branch; do
+		[ -n "$repo" ] || continue
+		listed="$(desk_follow_gh run list --repo "$repo" --limit 200 --created ">=$from_iso" --json "$DESK_FOLLOW_RUN_FIELDS" 2> /dev/null)" \
+			|| { desk_log "$pass" "follow: gh run list failed for $repo"; return 1; }
+		jq -e 'type == "array"' > /dev/null 2>&1 <<< "$listed" || { desk_log "$pass" "follow: gh run list for $repo was not a list"; return 1; }
+		jq -e 'length >= 200' > /dev/null <<< "$listed" && desk_log "$pass" "follow: $repo listed 200 CI runs in the window, the most it reads; older failures in it may be missed"
+		all="$(jq -c --argjson a "$all" --arg r "$repo" --arg b "$branch" '$a + [.[]
+			| select(.status == "completed" and ((.conclusion // "") | IN("failure", "timed_out", "startup_failure")))
+			| {id: "\($r):\(.databaseId):\(.attempt // 1)", repo: $r, workflow: (.workflowName // "a workflow"),
+			   title: (.displayTitle // ""), branch: .headBranch, event, conclusion, attempt: (.attempt // 1),
+			   ended: .updatedAt, url, on_default: (.headBranch == $b)}]' <<< "$listed")"
+	done < <(jq -r 'to_entries[] | [.key, .value] | @tsv' <<< "$repos")
+	printf '%s\n' "$all" > "$out"
+}
+
 desk_follow_note_cost() {
 	local c
 	c="$(desk_extract_total_cost_usd "$1")"
@@ -791,21 +904,26 @@ desk_follow_note_cost() {
 
 # desk_follow_message <entry json> <queue json> <name> <preamble file> <max chars> <timezone>
 # The whole message one session gets: the marker line, the instance's
-# standing preamble, then every queued change, oldest first. A change's
-# `also` holds the current names of the other followed sessions that have
-# its ticket (desk_follow_also_names).
+# standing preamble, then every queued change, oldest first. Changes on
+# one ticket or PR (or CI on one repo's default branch), their `group`, are
+# one entry at its first change's place, so a busy day on a followed repo
+# reads PR by PR. A change's `also` holds the current names of the other
+# followed sessions that have its ticket (desk_follow_also_names).
 desk_follow_message() {
 	local entry="$1" queue="$2" name="$3" preamble_file="$4" max="$5" tz="$6" intro="${7:-}" preamble=""
 	[ -f "$preamble_file" ] && preamble="$(cat "$preamble_file")"
 	TZ="${tz:-${TZ:-UTC}}" jq -jn --argjson e "$entry" --argjson q "$queue" --arg name "$name" \
 		--arg marker "$DESK_FOLLOW_MARKER" --arg preamble "$preamble" --arg lead "$intro" --argjson max "$max" '
 		def when: strflocaltime("%a %d %b %H:%M");
+		def ctx_of: ([(.context // "") | select(. != "")]
+		           + (if ((.also // []) | length) > 0 then ["also followed by " + (.also | join(", "))] else [] end))
+		           | if length > 0 then " (" + join("; ") + ")" else "" end;
 		($q.changes // []) as $c
 		| ([$c[].ref] | unique) as $refs
 		| ($q.dropped // 0) as $dropped
-		| [$c[] | ([(.context // "") | select(. != "")]
-		           + (if ((.also // []) | length) > 0 then ["also followed by " + (.also | join(", "))] else [] end)) as $ctx
-		   | "- \(.at | when) \(.ref) \"\(.title // "")\"\(if ($ctx | length) > 0 then " (" + ($ctx | join("; ")) + ")" else "" end): \(.what)"] as $lines
+		| ($c | to_entries | group_by(.value.group // .value.ref) | sort_by(.[0].key) | map(map(.value))) as $groups
+		| [$groups[] | if length == 1 then (.[0] | "- \(.at | when) \(.ref) \"\(.title // "")\"\(ctx_of): \(.what)")
+		               else "- \(.[0].ref) \"\(.[-1].title // "")\"\(.[0] | ctx_of):\n" + (map("  - \(.at | when): \(.what)") | join("\n")) end] as $lines
 		| ("\($marker) Update for \($e.label): \($c | length) change\(if ($c | length) == 1 then "" else "s" end) on \($refs | .[0:6] | join(", "))\(if ($refs | length) > 6 then " and more" else "" end). Not from the user.") as $head
 		| ($preamble | sub("\\s+$"; "")) as $pre
 		| ("Changes since \(if $q.since then ($q.since | when) else "following started" end), oldest first:") as $intro
@@ -817,7 +935,8 @@ desk_follow_message() {
 			else .text += $l + "\n" | .n += 1 end)) as $fit
 		| $top + $fit.text
 		  + (if $fit.n < ($lines | length)
-		     then "- … and \(($lines | length) - $fit.n) more, too long to include, on \([$c[$fit.n:][] | .ref] | unique | .[0:20] | join(", "))\(if ([$c[$fit.n:][] | .ref] | unique | length) > 20 then " and others" else "" end); look them up if they matter.\n"
+		     then [$groups[$fit.n:][][]] as $rest
+		     | "- … and \($rest | length) more, too long to include, on \([$rest[].ref] | unique | .[0:20] | join(", "))\(if ([$rest[].ref] | unique | length) > 20 then " and others" else "" end); look them up if they matter.\n"
 		     else "" end)
 		  + (if $dropped > 0 then "- Plus \($dropped) older change\(if $dropped == 1 then "" else "s" end) the queue no longer holds.\n" else "" end)
 		  # Everything left out on purpose is counted, so nothing is invisible.
@@ -1048,27 +1167,54 @@ desk_follow_main() {
 	fi
 
 	# PRs: matched against every key any follow's scope holds, including
-	# children and links the scope query just found.
+	# children and links the scope query just found, and in a followed
+	# repo every one.
 	local all_scope gh_ok="true"
 	all_scope="$(jq -c --argjson s "$scope_issues" --argjson c "$change_issues" --argjson k "$keys_sig" '
 		[(.queues // {})[] | (.scope // [])[]] + $k
 		+ [($s // [])[] | .key, (.links[] | .key)] + [($c // [])[] | .key] | unique' <<< "$state")"
 	local with_comments="true"
 	[ "$baseline_gh" = "true" ] && with_comments="false"
-	desk_follow_fetch_prs "$pass" "$pass_config" "$state" "$all_scope" "$gh_since" "$with_comments" "$work/prs.json" "" oldest_first \
+	local repo_set
+	repo_set="$(desk_follow_repo_set "$pass_config" "$entries")"
+	desk_follow_fetch_prs "$pass" "$(jq -c --argjson rs "$repo_set" '.repo_set = $rs' <<< "$pass_config")" \
+		"$state" "$all_scope" "$gh_since" "$with_comments" "$work/prs.json" "" oldest_first \
 		|| gh_ok="false"
 	local gh_through="$now"
 	[ -n "${DESK_FOLLOW_PRS_REACHED:-}" ] && gh_through="$DESK_FOLLOW_PRS_REACHED"
 
+	# Followed repos: one new to the follow is seeded (its open PRs and
+	# default branch); then every followed repo whose default branch is
+	# known has its failed CI runs read. `follow_repos` in the state holds
+	# what is known, for the repos still followed. Each is spelled as the
+	# PR listing spells it, which the snapshot ids carry.
+	local follow_repos repo_info to_seed
+	follow_repos="$(jq -c '[.[] | select(.all) | .repo]' <<< "$repo_set")"
+	repo_info="$(jq -c --argjson f "$follow_repos" '(.follow_repos // {}) | with_entries(select(.key as $k | $f | map(ascii_downcase) | index($k)))' <<< "$state")"
+	to_seed="$(jq -c --argjson i "$repo_info" '[.[] | select(ascii_downcase as $k | $i | has($k) | not)]' <<< "$follow_repos")"
+	echo '{"prs": [], "repos": {}}' > "$work/seed.json"
+	echo '[]' > "$work/runs.json"
+	if [ "$(jq 'length' <<< "$to_seed")" -gt 0 ]; then
+		desk_follow_seed_repos "$pass" "$to_seed" "$work/seed.json"
+		repo_info="$(jq -c --argjson i "$repo_info" '$i + .repos' "$work/seed.json")"
+	fi
+	if [ "$(jq 'length' <<< "$follow_repos")" -gt 0 ]; then
+		desk_follow_fetch_runs "$pass" "$(jq -c --argjson i "$repo_info" \
+			'map(select(ascii_downcase as $k | $i | has($k)) | {key: ., value: $i[ascii_downcase].default_branch}) | from_entries' <<< "$follow_repos")" \
+			"$gh_since" "$work/runs.json" || gh_ok="false"
+	fi
+
 	local new_state
 	jq -n --argjson entries "$entries" --slurpfile state <(printf '%s\n' "$state") \
 		--slurpfile scope "$work/scope.json" --slurpfile changes "$work/changes.json" --slurpfile prs "$work/prs.json" \
+		--slurpfile seed "$work/seed.json" --slurpfile runs "$work/runs.json" --argjson repo_info "$repo_info" \
 		--argjson now "$now" --argjson jira_since "${jira_since:-$now}" --argjson gh_since "$gh_since" \
 		--argjson baseline_jira "$baseline_jira" --argjson baseline_gh "$baseline_gh" \
 		--argjson queue_max "$(jq -r '.queue_max // 200' <<< "$pass_config")" \
 		--argjson skip "$(jq -c '.skip // {}' <<< "$pass_config")" --argjson self "$(jq -c '.self // []' <<< "$pass_config")" \
 		--arg cl "$(desk_follow_changelog_configured "$pass_config" && echo yes || echo no)" --argjson lookback "$([ -n "$lookback" ] && echo true || echo false)" '
 		{entries: $entries, state: $state[0], scope_issues: $scope[0], change_issues: $changes[0], prs: $prs[0],
+		 seed_prs: $seed[0].prs, runs: $runs[0], follow_repos: $repo_info,
 		 now: $now, jira_since: $jira_since, gh_since: $gh_since,
 		 baseline_jira: $baseline_jira, baseline_gh: $baseline_gh, queue_max: $queue_max,
 		 skip: $skip, self: $self, lookback: $lookback,

@@ -10,6 +10,11 @@
 #   $change_issues  normalized tickets from the changes query, or null when
 #                   that fetch failed
 #   $prs            normalized pull requests, or null when that fetch failed
+#   seed_prs        the open PRs of a repo just followed: snapshotted only
+#   runs            the followed repos' failed CI runs (follow.sh's
+#                   desk_follow_fetch_runs), or null when that fetch failed
+#   follow_repos    {<repo, lowercased>: {default_branch}} for the followed
+#                   repos, kept in the state as it is
 #   $now, $jira_since, $gh_since   epoch seconds; an item first seen with a
 #                   creation time after its source's `since` counts as new
 #   $baseline_jira, $baseline_gh   true on a source's first run: snapshots
@@ -36,10 +41,11 @@
 #                   compare against
 #
 # Only substantive changes are queued: new human content, a change to scope
-# or plan, a ticket or PR new to the follow. The rest (a status or state move
-# with nothing else, a bot's post, labels, check results, a ticket only first
-# seen) is counted per kind in the queue's `skipped`, which the message's
-# footer reports.
+# or plan, a ticket or PR new to the follow; and for a session following a
+# whole repo (an entry's `repos`), that repo's merges and failed CI runs.
+# The rest (a status or state move with nothing else, a bot's post or PR,
+# labels, check results, a ticket only first seen) is counted per kind in
+# the queue's `skipped`, which the message's footer reports.
 #
 # Prints the new state. Every change it queues is one line of plain text a
 # follow session reads; the message around them is built in follow.sh.
@@ -52,6 +58,7 @@
 | (.skip.bot_authors // []) as $bot_authors | (.skip.bot_signatures // []) as $bot_signatures
 | (.lookback // false) as $lookback
 | (.self // []) as $self
+| (.seed_prs // []) as $seed_prs | .runs as $runs | (.follow_repos // {}) as $follow_repos
 |
 
 # HTML comments (bots' hidden metadata) are dropped: they carry nothing a
@@ -261,7 +268,7 @@ def new_ticket_snapshots:
 # --- pull request changes -------------------------------------------------------
 
 def pr_snapshot($prev):
-	{ title, state, draft, review, requested, assignees, head, labels, body_sig: (.body | desc_sig),
+	{ title, state, draft, review, requested, assignees, head, labels, body_sig: (.body | desc_sig), branch, author, url,
 	  failing: .checks.fail, checks_done: (.checks.pending == 0), updated }
 	+ (if .comments != null then {seen: ([.comments[].id] + ($prev.seen // []) | unique)}
 	   else {seen: $prev.seen} end)
@@ -279,7 +286,7 @@ def asks_text($what; $kind):
 def pr_field_changes($prev):
 	. as $p
 	| [
-		(if $prev.state != $p.state then {kind: "state", text: "now \($p.state | ascii_downcase)", skip: "PR state changes"} else empty end),
+		(if $prev.state != $p.state then {kind: (if $p.state == "MERGED" then "merged" else "state" end), text: "now \($p.state | ascii_downcase)", skip: "PR state changes"} else empty end),
 		(if ($prev | has("draft")) and $prev.draft != $p.draft
 		 then {kind: (if $p.draft then "draft" else "ready" end), text: (if $p.draft then "back to draft" else "ready for review" end), skip: "PR state changes"} else empty end),
 		(if ($prev | has("review")) and $prev.review != $p.review
@@ -330,16 +337,19 @@ def pr_events:
 	($state.prs // {}) as $snap
 	| [ ($prs // [])[] | . as $p
 	    | ($snap[$p.id] // null) as $prev
-	    | {key: $p.id, title: $p.title, pr_keys: $p.keys, url: $p.url, pr_author: ($p.author // null)} as $base
+	    | {key: $p.id, title: $p.title, pr_keys: $p.keys, url: $p.url, pr_author: ($p.author // null), repo: ($p.repo // ($p.id | sub("#[0-9]+$"; "")))} as $base
 	    | if $baseline_gh then empty
 	      elif $prev == null then
 	        # A PR opened in the window is news; one only first seen (it
 	        # was already open when it came into scope) is counted.
-	        # One that already asks the user for a review is forwarded with it.
+	        # One that already asks the user for a review is forwarded with it;
+	        # one a bot opened is counted.
 	        ((($p.created | ts) // 0) > $gh_since) as $opened
 	        | ([($p.requested // [])[] | select(asks_user) | asks_text("review requested from"; null).text]
 	           + [($p.assignees // [])[] | select(is_self(.)) | asks_text("assigned to"; null).text]) as $asks
-	        | $base + {at: (($p.updated | ts) // $now), skip: (if $opened or ($asks | length) > 0 then null else "first-seen PRs" end),
+	        | $base + {at: (($p.updated | ts) // $now),
+	                   skip: (if ($asks | length) > 0 then null elif $opened and is_bot($p.author; "") then "bot PRs"
+	                          elif $opened then null else "first-seen PRs" end),
 	                   opened: $opened, commits: $p.commits,
 	                   what: ((if $opened then "opened" else "new under the follow" end)
 	                          + " (\($p.state | ascii_downcase)\(if $p.draft then ", draft" else "" end), branch \($p.branch))"
@@ -349,11 +359,49 @@ def pr_events:
 	        (($p | pr_field_changes($prev)) as $f
 	         | field_event($f) | $base + {at: (($p.updated | ts) // $now), kinds: [$f[].kind // empty]} + .),
 	          ($p | pr_comment_changes($prev) | .[] | $base + .)
-	      end ];
+	      end
+	    # How a session following the PR's whole repo counts it: a merge is
+	    # news there, unless a bot opened the PR.
+	    | .repo_skip = (if ((.kinds // []) | index("merged")) == null then .skip
+	                    elif is_bot(.pr_author; "") then "bot PRs" else null end) ];
 
 def new_pr_snapshots:
 	($state.prs // {}) as $snap
-	| reduce ($prs // [])[] as $p ($snap; .[$p.id] = ($p | pr_snapshot($snap[$p.id] // {})));
+	| reduce ($seed_prs[] | select($snap[.id] == null)) as $p ($snap; .[$p.id] = ($p | pr_snapshot({})))
+	| reduce ($prs // [])[] as $p (.; .[$p.id] = ($p | pr_snapshot($snap[$p.id] // {})));
+
+# --- CI runs in followed repos ---------------------------------------------------
+
+def follows_repo($e; $repo): ($repo | ascii_downcase) as $r | any(($e.repos // [])[]; ascii_downcase == $r);
+
+# A failed run that ended in the window and was not seen before: on the
+# repo's default branch, or on an open PR's branch, under that PR (by the
+# snapshots, so a PR open before the follow counts). Another branch's is
+# left out; one on a PR a bot opened is counted.
+def run_events($snaps):
+	($state.runs_seen // []) as $seen
+	| if $runs == null or $baseline_gh then []
+	  else [ $runs[] | . as $r
+	         | select(($seen | index($r.id)) == null and ((($r.ended | ts) // 0) > $gh_since))
+	         | ($r.repo | ascii_downcase + "#") as $prefix
+	         | ([$snaps | to_entries[] | select((.key | ascii_downcase | startswith($prefix)) and .value.state == "OPEN" and .value.branch == $r.branch)]
+	            | first) as $pr
+	         | "\($r.workflow) \($r.conclusion | gsub("_"; " "))\(if $r.attempt > 1 then " (attempt \($r.attempt))" else "" end): \($r.url)" as $what
+	         | if $r.on_default then
+	             {at: ($r.ended | ts), ref: $r.branch, title: $r.title, repo: $r.repo, group: "\($r.repo)@\($r.branch)",
+	              what: "CI failed on \($r.branch): \($what)", skip: null}
+	           elif $pr != null then
+	             {at: ($r.ended | ts), ref: ("PR " + ($pr.key | sub("^.*#"; "#"))), title: $pr.value.title, repo: $r.repo,
+	              group: $pr.key, url: $pr.value.url, what: "CI failed: \($what)",
+	              skip: (if is_bot($pr.value.author; "") then "bot CI failures" else null end)}
+	           else empty end ]
+	  end;
+
+# The other followed sessions a PR change also reaches: by a key, or by
+# following its repo.
+def also_pr($sid; $maps; $keys; $repo):
+	[$entries | to_entries[] | select(.key != $sid) | .key as $o | .value as $e
+	 | select(any($keys[]; has_ticket($e; $maps; .; null)) or follows_repo($e; $repo)) | $o];
 
 # --- attribution and queues --------------------------------------------------
 
@@ -406,19 +454,25 @@ def others_committed:
 	# Each commit by its author, the first entry: gh lists co-authors from
 	# the commit's trailers after it. No author counts as someone else.
 	else any(.commits[]; (.authors // [])[0] as $a | $a == null or (is_self($a) | not)) end;
-def own_pr_rules:
-	if .author != null then (if is_self(.author) then skip_unless("own posts") else . end)
+# Counted the same way for a session following the PR's repo (repo_skip).
+def own_pr_kind:
+	if .author != null then (if is_self(.author) then "own posts" else null end)
 	# On the user's own PR, a state move (merged, closed, draft, ready) is the
 	# user's; new commits, a retitle or a description edit may be someone
 	# else's, so the follow pass forwards an event carrying one, and the
 	# user's newly opened PR when anyone else has committed to it (or its
 	# commits could not be read).
-	elif is_self(.pr_author) and ((.kinds // []) | index("update") | not) and (others_committed | not) then skip_unless("own PR moves")
-	else . end;
+	elif is_self(.pr_author) and ((.kinds // []) | index("update") | not) and (others_committed | not) then "own PR moves"
+	else null end;
+def own_pr_rules:
+	own_pr_kind as $k
+	| if $k == null then . else .skip = (.skip // $k) | .repo_skip = (.repo_skip // $k) end;
 scope_maps as $maps
 | ticket_index as $tix
 | [ticket_events[] | own_ticket_rules] as $tev
 | [pr_events[] | own_pr_rules] as $pev
+| new_pr_snapshots as $pr_snaps
+| run_events($pr_snaps) as $rev
 | (if $change_issues == null and $scope_issues == null then ($state.tickets // {}) else new_ticket_snapshots end) as $tickets
 | ($state.queues // {}) as $queues
 | (reduce ($entries | to_entries[]) as $ent ({};
@@ -432,12 +486,23 @@ scope_maps as $maps
 	     | {at: ($ev.at // $now), ref: $ev.key, title: $ev.title, context: $rel, what: $ev.what, skip: $ev.skip}
 	       + (if $ev.field == true then {field_run: $now} else {} end)
 	       + (if ($also | length) > 0 then {also: $also} else {} end) ]
+	   # A PR matched both by a key and by its repo is one change, counted
+	   # as the repo follow counts it.
 	   + [ $pev[] | . as $ev
 	       | ([$ev.pr_keys[] | . as $k | select(($scope | index($k)) != null)]) as $hit
-	       | select(($hit | length) > 0)
-	       | also_having($sid; $maps; $ev.pr_keys; null) as $also
+	       | follows_repo($e; $ev.repo) as $via_repo
+	       | select(($hit | length) > 0 or $via_repo)
+	       | also_pr($sid; $maps; $ev.pr_keys; $ev.repo) as $also
 	       | {at: ($ev.at // $now), ref: ("PR " + ($ev.key | sub("^.*#"; "#"))), title: $ev.title,
-	          context: ($hit | join(", ")), what: $ev.what, url: $ev.url, skip: $ev.skip}
+	          context: (if ($hit | length) > 0 then ($hit | join(", ")) else "in \($ev.repo)" end),
+	          what: $ev.what, url: $ev.url, group: $ev.key, skip: (if $via_repo then $ev.repo_skip else $ev.skip end)}
+	         + (if ($also | length) > 0 then {also: $also} else {} end) ]
+	   + [ $rev[] | . as $ev
+	       | select(follows_repo($e; $ev.repo))
+	       | also_pr($sid; $maps; []; $ev.repo) as $also
+	       | {at: ($ev.at // $now), ref: $ev.ref, title: $ev.title, context: "in \($ev.repo)",
+	          what: $ev.what, group: $ev.group, skip: $ev.skip}
+	         + (if $ev.url then {url: $ev.url} else {} end)
 	         + (if ($also | length) > 0 then {also: $also} else {} end) ]) as $events
 	| [$events[] | select(.skip == null) | del(.skip)] as $new
 	| ($queues[$sid] // {changes: [], dropped: 0}) as $q
@@ -453,8 +518,10 @@ scope_maps as $maps
 | $state
 | .scope = ($maps + {refreshed_at: (if $scope_issues != null then $now else ($state.scope.refreshed_at // null) end)})
 | .tickets = $tickets
-| .prs = (if $prs == null then ($state.prs // {}) else new_pr_snapshots end)
+| .prs = $pr_snaps
 | .queues = $new_queues
+| .runs_seen = (if $runs == null then ($state.runs_seen // []) else (($state.runs_seen // []) + [$runs[].id] | reduce .[] as $i ([]; if index($i) then . else . + [$i] end) | .[-500:]) end)
+| .follow_repos = $follow_repos
 # Everything a follow tracks is closed: the seam a later pass reads to
 # suggest retiring the follow. The date it was first seen closed is kept.
 | .all_closed = (reduce ($entries | to_entries[]) as $ent ({};

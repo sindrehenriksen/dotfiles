@@ -2,14 +2,16 @@
 # desk-follow: the follow list a desk follow pass forwards ticket movement
 # from (docs/desk.md, "The follow pass"). Installed as ~/.local/bin/desk-follow.
 #
-#   desk-follow add [--session <id|name>] [--label <text>] [--related <KEY>...] <KEY>...
-#   desk-follow remove [--session <id|name>] [<KEY>...]
+#   desk-follow add [--session <id|name>] [--label <text>] [--related <KEY>...] [--repo <owner/name>]... [<KEY>...]
+#   desk-follow remove [--session <id|name>] [--repo <owner/name>]... [<KEY>...]
 #   desk-follow list [--json]
 #   desk-follow run [--dry-run] [--lookback-minutes N]
 #
 # --session defaults to $CLAUDE_CODE_SESSION_ID, which Claude Code sets in
-# its Bash tool's environment, so a session can register itself. `remove`
-# without keys stops the whole follow; with keys, drops only those.
+# its Bash tool's environment, so a session can register itself. `--repo`
+# follows a whole GitHub repo: every PR in it, whatever its title, and its
+# failed CI runs; repeat it for more than one. `remove` without keys or
+# repos stops the whole follow; with some, drops only those.
 # `run` runs the follow pass now (`desk-run <pass>`, the pass of kind
 # "follow" in $DESK_CONFIG), outside its
 # schedule. With $DESK_CONFIG unset, `run` uses ${XDG_CONFIG_HOME:-~/.config}/desk/config.json if it exists.
@@ -35,12 +37,14 @@ session="${CLAUDE_CODE_SESSION_ID:-}"
 label=""
 keys=()
 related=()
+repos=()
 json=""
 run_args=()
 while [ $# -gt 0 ]; do
 	case "$1" in
 		--session) [ $# -ge 2 ] || usage; session="$2"; shift 2 ;;
 		--label) [ $# -ge 2 ] || usage; label="$2"; shift 2 ;;
+		--repo) [ $# -ge 2 ] || usage; repos+=("$2"); shift 2 ;;
 		--related)
 			shift
 			while [ $# -gt 0 ] && [[ "$1" != --* ]]; do related+=("$(tr '[:lower:]' '[:upper:]' <<< "$1")"); shift; done
@@ -66,11 +70,12 @@ join_csv() { local IFS=,; printf '%s' "$*"; }
 case "$cmd" in
 	add)
 		need_session
-		desk_follow_cli_add "$session" "$label" "$(join_csv "${keys[@]+"${keys[@]}"}")" "$(join_csv "${related[@]+"${related[@]}"}")"
+		desk_follow_cli_add "$session" "$label" "$(join_csv "${keys[@]+"${keys[@]}"}")" "$(join_csv "${related[@]+"${related[@]}"}")" \
+			"$(join_csv "${repos[@]+"${repos[@]}"}")"
 		;;
 	remove)
 		need_session
-		desk_follow_cli_remove "$session" "$(join_csv "${keys[@]+"${keys[@]}"}" "${related[@]+"${related[@]}"}")"
+		desk_follow_cli_remove "$session" "$(join_csv "${keys[@]+"${keys[@]}"}" "${related[@]+"${related[@]}"}" "${repos[@]+"${repos[@]}"}")"
 		;;
 	list) desk_follow_cli_list "$json" ;;
 	run)

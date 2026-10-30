@@ -218,16 +218,29 @@ export FOLLOW_TEST_CALLS="$CALLS" FOLLOW_TEST_FIX="$FIX" FOLLOW_TEST_SENT="$ROOT
 : > "$FOLLOW_TEST_SENT"
 export DESK_CLAUDE_BIN="$FAKEBIN/claude"
 
-# gh: `pr list` replies $FIX/prs.json, `pr view N` replies $FIX/pr-N.json,
-# keeping only the fields its --json asks for, as gh does.
+# gh: `pr list` replies $FIX/prs-<owner>_<name>[-open].json when there is
+# one (-open for --state open), else $FIX/prs.json for org/repo and none
+# for another repo; `pr view N` replies $FIX/pr-N.json, keeping only the
+# fields its --json asks for, as gh does; `run list` replies
+# $FIX/runs-<owner>_<name>.json; `repo view` names main as the default.
 cat > "$FAKEBIN/gh" << FAKE
 #!/usr/bin/env bash
 echo "gh \$*" >> "$CALLS"
-fields=""
+fields="" repo="" open=""
 args=("\$@")
-for ((i = 0; i < \${#args[@]}; i++)); do [ "\${args[\$i]}" = --json ] && fields="\${args[\$((i + 1))]}"; done
+for ((i = 0; i < \${#args[@]}; i++)); do
+	[ "\${args[\$i]}" = --json ] && fields="\${args[\$((i + 1))]}"
+	[ "\${args[\$i]}" = --repo ] && repo="\${args[\$((i + 1))]}"
+	[ "\${args[\$i]}" = --state ] && [ "\${args[\$((i + 1))]}" = open ] && open="-open"
+done
+slug="\$(tr / _ <<< "\$repo")"
 case "\$1 \$2" in
-	"pr list") cat "$FIX/prs.json" ;;
+	"pr list")
+		if [ -f "$FIX/prs-\$slug\$open.json" ]; then cat "$FIX/prs-\$slug\$open.json"
+		elif [ "\$repo" = org/repo ]; then cat "$FIX/prs.json"
+		else echo '[]'; fi ;;
+	"run list") cat "$FIX/runs-\$slug.json" 2> /dev/null || echo '[]' ;;
+	"repo view") echo '{"defaultBranchRef":{"name":"main"}}' ;;
 	"pr view")
 		{ cat "$FIX/pr-\$3.json" 2> /dev/null || echo '{"comments":[],"reviews":[]}'; } \
 			| jq -c --arg f "\$fields" '(\$f | split(",")) as \$want | with_entries(select(.key as \$k | \$want | index(\$k)))' ;;
@@ -906,7 +919,8 @@ assert_contains "and the related session's line names the owner" \
 assert_contains "a child line keeps its relation and has no other follower" \
 	'QQ-21 "Summary of QQ-21" (child of QQ-2): new comment by Dev Three' "$msg_q"
 assert_contains "a PR on a shared key names the other session" \
-	'PR #41 "[SHR-3] Shared work" (SHR-3; also followed by quebec-renamed): opened' "$msg_p"
+	'PR #41 "[SHR-3] Shared work" (SHR-3; also followed by quebec-renamed):' "$msg_p"
+assert_contains "and its changes are listed under it" ": opened (open, branch shr-3-work)" "$msg_p"
 assert_not_contains "a session is never told it follows its own ticket" "also followed by quebec-renamed" "$msg_q"
 
 echo
@@ -1003,6 +1017,67 @@ assert_contains "reaching the limit is logged" "reached the 100-PR limit" "$out"
 assert_eq "the next window starts at the newest update listed" \
 	"$(jq -n '"2026-10-07T08:39:00Z" | fromdateiso8601')" "$(jq -r '.last_gh_ok' "$DESK_FOLLOW_STATE_FILE")"
 echo '[]' > "$FIX/prs.json"
+
+echo
+echo "=== a followed repo: its PRs, merges and failed CI runs, each PR once ==="
+SID_S="99999999-7777-4777-8777-777777777777"
+sessions << EOF
+$SID_S sierra-session true
+EOF
+human='{"login":"dev1","is_bot":false}'
+goal_pr() { # number title branch state created updated author-json
+	jq -cn --argjson n "$1" --arg t "$2" --arg b "$3" --arg s "$4" --arg c "$5" --arg u "$6" --argjson a "$7" '
+		{number:$n, title:$t, headRefName:$b, state:$s, isDraft:false, updatedAt:$u, createdAt:$c, author:$a,
+		 reviewDecision:"", reviewRequests:[], assignees:[], headRefOid:"g\($n)", labels:[], url:("https://example.test/goals/\($n)"), body:"", statusCheckRollup:[]}'
+}
+goal_run() { # id branch event conclusion workflow
+	jq -cn --argjson id "$1" --arg b "$2" --arg e "$3" --arg c "$4" --arg w "$5" --arg t "$future" '
+		{databaseId:$id, attempt:1, workflowName:$w, displayTitle:"Run \($id)", headBranch:$b, event:$e, status:"completed",
+		 conclusion:$c, createdAt:$t, updatedAt:$t, url:("https://example.test/runs/\($id)")}'
+}
+: > "$FOLLOW_TEST_SENT"
+# Spelled with capitals: the seeded snapshots must still be the ones the
+# listing diffs against.
+out="$("$CLI" add --session "$SID_S" --repo Org/Goals GOAL-1)"
+assert_contains "a repo is followed alongside a key" "following GOAL-1, Org/Goals for sierra-session" "$out"
+assert_contains "and the intro names the repo" "the GitHub repo Org/Goals" "$(jq -r .message "$FOLLOW_TEST_SENT")"
+out="$("$CLI" add --session "$SID_S" --repo not-a-repo 2>&1)"; rc=$?
+assert_eq "a repo that is not owner/name is refused" "2" "$rc"
+goal_pr 17 "Goal seventeen" goal-17 OPEN 2026-10-01T08:00:00Z 2026-10-02T08:00:00Z "$human" | jq -s . > "$FIX/prs-org_goals-open.json"
+echo '[]' > "$FIX/prs-org_goals.json"
+: > "$FOLLOW_TEST_SENT"
+"$RUN" follow > /dev/null 2>&1
+assert_eq "a repo just followed sends nothing" "0" "$(jq -c 'select(.to == "sierra-session")' "$FOLLOW_TEST_SENT" | wc -l | tr -d ' ')"
+assert_eq "its open PRs are snapshotted" "OPEN" "$(jq -r '.prs["org/goals#17"].state' "$DESK_FOLLOW_STATE_FILE")"
+assert_eq "and its default branch known" "main" "$(jq -r '.follow_repos["org/goals"].default_branch' "$DESK_FOLLOW_STATE_FILE")"
+{
+	goal_pr 17 "Goal seventeen" goal-17 MERGED 2026-10-01T08:00:00Z "$future" "$human"
+	goal_pr 18 "[GOAL-1] Goal eighteen" goal-18 OPEN "$future" "$future" "$human"
+	goal_pr 19 "Bump a dependency" dependabot-19 OPEN "$future" "$future" '{"login":"app/dependabot","is_bot":true}'
+} | jq -s . > "$FIX/prs-org_goals.json"
+{
+	goal_run 901 main push failure Deploy
+	goal_run 902 goal-18 pull_request failure Checks
+	goal_run 903 stray push failure Checks
+	goal_run 904 main push cancelled Deploy
+} | jq -s . > "$FIX/runs-org_goals.json"
+: > "$FOLLOW_TEST_SENT"
+"$RUN" follow > /dev/null 2>&1
+msg="$(jq -r 'select(.to == "sierra-session") | .message' "$FOLLOW_TEST_SENT")"
+assert_contains "a merge in the repo is sent" 'PR #17 "Goal seventeen" (in org/goals): now merged' "$msg"
+assert_contains "a PR on the followed key is listed under the key" 'PR #18 "[GOAL-1] Goal eighteen" (GOAL-1):' "$msg"
+assert_eq "and once, though the repo matches it too" "1" "$(grep -c 'opened (open, branch goal-18)' <<< "$msg")"
+assert_contains "a failed run on an open PR goes under that PR" "CI failed: Checks failure: https://example.test/runs/902" "$msg"
+assert_contains "a failed run on the default branch is sent" "CI failed on main: Deploy failure" "$msg"
+assert_not_contains "one on a branch with no PR is not" "runs/903" "$msg"
+assert_not_contains "nor a cancelled one" "runs/904" "$msg"
+assert_not_contains "a PR a bot opened is not listed" "Bump a dependency" "$msg"
+assert_contains "but counted" "1 bot PR" "$msg"
+: > "$FOLLOW_TEST_SENT"
+"$RUN" follow > /dev/null 2>&1
+assert_eq "the same runs and PRs again send nothing" "0" "$(jq -c 'select(.to == "sierra-session")' "$FOLLOW_TEST_SENT" | wc -l | tr -d ' ')"
+out="$("$CLI" remove --session "$SID_S" --repo ORG/Goals)"
+assert_contains "removing the repo, in any case, keeps the key" "still following GOAL-1 for sierra-session" "$out"
 
 echo
 echo "=== summary: $pass passed, $fail failed ==="
