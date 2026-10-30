@@ -51,6 +51,7 @@
 | .baseline_jira as $baseline_jira | .baseline_gh as $baseline_gh | .queue_max as $queue_max
 | (.skip.bot_authors // []) as $bot_authors | (.skip.bot_signatures // []) as $bot_signatures
 | (.lookback // false) as $lookback
+| (.self // []) as $self
 |
 
 # HTML comments (bots' hidden metadata) are dropped: they carry nothing a
@@ -79,6 +80,8 @@ def ts:
 def is_bot($author; $body):
 	(($author // "") as $a | any($bot_authors[]; . as $re | $a | test($re; "i")))
 	or (($body // "") | sub("^\\s+"; "") as $b | any($bot_signatures[]; . as $re | $b | test($re)));
+
+def is_self($who): ($who // "") as $w | any($self[]; ascii_downcase == ($w | ascii_downcase));
 
 def desc_sig: if . == null then null else (length | tostring) + ":" + .[0:200] + "|" + .[-200:] end;
 
@@ -258,7 +261,7 @@ def new_ticket_snapshots:
 # --- pull request changes -------------------------------------------------------
 
 def pr_snapshot($prev):
-	{ title, state, draft, review, head, labels, body_sig: (.body | desc_sig),
+	{ title, state, draft, review, requested, assignees, head, labels, body_sig: (.body | desc_sig),
 	  failing: .checks.fail, checks_done: (.checks.pending == 0), updated }
 	+ (if .comments != null then {seen: ([.comments[].id] + ($prev.seen // []) | unique)}
 	   else {seen: $prev.seen} end)
@@ -269,6 +272,10 @@ def checks_line:
 	+ (if (.checks.fail | length) > 0 then ", \(.checks.fail | length) failed (\(.checks.fail | join(", ")))" else "" end)
 	+ (if .checks.pending > 0 then ", \(.checks.pending) still running" else "" end);
 
+def asks_user: is_self(.) or startswith("team ");
+def asks_text($what; $kind):
+	{text: "\($what) \(if is_self(.) then "the user (\(.))" else . end)", skip: (if asks_user then null else $kind end)};
+
 def pr_field_changes($prev):
 	. as $p
 	| [
@@ -277,6 +284,18 @@ def pr_field_changes($prev):
 		 then {kind: (if $p.draft then "draft" else "ready" end), text: (if $p.draft then "back to draft" else "ready for review" end), skip: "PR state changes"} else empty end),
 		(if ($prev | has("review")) and $prev.review != $p.review
 		 then {text: "review decision \($prev.review // "none") → \($p.review // "none")", skip: "PR state changes"} else empty end),
+		# A review request (a re-request after a review too, since a review
+		# clears it) or an assignment naming the user waits on them, as does
+		# one to a team, whose members the listing does not say; one naming
+		# someone else is counted.
+		(if ($prev | has("requested")) then
+			(($p.requested - $prev.requested)[] | asks_text("review requested from"; "review requests")),
+			(($prev.requested - $p.requested) | if length > 0 then {text: "review request removed: \(join(", "))", skip: "review requests"} else empty end)
+		 else empty end),
+		(if ($prev | has("assignees")) then
+			(($p.assignees - $prev.assignees)[] | asks_text("assigned to"; "PR assignee changes")),
+			(($prev.assignees - $p.assignees) | if length > 0 then {text: "unassigned: \(join(", "))", skip: "PR assignee changes"} else empty end)
+		 else empty end),
 		(if $prev.title != $p.title then {kind: "update", text: "retitled from \"\($prev.title)\"", skip: null} else empty end),
 		(if ($prev | has("head")) and $prev.head != $p.head
 		 then {kind: "update", text: "new commits (head \($prev.head[0:7]) → \($p.head[0:7]))", skip: null} else empty end),
@@ -316,11 +335,15 @@ def pr_events:
 	      elif $prev == null then
 	        # A PR opened in the window is news; one only first seen (it
 	        # was already open when it came into scope) is counted.
+	        # One that already asks the user for a review is forwarded with it.
 	        ((($p.created | ts) // 0) > $gh_since) as $opened
-	        | $base + {at: (($p.updated | ts) // $now), skip: (if $opened then null else "first-seen PRs" end),
+	        | ([($p.requested // [])[] | select(asks_user) | asks_text("review requested from"; null).text]
+	           + [($p.assignees // [])[] | select(is_self(.)) | asks_text("assigned to"; null).text]) as $asks
+	        | $base + {at: (($p.updated | ts) // $now), skip: (if $opened or ($asks | length) > 0 then null else "first-seen PRs" end),
 	                   opened: $opened, commits: $p.commits,
 	                   what: ((if $opened then "opened" else "new under the follow" end)
-	                          + " (\($p.state | ascii_downcase)\(if $p.draft then ", draft" else "" end), branch \($p.branch))")},
+	                          + " (\($p.state | ascii_downcase)\(if $p.draft then ", draft" else "" end), branch \($p.branch))"
+	                          + ($asks | map("; " + .) | join("")))},
 	          ($p | pr_comment_changes({}) | .[] | $base + .)
 	      else
 	        (($p | pr_field_changes($prev)) as $f
@@ -364,11 +387,9 @@ def ticket_index:
 # its creator and its comments by their author; its field moves, which a
 # search result gives no author, by its changelog (follow.sh's
 # desk_follow_own_field_moves).
-(.self // []) as $self
-| (.own_field_moves // {}) as $own_field_moves
+(.own_field_moves // {}) as $own_field_moves
 | (.own_check // "off") as $own_check
 |
-def is_self($who): ($who // "") as $w | any($self[]; ascii_downcase == ($w | ascii_downcase));
 def skip_unless($kind): if .skip == null then .skip = $kind else . end;
 def own_ticket_rules:
 	if .author != null and is_self(.author) then skip_unless("own posts")

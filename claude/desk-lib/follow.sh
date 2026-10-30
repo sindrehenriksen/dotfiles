@@ -723,7 +723,7 @@ desk_follow_fetch_prs() {
 	[ "$order" = "oldest_first" ] && search="$search sort:updated-asc"
 	for repo in "${repos[@]}"; do
 		listed="$(desk_follow_gh pr list --repo "$repo" --state all --limit "$limit" --search "$search" \
-			--json number,title,headRefName,state,isDraft,updatedAt,createdAt,reviewDecision,headRefOid,labels,url,body,statusCheckRollup,author 2> /dev/null)" \
+			--json number,title,headRefName,state,isDraft,updatedAt,createdAt,reviewDecision,reviewRequests,assignees,headRefOid,labels,url,body,statusCheckRollup,author 2> /dev/null)" \
 			|| { desk_log "$pass" "follow: gh pr list failed for $repo"; return 1; }
 		jq -e 'type == "array"' > /dev/null 2>&1 <<< "$listed" || { desk_log "$pass" "follow: gh pr list for $repo was not a list"; return 1; }
 		if [ "$order" = "oldest_first" ] && jq -e --argjson l "$limit" 'length >= $l' > /dev/null 2>&1 <<< "$listed"; then
@@ -743,6 +743,10 @@ desk_follow_fetch_prs() {
 			     state, draft: .isDraft, review: (.reviewDecision // null) | (if . == "" then null else . end),
 			     head: .headRefOid, labels: ([.labels[]?.name] | sort), body: (.body // ""),
 			     updated: .updatedAt, created: .createdAt, keys: $k, author: (.author.login // null),
+			     # A team is "team <slug>": a login holds no space.
+			     requested: ([(.reviewRequests // [])[] | if .__typename == "Team" then "team " + (.slug // .name // "?") else .login end
+			                  | select(. != null and . != "")] | sort),
+			     assignees: ([(.assignees // [])[] | .login | select(. != null)] | sort),
 			     checks: {
 			       pass: ([$c[] | select(((.conclusion // .state // "") | pass_c))] | length),
 			       fail: ([$c[] | select(((.conclusion // .state // "") | fail_c)) | (.name // .context // "check")] | unique),

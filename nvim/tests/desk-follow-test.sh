@@ -668,6 +668,25 @@ assert_contains "with the earlier skips in its footer" "1 status move" "$msg"
 assert_eq "and the counts reset after the send" '{}' "$(jq -c --arg s "$SID_A" '.queues[$s].skipped' "$DESK_FOLLOW_STATE_FILE")"
 
 echo
+echo "=== a review request to the user is sent on its own; one to someone else is counted ==="
+pr_requested() { # updatedAt logins...
+	local at="$1"
+	shift
+	pr 40 "[ABC-11] Build the thing" "abc-11-build" MERGED h2 '[{"name":"tests","status":"COMPLETED","conclusion":"SUCCESS"},{"name":"evals","status":"COMPLETED","conclusion":"FAILURE"}]' \
+		| jq -s --arg at "$at" '.[0].updatedAt = $at | .[0].reviewRequests = [$ARGS.positional[] | {__typename: "User", login: .}]' --args "$@" > "$FIX/prs.json"
+}
+: > "$FOLLOW_TEST_SENT"
+pr_requested "2026-10-07T11:00:00Z" dev3
+"$RUN" follow > /dev/null 2>&1
+assert_eq "a request to someone else sends nothing" "0" "$(wc -l < "$FOLLOW_TEST_SENT" | tr -d ' ')"
+assert_eq "and is counted" '{"review requests":1}' "$(jq -c --arg s "$SID_A" '.queues[$s].skipped' "$DESK_FOLLOW_STATE_FILE")"
+pr_requested "2026-10-07T12:00:00Z" dev3 owner1
+"$RUN" follow > /dev/null 2>&1
+assert_contains "a request to the user goes out" "PR #40" "$(jq -r .message "$FOLLOW_TEST_SENT")"
+assert_contains "naming the user" "review requested from the user (owner1)" "$(jq -r .message "$FOLLOW_TEST_SENT")"
+prs_none
+
+echo
 echo "=== the user's own moves are counted, never sent ==="
 jq --arg s "$SID_A" '.queues[$s].changes = [] | .queues[$s].skipped = {}' "$DESK_FOLLOW_STATE_FILE" > "$ROOT/s" && mv "$ROOT/s" "$DESK_FOLLOW_STATE_FILE"
 own_t="$(date -u -v+2H +%Y-%m-%dT%H:%M:%S.000+0000 2> /dev/null || date -u -d '+2 hour' +%Y-%m-%dT%H:%M:%S.000+0000)"
