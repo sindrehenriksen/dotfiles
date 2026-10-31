@@ -207,6 +207,15 @@ head now reliably rots. When the same concept appears twice,
 unifying it is not tidiness — it is the only way the second copy
 ever gets the next fix.
 
+This is DRY, with DRY's limit built in: the rule is one *concept*,
+one implementation, not one copy of every line that looks alike.
+Two things that read the same today but answer to different reasons
+to change stay apart, and a little repetition that keeps the reader
+in one place usually beats an abstraction built only to avoid it, in
+code as much as in tests (where the habit goes by DAMP). The test is
+whether a change to one would have to be remembered in the other:
+unify when it would, leave it when it would not.
+
 It holds at runtime too. A switch that keeps the old behaviour
 runnable beside the new, or a fallback to a second mechanism for
 when the first cannot run, is a second implementation — one that
@@ -233,6 +242,26 @@ so departing from it and reading better passes, while tracing it
 exactly and feeling worse does not. Fidelity that gets lost
 silently has to be made checkable; the handover cannot be made
 careful enough.
+
+## One reason to change, inside one design
+
+Single responsibility: a module, function or screen does one job,
+has one reason to change, and its name says which. That is what lets
+a part be rewritten without touching the rest: an engine that knows
+nothing of the screens, a data layer the screens reach only through
+its interface. Modularity is not the goal on its own, though. The
+parts answer to one overall design, written where the work lives,
+that says how they relate and where the product is heading, so a
+part designed by itself still fits the whole. What is provisional is
+marked as provisional, in that design and beside the code (a
+stand-in for a later service, a screen kept thin until its design
+round), so the next reader knows what to build on and what to
+expect to replace. Restructuring as the plan moves is then ordinary
+work, not a failure of the first design. One project's first build,
+made overnight before its screens were designed, kept its file
+readers, session model and stats in an engine importing neither the
+UI framework nor the database, so the screens could be thrown away
+the next day without touching the part that had taken the night.
 
 ## Record a fact where it will be looked for
 

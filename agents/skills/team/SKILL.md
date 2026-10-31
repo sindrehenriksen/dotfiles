@@ -77,7 +77,8 @@ reason is good. When the ask is open ("improve X"), the team finds its
 own way, and shows the owner the shallow shape before going deep, not
 only before building.
 
-**Simplicity is a constraint, not a preference**, and it binds every
+**Simplicity is a constraint, not a preference** (YAGNI: build for
+the case in front of you, not one nobody has met), and it binds every
 role — product and UX as much as technical. A tier, a mode, a second
 way to do one thing, a control that appears conditionally, a field
 that exists for a case nobody has met: each needs to earn itself
