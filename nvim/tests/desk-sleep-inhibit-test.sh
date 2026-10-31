@@ -148,7 +148,7 @@ assert_eq "its model call ran while the inhibitor was held" "held" "$(cat "$CALL
 assert_true "the inhibitor went with the runner" "$(gone_within "$(cat "$PIDFILE")" 3)"
 rm -f "$ARGS"
 "$DESK_RUN" p > "$ROOT/run2.out" 2>&1
-assert_true "a run that finds the date done is a no-op" "$(grep -q 'already ok today' "$ROOT/run2.out" && echo true || echo false)"
+assert_true "a run that finds the date done is a no-op" "$(grep -q 'already ran today' "$ROOT/run2.out" && echo true || echo false)"
 assert_true "and takes no inhibitor" "$([ ! -e "$ARGS" ] && echo true || echo false)"
 
 echo
