@@ -91,6 +91,7 @@ narrated back.
 - Proceed freely when the ask is clear — this isn't about gating routine work. It applies to actions others will see or that are annoying to reverse: posting reviews/comments, creating tickets, sending messages, publishing externally. A state change that only records a decision already taken isn't one of them — moving a ticket to in-progress once we've agreed to pick the work up, say.
 - If the instruction is ambiguous or we're still discussing or drafting, show the draft and wait for an explicit go: refining wording or weighing options is not a green light to post.
 - Don't infer a new artifact from loose phrasing: "we should track this" isn't "create the ticket." A go-ahead covers only the step discussed, not the next action — but it does carry what that step routinely entails, so agreeing to take on a piece of work authorizes the bookkeeping of starting it.
+- **A go is an opening.** Once the owner says merge, push or post, the decision is made: act without checking back, and a go given ahead of the work clears the step just as much. What it does not clear is its own condition: "merge once review passes and nothing new surfaced" turns on *nothing new surfaced*, which a green check does not establish, so anything the owner has not seen is raised before acting.
 - **Don't delegate an outward-facing step.** Anything that needs a go — merging, posting, creating a ticket, triggering a review — stays in the main loop where the go was given. A subagent's work ends at the local commit.
 
 ## What we run, and what we trust
