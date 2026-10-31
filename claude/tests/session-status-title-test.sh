@@ -32,7 +32,6 @@ export CLAUDE_SESSION_READER_CACHE="$TMP/cache"
 export CLAUDE_SESSION_RECORDER_LOG="$TMP/recorder.log"
 PROJ="$CLAUDE_CONFIG_DIR/projects/-tmp-fixture"
 mkdir -p "$CLAUDE_CONFIG_DIR/sessions" "$PROJ" "$CLAUDE_SESSION_STORE" "$CLAUDE_SESSION_READER_CACHE" "$TMP/bin"
-ln -sf /bin/sleep "$TMP/bin/claude"
 
 name_of() { "$READER" | jq -r --arg id "$1" 'select(.id == $id) | .name'; }
 older_of() { "$READER" | jq -c --arg id "$1" 'select(.id == $id) | .older_names'; }
@@ -51,7 +50,7 @@ tp="$PROJ/s1.jsonl"
 	title_rec "Pid File Name" s1
 } > "$tp"
 start_event s1 "$tp"
-"$TMP/bin/claude" 60 > /dev/null 2>&1 &
+start_claude_stand_in "$TMP/bin" 60
 live_pid=$!
 sleep 0.15
 procstart=$(proc_start_of "$live_pid")

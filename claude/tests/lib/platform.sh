@@ -32,6 +32,20 @@ proc_start_ctime_of() {
 	fi
 }
 
+# start_claude_stand_in <bindir> <secs>: starts, in the background (so $! is
+# its pid), a process the reader takes for Claude Code: it runs as `claude`
+# and lives <secs> seconds, or until signalled. It is bash under that name
+# rather than a linked `sleep`, because a multicall coreutils (uutils, as
+# Ubuntu ships) refuses to run under a name not its own and exits at once.
+# It waits on one-second sleeps so a kill leaves no child behind for long,
+# and its output goes nowhere, so a `$(...)` around the call returns at once
+# rather than holding the pipe open until the stand-in exits.
+start_claude_stand_in() {
+	ln -sf "$(command -v bash)" "$1/claude"
+	"$1/claude" -c 'i=0; while [ $((i += 1)) -le "$1" ]; do sleep 1 & wait $!; done' _ "$2" \
+		< /dev/null > /dev/null 2>&1 &
+}
+
 # on_a_terminal <program> [args...]: runs it on a pseudo-terminal of its own,
 # as a tab gives Claude Code. BSD script takes the command after the
 # typescript file; util-linux's takes one string, run by $SHELL -c.

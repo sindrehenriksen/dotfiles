@@ -50,7 +50,6 @@ export CLAUDE_SESSION_RECORDER_LOG="$LOG_FILE"
 
 fakebin="$TMP/bin"
 mkdir -p "$fakebin"
-ln -sf /bin/sleep "$fakebin/claude"
 
 live_pids=()
 
@@ -59,13 +58,7 @@ live_pids=()
 # session, here reused for several so resolve has real candidates to rank.
 start_live() {  # sid name updated_at_epoch
     local sid=$1 name=$2 updated_epoch=$3
-    # Redirected explicitly rather than left to inherit whatever fd this
-    # function's caller happens to be capturing through (start_live is
-    # always called as `pid=$(start_live ...)`): an unredirected background
-    # job inherits the command substitution's own pipe, and bash then waits
-    # for that pipe to close — i.e. for this 60s sleep to finish — before
-    # the substitution can complete.
-    "$fakebin/claude" 60 >/dev/null 2>&1 &
+    start_claude_stand_in "$fakebin" 60
     local pid=$!
     live_pids+=("$pid")
     sleep 0.15

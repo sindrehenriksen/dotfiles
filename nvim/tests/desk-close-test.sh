@@ -50,10 +50,11 @@ echo '{}' > "$DESK_CONFIG"
 unset CLAUDE_CODE_SESSION_ID
 
 # close-session.sh only signals a process named claude, so the throwaway
-# sessions run sleep under that name.
+# sessions run under that name.
+# shellcheck source=../../claude/tests/lib/platform.sh
+source "$HERE/../../claude/tests/lib/platform.sh"
 PROCBIN="$ROOT/procbin"
 mkdir -p "$PROCBIN"
-ln -s "$(command -v sleep)" "$PROCBIN/claude"
 
 # The tab helper: `find` names terminal T-<pid>; `close` logs and succeeds.
 TAB_LOG="$ROOT/tab.log"
@@ -144,9 +145,7 @@ config_json="$(jq -cn --arg c "$CENTRAL" '{close_after_working_days: 3, keep_ope
 	central_session: $c, passes: {testpass: {brief: {instructions: ["x.md"]}}}}')"
 
 spawn_throwaway() {
-	# Redirected away from the caller's stdout, so $(spawn_throwaway)
-	# returns at once rather than when the sleep exits.
-	"$PROCBIN/claude" 300 < /dev/null > /dev/null 2>&1 &
+	start_claude_stand_in "$PROCBIN" 300
 	disown
 	echo $!
 }

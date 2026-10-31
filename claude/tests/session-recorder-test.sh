@@ -87,8 +87,7 @@ assert_eq "sess-c: three events (start, end, start)" "3" "$(wc -l < "$log_c" | t
 
 # A real, alive process claiming to be `claude`, for the liveness join.
 fakebin="$TMP/bin"; mkdir -p "$fakebin"
-ln -sf /bin/sleep "$fakebin/claude"
-"$fakebin/claude" 60 &
+start_claude_stand_in "$fakebin" 60
 c_pid=$!
 sleep 0.2
 c_procstart=$(proc_start_of "$c_pid")
