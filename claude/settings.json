@@ -367,14 +367,14 @@
     "command": "~/.claude/statusline.sh",
     "hideVimModeIndicator": true
   },
-  "theme": "dark",
-  "editorMode": "vim",
-  "skipAutoPermissionPrompt": true,
   "modelSettings": {
     "claude-opus-5-5": {
       "effortLevel": "high"
     }
   },
+  "theme": "dark",
+  "editorMode": "vim",
+  "skipAutoPermissionPrompt": true,
   "autoMode": {
     "allow": [
       "$defaults",
@@ -406,5 +406,11 @@
       "**Primary use of Claude Code**: Two contexts, equally common, neither one the default: a portfolio of personal software products plus this dev-environment repo, and employer work in private repos. Which applies is a property of the working directory, not of the user — an overlay may add its own facts for one of them.",
       "**Trusted repo**: The current working directory and its origin remote. Repos under the user's own GitHub account are trusted destinations; anything else is not."
     ]
+  },
+  "remoteControlAtStartup": true,
+  "voiceEnabled": true,
+  "voice": {
+    "enabled": true,
+    "mode": "hold"
   }
 }
