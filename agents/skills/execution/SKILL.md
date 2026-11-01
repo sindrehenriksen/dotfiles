@@ -121,6 +121,10 @@ What reaches the user is in the global instructions, "Calibrating what surfaces"
 - **Keep the commits that earn a place in history** — one coherent change, reasoning in the body, the kind someone later runs `git log` to understand. A review finding fixed as its own commit usually qualifies; reviewers read the branch in that order. Fold the artefacts of how the work happened: a format-only commit a hook produced, a typo fix to its own predecessor, a comment corrected two commits later. After folding, confirm it changed no content: `git rev-parse HEAD^{tree}` before and after should match.
 - Fixups, autosquash, what may be rewritten and how it is pushed are in the global instructions, "Git Conventions".
 
+## Alerts your work raised
+
+A failed deploy, a red CI run, a test email: when a session's own action set off a notification, that session handles the cause and then clears the notification itself, the way the workspace says alerts are cleared (trashed, resolved, marked handled), naming it in one line of its reply. A push is not finished until its deploy is up, not only its CI. An alert the session did not cause is someone else's to clear, however familiar it looks.
+
 ## Reviews
 
 Close each meaningful unit of work — an iteration, a phase, a coherent set of changes — with a review before calling it done; skip only trivial or mechanical changes. The skip covers this per-unit pass, not shipping: nothing ships without a neutral review. When the head moves after a review, the next one reviews the delta (a `git range-diff` across a rebase), unless the delta reworks the change. A repo's or session's own review guidance comes first; this is the floor.
