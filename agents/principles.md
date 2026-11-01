@@ -257,11 +257,7 @@ marked as provisional, in that design and beside the code (a
 stand-in for a later service, a screen kept thin until its design
 round), so the next reader knows what to build on and what to
 expect to replace. Restructuring as the plan moves is then ordinary
-work, not a failure of the first design. One project's first build,
-made overnight before its screens were designed, kept its file
-readers, session model and stats in an engine importing neither the
-UI framework nor the database, so the screens could be thrown away
-the next day without touching the part that had taken the night.
+work, not a failure of the first design.
 
 ## Record a fact where it will be looked for
 
