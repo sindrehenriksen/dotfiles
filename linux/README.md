@@ -22,7 +22,10 @@ sudo linux/setup-input.sh
 linux/gnome-shortcuts.sh
 # log out and back in
 systemctl --user enable --now xremap
+systemctl --user enable --now systemd-tmpfiles-setup.service systemd-tmpfiles-clean.timer
 ```
+
+The tmpfiles units create Claude Code's on-disk temp dir and clear it weekly (`claude-tmp.conf`); Ubuntu ships them disabled for user sessions.
 
 The log-out is not optional. Group membership only applies to a new session, and GNOME Shell cannot see a newly installed extension until it restarts — which on Wayland means logging out.
 

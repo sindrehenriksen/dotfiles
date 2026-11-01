@@ -23,6 +23,14 @@ else
     IS_MAC=false
 fi
 
+# Claude Code's temp files (task output, scratchpads, agent transcripts) on
+# disk rather than in /tmp, which on Linux is a RAM-backed tmpfs with a
+# per-user quota that a few busy sessions can fill. systemd-tmpfiles keeps it
+# a week (linux/claude-tmp.conf). macOS's temp dir is already on disk.
+if ! $IS_MAC; then
+    export CLAUDE_CODE_TMPDIR="$HOME/.cache/claude-tmp"
+fi
+
 # PATH - user local bin
 if [ -d "$HOME/.local/bin" ]; then
     export PATH="$HOME/.local/bin:$PATH"

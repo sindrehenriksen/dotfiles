@@ -99,6 +99,11 @@ else
     mkdir -p ~/.config/systemd
     link ~/dotfiles/system/systemd-user.conf ~/.config/systemd/user.conf
 
+    # Linux: Claude Code's temp dir and its weekly cleanup. Enabling the
+    # timer is a one-time step in linux/README.md.
+    mkdir -p ~/.config/user-tmpfiles.d
+    link ~/dotfiles/linux/claude-tmp.conf ~/.config/user-tmpfiles.d/claude-tmp.conf
+
     # Linux: xremap keyboard layer — see linux/README.md. The binary and the
     # GNOME extension are installed separately by linux/install.sh.
     mkdir -p ~/.config/xremap ~/.config/systemd/user ~/.local/bin
