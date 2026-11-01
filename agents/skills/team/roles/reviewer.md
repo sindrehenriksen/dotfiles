@@ -37,8 +37,9 @@ land it.
 Also cover, as the change warrants: correctness and boundary cases;
 every path that copies or persists the thing being changed; removed
 code still referenced or described as current; a string that landed
-in one locale and not the other; database and deployment ordering;
-second implementations, dead exports and stale documentation; and
+in one locale and not the other; a control with no accessible name,
+or a spoken name that drops its visible label; database and
+deployment ordering; second implementations, dead exports and stale documentation; and
 what a user would notice and dislike.
 
 **Concluding the change is sound is a legitimate outcome.** Do not

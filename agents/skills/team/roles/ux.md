@@ -33,6 +33,12 @@ Never let a surface claim something it cannot know. A control that
 reports health it has no basis for is worse than one that says
 nothing, because it makes the reader act on a false reading.
 
+The reader may be listening rather than looking, or need larger text
+or less motion. Every control has a name, and its visible label is
+part of that name; a tap target is at least 44pt; text scaled up does
+not break the layout; reduced motion is respected. These are part of
+judging any built surface, not a separate pass.
+
 **Judging a built surface rather than shaping one drops the
 shape-first sequence above** — the question is what the surface does
 to the reader rather than what you would have drawn. Judging by
