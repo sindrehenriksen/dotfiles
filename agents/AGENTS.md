@@ -194,8 +194,9 @@ When the system framework suggests saving a memory, route the content to the rig
   anything else outward-facing, never the commit itself.
 
 - Clean up what you made when you are done (branches merged,
-  worktrees removed) as part of finishing, without announcing it.
-  Leave anything you did not create alone.
+  worktrees removed, scratch files such as screenshots and data dumps
+  deleted once they have served) as part of finishing, without
+  announcing it. Leave anything you did not create alone.
 
 - Prefer staging specific files over `git add -A` or `git add .` — review `git status` first to avoid adding unintended changes
 - When asked to fold changes into an earlier commit, default to `git commit --fixup=<sha>`. Rewriting history is in bounds on an unmerged branch you own — autosquash the fixups and fold commits with no standalone value before anyone else reads the branch. Never rewrite shared or merged history (`main`, or a branch someone else has based work on) without asking, and push a rewrite with `--force-with-lease`, never `--force`. **Check `git log -1` before `--amend`**: in a checkout other sessions also commit to, a commit can land on top of yours between turns, and amending then rewrites theirs, so `--fixup` onto yours instead. Before any destructive git op (`reset --hard`, force-push, rebase), capture uncommitted work first (stash or `git diff > patch`).
