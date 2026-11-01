@@ -49,7 +49,11 @@ before passing anything on.
 
 Two things are yours in particular. **Anything outside the scope you
 were given goes up, however unanimous the team** — agreement is what
-that escalation exists to catch. And **circulate the shape to every
+that escalation exists to catch. That means work that needs a call,
+not a defect the round turns up that is obvious and needs no
+decision (a mislabelled control, a broken sentence, a missing link):
+fix those in the round and list them, since handing them up only
+moves a context switch onto the owner. And **circulate the shape to every
 declined role before anything is built** (see Convening), re-running
 it whenever the shape materially changes.
 
