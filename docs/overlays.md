@@ -51,6 +51,13 @@ different repos. Once it is up, what stays below is a pointer by name at most.
 The upward half is the half that gets skipped, because writing it where the work
 happened is always the shorter path.
 
+Two bridging tiers over the same base drift apart all the same: each grows its
+own fixes to shared problems, and a lesson sent up from one never reaches the
+other's copy. So now and then, after a large change to either, compare them side
+by side and route what turns up by the test above. Pull every checkout first:
+one machine's copy of the other tier, and of the team repos below it, can be
+weeks behind, and a comparison against it finds gaps that were closed long ago.
+
 ## The discovery asymmetry
 
 The two kinds of config are found by different rules, and the difference drives
