@@ -105,7 +105,7 @@ desk_follow_address() {
 desk_follow_intro_text() {
 	jq -r '
 		"This session is now a followed session. It follows "
-		+ ([(if (.keys | length) > 0 then "\(.keys | join(", ")) (with their children and linked tickets)" else empty end),
+		+ ([(if (.keys | length) > 0 then "\(.keys | join(", ")) (with their children, grandchildren and linked tickets)" else empty end),
 		    (if ((.related // []) | length) > 0 then "\(.related | join(", ")) (only as themselves)" else empty end),
 		    (if ((.repos // []) | length) > 0 then "the GitHub repo\(if (.repos | length) > 1 then "s" else "" end) \(.repos | join(", ")) (every PR in it, and its failed CI runs)" else empty end)] | join(", and "))
 		+ ". A background follow pass sends it updates on them as [desk-follow] messages. Load the desk-follow skill now if it is not loaded: it says how to take an update in and when to involve the user. On /handoff or before compacting, carry what its \"Before compacting\" section lists."' <<< "$1"
@@ -353,6 +353,19 @@ _desk_follow_keep_failed() {
 
 _desk_follow_jql_keys() { jq -r 'join(", ")' <<< "$1"; }
 
+# The tracked keys' children the last scope query found, from the state's
+# scope map: the second `parent in` level of the next scope and changes
+# queries, which reaches the children's children (an epic's stories'
+# subtasks). Built from the runner's own state, so the query stays one the
+# runner wrote and the page pin stays exact; and portable, where a
+# descendants function (`portfolioChildIssuesOf`) needs a premium Jira.
+# A child first seen this run gets its own children at the next scope
+# refresh, which the run makes due as soon as this list moves.
+_desk_follow_known_children() { # entries state
+	jq -c --argjson e "$1" '(.scope.children // {}) as $c | [$e[] | (.keys // [])[]] | unique as $k
+		| ([$k[] as $p | ($c[$p] // [])[]] | unique) - $k' <<< "$2"
+}
+
 # A tool result past Claude Code's output limit arrives as a pointer ("...
 # Output has been saved to <path>", or for a large result Claude Code
 # persists itself, "<persisted-output> … Full output saved to: <path>");
@@ -493,7 +506,7 @@ desk_follow_fetch_jira() {
 		return 1
 	fi
 
-	local tracked keys_only scope_keys scope_jql="none" changes_jql="none"
+	local tracked parents scope_keys scope_jql="none" changes_jql="none"
 	tracked="$(jq -c '[.[] | (.keys // []) + (.related // []) | .[]] | unique' <<< "$entries")"
 	# Only repos followed: no ticket to search, and nothing that failed.
 	if [ "$(jq 'length' <<< "$tracked")" -eq 0 ]; then
@@ -501,22 +514,24 @@ desk_follow_fetch_jira() {
 		echo '[]' > "$out_dir/changes.json"
 		return 0
 	fi
-	keys_only="$(jq -c '[.[] | (.keys // [])[]] | unique' <<< "$entries")"
+	# The parents: the tracked keys, then their known children.
+	parents="$(jq -c --argjson c "$(_desk_follow_known_children "$entries" "$state")" \
+		'[.[] | (.keys // [])[]] | unique | . + $c' <<< "$entries")"
 	if [ "$scope_due" = "true" ]; then
 		scope_jql="key in ($(_desk_follow_jql_keys "$tracked"))"
-		[ "$(jq 'length' <<< "$keys_only")" -gt 0 ] && scope_jql="$scope_jql OR parent in ($(_desk_follow_jql_keys "$keys_only"))"
+		[ "$(jq 'length' <<< "$parents")" -gt 0 ] && scope_jql="$scope_jql OR parent in ($(_desk_follow_jql_keys "$parents"))"
 	fi
 	if [ -n "$since" ]; then
-		# Everything already in scope, any new child, and any ticket that
-		# mentions a tracked key; relative minutes, so the Jira user's own
-		# time zone never shifts the window.
+		# Everything already in scope, any new child or child's child, and
+		# any ticket that mentions a tracked key; relative minutes, so the
+		# Jira user's own time zone never shifts the window.
 		scope_keys="$(jq -c --argjson t "$tracked" '[(.queues // {})[] | (.scope // [])[]] + $t | unique' <<< "$state")"
 		local minutes=$(( (now - since + 59) / 60 + 5 ))
 		[ "$minutes" -gt 43200 ] && minutes=43200
 		local mentions
 		mentions="$(jq -r 'map("text ~ \"\\\"" + . + "\\\"\"") | join(" OR ")' <<< "$tracked")"
 		changes_jql="(key in ($(_desk_follow_jql_keys "$scope_keys"))"
-		[ "$(jq 'length' <<< "$keys_only")" -gt 0 ] && changes_jql="$changes_jql OR parent in ($(_desk_follow_jql_keys "$keys_only"))"
+		[ "$(jq 'length' <<< "$parents")" -gt 0 ] && changes_jql="$changes_jql OR parent in ($(_desk_follow_jql_keys "$parents"))"
 		changes_jql="$changes_jql OR $mentions) AND updated >= -${minutes}m"
 	fi
 	if [ "$scope_jql" = "none" ] && [ "$changes_jql" = "none" ]; then
@@ -1145,15 +1160,18 @@ desk_follow_main() {
 		if [ -n "$gh_last" ]; then gh_since=$((gh_last - 300)); else baseline_gh="true"; gh_since=$((now - 14 * 86400)); fi
 	fi
 
-	# Scope: tracked tickets, their children, and what links to either;
-	# refreshed every scope_refresh_minutes, or when the follow list's keys
-	# changed since the last refresh.
-	local scope_due="false" refresh_minutes refreshed keys_sig
+	# Scope: tracked tickets, their children and the children's children,
+	# and what links to any of them; refreshed every scope_refresh_minutes,
+	# or when the follow list's keys, or the children the scope query asks
+	# for the children of, changed since the last refresh.
+	local scope_due="false" refresh_minutes refreshed keys_sig children_sig
 	refresh_minutes="$(jq -r '.scope_refresh_minutes // 60' <<< "$pass_config")"
 	refreshed="$(jq -r '.scope.refreshed_at // 0' <<< "$state")"
 	keys_sig="$(jq -c '[.[] | (.keys // []) + (.related // []) | .[]] | unique' <<< "$entries")"
+	children_sig="$(_desk_follow_known_children "$entries" "$state")"
 	if [ $((now - refreshed)) -ge $((refresh_minutes * 60)) ] \
-		|| [ "$(jq -c '.scope.keys_sig // null' <<< "$state")" != "$keys_sig" ]; then
+		|| [ "$(jq -c '.scope.keys_sig // null' <<< "$state")" != "$keys_sig" ] \
+		|| [ "$(jq -c '.scope.children_sig // []' <<< "$state")" != "$children_sig" ]; then
 		scope_due="true"
 	fi
 
@@ -1238,9 +1256,10 @@ desk_follow_main() {
 			return 1
 		fi
 	fi
-	new_state="$(jq -c --argjson k "$keys_sig" --argjson now "$now" --arg jira_ok "$jira_ok" --arg gh_ok "$gh_ok" \
+	new_state="$(jq -c --argjson k "$keys_sig" --argjson c "$children_sig" --argjson now "$now" --arg jira_ok "$jira_ok" --arg gh_ok "$gh_ok" \
 		--argjson gh_through "$gh_through" --arg lookback "$lookback" '
 		.scope.keys_sig = (if .scope.refreshed_at == $now then $k else .scope.keys_sig end)
+		| .scope.children_sig = (if .scope.refreshed_at == $now then $c else .scope.children_sig end)
 		| if $lookback != "" then . else
 		    (if $jira_ok == "true" then .last_jira_ok = $now else . end)
 		    | (if $gh_ok == "true" then .last_gh_ok = $gh_through else . end)

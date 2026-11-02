@@ -97,26 +97,47 @@ def desc_sig: if . == null then null else (length | tostring) + ":" + .[0:200] +
 def tracked($e): (($e.keys // []) + ($e.related // [])) | unique;
 def all_keys: [$entries[] | (.keys // [])[]] | unique;
 
-# children: {<tracked key>: [child keys]}; links: {<key>: [linked keys]}
+# children: {<tracked key>: [child keys]}; grandchildren: {<tracked key>:
+# [its children's child keys]}, one level and no deeper, since the scope
+# query asks for the children of the children it already knows;
+# links: {<key>: [linked keys]}
+def add_grandchildren($issues):
+	reduce $issues[] as $i (.;
+		if $i.parent == null then .
+		else . as $m
+		| reduce ($m.children | to_entries[] | select(.value | index($i.parent)) | .key) as $r (.;
+			.grandchildren[$r] = ((.grandchildren[$r] // []) + [$i.key] | unique))
+		end);
 def scope_maps:
 	($state.scope // {children: {}, links: {}}) as $old
-	| (if $scope_issues == null then $old
+	| (if $scope_issues == null then $old + {grandchildren: ($old.grandchildren // {})}
 	   else {
 		children: (reduce $scope_issues[] as $i ({};
 			if $i.parent != null and (all_keys | index($i.parent)) != null
 			then .[$i.parent] += [$i.key] else . end)),
+		grandchildren: {},
 		links: (reduce $scope_issues[] as $i ({}; .[$i.key] = [$i.links[].key]))
-	   } end) as $base
-	# A new child, or a new link, seen in this run's changes counts at once.
+	   } | add_grandchildren($scope_issues) end) as $base
+	# A new child or grandchild, or a new link, seen in this run's changes
+	# counts at once.
 	| reduce ($change_issues // [])[] as $i ($base;
 		(if $i.parent != null and (all_keys | index($i.parent)) != null
 		 then .children[$i.parent] = ((.children[$i.parent] // []) + [$i.key] | unique) else . end)
-		| .links[$i.key] = ([$i.links[].key] | unique));
+		| .links[$i.key] = ([$i.links[].key] | unique))
+	| add_grandchildren($change_issues // []);
 
-# A session's own tickets: its keys and their children. Its related keys
-# and links are not its own.
+# The session's key a ticket is a grandchild of, by the child it now hangs
+# off; null for any other ticket.
+def grandparent_of($e; $maps; $issue):
+	if $issue.parent == null then null
+	else [($e.keys // [])[] as $k
+	      | select((($maps.children[$k] // []) | index($issue.parent)) != null) | $k] | first
+	end;
+
+# A session's own tickets: its keys, their children and grandchildren. Its
+# related keys and links are not its own.
 def own_of($e; $maps):
-	(($e.keys // []) + [($e.keys // [])[] as $k | $maps.children[$k] // [] | .[]]) | unique;
+	(($e.keys // []) + [($e.keys // [])[] as $k | ($maps.children[$k] // []) + ($maps.grandchildren[$k] // []) | .[]]) | unique;
 
 # What the other followed sessions own, as {keys, own}: keys alone too, so
 # a ticket the children map has not seen yet still counts by its parent.
@@ -226,8 +247,9 @@ def comment_changes($prev):
 	  end;
 
 # Each ticket's change lines (empty when nothing moved), keyed by ticket.
-def ticket_events:
+def ticket_events($maps):
 	($state.tickets // {}) as $snap
+	| (all_keys + [all_keys[] as $k | $maps.children[$k] // [] | .[]]) as $parents
 	| (($scope_issues // []) + ($change_issues // [])) as $all
 	# The changes query's copy of a ticket carries the most fields; it wins.
 	| (reduce $all[] as $i ({}; .[$i.key] = ((.[$i.key] // {}) * $i))) as $by_key
@@ -240,12 +262,13 @@ def ticket_events:
 	      elif $prev == null and ($moved | index($i.key)) == null then empty
 	      elif $prev == null then
 	        # A ticket new to the follow: created in the window, or under a
-	        # tracked key (a new child), is news. One only first seen, with
-	        # no snapshot to compare (a mention, a lookback run), is counted:
-	        # what moved on it shows as its comments.
+	        # tracked key or one of its children (a new child or grandchild),
+	        # is news. One only first seen, with no snapshot to compare (a
+	        # mention, a lookback run), is counted: what moved on it shows as
+	        # its comments.
 	        ((($i.created | ts) // 0) > $jira_since) as $created
 	        | { key: $i.key, title: $i.summary, at: (($i.updated | ts) // $now), creator: (if $created then $i.creator else null end),
-	            skip: (if $created or (($i.parent != null) and (all_keys | index($i.parent)) != null and ($lookback | not))
+	            skip: (if $created or (($i.parent != null) and ($parents | index($i.parent)) != null and ($lookback | not))
 	                   then null else "first-seen tickets" end),
 	            what: ((if $created then "created" else "new under the follow" end)
 	                   + " (\($i.type // "ticket"), \($i.status)\(if $i.assignee then ", " + $i.assignee else "" end))") },
@@ -414,6 +437,7 @@ def relation($e; $maps; $issue; $claimed):
 	| own_of($e; $maps) as $roots
 	| if ($t | index($issue.key)) != null then ""
 	  elif $issue.parent != null and (($e.keys // []) | index($issue.parent)) != null then "child of \($issue.parent)"
+	  elif grandparent_of($e; $maps; $issue) != null then "child of \($issue.parent), under \(grandparent_of($e; $maps; $issue))"
 	  elif ($roots | index($issue.key)) == null and is_claimed($claimed; $issue.key; $issue.parent) then null
 	  else
 	    ([$roots[] as $r
@@ -469,7 +493,7 @@ def own_pr_rules:
 	| if $k == null then . else .skip = (.skip // $k) | .repo_skip = (.repo_skip // $k) end;
 scope_maps as $maps
 | ticket_index as $tix
-| [ticket_events[] | own_ticket_rules] as $tev
+| [ticket_events($maps)[] | own_ticket_rules] as $tev
 | [pr_events[] | own_pr_rules] as $pev
 | new_pr_snapshots as $pr_snaps
 | run_events($pr_snaps) as $rev

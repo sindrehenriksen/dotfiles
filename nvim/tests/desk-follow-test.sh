@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # The follow pass (claude/desk-lib/follow.sh, claude/desk-follow): the follow
-# list CLI, the interval floor, a baseline run, a run that forwards changes
-# to a live session, a queue held for a session that is not running and
+# list CLI, the interval floor, a baseline run, a scope reaching the
+# children's children, a run that forwards changes to a live session, a
+# queue held for a session that is not running and
 # delivered whole once it is, the send pinned to the resolved name (a send
 # to any other name is refused by the deny hook), the dry run, and the
 # seam for retiring a follow whose tickets are all closed, and a ticket
@@ -854,6 +855,46 @@ assert_not_contains "a ticket with no snapshot is not listed as news" "new under
 assert_contains "it is counted instead" "first-seen ticket" "$out"
 assert_not_contains "a ticket only the scope query returned is not" "ABC-11" "$out"
 [ -f "$ROOT/fresh-state.json" ] && bad "the dry run wrote state" || ok "the dry run wrote no state"
+
+echo
+echo "=== the scope reaches the children's children, and no further ==="
+SID_S="99999999-7777-4777-8777-777777777777"
+export DESK_FOLLOW_FILE="$ROOT/deep-follow.json" DESK_FOLLOW_STATE_FILE="$ROOT/deep-follow-state.json"
+sessions << EOF
+$SID_S sierra-session true
+EOF
+"$CLI" add --session "$SID_S" EPC-1 > /dev/null
+prs_none
+{
+	issue EPC-1 "In Progress"
+	issue EPC-2 "To Do" EPC-1
+} | headless > "$FIX/scope-result.json"
+echo '{"issues":{"nodes":[]}}' > "$FIX/changes-result.json"
+"$RUN" follow > /dev/null 2>&1
+assert_contains "with no child known yet, the scope query asks for the key's children" \
+	"SCOPE: key in (EPC-1) OR parent in (EPC-1)" "$(cat "$FOLLOW_TEST_LAST_PROMPT")"
+{
+	issue EPC-1 "In Progress"
+	issue EPC-2 "To Do" EPC-1
+	issue EPC-3 "To Do" EPC-2
+} | headless > "$FIX/scope-result.json"
+"$RUN" follow > /dev/null 2>&1
+assert_contains "a child just found makes the scope due again, now asking for its children too" \
+	"SCOPE: key in (EPC-1) OR parent in (EPC-1, EPC-2)" "$(cat "$FOLLOW_TEST_LAST_PROMPT")"
+assert_contains "and so does the changes query, for a new grandchild" \
+	"OR parent in (EPC-1, EPC-2) OR" "$(cat "$FOLLOW_TEST_LAST_PROMPT")"
+assert_eq "a grandchild is in scope" "true" "$(jq --arg s "$SID_S" '.queues[$s].scope | index("EPC-3") != null' "$DESK_FOLLOW_STATE_FILE")"
+issue EPC-3 "To Do" EPC-2 "[]" "[$(cmt 961 "Dev One" "Subtask news.")]" | rest > "$FIX/changes-result.json"
+: > "$FOLLOW_TEST_SENT"
+"$RUN" follow > /dev/null 2>&1
+assert_contains "with the children unchanged, the scope is not due again" "SCOPE: none" "$(cat "$FOLLOW_TEST_LAST_PROMPT")"
+assert_contains "news on a grandchild reaches the session, saying where it hangs" \
+	'EPC-3 "Summary of EPC-3" (child of EPC-2, under EPC-1): new comment by Dev One: "Subtask news."' \
+	"$(jq -r 'select(.to == "sierra-session") | .message' "$FOLLOW_TEST_SENT")"
+jq '.scope.refreshed_at = 0' "$DESK_FOLLOW_STATE_FILE" > "$ROOT/s" && mv "$ROOT/s" "$DESK_FOLLOW_STATE_FILE"
+"$RUN" follow > /dev/null 2>&1
+assert_contains "a grandchild's own children are never asked for" \
+	"SCOPE: key in (EPC-1) OR parent in (EPC-1, EPC-2)"$'\n' "$(cat "$FOLLOW_TEST_LAST_PROMPT")"
 
 echo
 echo "=== a ticket another session owns goes only to that session ==="
