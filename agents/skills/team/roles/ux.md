@@ -35,9 +35,12 @@ nothing, because it makes the reader act on a false reading.
 
 The reader may be listening rather than looking, or need larger text
 or less motion. Every control has a name, and its visible label is
-part of that name; a tap target is at least 44pt; text scaled up does
-not break the layout; reduced motion is respected. These are part of
-judging any built surface, not a separate pass.
+part of that name. The surface meets WCAG 2.2 AA, which covers the
+2.1 AA that EU and Norwegian accessibility law require: a target is
+at least 24 CSS px, or more where the platform asks for it (44pt on
+iOS); text scaled up does not break the layout; reduced motion is
+respected. These are part of judging any built surface, not a
+separate pass.
 
 **Judging a built surface rather than shaping one drops the
 shape-first sequence above** — the question is what the surface does
