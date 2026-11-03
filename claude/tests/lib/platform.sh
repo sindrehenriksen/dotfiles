@@ -40,10 +40,27 @@ proc_start_ctime_of() {
 # It waits on one-second sleeps so a kill leaves no child behind for long,
 # and its output goes nowhere, so a `$(...)` around the call returns at once
 # rather than holding the pipe open until the stand-in exits.
+# It returns once the stand-in runs under that name (running_as_claude), so
+# a caller can write its pid file straight away.
 start_claude_stand_in() {
 	ln -sf "$(command -v bash)" "$1/claude"
 	"$1/claude" -c 'i=0; while [ $((i += 1)) -le "$1" ]; do sleep 1 & wait $!; done' _ "$2" \
 		< /dev/null > /dev/null 2>&1 &
+	running_as_claude "$!"
+}
+
+# running_as_claude <pid>: waits, up to about five seconds, until <pid> has
+# exec'd under the name `claude`, which is what the reader checks. Until
+# then it is the forked shell, so a fixed short sleep loses that race on a
+# loaded machine.
+running_as_claude() {
+	local i comm
+	for i in $(seq 1 100); do
+		comm="$(ps -o comm= -p "$1" 2> /dev/null)"
+		[ "${comm##*/}" = claude ] && return 0
+		sleep 0.05
+	done
+	return 1
 }
 
 # on_a_terminal <program> [args...]: runs it on a pseudo-terminal of its own,

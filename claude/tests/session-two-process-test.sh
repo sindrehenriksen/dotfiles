@@ -97,7 +97,7 @@ spawn_claude() { # sid end_reason
     local pid=$!
     echo "$pid" >> "$TMP/spawned"
     printf '%s\n' "$tag" > "$TMP/ctl/$pid.tag"
-    sleep 0.15
+    running_as_claude "$pid"
     local procstart now_ms
     procstart=$(proc_start_of "$pid")
     now_ms=$(( $(date +%s) * 1000 ))

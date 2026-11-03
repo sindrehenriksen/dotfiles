@@ -52,7 +52,6 @@ tp="$PROJ/s1.jsonl"
 start_event s1 "$tp"
 start_claude_stand_in "$TMP/bin" 60
 live_pid=$!
-sleep 0.15
 procstart=$(proc_start_of "$live_pid")
 now=$(date +%s)
 jq -n --arg pid "$live_pid" --arg sid s1 --arg cwd "$PROJ" --arg ps "$procstart" --argjson u "$((now * 1000))" \

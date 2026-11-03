@@ -61,7 +61,6 @@ start_live() {  # sid name updated_at_epoch
     start_claude_stand_in "$fakebin" 60
     local pid=$!
     live_pids+=("$pid")
-    sleep 0.15
     local procstart
     procstart=$(proc_start_of "$pid")
     jq -n --arg pid "$pid" --arg sid "$sid" --arg cwd "$PROJ_DIR" \

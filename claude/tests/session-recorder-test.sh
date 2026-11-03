@@ -89,7 +89,6 @@ assert_eq "sess-c: three events (start, end, start)" "3" "$(wc -l < "$log_c" | t
 fakebin="$TMP/bin"; mkdir -p "$fakebin"
 start_claude_stand_in "$fakebin" 60
 c_pid=$!
-sleep 0.2
 c_procstart=$(proc_start_of "$c_pid")
 now_ms=$(( $(date +%s) * 1000 ))
 jq -n --arg pid "$c_pid" --arg sid "sess-c" --arg cwd "$PROJ_DIR" \
