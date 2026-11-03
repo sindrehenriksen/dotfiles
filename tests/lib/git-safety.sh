@@ -209,12 +209,15 @@ desk_test_guard_not_real_repo() {
 # event files and log, which every live session appends to, and the
 # reader's cache, which the nvim marks, the status line and any `resolve`
 # rewrite in place, and the bell hook's per-session `input-bell-<id>`
-# files, which a live session rewrites each time it rings. Those are
+# files, which a live session rewrites each time it rings, and desk's
+# `logs/`, which only launchd writes (a desk pass logs to stderr, never to a
+# file) and which a live pass skipping under the suite's hold still appends
+# its line to (desk_test_live_locks_hold). Those are
 # compared by path only. The reader cache is
 # keyed by config dir, so a test that reached the real cache with its own
 # temp config dir still shows up as a new path. Everything else is compared
 # by content.
-_DESK_TEST_STATE_LIVE_APPENDED=(-path '*/session-events/*' -o -path '*/live-sessions/*' -o -path '*/session-reader-cache/*' -o -name session-recorder.log -o -name 'input-bell-*')
+_DESK_TEST_STATE_LIVE_APPENDED=(-path '*/session-events/*' -o -path '*/live-sessions/*' -o -path '*/session-reader-cache/*' -o -name session-recorder.log -o -name 'input-bell-*' -o -path '*/state/desk/logs/*')
 DESK_TEST_STATE_GUARD_DIRS=("$HOME/.local/state/claude" "$HOME/.local/state/desk")
 
 # desk_test_state_guard_snapshot <dest_dir> <suffix>: writes each guarded
@@ -272,6 +275,45 @@ desk_test_state_guard_check() {
 		i=$((i + 1))
 	done
 	return "$changed"
+}
+
+# The scheduled desk passes run live from this working tree while the suite
+# runs (the follow pass every quarter hour) and write the real state the guard
+# above watches. run-all.sh holds their locks for the whole run, so no live
+# pass writes under the guard: a follow pass that fires meanwhile gives up
+# after its minute's wait and the next one fetches from its own last success,
+# and a morning or weekly pass waits out the suite (its wait is half an hour)
+# and then runs. Captured from $HOME when sourced, like the guard's own
+# directories, since the live passes don't set DESK_STATE_DIR.
+DESK_TEST_LIVE_LOCK_DIR="$HOME/.local/state/desk/lock"
+_DESK_TEST_LIVE_LOCK_FDS=(7 8)
+_DESK_TEST_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# desk_test_live_locks_hold <max_wait_secs> [poll_secs]: takes the runner's
+# and the follow pass's locks in $DESK_TEST_LIVE_LOCK_DIR, waiting for a live
+# pass that holds one. Returns 1, holding neither, when it gave up. Call in
+# the shell that should hold them, never a subshell.
+desk_test_live_locks_hold() {
+	local wait="$1" poll="${2:-5}"
+	# shellcheck source=../../claude/desk-lib/lock.sh
+	source "$_DESK_TEST_LIB_DIR/../../claude/desk-lib/lock.sh"
+	local names=("$DESK_LOCK_NAME" "$DESK_FOLLOW_LOCK_NAME") i
+	for i in 0 1; do
+		if ! DESK_LOCK_DIR="$DESK_TEST_LIVE_LOCK_DIR" DESK_LOCK_NAME="${names[$i]}" \
+			DESK_LOCK_FD="${_DESK_TEST_LIVE_LOCK_FDS[$i]}" \
+			DESK_LOCK_MAX_WAIT_SECS="$wait" DESK_LOCK_POLL_SECS="$poll" desk_lock_acquire; then
+			desk_test_live_locks_release
+			return 1
+		fi
+	done
+}
+
+# Also what each suite's subshell runs first: closing its inherited copies
+# leaves the parent's hold in place, and keeps anything a test leaves
+# running from locking the live passes out after the suite ends.
+desk_test_live_locks_release() {
+	local fd
+	for fd in "${_DESK_TEST_LIVE_LOCK_FDS[@]}"; do eval "exec $fd>&-"; done
 }
 
 # desk_test_safe_env_init <dest_dir>: the actual fix, not just the check —

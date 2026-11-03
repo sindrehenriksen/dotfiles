@@ -90,6 +90,83 @@ trap 'rm -rf "$ROOT"' EXIT
 	desk_test_state_guard_snapshot "$ROOT/guard" bell3
 	assert_true "a bell file for a session with no transcript trips it" \
 		"$(desk_test_state_guard_check "$ROOT/guard" bell2 bell3 > /dev/null 2>&1 && echo false || echo true)"
+
+	# A live scheduled pass, as launchd starts one: the real defaults under
+	# $HOME, its stderr appended to its log, and none of this shell's fds, since
+	# launchd starts it. Under its lock it writes its state
+	# file (the follow pass's follow-state.json, a scheduled pass's status
+	# file), as the real passes do; denied it, it logs that it is skipping.
+	live_pass() { # pass max_wait_secs [hold_secs]
+		env -u DESK_STATE_DIR -u DESK_LOCK_ROOT -u DESK_STATUS_FILE bash -c '
+			source "$1/claude/desk-lib/common.sh"
+			source "$1/claude/desk-lib/lock.sh"
+			state="$DESK_STATUS_FILE"
+			if [ "$2" = follow ]; then
+				DESK_LOCK_NAME="$DESK_FOLLOW_LOCK_NAME"
+				state="$DESK_STATE_DIR/follow-state.json"
+			fi
+			if DESK_LOCK_MAX_WAIT_SECS="$3" DESK_LOCK_POLL_SECS=1 desk_lock_acquire; then
+				date +%s.$RANDOM > "$state"
+				sleep "${4:-0}"
+			else
+				desk_log "$2" "another run holds the lock — skipping"
+			fi' _ "$HERE/../.." "$@" 2>> "$HOME/.local/state/desk/logs/$1.err.log" 7>&- 8>&-
+	}
+	desk_dir="$HOME/.local/state/desk"
+	mkdir -p "$desk_dir/logs"
+	live_pass follow 0
+	live_pass morning 0
+	desk_test_state_guard_snapshot "$ROOT/guard" lv1
+	live_pass follow 0
+	desk_test_state_guard_snapshot "$ROOT/guard" lv2
+	assert_true "unheld, a live follow pass rewriting its state trips the guard" \
+		"$(desk_test_state_guard_check "$ROOT/guard" lv1 lv2 > /dev/null 2>&1 && echo false || echo true)"
+
+	desk_test_live_locks_hold 0 1
+	assert_true "the suite takes the live passes' locks" "$([ $? -eq 0 ] && echo true || echo false)"
+	desk_test_state_guard_snapshot "$ROOT/guard" lv3
+	follow_log_before="$(wc -l < "$desk_dir/logs/follow.err.log")"
+	live_pass follow 1
+	status_before="$(cat "$desk_dir/status.json")"
+	(desk_test_live_locks_release && live_pass morning 30) &
+	morning_pid=$!
+	sleep 2
+	desk_test_state_guard_snapshot "$ROOT/guard" lv4
+	assert_true "held, a follow pass firing meanwhile skips and only logs that it did" \
+		"$([ "$(wc -l < "$desk_dir/logs/follow.err.log")" -gt "$follow_log_before" ] && echo true || echo false)"
+	assert_true "held, the live passes firing meanwhile leave the guard quiet" \
+		"$(desk_test_state_guard_check "$ROOT/guard" lv3 lv4 > /dev/null 2>&1 && echo true || echo false)"
+	date +%s.$RANDOM > "$desk_dir/follow-state.json"
+	desk_test_state_guard_snapshot "$ROOT/guard" lv5
+	assert_true "held, a test writing the follow state itself still trips it" \
+		"$(desk_test_state_guard_check "$ROOT/guard" lv4 lv5 > /dev/null 2>&1 && echo false || echo true)"
+	echo leaked > "$desk_dir/logs/test.log"
+	desk_test_state_guard_snapshot "$ROOT/guard" lv6
+	assert_true "held, a new file under the log directory still trips it" \
+		"$(desk_test_state_guard_check "$ROOT/guard" lv5 lv6 > /dev/null 2>&1 && echo false || echo true)"
+
+	# What a suite leaves running inherits nothing once its subshell drops the fds.
+	(desk_test_live_locks_release && exec sleep 30) &
+	leftover_pid=$!
+	desk_test_live_locks_release
+	wait "$morning_pid"
+	assert_true "a morning pass that waited out the suite runs once it ends, a test's leftover process notwithstanding" \
+		"$([ "$(cat "$desk_dir/status.json")" != "$status_before" ] && echo true || echo false)"
+	kill "$leftover_pid" 2> /dev/null
+
+	live_pass follow 0 3 &
+	holder_pid=$!
+	sleep 1
+	desk_test_live_locks_hold 0 1
+	assert_true "while a live pass holds its lock, the suite can't take them" "$([ $? -ne 0 ] && echo true || echo false)"
+	status_before="$(cat "$desk_dir/status.json")"
+	live_pass morning 0
+	assert_true "...and having given up holds neither" \
+		"$([ "$(cat "$desk_dir/status.json")" != "$status_before" ] && echo true || echo false)"
+	desk_test_live_locks_hold 10 1
+	assert_true "...but waiting, takes them once that pass ends" "$([ $? -eq 0 ] && echo true || echo false)"
+	desk_test_live_locks_release
+	wait "$holder_pid"
 ) | tee "$ROOT/out"
 grep -q FAIL "$ROOT/out" && fail=1 || fail=0
 echo

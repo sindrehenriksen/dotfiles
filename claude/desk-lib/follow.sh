@@ -1126,7 +1126,7 @@ desk_follow_main() {
 
 	# Its own lock, never the runner's: the follow pass touches nothing a morning
 	# pass does. Waits a minute at most for another follow run.
-	if ! DESK_LOCK_NAME=follow DESK_LOCK_MAX_WAIT_SECS="${DESK_FOLLOW_LOCK_WAIT_SECS:-60}" desk_lock_acquire; then
+	if ! DESK_LOCK_NAME="$DESK_FOLLOW_LOCK_NAME" DESK_LOCK_MAX_WAIT_SECS="${DESK_FOLLOW_LOCK_WAIT_SECS:-60}" desk_lock_acquire; then
 		desk_log "$pass" "follow: another follow run holds the lock — skipping"
 		return 0
 	fi

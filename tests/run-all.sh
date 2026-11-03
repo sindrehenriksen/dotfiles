@@ -10,7 +10,9 @@
 # (colon-separated; default: this repo's own main checkout) before
 # anything runs, and fails loudly if any of it changed by the end — the
 # belt to the per-test isolation's suspenders, so a test that slips past
-# its own guard still can't corrupt a real repo's config unnoticed.
+# its own guard still can't corrupt a real repo's config unnoticed. The
+# state guard does the same for real ~/.local/state/{claude,desk}, with the
+# live desk passes' locks held throughout so a scheduled pass can't trip it.
 #
 # Usage: tests/run-all.sh (from anywhere; run-all.sh finds its own repo)
 set -u
@@ -24,6 +26,17 @@ source "$HERE/lib/git-safety.sh"
 if ! desk_test_config_guard_resolve_repos "$REPO_ROOT"; then
 	echo "run-all: couldn't resolve a guard repo for $REPO_ROOT (and \$DESK_GUARD_REPOS is unset) — refusing to run" >&2
 	exit 1
+fi
+
+# The live desk passes' locks, held from before the first snapshot to after
+# the last (git-safety.sh, desk_test_live_locks_hold): a scheduled pass never
+# writes real state mid-suite, so the state guard sees only what tests did.
+if ! desk_test_live_locks_hold 0; then
+	echo "run-all: a live desk pass holds its lock — waiting for it to finish (up to ${DESK_TEST_LIVE_LOCK_WAIT_SECS:-1800}s)" >&2
+	if ! desk_test_live_locks_hold "${DESK_TEST_LIVE_LOCK_WAIT_SECS:-1800}"; then
+		echo "run-all: gave up waiting for the live desk pass — refusing to run" >&2
+		exit 1
+	fi
 fi
 
 GUARD_DIR="$(mktemp -d)"
@@ -113,7 +126,7 @@ run_suite() { # relative_path, run_cmd...
 	local rel="$1"
 	shift
 	printf '\n=== %s ===\n' "$rel"
-	if ( cd "$REPO_ROOT" && "$@" ); then
+	if ( desk_test_live_locks_release && cd "$REPO_ROOT" && "$@" ); then
 		pass_suites=$((pass_suites + 1))
 	else
 		fail_suites=$((fail_suites + 1))
@@ -135,6 +148,7 @@ done
 
 desk_test_config_guard_snapshot "$GUARD_DIR" after
 desk_test_state_guard_snapshot "$GUARD_DIR" after
+desk_test_live_locks_release
 
 echo
 echo "=== run-all summary: $pass_suites suite(s) passed, $fail_suites failed ==="

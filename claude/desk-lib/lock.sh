@@ -144,23 +144,28 @@ desk_guard_already_ran_today() {
 }
 
 # One lock for every scheduled pass, which share the notes repo, the ledger
-# and the status file; the follow pass takes its own (DESK_LOCK_NAME=follow).
+# and the status file; the follow pass takes its own
+# (DESK_LOCK_NAME="$DESK_FOLLOW_LOCK_NAME"). tests/run-all.sh holds both for
+# the length of the suite, so no live pass writes real state under it.
 # It is flock(2) on an open file, taken through perl since macOS has no
 # flock command: the lock lives on the open file description that this
-# shell keeps on fd 9, so it outlives the perl that took it and goes with
-# this shell however that ends. A run that died leaves nothing to break.
+# shell keeps on fd $DESK_LOCK_FD (default 9), so it outlives the perl that
+# took it and goes with this shell however that ends. A run that died
+# leaves nothing to break.
 DESK_LOCK_NAME="runner"
+DESK_FOLLOW_LOCK_NAME="follow"
 
 # Takes the lock, waiting for its holder up to $DESK_LOCK_MAX_WAIT_SECS.
 # Returns 1 when it gave up. Called in this shell, never a subshell, which
 # would hold the lock only as long as itself.
 desk_lock_acquire() {
-	local waited=0
+	local waited=0 fd="${DESK_LOCK_FD:-9}"
+	case "$fd" in [3-9]) ;; *) return 1 ;; esac
 	mkdir -p "$DESK_LOCK_DIR" 2> /dev/null
-	exec 9>> "$DESK_LOCK_DIR/$DESK_LOCK_NAME.flock" || return 1
-	until perl -MFcntl=:flock -e 'open(my $fh, ">&=", 9) or exit 2; flock($fh, LOCK_EX | LOCK_NB) or exit 1'; do
+	eval "exec $fd>> \"\$DESK_LOCK_DIR/\$DESK_LOCK_NAME.flock\"" || return 1
+	until perl -MFcntl=:flock -e 'open(my $fh, ">&=", $ARGV[0]) or exit 2; flock($fh, LOCK_EX | LOCK_NB) or exit 1' "$fd"; do
 		if [ "$waited" -ge "$DESK_LOCK_MAX_WAIT_SECS" ]; then
-			exec 9>&-
+			eval "exec $fd>&-"
 			return 1
 		fi
 		sleep "$DESK_LOCK_POLL_SECS"
@@ -169,7 +174,9 @@ desk_lock_acquire() {
 }
 
 desk_lock_release() {
-	exec 9>&-
+	local fd="${DESK_LOCK_FD:-9}"
+	case "$fd" in [3-9]) ;; *) return 1 ;; esac
+	eval "exec $fd>&-"
 }
 
 # The exact count of Mon-Fri calendar dates strictly after $1's own date and
