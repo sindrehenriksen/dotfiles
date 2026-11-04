@@ -376,6 +376,11 @@ assert_eq "--dangerously-skip-permissions: refused" \
 	"$(status)	$(detail)"
 flags_case claude --permission-mode=bypassPermissions --resume x
 assert_eq "...in its = form too" "refused" "$(status)"
+flags_case claude --add-dir=extra src --resume x
+typed="$(cat "$TMP/typed" 2> /dev/null)"
+eval "set -- ${typed# exec /bin/zsh -lic }"
+typed="$1"
+case "$typed" in *"claude --add-dir 'extra' --resume $s;"*) ok "--add-dir= takes its one value, the prompt after it left out" ;; *) bad "--add-dir= takes its one value (got [$typed])" ;; esac
 flags_case claude --resume x --settings /x/extra.json
 assert_eq "a --settings passed by hand, which could set a permission mode: refused" \
 	"refused	it was started with --settings by hand, which a resume would read again as it is now and which can set permissions; restart it by hand" \

@@ -235,10 +235,13 @@ restartable_flags() {
 						return 1
 					}
 				fi
+				# The = form takes its one value, as commander parses it; the
+				# spaced form takes every word up to the next option.
+				local one="$has_val"
 				_rf_carry --add-dir
 				while :; do
 					if [ -z "$has_val" ]; then
-						[ "$i" -lt "$n" ] && [[ "${words[$i]}" != -* ]] || break
+						[ -z "$one" ] && [ "$i" -lt "$n" ] && [[ "${words[$i]}" != -* ]] || break
 						val="${words[$i]}"
 						i=$((i + 1))
 					fi
