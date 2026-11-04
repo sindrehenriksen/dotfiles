@@ -54,13 +54,17 @@ restartable_mtime() { stat -c %Y "$1" 2> /dev/null || stat -f %m "$1" 2> /dev/nu
 # <config dir>/shell-snapshots/snapshot-…`, how Claude Code runs a Bash
 # call); and no subagent is running under a subagents dir given: none wrote
 # in the last $RESTART_SESSION_QUIET_MINS minutes, and none this process
-# started has a `<agent>.meta.json` without `finished: true`, which is what
-# catches a background subagent waiting on a long model call, when nothing
-# is written for minutes. One a crashed earlier process left unfinished
-# predates this process's start and does not count. Other children, the
-# MCP servers, do not count. Needs $procs loaded.
+# started has a `<agent>.meta.json` without `finished: true` and a write to
+# it or its transcript in the last two hours. That catches a background
+# subagent waiting on a long model call, when nothing is written for
+# minutes. The bound is there because a subagent that was stopped or failed
+# is left unfinished too: plenty here are, their transcripts untouched for
+# days. One an earlier process left predates this process's start and does
+# not count either. Other children, the MCP servers, do not count. Needs
+# $procs loaded.
 restartable_idle() {
-	local pid=$1 pidfile=$2 quiet="${RESTART_SESSION_QUIET_MINS:-5}" state running dir recent started meta
+	local pid=$1 pidfile=$2 quiet="${RESTART_SESSION_QUIET_MINS:-5}" state running dir recent started meta m j
+	local bound=$(($(date +%s) - 7200))
 	shift 2
 	state="$(jq -r '.status // empty' "$pidfile" 2> /dev/null)"
 	if [ -z "$state" ]; then
@@ -87,7 +91,10 @@ restartable_idle() {
 		fi
 		while IFS= read -r meta; do
 			[ -n "$meta" ] || continue
-			if [ "$(restartable_mtime "$meta")" -ge "$started" ]; then
+			m="$(restartable_mtime "$meta")"
+			j="$(restartable_mtime "${meta%.meta.json}.jsonl")"
+			[ "${j:-0}" -gt "$m" ] && m="$j"
+			if [ "$m" -ge "$started" ] && [ "$m" -ge "$bound" ]; then
 				restartable_why="not idle: a subagent it started has not finished ($(basename "$meta" .meta.json))"
 				return 1
 			fi

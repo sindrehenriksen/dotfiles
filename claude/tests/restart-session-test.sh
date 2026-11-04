@@ -289,6 +289,20 @@ run_restart "$s16"
 assert_eq "one it started, not finished, quiet for ten minutes: refused" \
 	"refused	not idle: a subagent it started has not finished (agent-slow)" "$(status)	$(detail)"
 rm "$sub16/agent-slow.meta.json"
+s16b=$(uuid)
+p16b=$(spawn "$s16b")
+desk_tab "$p16b"
+five_hours_ago_ms=$((($(date +%s) - 18000) * 1000))
+jq --argjson t "$five_hours_ago_ms" '.startedAt = $t' "$CONFIG_DIR/sessions/$p16b.json" > "$TMP/pf" && mv "$TMP/pf" "$CONFIG_DIR/sessions/$p16b.json"
+mkdir -p "$PROJ_DIR/$s16b/subagents"
+three_hours_ago=$(date -r $(($(date +%s) - 10800)) +%Y%m%d%H%M 2> /dev/null || date -d @$(($(date +%s) - 10800)) +%Y%m%d%H%M)
+echo '{"agentType":"general-purpose","finished":null}' > "$PROJ_DIR/$s16b/subagents/agent-stopped.meta.json"
+: > "$PROJ_DIR/$s16b/subagents/agent-stopped.jsonl"
+touch -t "$three_hours_ago" "$PROJ_DIR/$s16b/subagents/agent-stopped.meta.json" "$PROJ_DIR/$s16b/subagents/agent-stopped.jsonl"
+run_restart "$s16b"
+assert_eq "one it started but stopped hours ago, left unfinished, does not hold it up" "restarted" "$(status)"
+fresh
+desk_tab "$p16"
 run_restart "$s16"
 assert_eq "finished ones, and one an earlier process left unfinished, do not hold it up" "restarted" "$(status)"
 
