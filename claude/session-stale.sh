@@ -6,6 +6,11 @@
 # reason to offer.
 #
 # Usage: session-stale.sh <session-id>
+#        session-stale.sh --pid <pid> <config-dir>...
+#            Names the session a live pid holds, for Hammerspoon, which has
+#            only a tab's foreground pid: `<id>\t<config dir>\t<name>` from
+#            the first config dir whose pid file names it and passes the
+#            liveness check below, else exit 1.
 #
 # Reasons, one line each, `<kind>: <what changed>`:
 #   version  its pid file's `version` is not the installed Claude Code
@@ -52,6 +57,8 @@ script_dir() {
 HERE="$(script_dir)"
 # shellcheck source=desk-lib/restartable.sh
 source "$HERE/desk-lib/restartable.sh"
+# shellcheck source=desk-lib/liveness.sh
+source "$HERE/desk-lib/liveness.sh"
 # shellcheck source=desk-lib/account.sh
 source "$HERE/desk-lib/account.sh"
 
@@ -70,11 +77,40 @@ CLAUDE_BIN="${SESSION_STALE_CLAUDE_BIN:-$HOME/.local/bin/claude}"
 # left out: they shape the shell, not what a session runs with.
 SHELL_FILES=(.zprofile .zshrc .profile .shellrc .shellrc.early .secrets.env)
 
-id="${1:-}"
-if [ $# -ne 1 ] || [ -z "$id" ]; then
-	echo "usage: session-stale.sh <session-id>" >&2
+usage() {
+	echo "usage: session-stale.sh <session-id> | --pid <pid> <config-dir>..." >&2
 	exit 2
+}
+
+# A pid file counts only when its process is the one it names: alive, a
+# claude, and started when the pid file says (desk-lib/liveness.sh, the
+# check session-status.sh makes).
+pidfile_live() { # pidfile -> sets pf_id, pf_pid, pf_name; 0 when live
+	local procstart
+	IFS=$'\t' read -r pf_id pf_pid procstart pf_name < <(jq -r \
+		'[(.sessionId // ""), (.pid // "" | tostring), (.procStart // ""), (.name // "")] | @tsv' "$1" 2> /dev/null) || return 1
+	[[ "$pf_pid" =~ ^[0-9]+$ ]] || return 1
+	check_live "$pf_pid" "$procstart"
+	[ "$live" = true ]
+}
+
+if [ "${1:-}" = --pid ]; then
+	[ $# -ge 3 ] && [[ "$2" =~ ^[0-9]+$ ]] || usage
+	want="$2"
+	shift 2
+	for dir in "$@"; do
+		dir="${dir%/}"
+		[ -f "$dir/sessions/$want.json" ] || continue
+		if pidfile_live "$dir/sessions/$want.json" && [ "$pf_pid" = "$want" ] && [ -n "$pf_id" ]; then
+			printf '%s\t%s\t%s\n' "$pf_id" "$dir" "$pf_name"
+			exit 0
+		fi
+	done
+	exit 1
 fi
+
+id="${1:-}"
+[ $# -eq 1 ] && [ -n "$id" ] || usage
 not_now() {
 	echo "session-stale: $1" >&2
 	exit 1
@@ -86,11 +122,8 @@ not_now() {
 pids=()
 for f in "$CONFIG_DIR"/sessions/*.json; do
 	[ -f "$f" ] || continue
-	p="$(jq -r --arg id "$id" 'select(.sessionId == $id) | .pid' "$f" 2> /dev/null)"
-	[[ "$p" =~ ^[0-9]+$ ]] || continue
-	case "$(ps -o comm= -p "$p" 2> /dev/null)" in
-		claude | */claude) pids+=("$p") ;;
-	esac
+	grep -q "$id" "$f" 2> /dev/null || continue
+	pidfile_live "$f" && [ "$pf_id" = "$id" ] && pids+=("$pf_pid")
 done
 [ "${#pids[@]}" -gt 0 ] || not_now "no live process holds it"
 [ "${#pids[@]}" -eq 1 ] || not_now "more than one process holds it"

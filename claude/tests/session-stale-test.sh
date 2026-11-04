@@ -61,8 +61,8 @@ session() { # id version account -> sets pid
 	pid=$!
 	echo "$pid" >> "$TMP/spawned"
 	local started=$((($(date +%s) - 3600) * 1000))
-	jq -n --argjson pid "$pid" --arg id "$1" --arg v "$2" --argjson t "$started" --arg cwd "$TMP" \
-		'{pid:$pid, sessionId:$id, cwd:$cwd, startedAt:$t, version:$v, status:"idle"}' \
+	jq -n --argjson pid "$pid" --arg id "$1" --arg v "$2" --argjson t "$started" --arg cwd "$TMP" --arg ps "$(proc_start_of "$pid")" \
+		'{pid:$pid, sessionId:$id, name:"stand-in", cwd:$cwd, startedAt:$t, procStart:$ps, version:$v, status:"idle"}' \
 		> "$CLAUDE_CONFIG_DIR/sessions/$pid.json"
 	mkdir -p "$CLAUDE_CONFIG_DIR/projects/-p"
 	: > "$CLAUDE_CONFIG_DIR/projects/-p/$1.jsonl"
@@ -174,9 +174,22 @@ session "$s7" 2.1.300 acct-a
 first=$pid
 start_claude_stand_in "$TMP/bin" 300
 echo "$!" >> "$TMP/spawned"
-jq --argjson p "$!" '.pid = $p' "$CLAUDE_CONFIG_DIR/sessions/$first.json" > "$CLAUDE_CONFIG_DIR/sessions/$!.json"
+second=$!
+jq --argjson p "$second" --arg ps "$(proc_start_of "$second")" '.pid = $p | .procStart = $ps' \
+	"$CLAUDE_CONFIG_DIR/sessions/$first.json" > "$CLAUDE_CONFIG_DIR/sessions/$second.json"
 run "$s7"
 assert_eq "two live processes on it: exit 1" "1|session-stale: more than one process holds it" "$rc|$out$(cat "$TMP/err")"
+echo "=== naming the session a pid holds ==="
+out="$("$STALE" --pid "$first" /nonexistent "$CLAUDE_CONFIG_DIR")"
+assert_eq "the session, its config dir and its name" "$s7	$CLAUDE_CONFIG_DIR	stand-in" "$out"
+jq '.procStart = "Thu Jan 01 00:00:00 2015"' "$CLAUDE_CONFIG_DIR/sessions/$first.json" > "$TMP/pf" && mv "$TMP/pf" "$CLAUDE_CONFIG_DIR/sessions/$first.json"
+"$STALE" --pid "$first" "$CLAUDE_CONFIG_DIR" > /dev/null
+assert_eq "a pid file whose procStart is not that process's: no session" "1" "$?"
+"$STALE" --pid 999999 "$CLAUDE_CONFIG_DIR" > /dev/null
+assert_eq "a pid with no pid file: no session" "1" "$?"
+rm "$CLAUDE_CONFIG_DIR/sessions/$second.json"
+run "$s7"
+assert_eq "...and the same check when asked by id: the reused pid is not its process" "1|" "$rc|$out"
 run "not-an-id"
 assert_eq "not an id: exit 1" "1" "$rc"
 "$STALE" > /dev/null 2>&1

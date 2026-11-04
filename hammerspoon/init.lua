@@ -1216,8 +1216,8 @@ end
 -- watched, on Ghostty alone, re-attached whenever Ghostty launches.
 --
 -- A focus is settled for a moment, then the focused terminal's foreground
--- pid is asked of Ghostty, off the main thread, and mapped to a session by
--- its pid file. claude/session-stale.sh says why it is worth restarting
+-- pid is asked of Ghostty, off the main thread, and mapped to its session
+-- by session-stale.sh --pid. claude/session-stale.sh says why it is worth restarting
 -- (or exits 1 when it cannot say now). A session is offered once per set
 -- of reasons: Dismiss, or ignoring the offer, quiets it until its reasons
 -- change, and a session found not stale is forgotten, so reasons coming
@@ -1243,19 +1243,14 @@ DeskStale.seen = {}
 DeskStale.FOCUSED_PID_SCRIPT =
   'tell application "Ghostty" to return (pid of focused terminal of selected tab of front window) as text'
 
--- The session whose pid file names `pid`, as { id, name, dir }, from the
--- first config dir holding one; `read(path)` returns the decoded file or
--- nil.
-function DeskStale.session_for_pid(pid, dirs, read)
-  if type(pid) ~= "number" then return nil end
-  for _, dir in ipairs(dirs) do
-    local pf = read(dir .. "/sessions/" .. string.format("%d", pid) .. ".json")
-    if type(pf) == "table" and DeskTab.looks_like_uuid(pf.sessionId) then
-      local name = (type(pf.name) == "string" and pf.name ~= "") and pf.name or pf.sessionId:sub(1, 8)
-      return { id = pf.sessionId, name = name, dir = dir, pid = pid }
-    end
-  end
-  return nil
+-- The session `session-stale.sh --pid` names for `pid`, as { id, name,
+-- dir, pid }: it reads the pid file and checks that its process is that
+-- pid's (session-status.sh's liveness check), so nothing here reads pid
+-- files itself.
+function DeskStale.parse_session(pid, out)
+  local id, dir, name = (out or ""):match("^([^\t]+)\t([^\t]+)\t([^\n]*)")
+  if type(pid) ~= "number" or not DeskTab.looks_like_uuid(id) then return nil end
+  return { id = id, dir = dir, name = name ~= "" and name or id:sub(1, 8), pid = pid }
 end
 
 -- What a session-stale.sh result means for a session last offered `prev`
@@ -1323,25 +1318,16 @@ hs.task.new("/bin/zsh", function(rc, out)
   if rc == 0 and type(out) == "string" and out ~= "" then login_path = out end
 end, { "-lc", 'printf %s "$PATH"' }):start()
 
-local function run_tool(session, tool, args, done)
+local function run_tool(session, tool, args, done) -- session may be nil
   local t = hs.task.new(DeskStale.bin_dir .. "/" .. tool, done, args)
   if not t then return done(-1, "", "could not start " .. tool) end
   t:setEnvironment({
     HOME = HOME, USER = os.getenv("USER"), LOGNAME = os.getenv("LOGNAME"),
     TMPDIR = os.getenv("TMPDIR"), LANG = os.getenv("LANG") or "en_US.UTF-8",
     PATH = login_path or "/usr/bin:/bin:/usr/sbin:/sbin",
-    CLAUDE_CONFIG_DIR = session.dir,
+    CLAUDE_CONFIG_DIR = session and session.dir,
   })
   t:start()
-end
-
-local function read_json(path)
-  local f = io.open(path, "r")
-  if not f then return nil end
-  local text = f:read("a")
-  f:close()
-  local ok, value = pcall(hs.json.decode, text)
-  return ok and value or nil
 end
 
 function DeskStale.restart(session)
@@ -1369,11 +1355,18 @@ function DeskStale.handle(session, rc, out)
   return action
 end
 
--- Ghostty's focused terminal's foreground pid, asked off the main thread;
--- `done(pid)` gets nil when there is none to be had.
-local function focused_pid(done)
+-- The session in Ghostty's focused tab, asked off the main thread: its
+-- focused terminal's foreground pid, then the session that pid holds.
+-- `done(session)` gets nil when there is none.
+local function focused_session(done)
   local t = hs.task.new("/usr/bin/osascript", function(rc, out)
-    done(rc == 0 and tonumber((out or ""):match("^(%d+)")) or nil)
+    local pid = rc == 0 and tonumber((out or ""):match("^(%d+)")) or nil
+    if not pid then return done(nil) end
+    local args = { "--pid", string.format("%d", pid) }
+    for _, dir in ipairs(DeskStale.config_dirs) do args[#args + 1] = dir end
+    run_tool(nil, "session-stale.sh", args, function(rc2, out2)
+      done(rc2 == 0 and DeskStale.parse_session(pid, out2) or nil)
+    end)
   end, { "-e", DeskStale.FOCUSED_PID_SCRIPT })
   if t then t:start() else done(nil) end
 end
@@ -1382,8 +1375,7 @@ local checking = false
 function DeskStale.check_focused()
   if checking then return end
   checking = true
-  focused_pid(function(pid)
-    local session = DeskStale.session_for_pid(pid, DeskStale.config_dirs, read_json)
+  focused_session(function(session)
     local prev = session and DeskStale.seen[session.pid]
     local now = hs.timer.secondsSinceEpoch()
     if not session or (prev and now - prev.checked < DeskStale.recheck_secs) then
@@ -1408,8 +1400,7 @@ local function on_ghostty_focus()
 end
 
 DeskStale.hotkey = hs.hotkey.new({ "cmd", "alt" }, "r", function()
-  focused_pid(function(pid)
-    local session = DeskStale.session_for_pid(pid, DeskStale.config_dirs, read_json)
+  focused_session(function(session)
     if not session then
       hs.alert.show("No Claude Code session in this tab", 2)
       return

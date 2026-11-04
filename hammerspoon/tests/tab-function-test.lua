@@ -737,18 +737,12 @@ assert_eq("at load, the login shell's PATH is asked for", "/bin/zsh -lc", login_
 login_task.done(0, "/login/bin:/usr/bin", "")
 
 local S1 = "11111111-2222-3333-4444-555555555555"
-local files = {
-  ["/b/sessions/42.json"] = { sessionId = S1, name = "notes" },
-  ["/a/sessions/43.json"] = { sessionId = S1 },
-  ["/a/sessions/44.json"] = { sessionId = "not-an-id" },
-}
-local function read(path) return files[path] end
-local found = DeskStale.session_for_pid(42, { "/a", "/b" }, read)
-assert_eq("a pid's session is found in whichever config dir holds its pid file", "/b " .. S1 .. " notes",
-  found and (found.dir .. " " .. found.id .. " " .. found.name))
-assert_eq("...named by its id's start when it has no name", S1:sub(1, 8), DeskStale.session_for_pid(43, { "/a", "/b" }, read).name)
-assert_eq("a pid file without a real session id is no session", nil, DeskStale.session_for_pid(44, { "/a" }, read))
-assert_eq("no pid, no session", nil, DeskStale.session_for_pid(nil, { "/a" }, read))
+local found = DeskStale.parse_session(42, S1 .. "\t/b\tnotes\n")
+assert_eq("the session session-stale.sh --pid names: its id, config dir and name", "/b " .. S1 .. " notes 42",
+  found and (found.dir .. " " .. found.id .. " " .. found.name .. " " .. found.pid))
+assert_eq("...named by its id's start when it has no name", S1:sub(1, 8), DeskStale.parse_session(43, S1 .. "\t/a\t\n").name)
+assert_eq("a reply without a real session id is no session", nil, DeskStale.parse_session(44, "not-an-id\t/a\tx\n"))
+assert_eq("nothing named, no session", nil, DeskStale.parse_session(44, ""))
 
 local function decided(prev, rc, out) return (DeskStale.decide(prev, rc, out)) end
 assert_eq("not stale: forget the session", "clear", decided(nil, 0, ""))
@@ -797,44 +791,49 @@ assert_eq("found not stale: forgotten", "clear", DeskStale.handle(session, 0, ""
 assert_eq("...so reasons coming back are offered afresh", "offer", DeskStale.handle(session, 0, "version: 1 running, 2 installed\n"))
 
 -- The focus path end to end: a tab's pid, its pid file, the check.
-local dir = os.tmpname()
-os.remove(dir)
-os.execute("mkdir -p '" .. dir .. "/sessions'")
-local f = io.open(dir .. "/sessions/4242.json", "w")
-f:write('{"pid":4242,"sessionId":"' .. S1 .. '","name":"notes"}')
-f:close()
-hs.json = { decode = function(t) return { sessionId = t:match('"sessionId":"([^"]+)"'), name = t:match('"name":"([^"]*)"') } end }
-DeskStale.config_dirs = { dir }
+-- Finishes the two tasks that find the focused tab's session: Ghostty's
+-- answer, then session-stale.sh --pid's.
+local function focus_answers(pid_reply, session_reply, session_rc)
+  last_task().done(pid_reply and 0 or 1, pid_reply or "", "")
+  if pid_reply and pid_reply:match("^%d") then
+    local resolve = last_task()
+    resolve.done(session_rc or 0, session_reply or "", "")
+    return resolve
+  end
+end
+DeskStale.config_dirs = { "/a", "/b" }
 DeskStale.seen = {}
 DeskStale.check_focused()
 local ask = last_task()
 assert_eq("a focus asks Ghostty for the focused terminal's pid, off the main thread", "/usr/bin/osascript", ask.path)
 assert_eq("...of the selected tab's focused terminal", DeskStale.FOCUSED_PID_SCRIPT, ask.args[2])
 ask.done(0, "4242\n", "")
+local resolve = last_task()
+assert_eq("...then has session-stale.sh name the session that pid holds, in either config dir",
+  DeskStale.bin_dir .. "/session-stale.sh --pid 4242 /a /b", resolve.path .. " " .. table.concat(resolve.args, " "))
+resolve.done(0, S1 .. "\t/b\tnotes\n", "")
 local check = last_task()
-assert_eq("...then runs session-stale.sh on the session in it", DeskStale.bin_dir .. "/session-stale.sh " .. S1 .. " " .. dir,
+assert_eq("...then runs session-stale.sh on that session, in its config dir", DeskStale.bin_dir .. "/session-stale.sh " .. S1 .. " /b",
   check.path .. " " .. check.args[1] .. " " .. check.env.CLAUDE_CONFIG_DIR)
 local notes_before = #notes_sent
 check.done(0, "shell: ~/.zshrc changed since it started\n", "")
 assert_eq("...and offers the restart", notes_before + 1, #notes_sent)
 local n_tasks = #tasks_started
 DeskStale.check_focused()
-last_task().done(0, "4242\n", "")
-assert_eq("focusing it again straight away checks nothing more", n_tasks + 1, #tasks_started)
+focus_answers("4242\n", S1 .. "\t/b\tnotes\n")
+assert_eq("focusing it again straight away checks nothing more", n_tasks + 2, #tasks_started)
 n_tasks = #tasks_started
 DeskStale.check_focused()
-last_task().done(0, "9999\n", "")
-assert_eq("a tab with no Claude Code session in it is left alone", n_tasks + 1, #tasks_started)
+focus_answers("9999\n", "", 1)
+assert_eq("a tab with no Claude Code session in it is left alone", n_tasks + 2, #tasks_started)
 n_tasks = #tasks_started
 DeskStale.check_focused()
 last_task().done(1, "", "Ghostty is not running")
 assert_eq("...as is one Ghostty cannot name", n_tasks + 1, #tasks_started)
 DeskStale.hotkey.fn()
-last_task().done(0, "4242\n", "")
+focus_answers("4242\n", S1 .. "\t/b\tnotes\n")
 assert_eq("the hotkey restarts the focused tab's session, stale or not", DeskStale.bin_dir .. "/restart-session.sh " .. S1,
   last_task().path .. " " .. last_task().args[1])
-os.remove(dir .. "/sessions/4242.json")
-os.execute("rmdir '" .. dir .. "/sessions' '" .. dir .. "'")
 
 -- The hotkey, and the watchers that keep all of this to Ghostty.
 assert_eq("the hotkey is Cmd+Opt+R", "cmd+alt+r", table.concat(DeskStale.hotkey.mods, "+") .. "+" .. DeskStale.hotkey.key)
@@ -862,12 +861,10 @@ assert_eq("a tab switch checks the focused tab", "/usr/bin/osascript", #tasks_st
 hs.timer.doAfter = real_after
 last_task().done(1, "", "")
 
-files["/b/sessions/42.json"] = { sessionId = S1, name = "notes" }
-DeskStale.config_dirs = { "/nonexistent-dir" }
 n_tasks = #tasks_started
 DeskStale.hotkey.fn()
-last_task().done(0, "42\n", "")
-assert_eq("the hotkey in a tab with no session restarts nothing", n_tasks + 1, #tasks_started)
+focus_answers("42\n", "", 1)
+assert_eq("the hotkey in a tab with no session restarts nothing", n_tasks + 2, #tasks_started)
 
 print()
 print(string.format("=== summary: %d passed, %d failed ===", pass, fail))
