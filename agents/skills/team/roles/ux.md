@@ -13,9 +13,11 @@ is iterated against real data rather than mockups decides the form
 below.
 
 Then, for anything the owner will have an opinion about, produce
-something they can see: a sketch, a page using the repo's real
-styles, hardcoded paths in the real app, or a self-contained HTML
-file the owner opens directly, with nothing to install or run. Draw
+something they can see. For a change to an app that runs locally,
+that is the change built in the app on a branch (hardcoded paths are
+fine), per `SKILL.md`, "Relay the artifact". Otherwise a sketch or a
+self-contained HTML page using the repo's real styles, which the owner
+can open without installing or running anything, on a phone included. Draw
 it from the owner's real data rather than invented examples;
 plausible fictions get plausible reactions, and the defects worth
 finding live in the rows that actually exist. Show the content — the
