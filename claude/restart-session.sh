@@ -4,8 +4,10 @@
 # that resumes it, so a new Claude Code version, changed settings or hooks,
 # or changed shell config take effect without losing the tab. The resume
 # goes through the user's `claude` shell function, so it gets the same
-# account and flags a session started by hand gets, and the tab is left at
-# a prompt in the session's directory when the resumed session ends.
+# account and flags a session started by hand gets, plus the flags it was
+# started with where they can be read for certain (restartable_flags in
+# desk-lib/restartable.sh has which), and the tab is left at a prompt in
+# the session's directory when the resumed session ends.
 #
 # Unsent text in the session's input box is lost: the restart ends the
 # process holding it and clears the tab's line before typing the resume.
@@ -17,12 +19,15 @@
 # this command; a pid that is not a `claude` process. Also a session that is
 # not idle with nothing running: its pid file's status is not idle; it has a
 # shell of its own running (a child `<shell> -c source <config
-# dir>/shell-snapshots/snapshot-…`, how Claude Code runs a Bash call); or a
+# dir>/shell-snapshots/snapshot-…`, how Claude Code runs a Bash call); a
 # file under its transcript's `<id>/subagents/` changed in the last
-# $RESTART_SESSION_QUIET_MINS minutes (default 5). Other children, the MCP
-# servers, do not count. And a session whose tab cannot be named for certain
-# (as close-session.sh names it: the one terminal on its tty running its
-# pid) or would not be left at a prompt: claude's own shell must be an
+# $RESTART_SESSION_QUIET_MINS minutes (default 5), or a subagent it started
+# not marked finished there; or a wakeup or session cron its transcript
+# shows still pending, which lives in the process and would be lost. Other
+# children, the MCP servers, do not count. One started with flags that
+# cannot be carried over for certain. And a session whose tab cannot be
+# named for certain (as close-session.sh names it: the one terminal on its
+# tty running its pid) or would not be left at a prompt: claude's own shell must be an
 # interactive one, the command typed into one, or the form this script
 # types. A tab whose only shell is the one running claude, which tabs
 # opened before desk-open-tab.sh left a prompt have, closes with it.
@@ -137,10 +142,13 @@ transcript="$(jq -r '.transcript_path // empty' <<< "$entries")"
 [ -n "$transcript" ] || report refused "no transcript, so no way to tell whether subagents are running"
 restartable_idle "$pid" "$pidfile" "$(dirname "$transcript")/$id/subagents" \
 	|| report refused "$restartable_why"
+restartable_schedules "$pidfile" "$transcript" || report refused "$restartable_why"
 
 # --- the tab, and whether it is left at a prompt ---
 
 restartable_prompt "$pid" || report refused "$restartable_why" 3
+cwd="$(jq -r '.cwd // empty' <<< "$entries")"
+restartable_flags "$pid" "${cwd:-/}" || report refused "$restartable_why"
 
 tty="$(jq -r '.tty // empty' <<< "$entries")"
 recorded_tty="$(jq -r '.recorded_tty // empty' <<< "$entries")"
@@ -173,13 +181,14 @@ fi
 # The tab lookup can take seconds, so anything that started meanwhile is
 # caught here, as close to the signal as the checks can get.
 restartable_procs || report failed "could not list processes"
-restartable_idle "$pid" "$pidfile" "$(dirname "$transcript")/$id/subagents" \
+{ restartable_idle "$pid" "$pidfile" "$(dirname "$transcript")/$id/subagents" \
+	&& restartable_schedules "$pidfile" "$transcript"; } \
 	|| report refused "$restartable_why (since the first look)"
 
-cwd="$(jq -r '.cwd // empty' <<< "$entries")"
-resume="CLAUDE_CONFIG_DIR=$(shq "$CONFIG_DIR") claude --resume $id"
+claude_args="${restartable_carry:+$restartable_carry }--resume $id"
+resume="CLAUDE_CONFIG_DIR=$(shq "$CONFIG_DIR") claude $claude_args"
 [ -n "$cwd" ] && resume="cd $(shq "$cwd") && $resume"
-by_hand="resume it by hand: ${cwd:+cd $(shq "$cwd") && }claude --resume $id"
+by_hand="resume it by hand: ${cwd:+cd $(shq "$cwd") && }claude $claude_args"
 
 kill -TERM "$pid" 2> /dev/null
 waited=0

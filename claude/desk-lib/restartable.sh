@@ -46,14 +46,21 @@ runs_command() {
 }
 interactive_shell() { is_shell "$1" && ! runs_command "$1"; }
 
+restartable_shq() { printf "'%s'" "${1//\'/\'\\\'\'}"; }
+restartable_mtime() { stat -c %Y "$1" 2> /dev/null || stat -f %m "$1" 2> /dev/null; }
+
 # restartable_idle <pid> <pidfile> [subagents-dir...]: its pid file's status
 # is idle; it has no shell of its own running (a child `<shell> -c source
 # <config dir>/shell-snapshots/snapshot-…`, how Claude Code runs a Bash
-# call); and no file under a subagents dir given changed in the last
-# $RESTART_SESSION_QUIET_MINS minutes. Other children, the MCP servers, do
-# not count. Needs $procs loaded.
+# call); and no subagent is running under a subagents dir given: none wrote
+# in the last $RESTART_SESSION_QUIET_MINS minutes, and none this process
+# started has a `<agent>.meta.json` without `finished: true`, which is what
+# catches a background subagent waiting on a long model call, when nothing
+# is written for minutes. One a crashed earlier process left unfinished
+# predates this process's start and does not count. Other children, the
+# MCP servers, do not count. Needs $procs loaded.
 restartable_idle() {
-	local pid=$1 pidfile=$2 quiet="${RESTART_SESSION_QUIET_MINS:-5}" state running dir recent
+	local pid=$1 pidfile=$2 quiet="${RESTART_SESSION_QUIET_MINS:-5}" state running dir recent started meta
 	shift 2
 	state="$(jq -r '.status // empty' "$pidfile" 2> /dev/null)"
 	if [ -z "$state" ]; then
@@ -70,6 +77,7 @@ restartable_idle() {
 		restartable_why="not idle: it is running a shell command (pid $running)"
 		return 1
 	fi
+	started=$(($(jq -r '.startedAt // 0' "$pidfile" 2> /dev/null) / 1000))
 	for dir in "$@"; do
 		[ -d "$dir" ] || continue
 		recent="$(find "$dir" -type f -mmin "-$quiet" 2> /dev/null | head -n 1)"
@@ -77,6 +85,142 @@ restartable_idle() {
 			restartable_why="not idle: a subagent wrote in the last ${quiet} min ($(basename "$recent"))"
 			return 1
 		fi
+		while IFS= read -r meta; do
+			[ -n "$meta" ] || continue
+			if [ "$(restartable_mtime "$meta")" -ge "$started" ]; then
+				restartable_why="not idle: a subagent it started has not finished ($(basename "$meta" .meta.json))"
+				return 1
+			fi
+		done < <(find "$dir" -maxdepth 1 -name '*.meta.json' -exec jq -r 'select(.finished != true) | input_filename' {} + 2> /dev/null)
+	done
+	return 0
+}
+
+# restartable_schedules <pidfile> [transcript...]: nothing is scheduled in
+# the process itself, which a restart would lose: a ScheduleWakeup still to
+# fire, or a CronCreate that is not durable and not deleted, recurring or
+# still to fire, made since this process started. Read from the tool
+# results in its transcripts, so one made any other way goes unseen. That a
+# CronDelete names its cron by `input.id` is assumed: no transcript here
+# had one to read.
+restartable_schedules() {
+	local pidfile=$1 since t found
+	shift
+	since="$(jq -r '.startedAt // 0' "$pidfile" 2> /dev/null)"
+	for t in "$@"; do
+		[ -f "$t" ] || continue
+		found="$(grep -E '"(scheduledFor|nextFireAt)"|"name":"CronDelete"' "$t" 2> /dev/null \
+			| jq -rs --argjson since "${since:-0}" --argjson now "$(($(date +%s) * 1000))" '
+				def at: (.timestamp // "" | sub("\\.[0-9]+Z$"; "Z") | (fromdateiso8601? // 0)) * 1000;
+				map(select(at >= $since)) as $recs
+				| [$recs[] | .message.content[]? | objects | select(.type == "tool_use" and .name == "CronDelete") | .input.id] as $deleted
+				| [$recs[] | .toolUseResult? | objects
+					| if has("scheduledFor") then
+						select(.scheduledFor > $now) | "a wakeup due at \(.scheduledFor / 1000 | floor | strflocaltime("%H:%M"))"
+					elif has("nextFireAt") and .durable != true then
+						select(.id as $i | $deleted | index($i) | not)
+						| select(.recurring == true or .nextFireAt > $now)
+						| "a session cron (\(.humanSchedule // .id))"
+					else empty end][0] // empty' 2> /dev/null)"
+		if [ -n "$found" ]; then
+			restartable_why="it has $found scheduled in the process, which a restart would lose"
+			return 1
+		fi
+	done
+	return 0
+}
+
+# restartable_flags <pid> <cwd>: the flags claude was started with that a
+# resume should carry, read from its argv, into $restartable_carry as words
+# quoted for a shell (empty when there are none). Left out, since the
+# resume supplies its own: a leading `--settings <file>`, which the user's
+# `claude` function adds; `--resume`/`-r` and its id, `--continue`/`-c`,
+# `--fork-session`; `-n`/`--name` with its name; and a prompt, which is
+# everything from the first word that is not an option, or after `--`.
+# Carried: --model, --permission-mode, a later --settings, --add-dir and its
+# directories, --dangerously-skip-permissions,
+# --allow-dangerously-skip-permissions and --verbose. ps joins argv with
+# spaces, so a value holding one cannot be told apart: the check refuses
+# (returns 1) on any other option, an --add-dir or --settings value that is
+# not an existing directory or file from <cwd>, and a carried option that
+# turns up after the prompt began. Needs $procs loaded.
+restartable_flags() {
+	local cwd=$2 words word i n v
+	read -r -a words <<< "$(args_of "$1")"
+	restartable_carry=""
+	n=${#words[@]}
+	i=1
+	if [ "${words[1]:-}" = --settings ]; then i=3; fi
+	carry() { restartable_carry="${restartable_carry:+$restartable_carry }$1"; }
+	value() { # option -> sets v to the next word, or fails
+		v="${words[$((i + 1))]:-}"
+		if [ -z "$v" ] || [[ "$v" == -* ]]; then
+			restartable_why="its $1 has no value a restart can read"
+			return 1
+		fi
+	}
+	at() { # path -> does it exist from cwd
+		case "$1" in /*) [ -e "$1" ] ;; *) [ -e "$cwd/$1" ] ;; esac
+	}
+	while [ "$i" -lt "$n" ]; do
+		word="${words[$i]}"
+		case "$word" in
+			--resume | -r)
+				i=$((i + 1))
+				[[ "${words[$i]:-}" != -* ]] && i=$((i + 1))
+				continue ;;
+			--resume=* | --continue | -c | --fork-session) ;;
+			-n | --name)
+				i=$((i + 1))
+				while [ "$i" -lt "$n" ] && [[ "${words[$i]}" != -* ]]; do i=$((i + 1)); done
+				continue ;;
+			--name=*) ;;
+			--model | --permission-mode)
+				value "$word" || return 1
+				carry "$word $(restartable_shq "$v")"
+				i=$((i + 2))
+				continue ;;
+			--model=* | --permission-mode=*) carry "$(restartable_shq "$word")" ;;
+			--settings)
+				value "$word" || return 1
+				if ! at "$v"; then
+					restartable_why="its --settings $v is not a file a restart can find (a path with a space in it reads that way)"
+					return 1
+				fi
+				carry "--settings $(restartable_shq "$v")"
+				i=$((i + 2))
+				continue ;;
+			--add-dir)
+				value "$word" || return 1
+				carry --add-dir
+				i=$((i + 1))
+				while [ "$i" -lt "$n" ] && [[ "${words[$i]}" != -* ]]; do
+					v="${words[$i]}"
+					if ! at "$v"; then
+						restartable_why="its --add-dir $v is not a directory a restart can find (a path with a space in it reads that way)"
+						return 1
+					fi
+					carry "$(restartable_shq "$v")"
+					i=$((i + 1))
+				done
+				continue ;;
+			--dangerously-skip-permissions | --allow-dangerously-skip-permissions | --verbose) carry "$word" ;;
+			--) break ;;
+			-*)
+				restartable_why="it was started with $word, which a restart does not know how to carry over; restart it by hand"
+				return 1 ;;
+			*)
+				for word in "${words[@]:$i}"; do
+					case "$word" in
+						--model | --model=* | --permission-mode | --permission-mode=* | --settings | --settings=* | --add-dir \
+							| --dangerously-skip-permissions | --allow-dangerously-skip-permissions)
+							restartable_why="its $word comes after a prompt, so its argv cannot be read for certain; restart it by hand"
+							return 1 ;;
+					esac
+				done
+				break ;;
+		esac
+		i=$((i + 1))
 	done
 	return 0
 }

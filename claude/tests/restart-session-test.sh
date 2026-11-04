@@ -151,6 +151,7 @@ chmod +x "$DESK_CLOSE_TAB_BIN"
 # The tab's shells, as the process table shows them. $1 is the stand-in's
 # pid, $2 the args of its parent (pid 9001), $3 those of the parent's parent
 # (pid 9000); further arguments are extra rows, written as they come.
+# $CLAUDE_ARGV, when set, is the stand-in's own argv as ps shows it.
 LOGIN_ROW="/usr/bin/login -flp me /bin/bash --noprofile --norc -c exec -l /bin/zsh"
 table() { # claude_pid parent_args grand_args [row...]
 	local c=$1 p=$2 g=$3
@@ -159,7 +160,7 @@ table() { # claude_pid parent_args grand_args [row...]
 		printf '%s 1 /Applications/Ghostty.app/Contents/MacOS/ghostty\n' 8000
 		printf '%s 8000 %s\n' 9000 "$g"
 		printf '%s 9000 %s\n' 9001 "$p"
-		printf '%s 9001 claude --resume x\n' "$c"
+		printf '%s 9001 %s\n' "$c" "${CLAUDE_ARGV:-claude --resume x}"
 		for row in "$@"; do printf '%s\n' "$row"; done
 	} > "$TMP/procs"
 }
@@ -260,6 +261,86 @@ assert_eq "...with its tab never asked about" "" "$(cat "$TMP/tab.log")"
 touch -t 202001010000 "$PROJ_DIR/$s2/subagents/agent-a1.jsonl"
 run_restart "$s2"
 assert_eq "a subagent quiet for longer does not hold it up" "restarted" "$(status)"
+
+echo "=== a subagent still running, however long since it wrote ==="
+fresh
+s16=$(uuid)
+p16=$(spawn "$s16")
+desk_tab "$p16"
+an_hour_ago_ms=$((($(date +%s) - 3600) * 1000))
+jq --argjson t "$an_hour_ago_ms" '.startedAt = $t' "$CONFIG_DIR/sessions/$p16.json" > "$TMP/pf" && mv "$TMP/pf" "$CONFIG_DIR/sessions/$p16.json"
+sub16="$PROJ_DIR/$s16/subagents"
+mkdir -p "$sub16"
+ten_min_ago=$(date -r $(($(date +%s) - 600)) +%Y%m%d%H%M 2> /dev/null || date -d @$(($(date +%s) - 600)) +%Y%m%d%H%M)
+two_hours_ago=$(date -r $(($(date +%s) - 7200)) +%Y%m%d%H%M 2> /dev/null || date -d @$(($(date +%s) - 7200)) +%Y%m%d%H%M)
+echo '{"agentType":"general-purpose","finished":true}' > "$sub16/agent-done.meta.json"
+echo '{"agentType":"general-purpose","finished":null}' > "$sub16/agent-left.meta.json"
+touch -t "$ten_min_ago" "$sub16/agent-done.meta.json"
+touch -t "$two_hours_ago" "$sub16/agent-left.meta.json"
+echo '{"agentType":"general-purpose"}' > "$sub16/agent-slow.meta.json"
+touch -t "$ten_min_ago" "$sub16/agent-slow.meta.json"
+run_restart "$s16"
+assert_eq "one it started, not finished, quiet for ten minutes: refused" \
+	"refused	not idle: a subagent it started has not finished (agent-slow)" "$(status)	$(detail)"
+rm "$sub16/agent-slow.meta.json"
+run_restart "$s16"
+assert_eq "finished ones, and one an earlier process left unfinished, do not hold it up" "restarted" "$(status)"
+
+echo "=== something scheduled in the process ==="
+iso() { date -u -r "$1" +%Y-%m-%dT%H:%M:%S.000Z 2> /dev/null || date -u -d "@$1" +%Y-%m-%dT%H:%M:%S.000Z; }
+schedule_case() { # description expected-status transcript-line...
+	local desc=$1 want=$2 s p
+	shift 2
+	fresh
+	s=$(uuid)
+	p=$(spawn "$s")
+	desk_tab "$p"
+	jq --argjson t "$an_hour_ago_ms" '.startedAt = $t' "$CONFIG_DIR/sessions/$p.json" > "$TMP/pf" && mv "$TMP/pf" "$CONFIG_DIR/sessions/$p.json"
+	printf '%s\n' "$@" > "$PROJ_DIR/$s.jsonl"
+	run_restart "$s"
+	assert_eq "$desc" "$want" "$(status)"
+}
+now_s=$(date +%s)
+recent=$(iso $((now_s - 60)))
+before=$(iso $((now_s - 7200)))
+schedule_case "a wakeup still to fire: refused" refused \
+	"{\"type\":\"user\",\"timestamp\":\"$recent\",\"toolUseResult\":{\"scheduledFor\":$(((now_s + 600) * 1000))}}"
+case "$(detail)" in "it has a wakeup due at "*", which a restart would lose") ok "...saying so" ;; *) bad "...saying so (got [$(detail)])" ;; esac
+schedule_case "a wakeup that has fired: restarted" restarted \
+	"{\"type\":\"user\",\"timestamp\":\"$recent\",\"toolUseResult\":{\"scheduledFor\":$(((now_s - 30) * 1000))}}"
+schedule_case "a recurring session cron: refused" refused \
+	"{\"type\":\"user\",\"timestamp\":\"$recent\",\"toolUseResult\":{\"id\":\"c1\",\"humanSchedule\":\"*/5 * * * *\",\"recurring\":true,\"durable\":false,\"nextFireAt\":$(((now_s - 30) * 1000))}}"
+schedule_case "...one deleted since: restarted" restarted \
+	"{\"type\":\"user\",\"timestamp\":\"$recent\",\"toolUseResult\":{\"id\":\"c1\",\"recurring\":true,\"durable\":false,\"nextFireAt\":$(((now_s - 30) * 1000))}}" \
+	"{\"type\":\"assistant\",\"timestamp\":\"$recent\",\"message\":{\"content\":[{\"type\":\"tool_use\",\"name\":\"CronDelete\",\"input\":{\"id\":\"c1\"}}]}}"
+schedule_case "...a durable one, which outlives the process: restarted" restarted \
+	"{\"type\":\"user\",\"timestamp\":\"$recent\",\"toolUseResult\":{\"id\":\"c2\",\"recurring\":true,\"durable\":true,\"nextFireAt\":$(((now_s + 60) * 1000))}}"
+schedule_case "...one made by an earlier process, gone with it: restarted" restarted \
+	"{\"type\":\"user\",\"timestamp\":\"$before\",\"toolUseResult\":{\"id\":\"c3\",\"recurring\":true,\"durable\":false,\"nextFireAt\":$(((now_s + 60) * 1000))}}"
+
+echo "=== the flags it was started with ==="
+flags_case() { # argv -> sets s, out, rc
+	fresh
+	s=$(uuid)
+	p=$(spawn "$s")
+	CLAUDE_ARGV="$1" desk_tab "$p"
+	run_restart "$s"
+}
+mkdir -p "$PROJ_DIR/extra"
+flags_case "claude --settings /x/account.json --model opus --permission-mode plan --add-dir extra /tmp -n my session --verbose --resume $s fix the bug"
+assert_eq "carried flags: restarted" "restarted" "$(status)"
+typed="$(cat "$TMP/typed")"
+eval "set -- ${typed# exec /bin/zsh -lic }"
+assert_eq "...the resume carries them, without the function's settings, the name, the old resume or the prompt" \
+	"cd '$PROJ_DIR' && CLAUDE_CONFIG_DIR='$CONFIG_DIR' claude --model 'opus' --permission-mode 'plan' --add-dir 'extra' '/tmp' --verbose --resume $s; exec /bin/zsh -il" "$1"
+flags_case "claude --resume x --chrome"
+assert_eq "an option it does not know: refused, saying which" \
+	"refused	it was started with --chrome, which a restart does not know how to carry over; restart it by hand" "$(status)	$(detail)"
+flags_case "claude --add-dir $TMP/my dir --resume x"
+assert_eq "a directory with a space, which ps splits: refused" \
+	"refused	its --add-dir $TMP/my is not a directory a restart can find (a path with a space in it reads that way)" "$(status)	$(detail)"
+flags_case "claude fix it --model opus"
+assert_eq "a carried option after the prompt began: refused" "refused" "$(status)"
 
 echo "=== refusals on a live session leave it running ==="
 fresh
