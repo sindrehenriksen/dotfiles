@@ -45,6 +45,10 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# A home of its own, so nothing that falls back to ~/.claude reads a live
+# pid file.
+export HOME="$TMP/home"
+mkdir -p "$HOME"
 CONFIG_DIR="$TMP/config"
 PROJ_DIR="$TMP/the project"
 TRANSCRIPTS="$CONFIG_DIR/projects/-the-project"
@@ -137,7 +141,8 @@ if [ -f "$TMP/argv-$1" ]; then cat "$TMP/argv-$1"; else printf '%s\0' claude --r
 EOF
 
 # The tab helper. `find` names terminal T-<pid>, unless $TMP/outside-<pid>
-# says that session runs outside Ghostty. `pid` answers only while Ghostty
+# says that session runs outside Ghostty, or $TMP/nested-<pid> inside
+# another program's terminal in a Ghostty tab. `pid` answers only while Ghostty
 # runs, and only for a terminal listed in $TMP/terminals (those still open,
 # or restored), with the restored login shell 7000. `type` logs, keeps the
 # text, and unless $TMP/no-resume, starts a stand-in for the session the
@@ -147,7 +152,7 @@ cat > "$DESK_CLOSE_TAB_BIN" << 'EOF'
 case "$1" in
 	find)
 		echo "find $2 $3" >> "$TMP/tab.log"
-		[ -e "$TMP/outside-$3" ] && { echo "DeskTabTerminal: no Ghostty terminal is on $2" >&2; exit 1; }
+		{ [ -e "$TMP/outside-$3" ] || [ -e "$TMP/nested-$3" ]; } && { echo "DeskTabTerminal: no Ghostty terminal is on $2" >&2; exit 1; }
 		echo "T-$3" ;;
 	pid)
 		[ -e "$TMP/running" ] || { echo "DeskTerminalPid: Ghostty is not running" >&2; exit 1; }
@@ -180,7 +185,7 @@ EOF
 
 # brew: $TMP/installed names the installed cask; $TMP/outdated makes it
 # outdated; every other verb is logged, failing when $TMP/brew-fails-<verb>
-# names the cask it fails for.
+# lists the cask it fails for.
 cat > "$GHOSTTY_UPDATE_BREW" << 'EOF'
 #!/usr/bin/env bash
 cask="${*: -1}"
@@ -191,7 +196,7 @@ case "$1" in
 	*)
 		echo "$1 $cask" >> "$TMP/brew.log"
 		[ "$1" = fetch ] && [ -f "$TMP/on-fetch" ] && bash "$TMP/on-fetch"
-		[ "$(cat "$TMP/brew-fails-$1" 2> /dev/null)" = "$cask" ] && exit 1
+		grep -qxF "$cask" "$TMP/brew-fails-$1" 2> /dev/null && exit 1
 		case "$1" in
 			uninstall) rm -f "$TMP/installed" ;;
 			install) echo "$cask" > "$TMP/installed" ;;
@@ -200,10 +205,11 @@ case "$1" in
 esac
 EOF
 # Ghostty: running while $TMP/running exists. quit ends it, unless
-# $TMP/quit-fails (Hammerspoon unreachable), $TMP/quit-refused (it stays,
+# $TMP/quit-fails (Hammerspoon unreachable; with $TMP/quit-delivered the
+# call still timed out after the quit reached it), $TMP/quit-refused (it stays,
 # showing nothing) or $TMP/dialog-checks (a confirmation it shows for that
 # many looks, after which it quits if $TMP/confirm-quit, else stays: a
-# cancel). launch starts it, unless $TMP/no-launch, restoring the terminals
+# cancel). With $TMP/dialog-unknown, dialog cannot tell. launch starts it, unless $TMP/no-launch, restoring the terminals
 # listed in $TMP/restore. version is the installed cask's.
 cat > "$GHOSTTY_UPDATE_APP_BIN" << 'EOF'
 #!/usr/bin/env bash
@@ -212,9 +218,11 @@ case "$1" in
 	running) [ -e "$TMP/running" ] ;;
 	quit)
 		echo quit >> "$TMP/app.log"
+		[ -e "$TMP/quit-delivered" ] && { gone; echo "hs did not return within 6s; killed"; exit 124; }
 		[ -e "$TMP/quit-fails" ] && { echo "hs: can't access Hammerspoon message port"; exit 1; }
 		[ -e "$TMP/quit-refused" ] || [ -e "$TMP/dialog-checks" ] || gone ;;
 	dialog)
+		[ -e "$TMP/dialog-unknown" ] && { echo unknown; exit 1; }
 		left=$(cat "$TMP/dialog-checks" 2> /dev/null || echo 0)
 		if [ "$left" -gt 0 ]; then
 			echo $((left - 1)) > "$TMP/dialog-checks"
@@ -270,10 +278,11 @@ fresh() {
 		[ -f "$f" ] && kill -TERM "$(basename "$f" .json)" 2> /dev/null
 	done
 	sleep 0.5
-	rm -f "$CONFIG_DIR"/sessions/*.json "$TMP"/outside-* "$TMP"/argv-* "$TMP"/typed-* "$TMP"/brew-fails-* \
+	rm -f "$CONFIG_DIR"/sessions/*.json "$TMP"/outside-* "$TMP"/nested-* "$TMP"/argv-* "$TMP"/typed-* "$TMP"/brew-fails-* \
 		"$TMP/tab.log" "$TMP/opened" "$TMP/brew.log" "$TMP/app.log" "$TMP/notified" "$TMP/detached" \
 		"$TMP/before-job" "$TMP/quit-refused" "$TMP/no-resume" "$TMP/outdated" "$TMP/procs-extra" "$TMP/restore" \
-		"$TMP/on-fetch" "$TMP/quit-fails" "$TMP/dialog-checks" "$TMP/confirm-quit" "$TMP/no-launch" "$TMP/opener-fails"
+		"$TMP/on-fetch" "$TMP/quit-fails" "$TMP/dialog-checks" "$TMP/confirm-quit" "$TMP/no-launch" "$TMP/opener-fails" \
+		"$TMP/quit-delivered" "$TMP/dialog-unknown"
 	rm -rf "$TMP/state"/*
 	echo ghostty@tip > "$TMP/installed"
 	touch "$TMP/running"
@@ -345,6 +354,18 @@ echo "5555 8000 claude --model opus" > "$TMP/procs-extra"
 run_update --dry-run --to ghostty
 assert_eq "exit 1" "1" "$rc"
 assert_has "it names the process" "pid 5555 (claude --model opus)" "$out"
+
+echo "=== Claude Code inside another program's terminal in a tab refuses, saying so ==="
+fresh
+a=$(uuid)
+pa=$(spawn "$a")
+touch "$TMP/nested-$pa"
+tabs
+run_update --dry-run --to ghostty
+assert_eq "exit 1" "1" "$rc"
+assert_has "it names the cause" "($a): runs under Ghostty inside another program's terminal" "$out"
+assert_lacks "...not a config dir" "no reader reports" "$out"
+assert_lacks "...nor calls it left alone" "not in a Ghostty tab" "$out"
 
 echo "=== the move: each session back in the tab Ghostty restored for it ==="
 fresh
@@ -445,8 +466,7 @@ echo 2 > "$TMP/dialog-checks"
 run_update --to ghostty
 nothing_changed "cancelled: nothing installed"
 assert_has "...the session resumed in its own tab" "type T-$pa 7000" "$(cat "$TMP/tab.log")"
-assert_has "...the notification saying nothing was updated" "Ghostty not updated: Still ghostty@tip b3dc3d794 (build 18248). 1 of 1 sessions resumed." "$(note)"
-assert_has "...and the log why" "the quit was cancelled" "$(the_log)"
+assert_has "...the notification saying nothing was updated" "Ghostty not updated: The quit was cancelled. Still ghostty@tip b3dc3d794 (build 18248). 1 of 1 sessions resumed." "$(note)"
 fresh
 a=$(uuid)
 pa=$(spawn "$a")
@@ -468,7 +488,31 @@ tabs "$pa"
 run_update --to ghostty
 nothing_changed "nothing installed"
 assert_has "...the log naming the failed call" "the quit call to Hammerspoon failed (hs: can't access Hammerspoon message port)" "$(the_log)"
+assert_has "...so does the notification" "Ghostty not updated: The quit call to Hammerspoon failed. Still ghostty@tip" "$(note)"
 assert_has "...and the session resumed where it was" "type T-$pa 7000" "$(cat "$TMP/tab.log")"
+fresh
+a=$(uuid)
+pa=$(spawn "$a")
+tabs "$pa"
+printf 'T-%s\n' "$pa" > "$TMP/restore"
+: > "$TMP/quit-delivered"
+run_update --to ghostty
+assert_has "a quit call that timed out after it was delivered: the update went on" "Ghostty updated: " "$(note)"
+assert_eq "...installed" "ghostty" "$(cat "$TMP/installed")"
+
+echo "=== a dialog that cannot be read counts as open ==="
+fresh
+a=$(uuid)
+pa=$(spawn "$a")
+tabs "$pa"
+: > "$TMP/quit-refused"
+: > "$TMP/dialog-unknown"
+run_update --to ghostty
+nothing_changed "nothing installed"
+assert_eq "...nothing typed into Ghostty, which may still quit" "" "$(grep '^type' "$TMP/tab.log")"
+assert_has "...the user told it waits" "whether it is asking to cannot be seen" "$(cat "$TMP/notified")"
+assert_has "...and at the end, why and what to do" "Ghostty not updated: Ghostty has not quit and may be asking whether to; answer it, then resume the sessions by hand." "$(note)"
+assert_has "...the commands in the file" "cd '$PROJ_DIR' && CLAUDE_CONFIG_DIR='$CONFIG_DIR' claude --resume $a" "$(resume_file)"
 
 echo "=== brew failing ==="
 fresh
@@ -480,7 +524,7 @@ echo ghostty > "$TMP/brew-fails-install"
 run_update --to ghostty
 assert_eq "an install that fails puts the old cask back" \
 	"fetch ghostty|uninstall ghostty@tip|install ghostty|install ghostty@tip" "$(paste -sd'|' "$TMP/brew.log")"
-assert_has "...the notification saying it was not updated" "Ghostty not updated: Still ghostty@tip" "$(note)"
+assert_has "...the notification saying so" "Ghostty not updated: Installing ghostty failed, so ghostty@tip was put back. Still ghostty@tip" "$(note)"
 assert_has "...the log why" "brew install --cask ghostty failed (exit 1); put ghostty@tip back" "$(the_log)"
 assert_has "...and the session still came back" "type T-$pa 7000" "$(cat "$TMP/tab.log")"
 fresh
@@ -503,7 +547,15 @@ echo ghostty@tip > "$TMP/brew-fails-upgrade"
 run_update
 assert_eq "an upgrade that fails" "fetch ghostty@tip|upgrade ghostty@tip" "$(paste -sd'|' "$TMP/brew.log")"
 assert_has "...is reported" "brew upgrade --cask ghostty@tip failed (exit 1)" "$(the_log)"
-assert_has "...and the session still came back" "Ghostty not updated: Still ghostty@tip b3dc3d794 (build 18248). 1 of 1 sessions resumed." "$(note)"
+assert_has "...and the session still came back" "Ghostty not updated: brew upgrade failed. Still ghostty@tip b3dc3d794 (build 18248). 1 of 1 sessions resumed." "$(note)"
+fresh
+a=$(uuid)
+pa=$(spawn "$a")
+tabs "$pa"
+printf 'ghostty\nghostty@tip\n' > "$TMP/brew-fails-install"
+run_update --to ghostty
+assert_has "both the install and the put-back failing: the notification says what to run" \
+	"Ghostty not updated: Installing ghostty failed and putting ghostty@tip back did too; install Ghostty by hand: brew install --cask ghostty. No Ghostty is installed." "$(note)"
 
 echo "=== Ghostty restoring nothing, or not coming back ==="
 fresh

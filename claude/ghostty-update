@@ -69,21 +69,24 @@
 #   4. quits Ghostty as Cmd+Q does, so it saves its windows. Ghostty asks to
 #      confirm when a tab is running something (an editor, a server), in a
 #      sheet or an alert, which Hammerspoon sees through the accessibility
-#      tree. While one is open the job waits, up to
-#      $GHOSTTY_UPDATE_CONFIRM_WAIT_SECS (default 1800), and says so in a
-#      notification; confirmed, it goes on. Cancelled (Ghostty still running
-#      with no dialog, $GHOSTTY_UPDATE_QUIT_SECS after the quit, default 20),
-#      or a quit call Hammerspoon failed, it updates nothing and resumes the
-#      sessions where they are. Still asking when the wait runs out, it
-#      updates nothing and resumes nothing, since a later confirm would end
-#      them again, and reports the commands to run once it is answered;
+#      tree. While one is open, or none can be ruled out (Hammerspoon without
+#      Accessibility), the job waits, up to $GHOSTTY_UPDATE_CONFIRM_WAIT_SECS
+#      (default 1800), and says so in a notification; confirmed, it goes on.
+#      Cancelled (Ghostty still running with no dialog,
+#      $GHOSTTY_UPDATE_QUIT_SECS after the quit, default 20), it updates
+#      nothing and resumes the sessions where they are. A quit call that
+#      fails gets the same wait, since one that timed out may still have
+#      been delivered. Still asking, or not known not to be, when the wait
+#      runs out, it updates nothing and resumes nothing, since a later
+#      confirm would end them again, and reports the commands to run once
+#      it is answered;
 #   5. runs `brew upgrade --cask <cask>`, or for --to, `brew uninstall
 #      --cask <old>` then `brew install --cask <new>`, putting the old one
 #      back if the install fails;
 #   6. relaunches Ghostty (only if it was running), resumes the sessions,
 #      and reports in a notification: what was updated, from which version
-#      to which, how many sessions came back and the names of any that did
-#      not, the log, and a file beside it with each failed one's exact resume
+#      to which, or in a few words why not and what to do, how many
+#      sessions came back and the names of any that did not, the log, and a file beside it with each failed one's exact resume
 #      command (`<log>` with `.resume` for `.log`).
 # The job is left loaded once it ends and booted out by the next run.
 #
@@ -196,7 +199,8 @@ hs_answer() {
 # Ghostty itself: running (exit 0 when it is), quit (as Cmd+Q, so it saves
 # its windows and asks about anything running; fails, saying why, when the
 # call to Hammerspoon does), dialog (prints dialog while a sheet or an alert
-# is open in it, else none; fails when it cannot tell), launch, and version
+# is open in it, none when none is; fails, unknown, when it cannot tell),
+# launch, and version
 # (what the installed app says it is).
 app() {
 	if [ -n "${GHOSTTY_UPDATE_APP_BIN:-}" ]; then
@@ -212,11 +216,19 @@ app() {
 				&& [ "$answer" = true ] || { echo "${answer:-no answer}"; return 1; }
 			;;
 		dialog)
-			answer="$(hs_answer "local a = hs.application.get(\"$BUNDLE_ID\")
+			# Without Accessibility, or with Ghostty's windows unreadable, no
+			# dialog would show either: that is unknown, never none.
+			answer="$(hs_answer "if not hs.accessibilityState() then return \"unknown\" end
+				local a = hs.application.get(\"$BUNDLE_ID\")
 				if not a then return \"none\" end
 				local ax = hs.axuielement.applicationElement(a)
 				if not ax then return \"unknown\" end
-				for _, w in ipairs(ax:attributeValue(\"AXWindows\") or {}) do
+				local windows = ax:attributeValue(\"AXWindows\")
+				if windows == nil then
+					if #a:allWindows() > 0 then return \"unknown\" end
+					return \"none\"
+				end
+				for _, w in ipairs(windows) do
 					local sr = w:attributeValue(\"AXSubrole\")
 					if sr == \"AXDialog\" or sr == \"AXSystemDialog\" then return \"dialog\" end
 					for _, c in ipairs(w:attributeValue(\"AXChildren\") or {}) do
@@ -224,7 +236,7 @@ app() {
 					end
 				end
 				return \"none\"")" || return 1
-			case "$answer" in dialog | none) echo "$answer" ;; *) return 1 ;; esac
+			case "$answer" in dialog | none) echo "$answer" ;; *) echo unknown; return 1 ;; esac
 			;;
 		launch) open -a "$APP_PATH" ;;
 		version)
@@ -353,7 +365,7 @@ run_job() {
 			continue
 		fi
 		CONFIG_DIR="$dir"
-		if [ "$id" != "$caller" ] && ! restartable_idle "$pid" "$pidfile" "$(dirname "$transcript")/$id/subagents"; then
+		if ! restartable_idle "$pid" "$pidfile" "$(dirname "$transcript")/$id/subagents"; then
 			abort="$name ($id) is no longer idle: $restartable_why"
 		elif ! restartable_schedules "$pidfile" "$transcript"; then
 			abort="$name ($id): $restartable_why"
@@ -394,47 +406,67 @@ run_job() {
 		logl "stopped the sessions"
 	fi
 
-	# quit: quit (Ghostty is gone), failed (the call did not go through),
-	# cancelled (still running, no dialog), asking (a dialog still open when
-	# the wait ran out).
-	local quit=quit updated=false brew_note="" out d no_dialog_since told="" quit_until wait_until
+	# quit: quit (Ghostty is gone), failed (the quit call failed and Ghostty
+	# stayed), cancelled (still running, no dialog), asking (a dialog open,
+	# or none that can be ruled out, when the wait ran out). A quit call that
+	# fails may still have been delivered (a timeout), so the wait runs
+	# whatever it returned.
+	local quit=quit updated=false brew_note="" short_note="" out d quit_err="" no_dialog_since told="" quit_until wait_until
 	if [ "$was_running" = true ]; then
 		logl "quitting Ghostty"
 		if ! out="$(app quit 2>&1)"; then
-			quit=failed
-			brew_note="the quit call to Hammerspoon failed (${out:-no answer}), so nothing was updated"
-		else
-			quit_until=$((SECONDS + QUIT_SECS))
-			wait_until=$((SECONDS + CONFIRM_WAIT_SECS))
-			no_dialog_since=$SECONDS
-			while app running; do
-				# One it cannot tell about counts as open: resuming into a
-				# Ghostty that is about to quit is the outcome to avoid.
-				d="$(app dialog 2> /dev/null)" || d=dialog
-				if [ "$d" = dialog ]; then
-					no_dialog_since=""
-					if [ -z "$told" ]; then
-						told=1
+			quit_err="${out:-no answer}"
+			logl "the quit call to Hammerspoon failed ($quit_err); watching whether Ghostty quits anyway"
+		fi
+		quit_until=$((SECONDS + QUIT_SECS))
+		wait_until=$((SECONDS + CONFIRM_WAIT_SECS))
+		no_dialog_since=$SECONDS
+		while app running; do
+			# One it cannot tell about counts as open: resuming into a
+			# Ghostty that is about to quit is the outcome to avoid.
+			d="$(app dialog 2> /dev/null)" || d=unknown
+			if [ "$d" != none ]; then
+				no_dialog_since=""
+				if [ -z "$told" ]; then
+					told=1
+					if [ "$d" = dialog ]; then
 						logl "Ghostty is asking to confirm the quit; waiting up to ${CONFIRM_WAIT_SECS}s"
 						notify "Ghostty update waiting" "Ghostty is asking whether to quit. Confirm to go on with the update; cancel to keep $from_cask, with the sessions resumed in their tabs."
+					else
+						logl "cannot tell whether Ghostty is asking to confirm the quit (Hammerspoon without Accessibility?); waiting up to ${CONFIRM_WAIT_SECS}s"
+						notify "Ghostty update waiting" "Ghostty has not quit, and whether it is asking to cannot be seen (Hammerspoon without Accessibility?). Confirm or cancel if it is asking; the update waits for it."
 					fi
-				else
-					[ -n "$no_dialog_since" ] || no_dialog_since=$SECONDS
-					if { [ "$SECONDS" -ge "$quit_until" ] && [ $((SECONDS - no_dialog_since)) -ge "$NO_DIALOG_SECS" ]; } \
-						|| [ "$SECONDS" -ge "$wait_until" ]; then
+				fi
+			else
+				[ -n "$no_dialog_since" ] || no_dialog_since=$SECONDS
+				if { [ "$SECONDS" -ge "$quit_until" ] && [ $((SECONDS - no_dialog_since)) -ge "$NO_DIALOG_SECS" ]; } \
+					|| [ "$SECONDS" -ge "$wait_until" ]; then
+					if [ -n "$quit_err" ]; then
+						quit=failed
+						brew_note="the quit call to Hammerspoon failed ($quit_err) and Ghostty stayed, so nothing was updated"
+						short_note="The quit call to Hammerspoon failed"
+					else
 						quit=cancelled
 						brew_note="Ghostty did not quit (the quit was cancelled), so nothing was updated"
-						break
+						short_note="The quit was cancelled"
 					fi
-				fi
-				if [ "$SECONDS" -ge "$wait_until" ] && [ "$d" = dialog ]; then
-					quit=asking
-					brew_note="Ghostty was still asking to confirm the quit after ${CONFIRM_WAIT_SECS}s, so nothing was updated and no session resumed, since confirming would end them again; answer it, then resume them by hand"
 					break
 				fi
-				sleep 0.5
-			done
-		fi
+			fi
+			if [ "$SECONDS" -ge "$wait_until" ] && [ "$d" != none ]; then
+				quit=asking
+				if [ "$d" = dialog ]; then
+					brew_note="Ghostty was still asking to confirm the quit after ${CONFIRM_WAIT_SECS}s"
+					short_note="Ghostty is still asking whether to quit; answer it, then resume the sessions by hand"
+				else
+					brew_note="Ghostty had not quit after ${CONFIRM_WAIT_SECS}s, and whether it is asking to could not be seen"
+					short_note="Ghostty has not quit and may be asking whether to; answer it, then resume the sessions by hand"
+				fi
+				brew_note="$brew_note, so nothing was updated and no session resumed, since confirming would end them again; answer it, then resume them by hand"
+				break
+			fi
+			sleep 0.5
+		done
 		[ -z "$brew_note" ] || logl "$brew_note"
 	fi
 
@@ -451,8 +483,12 @@ run_job() {
 			return "$rc"
 		}
 		if [ "$action" = upgrade ]; then
-			brew_step upgrade --cask "$to_cask" && updated=true \
-				|| brew_note="brew upgrade --cask $to_cask failed (exit $rc)"
+			if brew_step upgrade --cask "$to_cask"; then
+				updated=true
+			else
+				brew_note="brew upgrade --cask $to_cask failed (exit $rc)"
+				short_note="brew upgrade failed"
+			fi
 		elif brew_step uninstall --cask "$from_cask"; then
 			if brew_step install --cask "$to_cask"; then
 				updated=true
@@ -460,12 +496,15 @@ run_job() {
 				brew_note="brew install --cask $to_cask failed (exit $rc)"
 				if brew_step install --cask "$from_cask"; then
 					brew_note="$brew_note; put $from_cask back"
+					short_note="Installing $to_cask failed, so $from_cask was put back"
 				else
 					brew_note="$brew_note, and putting $from_cask back failed too: install one by hand"
+					short_note="Installing $to_cask failed and putting $from_cask back did too; install Ghostty by hand: brew install --cask $to_cask"
 				fi
 			fi
 		else
 			brew_note="brew uninstall --cask $from_cask failed (exit $rc), so $to_cask was not installed"
+			short_note="brew uninstall failed"
 		fi
 		rm -f "$out"
 		[ -z "$brew_note" ] || logl "$brew_note"
@@ -486,7 +525,10 @@ run_job() {
 		# app just downloaded).
 		until_s=$((SECONDS + LAUNCH_SECS))
 		until app running || [ "$SECONDS" -ge "$until_s" ]; do sleep 0.5; done
-		app running || unreachable="Ghostty is not running after ${LAUNCH_SECS}s"
+		if ! app running; then
+			unreachable="Ghostty is not running after ${LAUNCH_SECS}s"
+			short_note="Ghostty did not come back; open it, then resume the sessions by hand"
+		fi
 	fi
 
 	# --- resume the sessions ---
@@ -594,10 +636,15 @@ run_job() {
 	local title text names
 	if [ "$updated" = true ]; then
 		title="Ghostty updated"
-		text="$from_cask $from_version -> $to_cask $to_version."
+		text="$from_cask $from_version -> $to_cask $to_version.${short_note:+ $short_note.}"
 	else
 		title="Ghostty not updated"
-		text="Still $from_cask $to_version."
+		text="${short_note:-Nothing was updated}."
+		if [ "$to_version" = "none installed" ]; then
+			text="$text No Ghostty is installed."
+		else
+			text="$text Still $from_cask $to_version."
+		fi
 	fi
 	text="$text ${#resumed[@]} of $((${#resumed[@]} + ${#failed[@]})) sessions resumed."
 	logl "$title: $text${brew_note:+ $brew_note.}"
@@ -669,6 +716,7 @@ read_live() {
 
 plan_sessions=()
 plan_pids=()
+declare -A not_in_tab=()
 refusals=()
 alone=()
 caller="${CLAUDE_CODE_SESSION_ID:-}"
@@ -696,6 +744,7 @@ if [ "$ghostty_running" = true ]; then
 			case "$tab_why" in
 				*"no Ghostty terminal is on"* | *"Ghostty is not running"*)
 					alone+=("$label: not in a Ghostty tab")
+					not_in_tab[$pid]="$label"
 					continue ;;
 			esac
 			how="in a new tab, since its tab could not be told apart ($tab_why)"
@@ -737,8 +786,22 @@ if [ "$ghostty_running" = true ]; then
 			{id: $id, name: $name, config_dir: $dir, pid: $pid, tty: $tty, cwd: $cwd, transcript: $tp,
 			 terminal: $terminal, carry: $carry, how: $how}')")
 	done < <(read_live)
+	# One a reader reports, but on a tty no Ghostty tab holds, runs inside
+	# another program's terminal in a tab (nvim's :terminal, say), where its
+	# tab cannot be named; one no reader reports runs under a config dir not
+	# listed.
 	while IFS= read -r line; do
-		[ -n "$line" ] && refusals+=("Claude Code under Ghostty that no reader reports (a config dir not in GHOSTTY_UPDATE_CONFIG_DIRS?): $line")
+		[ -n "$line" ] || continue
+		pid="${line#pid }"
+		pid="${pid%% *}"
+		if [ -n "${not_in_tab[$pid]:-}" ]; then
+			refusals+=("${not_in_tab[$pid]}: runs under Ghostty inside another program's terminal (an nvim :terminal, say), not in a tab's foreground, so its tab cannot be found and the quit would end it")
+			for i in "${!alone[@]}"; do
+				[ "${alone[$i]}" = "${not_in_tab[$pid]}: not in a Ghostty tab" ] && unset 'alone[i]'
+			done
+		else
+			refusals+=("Claude Code under Ghostty that no reader reports (a config dir not in GHOSTTY_UPDATE_CONFIG_DIRS?): $line")
+		fi
 	done < <(unplanned_claudes ${plan_pids[@]+"${plan_pids[@]}"})
 fi
 
