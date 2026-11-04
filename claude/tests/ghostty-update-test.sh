@@ -66,9 +66,10 @@ export GHOSTTY_UPDATE_APP_BIN="$TMP/bin/ghostty-app"
 export GHOSTTY_UPDATE_NOTIFY_BIN="$TMP/bin/notify"
 export GHOSTTY_UPDATE_DETACH_BIN="$TMP/bin/detach"
 export GHOSTTY_UPDATE_DELAY_SECS=0 GHOSTTY_UPDATE_GRACE_SECS=3 GHOSTTY_UPDATE_QUIT_SECS=2
+export GHOSTTY_UPDATE_CALLER_SECS=3 GHOSTTY_UPDATE_CONFIRM_WAIT_SECS=8
 export GHOSTTY_UPDATE_LAUNCH_SECS=2 GHOSTTY_UPDATE_RESTORE_SECS=2 GHOSTTY_UPDATE_PROMPT_SECS=3
 export GHOSTTY_UPDATE_CONFIRM_SECS=3 GHOSTTY_UPDATE_TAB_TIMEOUT_SECS=5
-export REOPEN_CONFIRM_SECS=0
+export REOPEN_CONFIRM_SECS=5
 unset CLAUDE_CODE_SESSION_ID DESK_HEADLESS DESK_CONFIG
 ln -sf "$(command -v bash)" "$TMP/bin/claude"
 export TMP PROJ_DIR TRANSCRIPTS RECORDER PLATFORM="$HERE/lib/platform.sh"
@@ -110,16 +111,20 @@ SPAWN
 source "$TMP/spawn.sh"
 
 # The process table: each stand-in in a desk tab (the user's login shell,
-# the command typed into it), and 7000, the login shell of a tab Ghostty
-# restored. With $TMP/procs-extra, those rows too.
+# the command typed into it) under Ghostty, or under Terminal.app when
+# $TMP/outside-<pid> says it runs outside Ghostty, and 7000, the login shell
+# of a tab Ghostty restored. With $TMP/procs-extra, those rows too.
 cat > "$TMP/bin/ps" << 'EOF'
 #!/usr/bin/env bash
 echo "8000 1 /Applications/Ghostty.app/Contents/MacOS/ghostty"
+echo "8100 1 /System/Applications/Utilities/Terminal.app/Contents/MacOS/Terminal"
 echo "7000 8000 -zsh"
 for f in "$CLAUDE_CONFIG_DIR"/sessions/*.json; do
 	[ -f "$f" ] || continue
 	p=$(basename "$f" .json)
-	echo "$((p + 200000)) 8000 -/bin/zsh"
+	app=8000
+	[ -e "$TMP/outside-$p" ] && app=8100
+	echo "$((p + 200000)) $app -/bin/zsh"
 	echo "$((p + 100000)) $((p + 200000)) /bin/zsh -lic claude --resume x"
 	echo "$p $((p + 100000)) claude --resume x"
 done
@@ -159,10 +164,17 @@ case "$1" in
 esac
 exit 0
 EOF
-# The tab opener reopen-sessions.sh calls: logs the command.
+# The tab opener reopen-sessions.sh calls: logs the command and starts a
+# stand-in for the session, as the resume in the new tab would, unless
+# $TMP/opener-fails, or $TMP/no-resume (opened, but the session never
+# comes up).
 cat > "$DESK_OPEN_TAB_BIN" << 'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$1" >> "$TMP/opened"
+[ -e "$TMP/opener-fails" ] && { echo "DeskOpenTab: no frontmost Ghostty window" >&2; echo false; exit 1; }
+[ -e "$TMP/no-resume" ] && { echo true; exit 0; }
+source "$TMP/spawn.sh"
+spawn "$2" > /dev/null
 echo true
 EOF
 
@@ -178,6 +190,7 @@ case "$1" in
 	info) jq -n --arg c "$cask" '{casks: [{token: $c, version: (if $c == "ghostty" then "1.4.0" else "18605,c7f6" end)}]}' ;;
 	*)
 		echo "$1 $cask" >> "$TMP/brew.log"
+		[ "$1" = fetch ] && [ -f "$TMP/on-fetch" ] && bash "$TMP/on-fetch"
 		[ "$(cat "$TMP/brew-fails-$1" 2> /dev/null)" = "$cask" ] && exit 1
 		case "$1" in
 			uninstall) rm -f "$TMP/installed" ;;
@@ -186,19 +199,33 @@ case "$1" in
 		exit 0 ;;
 esac
 EOF
-# Ghostty: running while $TMP/running exists. quit ends it unless
-# $TMP/quit-refused (a confirmation cancelled); launch starts it, Ghostty
-# restoring the terminals listed in $TMP/restore. version is the installed
-# cask's.
+# Ghostty: running while $TMP/running exists. quit ends it, unless
+# $TMP/quit-fails (Hammerspoon unreachable), $TMP/quit-refused (it stays,
+# showing nothing) or $TMP/dialog-checks (a confirmation it shows for that
+# many looks, after which it quits if $TMP/confirm-quit, else stays: a
+# cancel). launch starts it, unless $TMP/no-launch, restoring the terminals
+# listed in $TMP/restore. version is the installed cask's.
 cat > "$GHOSTTY_UPDATE_APP_BIN" << 'EOF'
 #!/usr/bin/env bash
+gone() { rm -f "$TMP/running"; : > "$TMP/terminals"; }
 case "$1" in
 	running) [ -e "$TMP/running" ] ;;
 	quit)
 		echo quit >> "$TMP/app.log"
-		[ -e "$TMP/quit-refused" ] || { rm -f "$TMP/running"; : > "$TMP/terminals"; } ;;
+		[ -e "$TMP/quit-fails" ] && { echo "hs: can't access Hammerspoon message port"; exit 1; }
+		[ -e "$TMP/quit-refused" ] || [ -e "$TMP/dialog-checks" ] || gone ;;
+	dialog)
+		left=$(cat "$TMP/dialog-checks" 2> /dev/null || echo 0)
+		if [ "$left" -gt 0 ]; then
+			echo $((left - 1)) > "$TMP/dialog-checks"
+			echo dialog
+		else
+			[ -e "$TMP/confirm-quit" ] && [ -e "$TMP/dialog-checks" ] && gone
+			echo none
+		fi ;;
 	launch)
 		echo launch >> "$TMP/app.log"
+		[ -e "$TMP/no-launch" ] && exit 1
 		touch "$TMP/running"
 		cp "$TMP/restore" "$TMP/terminals" 2> /dev/null ;;
 	version)
@@ -213,12 +240,18 @@ cat > "$GHOSTTY_UPDATE_NOTIFY_BIN" << 'EOF'
 #!/usr/bin/env bash
 printf '%s: %s\n' "$1" "$2" >> "$TMP/notified"
 EOF
-# The hand-over: the job runs inline, after $TMP/before-job if there is one.
+# The hand-over: the job runs inline from its spec, with the spec's
+# environment over this one, after $TMP/before-job if there is one.
 cat > "$GHOSTTY_UPDATE_DETACH_BIN" << 'EOF'
 #!/usr/bin/env bash
-echo "$*" >> "$TMP/detached"
-[ -f "$TMP/before-job" ] && bash "$TMP/before-job"
-"$@"
+cp "$1" "$TMP/detached"
+# Its output goes nowhere: a stand-in it starts would otherwise hold the
+# test's $(...) open through the copy of stdout bash keeps around a
+# redirected function call.
+[ -f "$TMP/before-job" ] && bash "$TMP/before-job" > /dev/null 2>&1
+mapfile -t argv < <(jq -r '.ProgramArguments[]' "$1")
+mapfile -t envs < <(jq -r '.EnvironmentVariables | to_entries[] | "\(.key)=\(.value)"' "$1")
+env "${envs[@]}" "${argv[@]}"
 EOF
 chmod +x "$TMP"/bin/*
 
@@ -239,12 +272,25 @@ fresh() {
 	sleep 0.5
 	rm -f "$CONFIG_DIR"/sessions/*.json "$TMP"/outside-* "$TMP"/argv-* "$TMP"/typed-* "$TMP"/brew-fails-* \
 		"$TMP/tab.log" "$TMP/opened" "$TMP/brew.log" "$TMP/app.log" "$TMP/notified" "$TMP/detached" \
-		"$TMP/before-job" "$TMP/quit-refused" "$TMP/no-resume" "$TMP/outdated" "$TMP/procs-extra" "$TMP/restore"
+		"$TMP/before-job" "$TMP/quit-refused" "$TMP/no-resume" "$TMP/outdated" "$TMP/procs-extra" "$TMP/restore" \
+		"$TMP/on-fetch" "$TMP/quit-fails" "$TMP/dialog-checks" "$TMP/confirm-quit" "$TMP/no-launch" "$TMP/opener-fails"
 	rm -rf "$TMP/state"/*
 	echo ghostty@tip > "$TMP/installed"
 	touch "$TMP/running"
 }
 tabs() { printf 'T-%s\n' "$@" > "$TMP/terminals"; }
+
+# A script line that marks the session with pid $1 busy, as a prompt
+# arriving would.
+busy_line() {
+	printf "jq '.status = \"busy\"' '%s' > '%s' && mv '%s' '%s'\n" \
+		"$CONFIG_DIR/sessions/$1.json" "$TMP/pf" "$TMP/pf" "$CONFIG_DIR/sessions/$1.json"
+}
+note() { tail -n 1 "$TMP/notified" 2> /dev/null; }
+resume_file() { cat "$TMP"/state/logs/ghostty-update-*.resume 2> /dev/null; }
+nothing_changed() { # description
+	assert_eq "$1" "|ghostty@tip" "$(grep -v '^fetch' "$TMP/brew.log" 2> /dev/null)|$(cat "$TMP/installed")"
+}
 
 echo "=== a dry run says what it would do, and does nothing ==="
 fresh
@@ -283,7 +329,22 @@ assert_lacks "...not the idle one" "($a): not idle" "$out"
 assert_eq "nothing stopped" "alive alive alive" "$(alive "$pa") $(alive "$pb") $(alive "$pc")"
 assert_eq "...no brew step, no quit, no job" "||" "$(cat "$TMP/brew.log" 2> /dev/null)|$(cat "$TMP/app.log" 2> /dev/null)|$(cat "$TMP/detached" 2> /dev/null)"
 CLAUDE_CODE_SESSION_ID="$b" run_update --dry-run --to ghostty
-assert_lacks "the session running the command is spared the idle check" "($b): not idle" "$out"
+assert_lacks "the session running the command is spared the idle check at first" "($b): not idle" "$out"
+now_s=$(date +%s)
+printf '{"type":"user","timestamp":"%s","toolUseResult":{"scheduledFor":%s}}\n' \
+	"$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" "$(((now_s + 600) * 1000))" >> "$TRANSCRIPTS/$b.jsonl"
+CLAUDE_CODE_SESSION_ID="$b" run_update --dry-run --to ghostty
+assert_has "...but not the check for what is scheduled in it" "($b): it has a wakeup due at" "$out"
+
+echo "=== Claude Code under Ghostty that no reader reports refuses the update ==="
+fresh
+a=$(uuid)
+pa=$(spawn "$a")
+tabs "$pa"
+echo "5555 8000 claude --model opus" > "$TMP/procs-extra"
+run_update --dry-run --to ghostty
+assert_eq "exit 1" "1" "$rc"
+assert_has "it names the process" "pid 5555 (claude --model opus)" "$out"
 
 echo "=== the move: each session back in the tab Ghostty restored for it ==="
 fresh
@@ -301,7 +362,8 @@ printf 'T-%s\n' "$pa" > "$TMP/restore"
 run_update --to ghostty
 assert_eq "exit 0" "0" "$rc"
 assert_has "it says where the log is" "Log: $DESK_STATE_DIR/logs/ghostty-update-" "$out"
-assert_eq "the job was handed the plan" "--job" "$(awk '{print $3}' "$TMP/detached")"
+assert_eq "the job carries the documented overrides into its environment" "2|5" \
+	"$(jq -r '.EnvironmentVariables | "\(.GHOSTTY_UPDATE_QUIT_SECS)|\(.GHOSTTY_UPDATE_TAB_TIMEOUT_SECS)"' "$TMP/detached")"
 assert_eq "the new cask fetched before the quit, the old one uninstalled, the new one installed" \
 	"fetch ghostty|uninstall ghostty@tip|install ghostty" "$(paste -sd'|' "$TMP/brew.log")"
 assert_eq "Ghostty quit, then launched" "quit|launch" "$(paste -sd'|' "$TMP/app.log")"
@@ -314,37 +376,101 @@ assert_eq "a's resume, with its flags, was typed into its restored tab's shell" 
 assert_eq "...and nothing into b's, which was not restored" "false" "$([ -e "$TMP/typed-T-$pb" ] && echo true || echo false)"
 assert_has "b was reopened in a new tab by reopen-sessions.sh" "claude --resume '$b'" "$(cat "$TMP/opened" 2> /dev/null)"
 assert_lacks "...and a was not opened a second time" "$a" "$(cat "$TMP/opened" 2> /dev/null)"
-note="$(tail -n 1 "$TMP/notified")"
-assert_has "the notification says what was updated, from which version to which" \
-	"Ghostty updated: ghostty@tip b3dc3d794 (build 18248) -> ghostty 1.4.0. 2 session(s) resumed (" "$note"
-assert_has "...naming the sessions and how each came back" "$(name_of "$a"): in its tab" "$note"
-assert_has "...b in a new tab" "$(name_of "$b"): in a new tab" "$note"
-assert_has "the log has the same" "resumed  $(name_of "$b"): in a new tab" "$(the_log)"
+assert_eq "the notification is short: the versions, how many came back, the log" \
+	"Ghostty updated: ghostty@tip b3dc3d794 (build 18248) -> ghostty 1.4.0. 2 of 2 sessions resumed. Log: $(ls "$TMP"/state/logs/ghostty-update-*.log)" "$(note)"
+assert_has "the log says how each came back" "resumed  $(name_of "$a"): in its tab" "$(the_log)"
+assert_has "...b in a new tab" "resumed  $(name_of "$b"): in a new tab" "$(the_log)"
 
-echo "=== a session that turns busy before the job acts stops everything ==="
+echo "=== a session that turns busy during the fetch stops everything ==="
 fresh
 a=$(uuid)
 pa=$(spawn "$a")
 tabs "$pa"
-printf 'jq %s %s > %s && mv %s %s\n' "'.status = \"busy\"'" "'$CONFIG_DIR/sessions/$pa.json'" "'$TMP/pf'" "'$TMP/pf'" "'$CONFIG_DIR/sessions/$pa.json'" > "$TMP/before-job"
+busy_line "$pa" > "$TMP/on-fetch"
 run_update --to ghostty
 assert_eq "the session still runs" "alive" "$(alive "$pa")"
-assert_eq "...Ghostty was not quit and nothing installed" "|" "$(cat "$TMP/app.log" 2> /dev/null)|$(grep -v '^fetch' "$TMP/brew.log" 2> /dev/null)"
-assert_has "...and the notification says why" "Ghostty not updated: Nothing was done: $(name_of "$a") ($a) is no longer idle: not idle: its status is busy" "$(cat "$TMP/notified")"
+assert_eq "...Ghostty was not quit" "" "$(cat "$TMP/app.log" 2> /dev/null)"
+nothing_changed "...and nothing installed"
+assert_has "...the notification saying why" "Ghostty not updated: Nothing was done: $(name_of "$a") ($a) is no longer idle: not idle: its status is busy" "$(note)"
 
-echo "=== a quit that is cancelled updates nothing, and resumes the sessions where they are ==="
+echo "=== a session started after the first look stops everything ==="
 fresh
 a=$(uuid)
 pa=$(spawn "$a")
 tabs "$pa"
-: > "$TMP/quit-refused"
+n=$(uuid)
+printf 'source "%s"; spawn %s > /dev/null\n' "$TMP/spawn.sh" "$n" > "$TMP/before-job"
 run_update --to ghostty
-assert_eq "nothing uninstalled or installed" "fetch ghostty" "$(paste -sd'|' "$TMP/brew.log")"
-assert_eq "...still ghostty@tip" "ghostty@tip" "$(cat "$TMP/installed")"
-assert_has "the session was resumed in its own tab" "type T-$pa 7000" "$(cat "$TMP/tab.log")"
-assert_has "...and the notification says nothing was updated" "Ghostty not updated: Ghostty did not quit within 2s" "$(tail -n 1 "$TMP/notified")"
+assert_eq "both still run" "alive" "$(alive "$pa")"
+assert_has "...the notification naming the new one" "outside the plan, which the quit would end: pid" "$(note)"
+assert_has "...by its session" "session $n" "$(note)"
+nothing_changed "...nothing installed"
 
-echo "=== an install that fails puts the old cask back ==="
+echo "=== the session that ran this is waited for ==="
+fresh
+a=$(uuid)
+pa=$(spawn "$a" busy)
+tabs "$pa"
+printf 'T-%s\n' "$pa" > "$TMP/restore"
+printf '(sleep 1; %s) > /dev/null 2>&1 &\n' "$(busy_line "$pa" | sed 's/"busy"/"idle"/')" > "$TMP/before-job"
+CLAUDE_CODE_SESSION_ID="$a" run_update --to ghostty
+assert_has "once idle, it was stopped and resumed with the rest" "Ghostty updated: " "$(note)"
+assert_has "...in its tab" "type T-$pa 7000" "$(cat "$TMP/tab.log")"
+fresh
+a=$(uuid)
+pa=$(spawn "$a" busy)
+tabs "$pa"
+CLAUDE_CODE_SESSION_ID="$a" run_update --to ghostty
+assert_eq "never idle: still running" "alive" "$(alive "$pa")"
+assert_has "...refused, saying so" "the session that ran this, did not go idle within 3s: not idle: its status is busy" "$(note)"
+nothing_changed "...nothing installed"
+
+echo "=== a quit confirmation is waited out ==="
+fresh
+a=$(uuid)
+pa=$(spawn "$a")
+tabs "$pa"
+printf 'T-%s\n' "$pa" > "$TMP/restore"
+echo 2 > "$TMP/dialog-checks"
+: > "$TMP/confirm-quit"
+run_update --to ghostty
+assert_has "the user is told it waits for the confirmation" "Ghostty update waiting: Ghostty is asking whether to quit." "$(cat "$TMP/notified")"
+assert_has "...confirmed, the update went on" "Ghostty updated: " "$(note)"
+assert_eq "...and installed" "ghostty" "$(cat "$TMP/installed")"
+fresh
+a=$(uuid)
+pa=$(spawn "$a")
+tabs "$pa"
+echo 2 > "$TMP/dialog-checks"
+run_update --to ghostty
+nothing_changed "cancelled: nothing installed"
+assert_has "...the session resumed in its own tab" "type T-$pa 7000" "$(cat "$TMP/tab.log")"
+assert_has "...the notification saying nothing was updated" "Ghostty not updated: Still ghostty@tip b3dc3d794 (build 18248). 1 of 1 sessions resumed." "$(note)"
+assert_has "...and the log why" "the quit was cancelled" "$(the_log)"
+fresh
+a=$(uuid)
+pa=$(spawn "$a")
+tabs "$pa"
+echo 1000 > "$TMP/dialog-checks"
+run_update --to ghostty
+nothing_changed "still asking when the wait runs out: nothing installed"
+assert_eq "...nothing typed into Ghostty, which a later confirm would quit" "" "$(grep '^type' "$TMP/tab.log")"
+assert_has "...the notification naming the session not resumed" "0 of 1 sessions resumed. Not resumed: $(name_of "$a"); commands in " "$(note)"
+assert_has "...the file it names holds the exact command" "cd '$PROJ_DIR' && CLAUDE_CONFIG_DIR='$CONFIG_DIR' claude --resume $a" "$(resume_file)"
+assert_has "...and the log why" "still asking to confirm the quit" "$(the_log)"
+
+echo "=== a quit call that fails is reported as that ==="
+fresh
+a=$(uuid)
+pa=$(spawn "$a")
+tabs "$pa"
+: > "$TMP/quit-fails"
+run_update --to ghostty
+nothing_changed "nothing installed"
+assert_has "...the log naming the failed call" "the quit call to Hammerspoon failed (hs: can't access Hammerspoon message port)" "$(the_log)"
+assert_has "...and the session resumed where it was" "type T-$pa 7000" "$(cat "$TMP/tab.log")"
+
+echo "=== brew failing ==="
 fresh
 a=$(uuid)
 pa=$(spawn "$a")
@@ -352,10 +478,73 @@ tabs "$pa"
 printf 'T-%s\n' "$pa" > "$TMP/restore"
 echo ghostty > "$TMP/brew-fails-install"
 run_update --to ghostty
-assert_eq "ghostty failed to install, so ghostty@tip went back" \
+assert_eq "an install that fails puts the old cask back" \
 	"fetch ghostty|uninstall ghostty@tip|install ghostty|install ghostty@tip" "$(paste -sd'|' "$TMP/brew.log")"
-assert_has "...the notification saying so" "Ghostty not updated: brew install --cask ghostty failed (exit 1); put ghostty@tip back" "$(tail -n 1 "$TMP/notified")"
+assert_has "...the notification saying it was not updated" "Ghostty not updated: Still ghostty@tip" "$(note)"
+assert_has "...the log why" "brew install --cask ghostty failed (exit 1); put ghostty@tip back" "$(the_log)"
 assert_has "...and the session still came back" "type T-$pa 7000" "$(cat "$TMP/tab.log")"
+fresh
+a=$(uuid)
+pa=$(spawn "$a")
+tabs "$pa"
+printf 'T-%s\n' "$pa" > "$TMP/restore"
+echo ghostty@tip > "$TMP/brew-fails-uninstall"
+run_update --to ghostty
+assert_eq "an uninstall that fails installs nothing" "fetch ghostty|uninstall ghostty@tip" "$(paste -sd'|' "$TMP/brew.log")"
+assert_has "...saying so" "brew uninstall --cask ghostty@tip failed (exit 1), so ghostty was not installed" "$(the_log)"
+assert_has "...and the session still came back" "type T-$pa 7000" "$(cat "$TMP/tab.log")"
+fresh
+a=$(uuid)
+pa=$(spawn "$a")
+tabs "$pa"
+printf 'T-%s\n' "$pa" > "$TMP/restore"
+: > "$TMP/outdated"
+echo ghostty@tip > "$TMP/brew-fails-upgrade"
+run_update
+assert_eq "an upgrade that fails" "fetch ghostty@tip|upgrade ghostty@tip" "$(paste -sd'|' "$TMP/brew.log")"
+assert_has "...is reported" "brew upgrade --cask ghostty@tip failed (exit 1)" "$(the_log)"
+assert_has "...and the session still came back" "Ghostty not updated: Still ghostty@tip b3dc3d794 (build 18248). 1 of 1 sessions resumed." "$(note)"
+
+echo "=== Ghostty restoring nothing, or not coming back ==="
+fresh
+a=$(uuid)
+pa=$(spawn "$a")
+b=$(uuid)
+pb=$(spawn "$b")
+tabs "$pa" "$pb"
+run_update --to ghostty
+assert_eq "restoring no tab: nothing typed" "" "$(grep '^type' "$TMP/tab.log")"
+assert_eq "...both reopened in new tabs" "2" "$(grep -c 'claude --resume' "$TMP/opened")"
+assert_has "...and counted, once live" "2 of 2 sessions resumed." "$(note)"
+fresh
+a=$(uuid)
+pa=$(spawn "$a")
+tabs "$pa"
+: > "$TMP/no-launch"
+run_update --to ghostty
+assert_has "not relaunching: the update is still reported" "Ghostty updated: " "$(note)"
+assert_has "...with the session not resumed" "0 of 1 sessions resumed. Not resumed: $(name_of "$a")" "$(note)"
+assert_has "...its command in the file" "# $(name_of "$a"): Ghostty is not running after 2s" "$(resume_file)"
+assert_eq "...and nothing opened" "" "$(cat "$TMP/opened" 2> /dev/null)"
+
+echo "=== a reopen that does not take carries its resume command ==="
+fresh
+a=$(uuid)
+pa=$(spawn "$a")
+tabs "$pa"
+: > "$TMP/opener-fails"
+run_update --to ghostty
+assert_has "it is not counted as resumed" "0 of 1 sessions resumed. Not resumed: $(name_of "$a")" "$(note)"
+assert_has "...the reason and the command in the file" "failed: opener failed" "$(resume_file)"
+assert_has "..." "cd '$PROJ_DIR' && CLAUDE_CONFIG_DIR='$CONFIG_DIR' claude --resume $a" "$(resume_file)"
+fresh
+a=$(uuid)
+pa=$(spawn "$a")
+tabs "$pa"
+: > "$TMP/no-resume"
+run_update --to ghostty
+assert_has "a tab opened whose session never came up is not counted either" "0 of 1 sessions resumed. Not resumed: $(name_of "$a")" "$(note)"
+assert_has "...its command in the file" "cd '$PROJ_DIR' && CLAUDE_CONFIG_DIR='$CONFIG_DIR' claude --resume $a" "$(resume_file)"
 
 echo "=== a resume that does not take is reported with the command to run ==="
 fresh
@@ -371,9 +560,9 @@ assert_eq "...and nothing stopped" "alive" "$(alive "$pa")"
 : > "$TMP/outdated"
 run_update
 assert_eq "outdated: upgraded in place" "fetch ghostty@tip|upgrade ghostty@tip" "$(paste -sd'|' "$TMP/brew.log")"
-assert_has "the failed one is in the notification with the exact resume command" \
-	"$(name_of "$a"): typed into its tab but not live after 3s; look at the tab, else: cd '$PROJ_DIR' && CLAUDE_CONFIG_DIR='$CONFIG_DIR' claude --resume $a" \
-	"$(tail -n 1 "$TMP/notified")"
+assert_has "the notification names the one not resumed" "Not resumed: $(name_of "$a")" "$(note)"
+assert_has "...its file the exact command" "typed into its tab but not live after 3s" "$(resume_file)"
+assert_has "..." "cd '$PROJ_DIR' && CLAUDE_CONFIG_DIR='$CONFIG_DIR' claude --resume $a" "$(resume_file)"
 
 echo "=== recorder never logged an error ==="
 assert_eq "recorder log is empty" "" "$(cat "$CLAUDE_SESSION_RECORDER_LOG" 2> /dev/null)"
