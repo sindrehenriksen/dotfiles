@@ -1207,6 +1207,247 @@ function DeskTypeInTerminal(terminal_id, pid, text)
   return true
 end
 
+-- ---------------------------------------------------------------------------
+-- Desk: offer to restart a stale session when its tab is focused, never
+-- restart one unasked. Switching between Ghostty's native tabs fires no
+-- hs.window.filter windowFocused (each tab is its own window, but only
+-- coming from another app fires it); the Ghostty application element's
+-- AXMainWindowChanged does fire on every tab switch, so that is what is
+-- watched, on Ghostty alone, re-attached whenever Ghostty launches.
+--
+-- A focus is settled for a moment, then the focused terminal's foreground
+-- pid is asked of Ghostty, off the main thread, and mapped to a session by
+-- its pid file. claude/session-stale.sh says why it is worth restarting
+-- (or exits 1 when it cannot say now). A session is offered once per set
+-- of reasons: Dismiss, or ignoring the offer, quiets it until its reasons
+-- change, and a session found not stale is forgotten, so reasons coming
+-- back are offered afresh. Restart runs claude/restart-session.sh. Cmd+Opt+R,
+-- bound only while Ghostty is the active app, restarts the focused tab's
+-- session stale or not, after the checks restart-session.sh makes.
+-- The offer's buttons show only with Hammerspoon's notifications set to
+-- Alerts in System Settings; as banners they appear on hover.
+-- ---------------------------------------------------------------------------
+
+DeskStale = {}
+
+local HOME = os.getenv("HOME") or ""
+-- The two config dirs the `claude` account switcher in .shellrc uses; a
+-- session's pid file is in one of them.
+DeskStale.config_dirs = { HOME .. "/.claude", HOME .. "/.claude-work" }
+DeskStale.bin_dir = HOME .. "/.local/bin"
+DeskStale.settle_secs = 0.4
+DeskStale.recheck_secs = 30
+-- Per pid: { reasons = <the reasons last offered>, checked = <time> }.
+DeskStale.seen = {}
+
+DeskStale.FOCUSED_PID_SCRIPT =
+  'tell application "Ghostty" to return (pid of focused terminal of selected tab of front window) as text'
+
+-- The session whose pid file names `pid`, as { id, name, dir }, from the
+-- first config dir holding one; `read(path)` returns the decoded file or
+-- nil.
+function DeskStale.session_for_pid(pid, dirs, read)
+  if type(pid) ~= "number" then return nil end
+  for _, dir in ipairs(dirs) do
+    local pf = read(dir .. "/sessions/" .. string.format("%d", pid) .. ".json")
+    if type(pf) == "table" and DeskTab.looks_like_uuid(pf.sessionId) then
+      local name = (type(pf.name) == "string" and pf.name ~= "") and pf.name or pf.sessionId:sub(1, 8)
+      return { id = pf.sessionId, name = name, dir = dir, pid = pid }
+    end
+  end
+  return nil
+end
+
+-- What a session-stale.sh result means for a session last offered `prev`
+-- (nil if never): "offer" (restartable), "manual" (its tab would close with
+-- it), "quiet" (already offered for these reasons), "clear" (not stale:
+-- forget it) or "wait" (cannot tell now: leave it be). Also returns the
+-- reasons as one string.
+function DeskStale.decide(prev, rc, out)
+  local reasons = (out or ""):gsub("%s+$", "")
+  if rc == 0 and reasons == "" then return "clear", "" end
+  if (rc ~= 0 and rc ~= 3) or reasons == "" then return "wait", reasons end
+  if prev and prev.reasons == reasons then return "quiet", reasons end
+  return rc == 3 and "manual" or "offer", reasons
+end
+
+-- The notification for an offer, as hs.notify attributes.
+function DeskStale.offer_attributes(session, reasons, kind)
+  local why = reasons:gsub("\n", "; ")
+  if kind == "manual" then
+    return {
+      title = session.name .. " is out of date",
+      subTitle = why,
+      informativeText = "This tab can't restart it in place: exit the session and resume it once "
+        .. "(claude --resume " .. session.id .. "), and restarts work here from then on.",
+      hasActionButton = false,
+      otherButtonTitle = "Dismiss",
+      withdrawAfter = 0,
+    }
+  end
+  return {
+    title = "Restart " .. session.name .. "?",
+    subTitle = why,
+    informativeText = "Unsent text in its input box is lost on restart.",
+    hasActionButton = true,
+    actionButtonTitle = "Restart",
+    otherButtonTitle = "Dismiss",
+    withdrawAfter = 0,
+  }
+end
+
+-- A restart-session.sh result as { title, informativeText }: its output
+-- line is `<status>\t<id>\t<name>\t<detail>`.
+function DeskStale.restart_report(session, rc, out)
+  local status, _, _, detail = (out or ""):match("^([^\t]*)\t([^\t]*)\t([^\t]*)\t([^\n]*)")
+  if rc == 0 then
+    return { title = "Restarted " .. session.name, informativeText = detail or "" }
+  end
+  if rc == 3 then
+    return {
+      title = session.name .. " can't restart in this tab",
+      informativeText = "Exit the session and resume it once (claude --resume " .. session.id
+        .. "), and restarts work here from then on.",
+    }
+  end
+  return {
+    title = session.name .. " not restarted",
+    informativeText = detail or ("restart-session.sh exited " .. tostring(rc) .. (status and "" or ", saying nothing")),
+  }
+end
+
+-- The PATH a login shell gets, for the scripts these run (jq, hs and the
+-- desk tools live outside Hammerspoon's own PATH); read once at load.
+local login_path = nil
+hs.task.new("/bin/zsh", function(rc, out)
+  if rc == 0 and type(out) == "string" and out ~= "" then login_path = out end
+end, { "-lc", 'printf %s "$PATH"' }):start()
+
+local function run_tool(session, tool, args, done)
+  local t = hs.task.new(DeskStale.bin_dir .. "/" .. tool, done, args)
+  if not t then return done(-1, "", "could not start " .. tool) end
+  t:setEnvironment({
+    HOME = HOME, USER = os.getenv("USER"), LOGNAME = os.getenv("LOGNAME"),
+    TMPDIR = os.getenv("TMPDIR"), LANG = os.getenv("LANG") or "en_US.UTF-8",
+    PATH = login_path or "/usr/bin:/bin:/usr/sbin:/sbin",
+    CLAUDE_CONFIG_DIR = session.dir,
+  })
+  t:start()
+end
+
+local function read_json(path)
+  local f = io.open(path, "r")
+  if not f then return nil end
+  local text = f:read("a")
+  f:close()
+  local ok, value = pcall(hs.json.decode, text)
+  return ok and value or nil
+end
+
+function DeskStale.restart(session)
+  hs.alert.show("Restarting " .. session.name .. "…", 2)
+  run_tool(session, "restart-session.sh", { session.id }, function(rc, out)
+    local report = DeskStale.restart_report(session, rc, out)
+    hs.notify.new({ title = report.title, informativeText = report.informativeText }):send()
+  end)
+end
+
+-- Acts on a session-stale.sh result for `session`.
+function DeskStale.handle(session, rc, out)
+  local prev = DeskStale.seen[session.pid]
+  local action, reasons = DeskStale.decide(prev, rc, out)
+  if action == "clear" then
+    DeskStale.seen[session.pid] = nil
+  elseif action == "offer" or action == "manual" then
+    DeskStale.seen[session.pid] = { reasons = reasons, checked = hs.timer.secondsSinceEpoch() }
+    hs.notify.new(function(n)
+      if action == "offer" and n:activationType() == hs.notify.activationTypes.actionButtonClicked then
+        DeskStale.restart(session)
+      end
+    end, DeskStale.offer_attributes(session, reasons, action)):send()
+  end
+  return action
+end
+
+-- Ghostty's focused terminal's foreground pid, asked off the main thread;
+-- `done(pid)` gets nil when there is none to be had.
+local function focused_pid(done)
+  local t = hs.task.new("/usr/bin/osascript", function(rc, out)
+    done(rc == 0 and tonumber((out or ""):match("^(%d+)")) or nil)
+  end, { "-e", DeskStale.FOCUSED_PID_SCRIPT })
+  if t then t:start() else done(nil) end
+end
+
+local checking = false
+function DeskStale.check_focused()
+  if checking then return end
+  checking = true
+  focused_pid(function(pid)
+    local session = DeskStale.session_for_pid(pid, DeskStale.config_dirs, read_json)
+    local prev = session and DeskStale.seen[session.pid]
+    local now = hs.timer.secondsSinceEpoch()
+    if not session or (prev and now - prev.checked < DeskStale.recheck_secs) then
+      checking = false
+      return
+    end
+    run_tool(session, "session-stale.sh", { session.id }, function(rc, out)
+      checking = false
+      if DeskStale.seen[session.pid] then DeskStale.seen[session.pid].checked = now end
+      DeskStale.handle(session, rc, out)
+    end)
+  end)
+end
+
+local settle_timer = nil
+local function on_ghostty_focus()
+  if settle_timer then settle_timer:stop() end
+  settle_timer = hs.timer.doAfter(DeskStale.settle_secs, function()
+    settle_timer = nil
+    DeskStale.check_focused()
+  end)
+end
+
+DeskStale.hotkey = hs.hotkey.new({ "cmd", "alt" }, "r", function()
+  focused_pid(function(pid)
+    local session = DeskStale.session_for_pid(pid, DeskStale.config_dirs, read_json)
+    if not session then
+      hs.alert.show("No Claude Code session in this tab", 2)
+      return
+    end
+    DeskStale.restart(session)
+  end)
+end)
+
+local ghostty_watcher = nil
+local function watch_ghostty(app)
+  if ghostty_watcher then ghostty_watcher:stop() end
+  ghostty_watcher = app:newWatcher(on_ghostty_focus)
+  ghostty_watcher:start({
+    hs.uielement.watcher.mainWindowChanged,
+    hs.uielement.watcher.applicationActivated,
+  })
+end
+
+desk_stale_app_watcher = hs.application.watcher.new(function(name, event, app)
+  if name ~= "Ghostty" then return end
+  if event == hs.application.watcher.launched then
+    watch_ghostty(app)
+  elseif event == hs.application.watcher.activated then
+    DeskStale.hotkey:enable()
+  elseif event == hs.application.watcher.deactivated or event == hs.application.watcher.terminated then
+    DeskStale.hotkey:disable()
+  end
+end)
+desk_stale_app_watcher:start()
+do
+  local ghostty = hs.application.get("Ghostty")
+  if ghostty then
+    watch_ghostty(ghostty)
+    local front = hs.application.frontmostApplication()
+    if front and front:name() == "Ghostty" then DeskStale.hotkey:enable() end
+  end
+end
+
 -- Dual-function Caps Lock (remapped to F18 at the HID level by
 -- macos/keyboard-remap.sh):
 --   Tap                  → Escape

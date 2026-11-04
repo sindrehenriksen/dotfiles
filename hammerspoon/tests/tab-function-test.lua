@@ -3,8 +3,9 @@
 -- if it broke: a tab never goes into the window being typed in, no window
 -- moves or is resized, focus comes back where it was, the command reaches
 -- the user's shell intact, a locked screen opens nothing, closing a
--- session's tab closes only that one, and the overview's full-height
--- stretch is put back. Never touches a real screen, window or osascript
+-- session's tab closes only that one, the overview's full-height
+-- stretch is put back, and a stale session is offered a restart once per
+-- set of reasons, from Ghostty's tab switches alone. Never touches a real screen, window or osascript
 -- call; run with the system `lua`, not Hammerspoon.
 --
 -- Run: lua hammerspoon/tests/tab-function-test.lua
@@ -32,6 +33,9 @@ end
 
 package.preload["hs.ipc"] = function() return {} end
 
+local tasks_started = {}
+local app_watcher_fn = nil
+local notes_sent = {}
 local osascript_calls = 0
 local last_osascript_script = nil
 local timers_started = 0
@@ -59,6 +63,12 @@ hs = {
       end,
     },
     bind = function() end,
+    new = function(mods, key, fn)
+      local h = { mods = mods, key = key, fn = fn, enabled = false }
+      function h:enable() self.enabled = true; return self end
+      function h:disable() self.enabled = false; return self end
+      return h
+    end,
   },
   keycodes = {
     map = setmetatable({}, { __index = function() return 0 end }),
@@ -87,6 +97,31 @@ hs = {
   application = {
     get = function() return nil end,
     frontmostApplication = function() return nil end,
+    watcher = {
+      new = function(fn) app_watcher_fn = fn; return setmetatable({}, inert) end,
+      launched = "launched", activated = "activated", deactivated = "deactivated", terminated = "terminated",
+    },
+  },
+  uielement = { watcher = { mainWindowChanged = "AXMainWindowChanged", applicationActivated = "AXApplicationActivated" } },
+  -- Tasks are recorded, never run: a test finishes one by calling its
+  -- callback.
+  task = {
+    new = function(path, done, args)
+      local t = { path = path, done = done, args = args or {} }
+      function t:setEnvironment(env) self.env = env; return self end
+      function t:start() tasks_started[#tasks_started + 1] = self; return self end
+      return t
+    end,
+  },
+  notify = {
+    activationTypes = { actionButtonClicked = 2, contentsClicked = 1 },
+    new = function(fn, attrs)
+      if type(fn) == "table" then fn, attrs = nil, fn end
+      local n = { fn = fn, attrs = attrs }
+      function n:send() notes_sent[#notes_sent + 1] = self; return self end
+      function n:activationType() return self.clicked end
+      return n
+    end,
   },
   osascript = {
     applescript = function(script)
@@ -687,6 +722,152 @@ assert_eq("no tty: none", "none", DeskWindowTall("", 4242))
 hs.window.focusedWindow = function() return nil end
 hs.window.get = function() return nil end
 hs.osascript.applescript, hs.application.get = real_as, real_app_get
+
+-- ---------------------------------------------------------------------------
+-- The offer to restart a stale session (DeskStale): which session a tab
+-- holds, when to offer, once per set of reasons, and what each button
+-- runs. Tasks are recorded by the stub and finished by hand here.
+-- ---------------------------------------------------------------------------
+local function task_at(i) return tasks_started[i] end
+local function last_task() return tasks_started[#tasks_started] end
+local function last_note() return notes_sent[#notes_sent] end
+
+local login_task = task_at(1)
+assert_eq("at load, the login shell's PATH is asked for", "/bin/zsh -lc", login_task and (login_task.path .. " " .. login_task.args[1]))
+login_task.done(0, "/login/bin:/usr/bin", "")
+
+local S1 = "11111111-2222-3333-4444-555555555555"
+local files = {
+  ["/b/sessions/42.json"] = { sessionId = S1, name = "notes" },
+  ["/a/sessions/43.json"] = { sessionId = S1 },
+  ["/a/sessions/44.json"] = { sessionId = "not-an-id" },
+}
+local function read(path) return files[path] end
+local found = DeskStale.session_for_pid(42, { "/a", "/b" }, read)
+assert_eq("a pid's session is found in whichever config dir holds its pid file", "/b " .. S1 .. " notes",
+  found and (found.dir .. " " .. found.id .. " " .. found.name))
+assert_eq("...named by its id's start when it has no name", S1:sub(1, 8), DeskStale.session_for_pid(43, { "/a", "/b" }, read).name)
+assert_eq("a pid file without a real session id is no session", nil, DeskStale.session_for_pid(44, { "/a" }, read))
+assert_eq("no pid, no session", nil, DeskStale.session_for_pid(nil, { "/a" }, read))
+
+local function decided(prev, rc, out) return (DeskStale.decide(prev, rc, out)) end
+assert_eq("not stale: forget the session", "clear", decided(nil, 0, ""))
+assert_eq("stale and restartable: offer", "offer", decided(nil, 0, "version: 1 running, 2 installed\n"))
+assert_eq("its tab would close with it: the manual offer", "manual", decided(nil, 3, "version: 1 running, 2 installed\n"))
+assert_eq("cannot tell now: leave it be", "wait", decided({ reasons = "x" }, 1, ""))
+assert_eq("offered for these reasons already: quiet", "quiet", decided({ reasons = "shell: ~/.zshrc changed" }, 0, "shell: ~/.zshrc changed\n"))
+assert_eq("reasons that changed: offer again", "offer", decided({ reasons = "shell: ~/.zshrc changed" }, 0, "version: 1 running, 2 installed"))
+
+local session = { id = S1, name = "notes", dir = "/b", pid = 42 }
+local offer = DeskStale.offer_attributes(session, "version: 1 running, 2 installed\nshell: ~/.zshrc changed", "offer")
+assert_eq("the offer names the session", "Restart notes?", offer.title)
+assert_eq("...and every reason", "version: 1 running, 2 installed; shell: ~/.zshrc changed", offer.subTitle)
+assert_eq("...with Restart and Dismiss", "Restart/Dismiss", offer.actionButtonTitle .. "/" .. offer.otherButtonTitle)
+assert_eq("...saying unsent input is lost", true, offer.informativeText:find("Unsent text in its input box is lost", 1, true) ~= nil)
+local manual = DeskStale.offer_attributes(session, "version: 1 running, 2 installed", "manual")
+assert_eq("a tab that would close: no Restart button", false, manual.hasActionButton)
+assert_eq("...but how to get a tab that restarts", true, manual.informativeText:find("resume it once (claude --resume " .. S1 .. ")", 1, true) ~= nil)
+
+DeskStale.seen = {}
+local before = #notes_sent
+assert_eq("a stale session is offered", "offer", DeskStale.handle(session, 0, "version: 1 running, 2 installed\n"))
+local note = last_note()
+assert_eq("...one notification", before + 1, #notes_sent)
+assert_eq("the same reasons on the next look: no second notification", "quiet", DeskStale.handle(session, 0, "version: 1 running, 2 installed\n"))
+assert_eq("...none", before + 1, #notes_sent)
+assert_eq("busy for now: still quiet", "wait", DeskStale.handle(session, 1, ""))
+assert_eq("...and still quiet once it is idle again", "quiet", DeskStale.handle(session, 0, "version: 1 running, 2 installed\n"))
+local tasks_before = #tasks_started
+note.clicked = hs.notify.activationTypes.contentsClicked
+note.fn(note)
+assert_eq("clicking the notification itself restarts nothing", tasks_before, #tasks_started)
+note.clicked = hs.notify.activationTypes.actionButtonClicked
+note.fn(note)
+local restart = last_task()
+assert_eq("Restart runs restart-session.sh on the session", DeskStale.bin_dir .. "/restart-session.sh " .. S1,
+  restart and (restart.path .. " " .. restart.args[1]))
+assert_eq("...in its own config dir, on the login PATH", "/b /login/bin:/usr/bin", restart.env.CLAUDE_CONFIG_DIR .. " " .. restart.env.PATH)
+restart.done(0, "restarted\t" .. S1 .. "\tnotes\tresumed in its tab (pid 77)\n", "")
+assert_eq("...and says how it went", "Restarted notes: resumed in its tab (pid 77)", last_note().attrs.title .. ": " .. last_note().attrs.informativeText)
+local refused = DeskStale.restart_report(session, 1, "refused\t" .. S1 .. "\tnotes\tnot idle: its status is busy\n")
+assert_eq("a refusal says why", "notes not restarted: not idle: its status is busy", refused.title .. ": " .. refused.informativeText)
+assert_eq("exit 3 says how to get a tab that restarts", true,
+  DeskStale.restart_report(session, 3, "refused\t" .. S1 .. "\tnotes\tits tab would close\n").informativeText:find("resume it once", 1, true) ~= nil)
+assert_eq("found not stale: forgotten", "clear", DeskStale.handle(session, 0, ""))
+assert_eq("...so reasons coming back are offered afresh", "offer", DeskStale.handle(session, 0, "version: 1 running, 2 installed\n"))
+
+-- The focus path end to end: a tab's pid, its pid file, the check.
+local dir = os.tmpname()
+os.remove(dir)
+os.execute("mkdir -p '" .. dir .. "/sessions'")
+local f = io.open(dir .. "/sessions/4242.json", "w")
+f:write('{"pid":4242,"sessionId":"' .. S1 .. '","name":"notes"}')
+f:close()
+hs.json = { decode = function(t) return { sessionId = t:match('"sessionId":"([^"]+)"'), name = t:match('"name":"([^"]*)"') } end }
+DeskStale.config_dirs = { dir }
+DeskStale.seen = {}
+DeskStale.check_focused()
+local ask = last_task()
+assert_eq("a focus asks Ghostty for the focused terminal's pid, off the main thread", "/usr/bin/osascript", ask.path)
+assert_eq("...of the selected tab's focused terminal", DeskStale.FOCUSED_PID_SCRIPT, ask.args[2])
+ask.done(0, "4242\n", "")
+local check = last_task()
+assert_eq("...then runs session-stale.sh on the session in it", DeskStale.bin_dir .. "/session-stale.sh " .. S1 .. " " .. dir,
+  check.path .. " " .. check.args[1] .. " " .. check.env.CLAUDE_CONFIG_DIR)
+local notes_before = #notes_sent
+check.done(0, "shell: ~/.zshrc changed since it started\n", "")
+assert_eq("...and offers the restart", notes_before + 1, #notes_sent)
+local n_tasks = #tasks_started
+DeskStale.check_focused()
+last_task().done(0, "4242\n", "")
+assert_eq("focusing it again straight away checks nothing more", n_tasks + 1, #tasks_started)
+n_tasks = #tasks_started
+DeskStale.check_focused()
+last_task().done(0, "9999\n", "")
+assert_eq("a tab with no Claude Code session in it is left alone", n_tasks + 1, #tasks_started)
+n_tasks = #tasks_started
+DeskStale.check_focused()
+last_task().done(1, "", "Ghostty is not running")
+assert_eq("...as is one Ghostty cannot name", n_tasks + 1, #tasks_started)
+DeskStale.hotkey.fn()
+last_task().done(0, "4242\n", "")
+assert_eq("the hotkey restarts the focused tab's session, stale or not", DeskStale.bin_dir .. "/restart-session.sh " .. S1,
+  last_task().path .. " " .. last_task().args[1])
+os.remove(dir .. "/sessions/4242.json")
+os.execute("rmdir '" .. dir .. "/sessions' '" .. dir .. "'")
+
+-- The hotkey, and the watchers that keep all of this to Ghostty.
+assert_eq("the hotkey is Cmd+Opt+R", "cmd+alt+r", table.concat(DeskStale.hotkey.mods, "+") .. "+" .. DeskStale.hotkey.key)
+assert_eq("...off while Ghostty is not the active app", false, DeskStale.hotkey.enabled)
+n_tasks = #tasks_started
+app_watcher_fn("Safari", "activated", {})
+assert_eq("another app activating does nothing", false, DeskStale.hotkey.enabled)
+assert_eq("...starts nothing", n_tasks, #tasks_started)
+app_watcher_fn("Ghostty", "activated", {})
+assert_eq("Ghostty activating turns the hotkey on", true, DeskStale.hotkey.enabled)
+app_watcher_fn("Ghostty", "deactivated", {})
+assert_eq("...and leaving it, off", false, DeskStale.hotkey.enabled)
+local ax_fn, ax_events
+local fake_ghostty = { newWatcher = function(_, fn)
+  ax_fn = fn
+  return { start = function(self, events) ax_events = events; return self end, stop = function() end }
+end }
+app_watcher_fn("Ghostty", "launched", fake_ghostty)
+assert_eq("Ghostty launching gets its tab switches watched", "AXMainWindowChanged", ax_events and ax_events[1])
+local real_after = hs.timer.doAfter
+hs.timer.doAfter = function(_, fn) fn(); return setmetatable({}, inert) end
+n_tasks = #tasks_started
+ax_fn()
+assert_eq("a tab switch checks the focused tab", "/usr/bin/osascript", #tasks_started == n_tasks + 1 and last_task().path)
+hs.timer.doAfter = real_after
+last_task().done(1, "", "")
+
+files["/b/sessions/42.json"] = { sessionId = S1, name = "notes" }
+DeskStale.config_dirs = { "/nonexistent-dir" }
+n_tasks = #tasks_started
+DeskStale.hotkey.fn()
+last_task().done(0, "42\n", "")
+assert_eq("the hotkey in a tab with no session restarts nothing", n_tasks + 1, #tasks_started)
 
 print()
 print(string.format("=== summary: %d passed, %d failed ===", pass, fail))
