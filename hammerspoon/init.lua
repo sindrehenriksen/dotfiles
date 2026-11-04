@@ -1132,13 +1132,18 @@ end
 
 -- Clears the line, pastes `text` and presses enter in terminal
 -- `terminal_id`, only while its foreground pid is `pid`: "sent", else
--- "gone", "ambiguous" or "moved", having typed nothing.
+-- "gone", "ambiguous" or "moved", having typed nothing. The clear is Ctrl-C,
+-- which has the shell discard its line in vi insert and command mode
+-- alike, where Ctrl-U reaches back only to where insert mode began; the
+-- pause after it lets the shell redraw its prompt before the paste, which
+-- would otherwise land in the line being discarded.
 function DeskTab.type_in_terminal_script(terminal_id, pid, text)
   local lines = { 'tell application "Ghostty"' }
   for _, l in ipairs(terminal_by_id_lines(terminal_id)) do lines[#lines + 1] = l end
   for _, l in ipairs({
     "if (pid of term) is not " .. string.format("%d", pid) .. ' then return "moved"',
-    'send key "u" modifiers "control" to term',
+    'send key "c" modifiers "control" to term',
+    "delay 0.3",
     "input text " .. as_string_literal(text) .. " to term",
     'send key "enter" to term',
     'return "sent"',

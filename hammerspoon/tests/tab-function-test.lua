@@ -579,9 +579,11 @@ local type_script = DeskTab.type_in_terminal_script('T"1', 777, [[exec /bin/zsh 
 local function at(pat) return type_script:find(pat, 1, true) end
 assert_eq("the script looks the terminal up by its id, quoted for AppleScript", true, at('whose id is "T\\"1"') ~= nil)
 assert_eq("...checks its foreground pid before anything is typed", true,
-  at("if (pid of term) is not 777 then return \"moved\"") < at('send key "u" modifiers "control" to term'))
-assert_eq("...clears the line, pastes the text, then presses enter", true,
-  at('send key "u"') < at("input text ") and at("input text ") < at('send key "enter" to term'))
+  at("if (pid of term) is not 777 then return \"moved\"") < at('send key "c" modifiers "control" to term'))
+assert_eq("...clears the line with Ctrl-C, which works in vi command mode too, and lets the prompt redraw", true,
+  at('send key "c" modifiers "control" to term') < at("delay ") and at("delay ") < at("input text "))
+assert_eq("...then pastes the text and presses enter", true,
+  at("input text ") < at('send key "enter" to term'))
 assert_eq("...with the text's own quotes escaped", true, at([[input text "exec /bin/zsh -lic 'claude --resume \"x\"'" to term]]) ~= nil)
 terminal_reply = { true, "777", "" }
 assert_eq("a terminal's foreground pid is reported", "pid 777", DeskTerminalPid("T1"))

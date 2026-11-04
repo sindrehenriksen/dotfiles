@@ -30,13 +30,20 @@
 # Then the idle checks again, since naming the tab can take seconds; SIGTERM
 # straight after, as close-session.sh sends; and a wait for the process and
 # its pid file to go. A session that will not stop is reported and nothing
-# more is done. Once it has, and the tab's foreground process is an
-# interactive shell, the tab's line is cleared and
+# more is done. Once it has, the tab's foreground process is watched until
+# it is an interactive shell that has settled (the same shell with the same
+# children on two looks a second apart); then Ctrl-C clears the line, in vi
+# insert and command mode alike, and
 #   exec /bin/zsh -lic 'cd <cwd> && CLAUDE_CONFIG_DIR=<dir> claude --resume <id>; exec /bin/zsh -il'
-# typed and entered, only while that shell is still the foreground process.
-# Nothing is recorded as a deliberate end: the process's own SessionEnd
-# records its stop like any other, so reopen-sessions.sh treats the session
-# as it would have.
+# is pasted and entered, only while that shell is still the foreground
+# process. What that guarantees: nothing is typed into anything but that
+# shell, and whatever was on its line is discarded. What it does not: a key
+# pressed in the tab between the clear and the paste lands in front of the
+# resume. A helper call that times out while typing may have typed, so the
+# session is then watched for and a manual resume advised only once it is
+# seen not to be live. Nothing is recorded as a deliberate end: the
+# process's own SessionEnd records its stop like any other, so
+# reopen-sessions.sh treats the session as it would have.
 #
 # The idle and prompt checks live in desk-lib/restartable.sh, shared with
 # session-stale.sh, which offers a restart only where this would accept it.
@@ -186,30 +193,55 @@ fi
 
 # --- resume it in the tab ---
 
-shell_pid="" last_seen=""
+# The tab's shell counts as settled, and so ready for the Ctrl-C that clears
+# its line, once two looks a second apart find the same interactive shell in
+# the foreground with the same children: a shell still reading its startup
+# files comes and goes through children, and a Ctrl-C then would cut its
+# startup short. A pid call that fails is tried again until the wait runs
+# out; it only reads, so nothing can have been typed.
+children_of() { awk -v p="$1" '$2 == p { print $1 }' <<< "$procs" | sort | paste -sd, -; }
+shell_pid="" last_seen="" seen="" unreached=""
 waited=0
 while :; do
 	tab_call pid "$terminal"
 	if [ "$tab_rc" -eq 0 ] && [[ "$tab_out" =~ ^[0-9]+$ ]]; then
+		unreached=""
 		restartable_procs
 		last_seen="$(args_of "$tab_out")"
 		if interactive_shell "$last_seen"; then
-			shell_pid="$tab_out"
-			break
+			look="$tab_out:$(children_of "$tab_out")"
+			if [ "$look" = "$seen" ]; then
+				shell_pid="$tab_out"
+				break
+			fi
+			seen="$look"
+		else
+			seen=""
 		fi
 	elif [ "$tab_rc" -ne 0 ]; then
-		report failed "the session stopped, but its tab is out of reach${tab_why:+ ($tab_why)}; $by_hand"
+		unreached="${tab_why:-the tab helper failed}"
 	fi
 	[ "$waited" -ge "$PROMPT_SECS" ] && break
 	sleep 1
 	waited=$((waited + 1))
 done
+if [ -n "$unreached" ]; then
+	report failed "the session stopped, but its tab is out of reach ($unreached); $by_hand"
+fi
 if [ -z "$shell_pid" ]; then
-	report failed "the session stopped, but its tab showed no prompt within ${PROMPT_SECS}s (${last_seen:-nothing in the foreground}); $by_hand"
+	report failed "the session stopped, but its tab showed no settled prompt within ${PROMPT_SECS}s (${last_seen:-nothing in the foreground}); $by_hand"
 fi
 
+# A type that timed out may still have typed and run the resume, so a
+# manual resume is advised only once the session is seen not to be live:
+# two processes on one transcript is the outcome to avoid.
+maybe_typed=""
 tab_call type "$terminal" "$shell_pid" " exec /bin/zsh -lic $(shq "$resume$RESTARTABLE_HANDOVER")"
-if [ "$tab_rc" -ne 0 ]; then
+if [ "$tab_rc" -eq 124 ]; then
+	maybe_typed=1
+	[ "$CONFIRM_SECS" -gt 0 ] \
+		|| report failed "the session stopped and the tab helper timed out while typing, so the resume may have been typed; look at the tab before resuming it by hand"
+elif [ "$tab_rc" -ne 0 ]; then
 	report failed "the session stopped, but the resume was not typed${tab_why:+: $tab_why}; $by_hand"
 fi
 
@@ -223,4 +255,7 @@ while [ "$waited" -lt "$CONFIRM_SECS" ]; do
 		report restarted "resumed in its tab (pid $now)"
 	fi
 done
+if [ -n "$maybe_typed" ]; then
+	report failed "the session stopped and the tab helper timed out while typing; it is not live after ${CONFIRM_SECS}s, so if its tab shows nothing running, $by_hand"
+fi
 report failed "the resume was typed into its tab, but the session is not live after ${CONFIRM_SECS}s; look at the tab"

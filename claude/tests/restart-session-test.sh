@@ -107,9 +107,11 @@ source "$TMP/spawn.sh"
 # $TMP/busy-on-find marks the session busy, as a prompt arriving meanwhile
 # would; `pid` prints the pid in
 # $TMP/fg, first putting $TMP/procs.after in place as the process table
-# once the session has stopped, when there is one; `type` keeps the text in $TMP/typed and fails if $TMP/type-fails
-# exists, and with $TMP/resume-on-type naming a session starts a stand-in for
-# it, as the typed resume would.
+# once the session has stopped, when there is one, and fails while the count
+# in $TMP/pid-fails is above 0; `type` keeps the text in $TMP/typed and fails
+# if $TMP/type-fails exists, with $TMP/resume-on-type naming a session starts
+# a stand-in for it, as the typed resume would, and with $TMP/type-times-out
+# then exits 124, as a timed-out hs call does after it may have typed.
 cat > "$DESK_CLOSE_TAB_BIN" << 'FAKE'
 #!/usr/bin/env bash
 case "$1" in
@@ -124,6 +126,12 @@ case "$1" in
 		echo "T-$3" ;;
 	pid)
 		echo "pid $2" >> "$TMP/tab.log"
+		left=$(cat "$TMP/pid-fails" 2> /dev/null || echo 0)
+		if [ "$left" -gt 0 ]; then
+			echo $((left - 1)) > "$TMP/pid-fails"
+			echo "DeskTerminalPid: osascript failed: busy" >&2
+			exit 1
+		fi
 		[ -e "$TMP/procs.after" ] && mv "$TMP/procs.after" "$TMP/procs"
 		cat "$TMP/fg" ;;
 	type)
@@ -133,7 +141,8 @@ case "$1" in
 		if [ -s "$TMP/resume-on-type" ]; then
 			source "$TMP/spawn.sh"
 			spawn "$(cat "$TMP/resume-on-type")" > /dev/null
-		fi ;;
+		fi
+		[ -e "$TMP/type-times-out" ] && exit 124 ;;
 esac
 exit 0
 FAKE
@@ -168,7 +177,8 @@ status() { cut -f1 <<< "$out"; }
 alive() { kill -0 "$1" 2> /dev/null && echo alive || echo gone; }
 fresh() {
 	: > "$TMP/tab.log"
-	rm -f "$TMP/typed" "$TMP/find-fails" "$TMP/busy-on-find" "$TMP/type-fails" "$TMP/resume-on-type" "$TMP/procs.after"
+	rm -f "$TMP/typed" "$TMP/find-fails" "$TMP/busy-on-find" "$TMP/type-fails" "$TMP/type-times-out" \
+		"$TMP/resume-on-type" "$TMP/procs.after" "$TMP/pid-fails"
 	echo 9000 > "$TMP/fg"
 }
 
@@ -193,8 +203,8 @@ assert_eq "...exit 0" "0" "$rc"
 assert_eq "an MCP server child did not count as running" "restarted" "$(status)"
 assert_eq "the process is gone" "gone" "$(alive "$p1")"
 assert_eq "...and so is its pid file" "false" "$([ -e "$CONFIG_DIR/sessions/$p1.json" ] && echo true || echo false)"
-assert_eq "the tab was named while the process was alive, then typed into at the shell it came back to" \
-	"find $tty1 $p1 alive|pid T-$p1|type T-$p1 9000" "$(paste -sd'|' "$TMP/tab.log")"
+assert_eq "the tab was named while the process was alive, then typed into once the shell it came back to had settled" \
+	"find $tty1 $p1 alive|pid T-$p1|pid T-$p1|type T-$p1 9000" "$(paste -sd'|' "$TMP/tab.log")"
 typed="$(cat "$TMP/typed")"
 assert_eq "a fresh login shell is exec'd, kept out of history by its leading space" " exec /bin/zsh -lic " "${typed:0:20}"
 eval "set -- ${typed# exec /bin/zsh -lic }"
@@ -301,7 +311,7 @@ echo 9001 > "$TMP/fg"
 run_restart "$s5"
 assert_eq "no prompt in time: failed" "failed" "$(status)"
 assert_eq "...saying what was in the foreground and how to resume by hand" \
-	"the session stopped, but its tab showed no prompt within 2s (/bin/zsh -lic claude --resume x); resume it by hand: cd '$PROJ_DIR' && claude --resume $s5" "$(detail)"
+	"the session stopped, but its tab showed no settled prompt within 2s (/bin/zsh -lic claude --resume x); resume it by hand: cd '$PROJ_DIR' && claude --resume $s5" "$(detail)"
 assert_eq "...having typed nothing" "false" "$([ -e "$TMP/typed" ] && echo true || echo false)"
 
 fresh
@@ -313,6 +323,74 @@ run_restart "$s6"
 assert_eq "the helper refusing to type: failed, with the reason" \
 	"failed	the session stopped, but the resume was not typed: DeskTypeInTerminal: not typed: its foreground process changed; resume it by hand: cd '$PROJ_DIR' && claude --resume $s6" \
 	"$(status)	$(detail)"
+
+echo "=== a tab that is slow to answer ==="
+fresh
+s10=$(uuid)
+p10=$(spawn "$s10")
+desk_tab "$p10"
+echo 1 > "$TMP/pid-fails"
+RESTART_SESSION_PROMPT_SECS=3 run_restart "$s10"
+assert_eq "a pid call that fails once is tried again: restarted" "restarted" "$(status)"
+assert_eq "...typed once it answered" "type T-$p10 9000" "$(grep '^type' "$TMP/tab.log")"
+
+fresh
+s11=$(uuid)
+p11=$(spawn "$s11")
+desk_tab "$p11"
+echo 9 > "$TMP/pid-fails"
+run_restart "$s11"
+assert_eq "one that never answers: failed, nothing typed, a manual resume advised" \
+	"failed	the session stopped, but its tab is out of reach (DeskTerminalPid: osascript failed: busy); resume it by hand: cd '$PROJ_DIR' && claude --resume $s11" \
+	"$(status)	$(detail)"
+assert_eq "...having typed nothing" "false" "$([ -e "$TMP/typed" ] && echo true || echo false)"
+
+echo "=== a type that times out may have typed ==="
+fresh
+s12=$(uuid)
+p12=$(spawn "$s12")
+desk_tab "$p12"
+: > "$TMP/type-times-out"
+run_restart "$s12"
+assert_eq "with no confirm wait: failed, with no manual resume advised" \
+	"failed	the session stopped and the tab helper timed out while typing, so the resume may have been typed; look at the tab before resuming it by hand" \
+	"$(status)	$(detail)"
+
+fresh
+s13=$(uuid)
+p13=$(spawn "$s13")
+desk_tab "$p13"
+: > "$TMP/type-times-out"
+echo "$s13" > "$TMP/resume-on-type"
+RESTART_SESSION_CONFIRM_SECS=10 run_restart "$s13"
+assert_eq "it had typed, and the session came back: restarted" "restarted" "$(status)"
+
+fresh
+s14=$(uuid)
+p14=$(spawn "$s14")
+desk_tab "$p14"
+: > "$TMP/type-times-out"
+RESTART_SESSION_CONFIRM_SECS=2 run_restart "$s14"
+assert_eq "it had not, and the session stayed down: a manual resume, only now and with a look first" \
+	"failed	the session stopped and the tab helper timed out while typing; it is not live after 2s, so if its tab shows nothing running, resume it by hand: cd '$PROJ_DIR' && claude --resume $s14" \
+	"$(status)	$(detail)"
+
+echo "=== a directory with a quote in its name ==="
+fresh
+plain_proj="$PROJ_DIR"
+PROJ_DIR="$TMP/it's here"
+mkdir -p "$PROJ_DIR"
+s15=$(uuid)
+p15=$(spawn "$s15")
+desk_tab "$p15"
+run_restart "$s15"
+PROJ_DIR="$plain_proj"
+assert_eq "restarted" "restarted" "$(status)"
+typed="$(cat "$TMP/typed")"
+eval "set -- ${typed# exec /bin/zsh -lic }"
+inner="${1%; exec /bin/zsh -il}"
+assert_eq "the typed resume changes into that directory, intact" "$TMP/it's here" \
+	"$(cd / && bash -c "claude() { pwd; }; $inner")"
 
 echo "=== the resumed session is confirmed live ==="
 fresh
