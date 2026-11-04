@@ -1482,7 +1482,9 @@ local function on_ghostty_focus()
 end
 
 -- The first press shows what a restart would do; a second press on the
--- same session within DeskStale.confirm_secs does it.
+-- same session within DeskStale.confirm_secs of that showing does it. It
+-- arms only once the confirmation is on screen, so a quick double press
+-- never restarts unseen.
 DeskStale.armed = nil
 function DeskStale.press()
   local pressed = hs.timer.secondsSinceEpoch()
@@ -1492,13 +1494,13 @@ function DeskStale.press()
       return
     end
     local armed = DeskStale.armed
+    DeskStale.armed = nil
     if armed and armed.pid == session.pid and pressed - armed.at <= DeskStale.confirm_secs then
-      DeskStale.armed = nil
       return DeskStale.restart(session)
     end
-    DeskStale.armed = { pid = session.pid, at = pressed }
     run_tool(session, "session-stale.sh", { session.id }, function(rc, out, err)
       hs.alert.show(DeskStale.confirm_text(session, rc, out, err), DeskStale.confirm_secs)
+      DeskStale.armed = { pid = session.pid, at = hs.timer.secondsSinceEpoch() }
     end)
   end)
 end

@@ -865,6 +865,23 @@ assert_eq("a tab that cannot restart in place says so",
   true, DeskStale.confirm_text(session, 3, "version: x\n", ""):find("this tab can't restart it in place", 1, true) ~= nil)
 assert_eq("nothing stale says so", true, DeskStale.confirm_text(session, 0, "", ""):find("Restart notes? nothing in it is stale.", 1, true) ~= nil)
 
+DeskStale.armed = nil
+DeskStale.hotkey.fn()
+focus_answers("4242\n", S1 .. "\t/b\tnotes\n")
+local pending = last_task()
+DeskStale.hotkey.fn()
+focus_answers("4242\n", S1 .. "\t/b\tnotes\n")
+assert_eq("a quick double press, before the confirmation shows, restarts nothing", DeskStale.bin_dir .. "/session-stale.sh", last_task().path)
+local pending2 = last_task()
+clock = clock + 3
+pending.done(0, "version: 1 running, 2 installed\n", "")
+pending2.done(0, "version: 1 running, 2 installed\n", "")
+clock = clock + 3
+DeskStale.hotkey.fn()
+focus_answers("4242\n", S1 .. "\t/b\tnotes\n")
+assert_eq("...the window starts once it shows: a press 3s after that restarts", DeskStale.bin_dir .. "/restart-session.sh", last_task().path)
+last_task().done(0, "restarted\t" .. S1 .. "\tnotes\tok\n", "")
+
 -- An offer stands for a minute.
 local seen_before = DeskStale.seen
 DeskStale.seen = {}
