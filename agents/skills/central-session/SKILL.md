@@ -29,6 +29,7 @@ The user works from one long-lived session and has other sessions do the work: o
 - A go the user gives here covers what they said, no more. Pass it on to the session it concerns in the user's words, naming what it covers. That session's own rules for outward-facing steps still apply.
 - Anything the user hasn't decided goes to the user: a design choice, a ticket to create, a scope change, an outward-facing step.
 - Don't do a session's work here, and don't read its transcript in this context. Ask it, or have a subagent read it and report.
+- The setup this session runs on is its own work, not a new session's: the scheduled passes, the follow and session tooling, the notes tool and how sessions are opened, restarted and closed. Do it here, sized and run through `team` like any other work, rather than starting a session for it.
 
 ## What it keeps on disk
 
