@@ -830,10 +830,55 @@ n_tasks = #tasks_started
 DeskStale.check_focused()
 last_task().done(1, "", "Ghostty is not running")
 assert_eq("...as is one Ghostty cannot name", n_tasks + 1, #tasks_started)
+local alerts = {}
+local real_alert = hs.alert.show
+hs.alert.show = function(text) alerts[#alerts + 1] = text; return "alert-uuid" end
+local clock = 1000
+local real_clock = hs.timer.secondsSinceEpoch
+hs.timer.secondsSinceEpoch = function() return clock end
+DeskStale.armed = nil
 DeskStale.hotkey.fn()
 focus_answers("4242\n", S1 .. "\t/b\tnotes\n")
-assert_eq("the hotkey restarts the focused tab's session, stale or not", DeskStale.bin_dir .. "/restart-session.sh " .. S1,
+local first = last_task()
+assert_eq("the hotkey's first press restarts nothing: it asks session-stale.sh what a restart would do",
+  DeskStale.bin_dir .. "/session-stale.sh " .. S1, first.path .. " " .. first.args[1])
+first.done(0, "version: 1 running, 2 installed\n", "")
+assert_eq("...and shows it, with what unsent input costs",
+  "Restart notes? version: 1 running, 2 installed.\nUnsent text in its input box is lost. Press Cmd+Opt+R again to restart.",
+  alerts[#alerts])
+clock = clock + 2
+DeskStale.hotkey.fn()
+focus_answers("4242\n", S1 .. "\t/b\tnotes\n")
+assert_eq("a second press within a few seconds restarts the focused tab's session", DeskStale.bin_dir .. "/restart-session.sh " .. S1,
   last_task().path .. " " .. last_task().args[1])
+last_task().done(0, "restarted\t" .. S1 .. "\tnotes\tok\n", "")
+DeskStale.hotkey.fn()
+focus_answers("4242\n", S1 .. "\t/b\tnotes\n")
+clock = clock + 10
+DeskStale.hotkey.fn()
+focus_answers("4242\n", S1 .. "\t/b\tnotes\n")
+assert_eq("a second press too late only shows it again", DeskStale.bin_dir .. "/session-stale.sh", last_task().path)
+last_task().done(1, "", "session-stale: not idle: its status is busy\n")
+assert_eq("...saying when a restart would be refused, and why", true,
+  alerts[#alerts]:find("a restart would be refused now: not idle: its status is busy.", 1, true) ~= nil)
+assert_eq("a tab that cannot restart in place says so",
+  true, DeskStale.confirm_text(session, 3, "version: x\n", ""):find("this tab can't restart it in place", 1, true) ~= nil)
+assert_eq("nothing stale says so", true, DeskStale.confirm_text(session, 0, "", ""):find("Restart notes? nothing in it is stale.", 1, true) ~= nil)
+
+-- An offer stands for a minute.
+local seen_before = DeskStale.seen
+DeskStale.seen = {}
+DeskStale.handle(session, 0, "version: 1 running, 2 installed\n")
+local offer_note = last_note()
+assert_eq("the offer is withdrawn after a minute", 60, offer_note.attrs.withdrawAfter)
+clock = clock + 61
+n_tasks = #tasks_started
+offer_note.clicked = hs.notify.activationTypes.actionButtonClicked
+offer_note.fn(offer_note)
+assert_eq("a click on it later than that does nothing", n_tasks, #tasks_started)
+DeskStale.seen = seen_before
+hs.timer.secondsSinceEpoch = real_clock
+hs.alert.show = real_alert
 
 -- What a check costs while a tab stays focused.
 assert_eq("reasons session-stale.sh says are the ones offered (exit 4): quiet", "quiet", decided(nil, 4, "version: 1 running, 2 installed\n"))

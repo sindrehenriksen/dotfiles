@@ -1217,15 +1217,16 @@ end
 --
 -- A focus is settled for a moment, then the focused terminal's foreground
 -- pid is asked of Ghostty, off the main thread, and mapped to its session
--- by session-stale.sh --pid. claude/session-stale.sh says why it is worth restarting
+-- by session-stale.sh --pid, which then says why it is worth restarting
 -- (or exits 1 when it cannot say now). A session is offered once per set
 -- of reasons: Dismiss, or ignoring the offer, quiets it until its reasons
 -- change, and a session found not stale is forgotten, so reasons coming
 -- back are offered afresh; while they match, the check skips its heavy
--- part. Every task it starts has a timeout. Restart runs
--- claude/restart-session.sh. Cmd+Opt+R,
--- bound only while Ghostty is the active app, restarts the focused tab's
--- session stale or not, after the checks restart-session.sh makes.
+-- part. Every task it starts has a timeout. An offer stands for a minute;
+-- Restart runs claude/restart-session.sh. Cmd+Opt+R, bound only while
+-- Ghostty is the active app, is for the focused tab's session stale or
+-- not: the first press shows what a restart would do, a second within a
+-- few seconds does it, after the checks restart-session.sh makes.
 -- The offer's buttons show only with Hammerspoon's notifications set to
 -- Alerts in System Settings; as banners they appear on hover.
 -- ---------------------------------------------------------------------------
@@ -1238,6 +1239,11 @@ local HOME = os.getenv("HOME") or ""
 DeskStale.config_dirs = { HOME .. "/.claude", HOME .. "/.claude-work" }
 DeskStale.bin_dir = HOME .. "/.local/bin"
 DeskStale.settle_secs = 0.4
+-- An offer stands this long: it is withdrawn after, and a click on it
+-- that comes later does nothing.
+DeskStale.offer_secs = 60
+-- The hotkey's second press restarts only within this long of the first.
+DeskStale.confirm_secs = 4
 DeskStale.recheck_secs = 30
 -- How long each kind of task may run before it is ended. A restart waits
 -- on the session to stop, the tab's prompt and the resume, each bounded in
@@ -1287,7 +1293,7 @@ function DeskStale.offer_attributes(session, reasons, kind)
         .. "(claude --resume " .. session.id .. "), and restarts work here from then on.",
       hasActionButton = false,
       otherButtonTitle = "Dismiss",
-      withdrawAfter = 0,
+      withdrawAfter = DeskStale.offer_secs,
     }
   end
   return {
@@ -1297,8 +1303,27 @@ function DeskStale.offer_attributes(session, reasons, kind)
     hasActionButton = true,
     actionButtonTitle = "Restart",
     otherButtonTitle = "Dismiss",
-    withdrawAfter = 0,
+    withdrawAfter = DeskStale.offer_secs,
   }
+end
+
+-- What the hotkey's first press shows for `session`, from its
+-- session-stale.sh result: why a restart would help, or why it would be
+-- refused, and what a second press costs.
+function DeskStale.confirm_text(session, rc, out, err)
+  local reasons = (out or ""):gsub("%s+$", ""):gsub("\n", "; ")
+  local why
+  if rc == 3 then
+    why = "this tab can't restart it in place"
+  elseif rc == 1 then
+    why = "a restart would be refused now: " .. ((err or ""):gsub("^session%-stale: ", ""):gsub("%s+$", ""))
+  elseif reasons ~= "" then
+    why = reasons
+  else
+    why = "nothing in it is stale"
+  end
+  return "Restart " .. session.name .. "? " .. why .. ".\nUnsent text in its input box is lost. "
+    .. "Press Cmd+Opt+R again to restart."
 end
 
 -- A restart-session.sh result as { title, informativeText }: its output
@@ -1379,8 +1404,10 @@ function DeskStale.handle(session, rc, out)
   if action == "clear" then
     DeskStale.seen[session.pid] = nil
   elseif action == "offer" or action == "manual" then
-    DeskStale.seen[session.pid] = { reasons = reasons, checked = hs.timer.secondsSinceEpoch() }
+    local offered = hs.timer.secondsSinceEpoch()
+    DeskStale.seen[session.pid] = { reasons = reasons, checked = offered }
     hs.notify.new(function(n)
+      if hs.timer.secondsSinceEpoch() - offered > DeskStale.offer_secs then return end
       if action == "offer" and n:activationType() == hs.notify.activationTypes.actionButtonClicked then
         DeskStale.restart(session)
       end
@@ -1436,15 +1463,28 @@ local function on_ghostty_focus()
   end)
 end
 
-DeskStale.hotkey = hs.hotkey.new({ "cmd", "alt" }, "r", function()
+-- The first press shows what a restart would do; a second press on the
+-- same session within DeskStale.confirm_secs does it.
+DeskStale.armed = nil
+function DeskStale.press()
+  local pressed = hs.timer.secondsSinceEpoch()
   focused_session(function(session)
     if not session then
       hs.alert.show("No Claude Code session in this tab", 2)
       return
     end
-    DeskStale.restart(session)
+    local armed = DeskStale.armed
+    if armed and armed.pid == session.pid and pressed - armed.at <= DeskStale.confirm_secs then
+      DeskStale.armed = nil
+      return DeskStale.restart(session)
+    end
+    DeskStale.armed = { pid = session.pid, at = pressed }
+    run_tool(session, "session-stale.sh", { session.id }, function(rc, out, err)
+      hs.alert.show(DeskStale.confirm_text(session, rc, out, err), DeskStale.confirm_secs)
+    end)
   end)
-end)
+end
+DeskStale.hotkey = hs.hotkey.new({ "cmd", "alt" }, "r", function() DeskStale.press() end)
 
 local ghostty_watcher = nil
 local function watch_ghostty(app)
