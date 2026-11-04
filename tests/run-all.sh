@@ -78,6 +78,7 @@ BASH_SUITES=(
 	claude/tests/input-bell-test.sh
 	claude/tests/reopen-sessions-test.sh
 	claude/tests/session-recorder-test.sh
+	claude/tests/session-stale-test.sh
 	claude/tests/session-status-resolve-test.sh
 	claude/tests/session-status-human-test.sh
 	claude/tests/session-status-title-test.sh
