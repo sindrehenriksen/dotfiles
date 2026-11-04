@@ -180,7 +180,7 @@ fresh
 s1=$(uuid)
 p1=$(spawn "$s1")
 tty1=$(field "$s1" .tty)
-desk_tab "$p1" "$p1 4000 node /opt/mcp/server.js" "4000 1 unrelated"
+desk_tab "$p1" "4000 $p1 node /opt/mcp/server.js" "4001 1 unrelated"
 run_restart "$s1"
 assert_eq "it reports restarted" "restarted	resume typed into its tab" "$(status)	$(detail)"
 assert_eq "...exit 0" "0" "$rc"
