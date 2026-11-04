@@ -853,6 +853,96 @@ do
 	settle()
 end
 
+-- Two suggestions for notes.md and one new item on top of reading.md, the
+-- notes open and reviewed. Returns repo, notes buffer, review session.
+local function two_files()
+	vim.cmd("silent! %bwipeout!")
+	vim.cmd("silent! only")
+	local r = new_repo({ "# Notes", "- a", "", "- b" })
+	write(r, "reading.md", { "# Reading", "- old" })
+	assert(git.run(r, { "commit", "-q", "-am", "reading" }))
+	assert(proposal.build(r, "morning", "2026-10-01", {
+		item("na", { kind = "edit", target = { at = "- a" }, before = "- a", after = "- a!", headline = "notes a" }),
+		item("nb", { kind = "edit", target = { at = "- b" }, before = "- b", after = "- b!", headline = "notes b" }),
+		item("fr", { file = "reading.md", kind = "new", target = "top", after = "- Framsikt", headline = "Framsikt's write-up" }),
+	}, FILES))
+	vim.cmd("edit " .. vim.fn.fnameescape(r .. "/notes.md"))
+	local nb = vim.api.nvim_get_current_buf()
+	review.attach(nb)
+	assert(review.open_review(nb))
+	return r, nb, review.session_of(nb)
+end
+
+local function qf_texts()
+	local out = {}
+	for _, e in ipairs(vim.fn.getqflist()) do
+		out[#out + 1] = e.text
+	end
+	return out
+end
+
+print("\n=== the last take in one file keeps the overview for the other's ===")
+do
+	local r, nb = two_files()
+	assert_true("the overview opens", review.overview(nb))
+	local qw = vim.api.nvim_get_current_win()
+	vim.api.nvim_win_set_cursor(qw, { 1, 0 })
+	review.qf_preview()
+	vim.cmd("normal t")
+	vim.cmd("normal t")
+	settle()
+	assert_true("notes.md's review has ended", review.session_of(nb) == nil)
+	assert_true("the overview is still open", review.overview_open())
+	assert_eq("listing what waits in reading.md", { "reading.md: Framsikt's write-up" }, qf_texts())
+	assert_eq("with the cursor still in it", qw, vim.api.nvim_get_current_win())
+	review.qf_jump()
+	local rb = vim.fn.bufnr(r .. "/reading.md")
+	assert_true("⏎ opens reading.md's review", review.session_of(rb) ~= nil)
+	assert_eq("the list is reading.md's own now", { "Framsikt's write-up" }, qf_texts())
+	if vim.api.nvim_win_is_valid(qw) then
+		vim.api.nvim_set_current_win(qw)
+	end
+	vim.cmd("normal t")
+	settle()
+	assert_eq("t takes it", "- Framsikt", lines_of(rb)[1])
+	assert_true("and with nothing left anywhere the overview closes", not review.overview_open())
+end
+
+print("\n=== with the overview closed, the last take says what waits elsewhere ===")
+do
+	local r, nb, s = two_files()
+	local said = {}
+	vim.notify = function(m)
+		said[#said + 1] = m
+	end
+	local nw = vim.api.nvim_get_current_win()
+	for _, h in ipairs({ "notes a", "notes b" }) do
+		vim.api.nvim_win_set_cursor(nw, { spot_row(s, h), 0 })
+		vim.cmd("normal dp")
+	end
+	settle()
+	vim.notify = function() end
+	assert_true("notes.md's review has ended", review.session_of(nb) == nil)
+	assert_true("its closing line says reading.md still has one", (said[#said] or ""):find("1 still waiting in reading.md", 1, true) ~= nil)
+
+	-- The overview key from notes.md, nothing left there: the review opens
+	-- in reading.md, and the list is reading.md's, its keys acting on it.
+	assert_true("the overview opens", review.overview(nb))
+	local rb = vim.fn.bufnr(r .. "/reading.md")
+	assert_true("over reading.md's review", review.session_of(rb) ~= nil)
+	assert_eq("listing it as reading.md's own", { "Framsikt's write-up" }, qf_texts())
+	local qw = vim.api.nvim_get_current_win()
+	review.qf_jump()
+	assert_eq("⏎ jumps into reading.md", { rb, 1 }, { vim.api.nvim_get_current_buf(), vim.api.nvim_win_get_cursor(0)[1] })
+	vim.api.nvim_set_current_win(qw)
+	local ok_, why = review.qf_act("take")
+	assert_eq("t takes it rather than sending you to its review", { true, "- Framsikt" }, { ok_, lines_of(rb)[1] })
+	if not ok_ then
+		print("     (" .. tostring(why) .. ")")
+	end
+	settle()
+end
+
 print("\n=== the top as keys move to it, and edits under it ===")
 do
 	-- CursorMoved and TextChanged fire only from a running main loop, which

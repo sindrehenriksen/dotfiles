@@ -73,7 +73,7 @@ A review covers one of the config's `files`, drawn over that file's own window: 
 | `n`/`N`, `]c`/`[c` | Next or previous suggestion, wrapping; `n`/`N` are the search's own while one is highlighted. |
 | `Q`, `<leader>gq`, `:q` | End the review: declines and takes recorded, the notes saved (`:q` leaves the takes for the next save), never over a change on disk, and one line saying what it recorded. Quitting nvim records them too. |
 
-The review also ends on its own once nothing is left open in the file. A take is recorded by id, so it stays taken whatever you do to the text after; deleting an edit's red lines by hand declines it, typing into them leaves it to the next staging. When the proposal changes under an open review, the next look or key works the drawing out over the new one, keeping the declines; a key that noticed does nothing that once.
+The review also ends on its own once nothing is left open in the file. With some still waiting in the other file, an open overview stays, listing those, and `<CR>` opens their review; with the overview closed, the line the review ends with says how many wait there. A take is recorded by id, so it stays taken whatever you do to the text after; deleting an edit's red lines by hand declines it, typing into them leaves it to the next staging. When the proposal changes under an open review, the next look or key works the drawing out over the new one, keeping the declines; a key that noticed does nothing that once.
 
 The bar above the notes has the keys on the left and the status line on the right: each pass's last result, the untaken suggestions (while a review is open, its live and recorded counts, as in `30 left (34 saved)`) and the deferred ones.
 

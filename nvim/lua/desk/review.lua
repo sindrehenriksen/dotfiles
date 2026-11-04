@@ -614,7 +614,7 @@ function M.say_closed(s, before)
 	end)
 end
 
-local function write_taken_notes(s, everything, before)
+local function write_taken_notes(s, everything, before, waiting)
 	local autosave = require("desk.autosave")
 	local took, wrote, left = {}, {}, {}
 	for b in pairs(s.took_into or {}) do
@@ -653,6 +653,9 @@ local function write_taken_notes(s, everything, before)
 		local summary = before and M.decided_since(s.repo, before)
 		local saved = table.concat(parts, ", ")
 		local msg = summary and ("review closed: " .. summary .. (saved ~= "" and ("; " .. saved) or "")) or saved
+		if waiting then
+			msg = msg ~= "" and (msg .. "; " .. waiting) or waiting
+		end
 		if msg ~= "" then
 			vim.notify("desk: " .. msg, vim.log.levels.INFO)
 		end
@@ -1558,7 +1561,7 @@ function M.view_acted(s)
 	M.view_refresh(s)
 	local ok, why = true, nil
 	if next(s.view_shown or {}) == nil then
-		ok, why = M.close_review(s)
+		ok, why = M.close_review(s, true)
 		if ok then
 			return true
 		end
@@ -1659,10 +1662,16 @@ function M.view_next_key(notes_buf, forward)
 	end
 end
 
+local overview_items -- the overview's entries, below
+
 --- Ends the review `s`, and closes the overview when it is this review's
 --- list: its declines and takes are recorded in the same step, the notes
 --- saved. Leaves the user in their notes. Returns true, or false, why.
-function M.close_review(s)
+--- `done` is the review ending on its own, nothing left in its file: with
+--- some still waiting in another, an open overview stays, listing those
+--- (focus staying in it if it was there), and with none open the closing
+--- line says what waits where.
+function M.close_review(s, done)
 	if not (s and sessions[s.notes_buf] == s and vim.api.nvim_buf_is_valid(s.review_buf)) then
 		return false, "no review open"
 	end
@@ -1671,15 +1680,34 @@ function M.close_review(s)
 	if not ok then
 		return false, why
 	end
-	write_taken_notes(s, true, before)
 	local info = vim.fn.getqflist({ title = 0, context = 0 })
 	local ctx = type(info.context) == "table" and info.context or {}
-	if info.title == M.OVERVIEW_TITLE and (ctx.desk_review_buf == s.review_buf or not session_for_review_buf(ctx.desk_review_buf or -1)) then
+	local ours = info.title == M.OVERVIEW_TITLE and (ctx.desk_review_buf == s.review_buf or not session_for_review_buf(ctx.desk_review_buf or -1))
+	local elsewhere = done and M.pending_elsewhere(s.repo, s.file) or {}
+	local keep = ours and #elsewhere > 0 and M.overview_open()
+	local waiting
+	if #elsewhere > 0 and not keep then
+		local parts = {}
+		for _, o in ipairs(elsewhere) do
+			parts[#parts + 1] = string.format("%d still waiting in %s", o.count, o.file)
+		end
+		waiting = table.concat(parts, ", ") .. ": ␣gR opens " .. (#parts > 1 and "them" or "it")
+	end
+	write_taken_notes(s, true, before, waiting)
+	local in_list = false
+	if keep then
+		in_list = vim.api.nvim_get_current_win() == vim.fn.getqflist({ winid = 0 }).winid
+		vim.fn.setqflist({}, "r", {
+			title = M.OVERVIEW_TITLE,
+			items = overview_items(nil, s.repo, s.file),
+			context = { desk_repo = s.repo },
+		})
+	elseif ours then
 		vim.cmd("cclose")
 	end
 	local notes_win = vim.fn.bufwinid(s.notes_buf)
 	close_session(s)
-	if notes_win ~= -1 and vim.api.nvim_win_is_valid(notes_win) then
+	if not in_list and notes_win ~= -1 and vim.api.nvim_win_is_valid(notes_win) then
 		vim.api.nvim_set_current_win(notes_win)
 	end
 	return true
@@ -1789,7 +1817,7 @@ function M.entry_text(item, conflict, other)
 	return text
 end
 
-local function overview_items(s, repo, file)
+function overview_items(s, repo, file)
 	local qf = {}
 	if s then
 		for _, r in ipairs(M.remaining(s)) do
@@ -1870,13 +1898,16 @@ end
 --- The overview key: opens the review if needed, then a quickfix list with
 --- one headline per open suggestion.
 function M.overview(notes_buf)
-	local s = sessions[notes_buf]
-	if not s or not vim.api.nvim_buf_is_valid(s.review_buf) then
+	local s = live_session(notes_buf)
+	if not s then
 		local ok, why = M.open_review(notes_buf)
-		s = sessions[notes_buf]
 		if not ok then
 			return false, why
 		end
+		-- With nothing left here the review opened in the other file, and
+		-- the list is that file's.
+		s = live_session(notes_buf) or live_session(vim.api.nvim_get_current_buf())
+		notes_buf = s and s.notes_buf or notes_buf
 	end
 	local repo, file = M.repo_context(notes_buf)
 	local items = overview_items(s, repo, file)
@@ -2103,11 +2134,13 @@ function M.qf_act(verb)
 	if not data.id then
 		return false, "no suggestion on this line"
 	end
-	if data.file then
+	-- An entry made as the other file's acts all the same once the review
+	-- is open there.
+	local s = live_session(entry.bufnr)
+	if not s and data.file then
 		return false, string.format("that one is in %s: ⏎ opens its review", data.file)
 	end
-	local s = sessions[entry.bufnr]
-	if not (s and vim.api.nvim_buf_is_valid(s.review_buf)) then
+	if not s then
 		return false, "its review is closed: ⏎ opens it"
 	end
 	local fresh, stale = M.ensure_current(s, true)
@@ -2130,7 +2163,13 @@ function M.qf_act(verb)
 	end
 	local ok, why = M.view_acted(s)
 	if not ok or sessions[s.notes_buf] ~= s then
-		return ok, why -- the last one: the review and its list are closed
+		-- The last one: the review is closed, and its list with it unless
+		-- the list stays for the other file's, the first of them shown.
+		if ok and M.overview_open() and vim.bo[vim.api.nvim_get_current_buf()].buftype == "quickfix" then
+			travel.row = nil
+			M.qf_preview()
+		end
+		return ok, why
 	end
 	local qwin = vim.api.nvim_get_current_win()
 	M.refresh_overview(s)
