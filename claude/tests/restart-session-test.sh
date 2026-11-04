@@ -53,6 +53,12 @@ unset CLAUDE_CODE_SESSION_ID DESK_HEADLESS
 ln -sf "$(command -v bash)" "$TMP/bin/claude"
 export TMP PROJ_DIR RECORDER
 
+# The session's exact argv: whatever the test last wrote, a NUL after each
+# word, whatever the pid.
+export RESTART_SESSION_ARGV="$TMP/bin/argv"
+printf '#!/usr/bin/env bash\ncat "%s/argv"\n' "$TMP" > "$TMP/bin/argv"
+chmod +x "$TMP/bin/argv"
+
 # The process table: whatever the test last wrote.
 printf '#!/usr/bin/env bash\ncat "%s/procs"\n' "$TMP" > "$TMP/bin/ps"
 chmod +x "$TMP/bin/ps"
@@ -151,7 +157,6 @@ chmod +x "$DESK_CLOSE_TAB_BIN"
 # The tab's shells, as the process table shows them. $1 is the stand-in's
 # pid, $2 the args of its parent (pid 9001), $3 those of the parent's parent
 # (pid 9000); further arguments are extra rows, written as they come.
-# $CLAUDE_ARGV, when set, is the stand-in's own argv as ps shows it.
 LOGIN_ROW="/usr/bin/login -flp me /bin/bash --noprofile --norc -c exec -l /bin/zsh"
 table() { # claude_pid parent_args grand_args [row...]
 	local c=$1 p=$2 g=$3
@@ -160,7 +165,7 @@ table() { # claude_pid parent_args grand_args [row...]
 		printf '%s 1 /Applications/Ghostty.app/Contents/MacOS/ghostty\n' 8000
 		printf '%s 8000 %s\n' 9000 "$g"
 		printf '%s 9000 %s\n' 9001 "$p"
-		printf '%s 9001 %s\n' "$c" "${CLAUDE_ARGV:-claude --resume x}"
+		printf '%s 9001 claude --resume x\n' "$c"
 		for row in "$@"; do printf '%s\n' "$row"; done
 	} > "$TMP/procs"
 }
@@ -181,6 +186,7 @@ fresh() {
 	rm -f "$TMP/typed" "$TMP/find-fails" "$TMP/busy-on-find" "$TMP/type-fails" "$TMP/type-times-out" \
 		"$TMP/resume-on-type" "$TMP/procs.after" "$TMP/pid-fails"
 	echo 9000 > "$TMP/fg"
+	printf '%s\0' claude --resume x > "$TMP/argv"
 }
 
 echo "=== refused before anything is touched ==="
@@ -319,28 +325,63 @@ schedule_case "...one made by an earlier process, gone with it: restarted" resta
 	"{\"type\":\"user\",\"timestamp\":\"$before\",\"toolUseResult\":{\"id\":\"c3\",\"recurring\":true,\"durable\":false,\"nextFireAt\":$(((now_s + 60) * 1000))}}"
 
 echo "=== the flags it was started with ==="
-flags_case() { # argv -> sets s, out, rc
+# The stand-in's exact argv, as the argv stub reports it: one word each.
+flags_case() { # argv words... -> sets s, out, rc
 	fresh
 	s=$(uuid)
 	p=$(spawn "$s")
-	CLAUDE_ARGV="$1" desk_tab "$p"
+	desk_tab "$p"
+	printf '%s\0' "$@" > "$TMP/argv"
 	run_restart "$s"
 }
-mkdir -p "$PROJ_DIR/extra"
-flags_case "claude --settings /x/account.json --model opus --permission-mode plan --add-dir extra /tmp -n my session --verbose --resume $s fix the bug"
+mkdir -p "$PROJ_DIR/extra" "$TMP/my dir"
+flags_case claude --settings /x/account.json --model opus --permission-mode plan --add-dir extra "$TMP/my dir" \
+	-n "my session" --verbose --resume x "fix the bug --model haiku" --effort=high
 assert_eq "carried flags: restarted" "restarted" "$(status)"
 typed="$(cat "$TMP/typed")"
 eval "set -- ${typed# exec /bin/zsh -lic }"
-assert_eq "...the resume carries them, without the function's settings, the name, the old resume or the prompt" \
-	"cd '$PROJ_DIR' && CLAUDE_CONFIG_DIR='$CONFIG_DIR' claude --model 'opus' --permission-mode 'plan' --add-dir 'extra' '/tmp' --verbose --resume $s; exec /bin/zsh -il" "$1"
-flags_case "claude --resume x --chrome"
-assert_eq "an option it does not know: refused, saying which" \
-	"refused	it was started with --chrome, which a restart does not know how to carry over; restart it by hand" "$(status)	$(detail)"
-flags_case "claude --add-dir $TMP/my dir --resume x"
-assert_eq "a directory with a space, which ps splits: refused" \
-	"refused	its --add-dir $TMP/my is not a directory a restart can find (a path with a space in it reads that way)" "$(status)	$(detail)"
-flags_case "claude fix it --model opus"
-assert_eq "a carried option after the prompt began: refused" "refused" "$(status)"
+assert_eq "...the resume carries them, a spaced directory whole, without the function's settings, the name, the old resume or the prompt" \
+	"cd '$PROJ_DIR' && CLAUDE_CONFIG_DIR='$CONFIG_DIR' claude --model 'opus' --permission-mode 'plan' --add-dir 'extra' '$TMP/my dir' --verbose --effort 'high' --resume $s; exec /bin/zsh -il" "$1"
+flags_case claude --settings /tmp -n ticket-2 "Fix the bug" --permission-mode bypassPermissions
+assert_eq "a named session's prompt is skipped, and a bypass after it is still seen: refused" \
+	"refused	it was started with --permission-mode bypassPermissions, which bypasses permissions and a restart never passes on; restart it by hand" \
+	"$(status)	$(detail)"
+flags_case claude --settings /tmp -n ticket-2 Fix the bug --model sonnet
+typed="$(cat "$TMP/typed" 2> /dev/null)"
+eval "set -- ${typed# exec /bin/zsh -lic }"
+typed="$1"
+case "$typed" in *"claude --model 'sonnet' --resume $s;"*) ok "...a prompt typed as several words is skipped too, the flag after it carried" ;; *) bad "...a prompt typed as several words is skipped too (got [$typed])" ;; esac
+flags_case claude --resume "a long session name" --model opus --verbose
+typed="$(cat "$TMP/typed" 2> /dev/null)"
+eval "set -- ${typed# exec /bin/zsh -lic }"
+typed="$1"
+case "$typed" in *"claude --model 'opus' --verbose --resume $s;"*) ok "a multi-word --resume name with flags after it: the flags carried" ;; *) bad "a multi-word --resume name with flags after it (got [$typed])" ;; esac
+flags_case claude --dangerously-skip-permissions --resume x
+assert_eq "--dangerously-skip-permissions: refused" \
+	"refused	it was started with --dangerously-skip-permissions, which bypasses permissions and a restart never passes on; restart it by hand" \
+	"$(status)	$(detail)"
+flags_case claude --permission-mode=bypassPermissions --resume x
+assert_eq "...in its = form too" "refused" "$(status)"
+flags_case claude --resume x --mcp-config extra.json
+assert_eq "an option a resume would drop: refused, saying which" \
+	"refused	it was started with --mcp-config, which a resume would drop; restart it by hand" "$(status)	$(detail)"
+flags_case claude --add-dir "$TMP/gone" --resume x
+assert_eq "an --add-dir that is gone: refused" \
+	"refused	its --add-dir $TMP/gone is not a directory a restart can find" "$(status)	$(detail)"
+fresh
+s=$(uuid)
+p=$(spawn "$s")
+desk_tab "$p"
+: > "$TMP/argv"
+run_restart "$s"
+assert_eq "an argv that cannot be read: refused" \
+	"refused	its argv could not be read, so the flags it was started with are unknown" "$(status)	$(detail)"
+bash -c 'sleep 30; :' "a b" --model x &
+reader=$!
+sleep 0.3
+assert_eq "the real argv reader keeps a spaced word whole" "bash|-c|sleep 30; :|a b|--model|x|" \
+	"$(unset RESTART_SESSION_ARGV; source "$HERE/../desk-lib/restartable.sh"; restartable_argv "$reader" | tr '\0' '|')"
+kill "$reader" 2> /dev/null
 
 echo "=== refusals on a live session leave it running ==="
 fresh

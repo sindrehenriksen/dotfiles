@@ -4,9 +4,9 @@
 # that resumes it, so a new Claude Code version, changed settings or hooks,
 # or changed shell config take effect without losing the tab. The resume
 # goes through the user's `claude` shell function, so it gets the same
-# account and flags a session started by hand gets, plus the flags it was
-# started with where they can be read for certain (restartable_flags in
-# desk-lib/restartable.sh has which), and the tab is left at a prompt in
+# account and flags a session started by hand gets, plus the allowlisted
+# flags its exact argv shows it was started with (restartable_flags in
+# desk-lib/restartable.sh has the list), and the tab is left at a prompt in
 # the session's directory when the resumed session ends.
 #
 # Unsent text in the session's input box is lost: the restart ends the
@@ -24,8 +24,9 @@
 # $RESTART_SESSION_QUIET_MINS minutes (default 5), or a subagent it started
 # not marked finished there; or a wakeup or session cron its transcript
 # shows still pending, which lives in the process and would be lost. Other
-# children, the MCP servers, do not count. One started with flags that
-# cannot be carried over for certain. And a session whose tab cannot be
+# children, the MCP servers, do not count. One whose argv cannot be read, or
+# holds an option a resume would drop, or a flag that bypasses permissions,
+# which a restart never passes on: the user passes it again by hand. And a session whose tab cannot be
 # named for certain (as close-session.sh names it: the one terminal on its
 # tty running its pid) or would not be left at a prompt: claude's own shell must be an
 # interactive one, the command typed into one, or the form this script

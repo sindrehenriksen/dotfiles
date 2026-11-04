@@ -33,9 +33,12 @@ export CLAUDE_CONFIG_DIR="$TMP/config"
 export CLAUDE_SESSION_STORE="$TMP/store"
 export SESSION_STALE_CLAUDE_BIN="$TMP/local-bin/claude"
 export RESTART_SESSION_PS="$TMP/ps"
+export RESTART_SESSION_ARGV="$TMP/argv-of"
 mkdir -p "$HOME" "$CLAUDE_CONFIG_DIR/sessions" "$CLAUDE_SESSION_STORE" "$TMP/local-bin" "$TMP/versions" "$TMP/bin"
 printf '#!/usr/bin/env bash\ncat "%s/procs"\n' "$TMP" > "$TMP/ps"
-chmod +x "$TMP/ps"
+printf '#!/usr/bin/env bash\ncat "%s/argv"\n' "$TMP" > "$TMP/argv-of"
+chmod +x "$TMP/ps" "$TMP/argv-of"
+printf '%s\0' claude --settings /x.json --resume x > "$TMP/argv"
 
 # Installed Claude Code: a link named for its version, as the installer
 # leaves ~/.local/bin/claude.
@@ -69,12 +72,12 @@ session() { # id version account -> sets pid
 	tab "$pid"
 }
 # Its tab: claude typed into the user's login shell, unless given another
-# parent; its argv, $CLAUDE_ARGV or a plain resume.
+# parent. Its exact argv is $TMP/argv.
 tab() { # pid [parent-args]
 	{
 		printf '9000 1 -/bin/zsh\n'
 		printf '9001 9000 %s\n' "${2:-/bin/zsh -lic claude --resume x}"
-		printf '%s 9001 %s\n' "$1" "${CLAUDE_ARGV:-claude --settings /x.json --resume x}"
+		printf '%s 9001 claude --settings /x.json --resume x\n' "$1"
 	} > "$TMP/procs"
 }
 run() { # id -> out, rc
@@ -151,9 +154,10 @@ mkdir -p "$CLAUDE_CONFIG_DIR/projects/-p/$s6/subagents"
 run "$s6"
 assert_eq "a subagent writing: exit 1" "1|" "$rc|$out"
 rm -r "$CLAUDE_CONFIG_DIR/projects/-p/$s6"
-CLAUDE_ARGV="claude --resume x --chrome" tab "$pid"
+printf '%s\0' claude --resume x --dangerously-skip-permissions > "$TMP/argv"
 run "$s6"
-assert_eq "flags a restart cannot carry: exit 1" "1|" "$rc|$out"
+assert_eq "flags a restart will not carry: exit 1" "1|" "$rc|$out"
+printf '%s\0' claude --settings /x.json --resume x > "$TMP/argv"
 tab "$pid" "/bin/zsh -lic CLAUDE_CONFIG_DIR='/c' claude --resume x"
 sed -i.bak 's|^9000 1 -/bin/zsh$|9000 1 /usr/bin/login -flp me /bin/bash --noprofile --norc -c exec -l /bin/zsh|' "$TMP/procs"
 run "$s6"

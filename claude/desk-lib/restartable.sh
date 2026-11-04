@@ -130,97 +130,126 @@ restartable_schedules() {
 	return 0
 }
 
+# restartable_argv <pid>: the process's exact argv, a NUL after each word:
+# /proc on Linux, KERN_PROCARGS2 on macOS (proc-argv.py), or the command in
+# $RESTART_SESSION_ARGV, given the pid. Fails when it cannot be read.
+restartable_argv() {
+	if [ -n "${RESTART_SESSION_ARGV:-}" ]; then
+		"$RESTART_SESSION_ARGV" "$1"
+	elif [ -r "/proc/$1/cmdline" ]; then
+		cat "/proc/$1/cmdline"
+	else
+		python3 -I "$(dirname "${BASH_SOURCE[0]}")/proc-argv.py" "$1"
+	fi
+}
+
 # restartable_flags <pid> <cwd>: the flags claude was started with that a
-# resume should carry, read from its argv, into $restartable_carry as words
-# quoted for a shell (empty when there are none). Left out, since the
-# resume supplies its own: a leading `--settings <file>`, which the user's
-# `claude` function adds; `--resume`/`-r` and its id, `--continue`/`-c`,
-# `--fork-session`; `-n`/`--name` with its name; and a prompt, which is
-# everything from the first word that is not an option, or after `--`.
-# Carried: --model, --permission-mode, a later --settings, --add-dir and its
-# directories, --dangerously-skip-permissions,
-# --allow-dangerously-skip-permissions and --verbose. ps joins argv with
-# spaces, so a value holding one cannot be told apart: the check refuses
-# (returns 1) on any other option, an --add-dir or --settings value that is
-# not an existing directory or file from <cwd>, and a carried option that
-# turns up after the prompt began. Needs $procs loaded.
+# resume should carry, from its exact argv, into $restartable_carry as
+# words quoted for a shell (empty when there are none). Each word is read
+# against the options below, with their arities as `claude --help` gives
+# them, so a value and a prompt are never mistaken for an option.
+#   Left out, since the resume supplies its own: a leading `--settings
+#   <file>`, which the user's `claude` function adds; -n/--name <name>;
+#   -r/--resume [value]; -c/--continue; --fork-session; and the prompt,
+#   any word that is not an option or an option's value, or after `--`.
+#   Carried: --model, --effort, --fallback-model, --agent, --permission-mode
+#   (but see below), a later --settings, --add-dir <directories...>,
+#   --verbose, --ide, --chrome and --no-chrome.
+# Refused (returns 1, why in $restartable_why): an argv that cannot be read;
+# any other option, which a resume would silently drop; an --add-dir or
+# --settings value that is not an existing directory or file from <cwd>;
+# and, whatever else the argv says, a flag that bypasses permissions
+# (--dangerously-skip-permissions, --allow-dangerously-skip-permissions,
+# --permission-mode bypassPermissions), which a restart never passes on its
+# own: the user passes it again by hand.
 restartable_flags() {
-	local cwd=$2 words word i n v
-	read -r -a words <<< "$(args_of "$1")"
-	restartable_carry=""
+	local cwd=$2 word name val has_val i n words=()
+	while IFS= read -r -d '' word; do words+=("$word"); done < <(restartable_argv "$1" 2> /dev/null)
 	n=${#words[@]}
-	i=1
-	if [ "${words[1]:-}" = --settings ]; then i=3; fi
-	carry() { restartable_carry="${restartable_carry:+$restartable_carry }$1"; }
-	value() { # option -> sets v to the next word, or fails
-		v="${words[$((i + 1))]:-}"
-		if [ -z "$v" ] || [[ "$v" == -* ]]; then
-			restartable_why="its $1 has no value a restart can read"
+	if [ "$n" -eq 0 ]; then
+		restartable_why="its argv could not be read, so the flags it was started with are unknown"
+		return 1
+	fi
+	restartable_carry=""
+	_rf_carry() { restartable_carry="${restartable_carry:+$restartable_carry }$1"; }
+	_rf_at() { case "$1" in /*) [ -e "$1" ] ;; *) [ -e "$cwd/$1" ] ;; esac; }
+	_rf_bypass() {
+		restartable_why="it was started with $1, which bypasses permissions and a restart never passes on; restart it by hand"
+		return 1
+	}
+	# The next word as the value, unless an = gave one.
+	_rf_take() {
+		[ -n "$has_val" ] && return 0
+		if [ "$i" -ge "$n" ]; then
+			restartable_why="its $name has no value"
 			return 1
 		fi
+		val="${words[$i]}" has_val=1
+		i=$((i + 1))
 	}
-	at() { # path -> does it exist from cwd
-		case "$1" in /*) [ -e "$1" ] ;; *) [ -e "$cwd/$1" ] ;; esac
-	}
+	i=1
+	[ "${words[1]:-}" = --settings ] && i=3
 	while [ "$i" -lt "$n" ]; do
 		word="${words[$i]}"
-		case "$word" in
-			--resume | -r)
-				i=$((i + 1))
-				[[ "${words[$i]:-}" != -* ]] && i=$((i + 1))
-				continue ;;
-			--resume=* | --continue | -c | --fork-session) ;;
-			-n | --name)
-				i=$((i + 1))
-				while [ "$i" -lt "$n" ] && [[ "${words[$i]}" != -* ]]; do i=$((i + 1)); done
-				continue ;;
-			--name=*) ;;
-			--model | --permission-mode)
-				value "$word" || return 1
-				carry "$word $(restartable_shq "$v")"
-				i=$((i + 2))
-				continue ;;
-			--model=* | --permission-mode=*) carry "$(restartable_shq "$word")" ;;
-			--settings)
-				value "$word" || return 1
-				if ! at "$v"; then
-					restartable_why="its --settings $v is not a file a restart can find (a path with a space in it reads that way)"
+		i=$((i + 1))
+		name="$word" val="" has_val=""
+		if [[ "$word" == --*=* ]]; then
+			name="${word%%=*}" val="${word#*=}" has_val=1
+		fi
+		case "$name" in
+			--)
+				break ;;
+			-n | --name) _rf_take || return 1 ;;
+			-r | --resume)
+				if [ -z "$has_val" ] && [ "$i" -lt "$n" ] && [[ "${words[$i]}" != -* ]]; then i=$((i + 1)); fi ;;
+			-c | --continue | --fork-session) ;;
+			--dangerously-skip-permissions | --allow-dangerously-skip-permissions)
+				_rf_bypass "$name"
+				return 1 ;;
+			--permission-mode)
+				_rf_take || return 1
+				if [ "$val" = bypassPermissions ]; then
+					_rf_bypass "--permission-mode $val"
 					return 1
 				fi
-				carry "--settings $(restartable_shq "$v")"
-				i=$((i + 2))
-				continue ;;
+				_rf_carry "$name $(restartable_shq "$val")" ;;
+			--model | --effort | --fallback-model | --agent)
+				_rf_take || return 1
+				_rf_carry "$name $(restartable_shq "$val")" ;;
+			--settings)
+				_rf_take || return 1
+				if ! _rf_at "$val"; then
+					restartable_why="its --settings $val is not a file a restart can find"
+					return 1
+				fi
+				_rf_carry "$name $(restartable_shq "$val")" ;;
 			--add-dir)
-				value "$word" || return 1
-				carry --add-dir
-				i=$((i + 1))
-				while [ "$i" -lt "$n" ] && [[ "${words[$i]}" != -* ]]; do
-					v="${words[$i]}"
-					if ! at "$v"; then
-						restartable_why="its --add-dir $v is not a directory a restart can find (a path with a space in it reads that way)"
+				if [ -z "$has_val" ]; then
+					[ "$i" -lt "$n" ] && [[ "${words[$i]}" != -* ]] || {
+						restartable_why="its --add-dir has no directory"
+						return 1
+					}
+				fi
+				_rf_carry --add-dir
+				while :; do
+					if [ -z "$has_val" ]; then
+						[ "$i" -lt "$n" ] && [[ "${words[$i]}" != -* ]] || break
+						val="${words[$i]}"
+						i=$((i + 1))
+					fi
+					has_val=""
+					if ! _rf_at "$val"; then
+						restartable_why="its --add-dir $val is not a directory a restart can find"
 						return 1
 					fi
-					carry "$(restartable_shq "$v")"
-					i=$((i + 1))
-				done
-				continue ;;
-			--dangerously-skip-permissions | --allow-dangerously-skip-permissions | --verbose) carry "$word" ;;
-			--) break ;;
+					_rf_carry "$(restartable_shq "$val")"
+				done ;;
+			--verbose | --ide | --chrome | --no-chrome) _rf_carry "$name" ;;
 			-*)
-				restartable_why="it was started with $word, which a restart does not know how to carry over; restart it by hand"
+				restartable_why="it was started with $name, which a resume would drop; restart it by hand"
 				return 1 ;;
-			*)
-				for word in "${words[@]:$i}"; do
-					case "$word" in
-						--model | --model=* | --permission-mode | --permission-mode=* | --settings | --settings=* | --add-dir \
-							| --dangerously-skip-permissions | --allow-dangerously-skip-permissions)
-							restartable_why="its $word comes after a prompt, so its argv cannot be read for certain; restart it by hand"
-							return 1 ;;
-					esac
-				done
-				break ;;
+			*) ;;
 		esac
-		i=$((i + 1))
 	done
 	return 0
 }
