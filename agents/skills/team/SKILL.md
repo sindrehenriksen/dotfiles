@@ -172,6 +172,12 @@ Two rules that cost nothing and pay:
   carrying, on the page, what changed since they last looked.
   Without that they re-read the whole thing hunting for the diff, and
   stop opening it.
+  When the shape is a change to an app that runs locally, build it in
+  the app instead: on a branch, with a local server the owner can
+  click through and screenshots at desktop and phone width, iterated
+  in place as they react. A plain HTML page is for a shape the app
+  can't show yet, one not worth building, or one to share with people
+  who can't run the app.
   Better still, let the owner talk to the role that made it — see
   Authority.
 - **Show the content, not only the layout.** The list, the strings,
