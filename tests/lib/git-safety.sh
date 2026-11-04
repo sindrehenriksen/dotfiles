@@ -338,7 +338,8 @@ desk_test_safe_env_init() {
 	mkdir -p "$dest/state" "$dest/claude-config" "$dest/bin"
 
 	local stub
-	for stub in claude desk-open-tab.sh desk-focus-tab.sh desk-close-tab.sh desk-window.sh open-url ghostty systemd-inhibit; do
+	for stub in claude desk-open-tab.sh desk-focus-tab.sh desk-close-tab.sh desk-window.sh open-url ghostty systemd-inhibit \
+		brew ghostty-app notify detach; do
 		{
 			printf '#!/usr/bin/env bash\n'
 			printf 'echo "refusing stub ($0): this test never overrode the env var pointing at it — refusing to run for real" >&2\n'
@@ -366,6 +367,10 @@ desk_test_safe_env_init() {
 	export DESK_OPEN_URL="$dest/bin/open-url"
 	export DESK_GHOSTTY_BIN="$dest/bin/ghostty"
 	export DESK_INHIBIT_BIN="$dest/bin/systemd-inhibit"
+	export GHOSTTY_UPDATE_BREW="$dest/bin/brew"
+	export GHOSTTY_UPDATE_APP_BIN="$dest/bin/ghostty-app"
+	export GHOSTTY_UPDATE_NOTIFY_BIN="$dest/bin/notify"
+	export GHOSTTY_UPDATE_DETACH_BIN="$dest/bin/detach"
 	# Never the machine-local default config, which names a real instance.
 	export DESK_CONFIG_DEFAULT="$dest/no-desk-config.json"
 }

@@ -1,0 +1,665 @@
+#!/usr/bin/env bash
+# Updates Ghostty, a Homebrew cask, without losing the Claude Code sessions
+# in its tabs. Replacing the app means quitting it, which ends every session
+# running in it; this records them, quits Ghostty so it saves its windows,
+# runs the brew step, relaunches it and resumes each session in the tab
+# Ghostty restored for it. macOS only.
+#
+# Usage: ghostty-update [--dry-run] [--to ghostty|ghostty@tip]
+#
+#   (none)       upgrade whichever of the two casks is installed.
+#   --to CASK    move to that cask: uninstall the installed one, then install
+#                CASK. Naming the installed one is a plain upgrade.
+#   --dry-run    say what it would do, and what it would refuse; change
+#                nothing.
+#
+# Which sessions. Those the reader (session-status.sh) reports live, under
+# each config dir in $GHOSTTY_UPDATE_CONFIG_DIRS (colon-separated; default
+# ~/.claude and ~/.claude-work, the two the `claude` account switcher uses),
+# whose tty a Ghostty terminal holds with the session in its foreground, as
+# desk-close-tab.sh `find` names it for close-session.sh. A session on a tty
+# no Ghostty terminal holds is left alone.
+#
+# Refused, with nothing done, when any of them could not come back as it
+# was: held by two processes; not idle, running a shell command or a
+# subagent, or with a wakeup or session cron pending in the process; started
+# with flags a resume would drop or must not pass on; or without a
+# transcript. The checks are restart-session.sh's (desk-lib/restartable.sh),
+# made again just before anything is stopped. The session running this
+# command, if one is, is spared the idle check, since what it is running is
+# this; it is resumed with the rest. Unsent text in an input box is lost.
+#
+# Resuming into the restored tabs. Ghostty saves each terminal's id with its
+# window state and gives the terminal the same id when it restores it
+# (SurfaceView's Codable `uuid`, which is also the id its AppleScript
+# reports, in the tip builds and in 1.4.0 alike, whose state format is the
+# same version). So a session's tab is recorded by terminal id before the
+# quit and found by it after; the cwd, shared by several tabs at once, is
+# never what matches. Into that tab's restored shell, once it has settled,
+# goes the resume restart-session.sh types (desk-lib/tab-resume.sh), and a
+# new pid file naming the session confirms it. A session whose tab does not
+# come back (its tab closed with it, since no shell in it outlives claude;
+# Ghostty restored nothing; the restored tab never showed a prompt) is
+# reopened in a new tab by reopen-sessions.sh --session, which carries no
+# flags; nothing then sits in its old tab, which was not restored. A resume
+# typed by a helper call that timed out may have run, so that session is
+# not reopened elsewhere: it is reported with the command to run by hand.
+#
+# Surviving the quit. Run from a Ghostty tab, this would die with Ghostty, so
+# after the checks it hands the work to a launchd job (gui/<uid>/
+# local.ghostty-update, bootstrapped from a plist beside its plan): a child
+# of launchd in the user's GUI session, outside Ghostty's process tree, where
+# Hammerspoon and Homebrew stay reachable. It logs to
+# $DESK_STATE_DIR/logs/ghostty-update-<time>.log (default
+# ~/.local/state/desk). Ghostty is driven through Hammerspoon, which already
+# holds the permission to script it. The job:
+#   1. checks the sessions again, and fetches the new cask, so a swap never
+#      leaves the machine without Ghostty for a download;
+#   2. stops each session with SIGTERM, as close-session.sh does, recording
+#      no end of its own, so each tab falls back to its prompt;
+#   3. quits Ghostty as Cmd+Q does, so it saves its windows. Ghostty asks to
+#      confirm when a tab is running something (an editor, a server); the
+#      job waits $GHOSTTY_UPDATE_QUIT_SECS (default 180) for that, and if
+#      Ghostty is still running then, updates nothing and resumes the
+#      sessions where they are;
+#   4. runs `brew upgrade --cask <cask>`, or for --to, `brew uninstall
+#      --cask <old>` then `brew install --cask <new>`, putting the old one
+#      back if the install fails;
+#   5. relaunches Ghostty (only if it was running), resumes the sessions,
+#      and reports in the log and as a notification: what was updated, from
+#      which version to which, the sessions resumed and how, and any that
+#      failed with the exact command to resume it by hand.
+# The job is left loaded once it ends and booted out by the next run.
+#
+# Exit codes: 0 the job was started (or --dry-run, or nothing to update); 1
+# refused or failed before anything changed; 2 usage.
+#
+# Overrides (tests): $DESK_READER, $DESK_CLOSE_TAB_BIN, $DESK_OPEN_TAB_BIN
+# (for reopen-sessions.sh), $DESK_STATE_DIR, $RESTART_SESSION_PS,
+# $RESTART_SESSION_ARGV, $GHOSTTY_UPDATE_BREW (default brew),
+# $GHOSTTY_UPDATE_APP_BIN (a command taking running, quit, launch or
+# version in place of the built-in Ghostty control), $GHOSTTY_UPDATE_NOTIFY_BIN
+# (given a title and a text), $GHOSTTY_UPDATE_DETACH_BIN (given the job's
+# argv in place of launchd), $GHOSTTY_UPDATE_CONFIG_DIRS, and the waits
+# $GHOSTTY_UPDATE_DELAY_SECS (before the job acts, default 5),
+# _GRACE_SECS (10), _QUIT_SECS (180), _LAUNCH_SECS (180), _RESTORE_SECS
+# (30, once Ghostty runs), _PROMPT_SECS (15),
+# _CONFIRM_SECS (30) and _TAB_TIMEOUT_SECS (10).
+set -u
+
+script_dir() {
+	local src="${BASH_SOURCE[0]}" dir
+	while [ -h "$src" ]; do
+		dir="$(cd -P "$(dirname "$src")" && pwd)"
+		src="$(readlink "$src")"
+		[[ "$src" != /* ]] && src="$dir/$src"
+	done
+	cd -P "$(dirname "$src")" && pwd
+}
+HERE="$(script_dir)"
+SELF="$HERE/$(basename "${BASH_SOURCE[0]}")"
+
+desk_pid_alive() { kill -0 "$1" 2> /dev/null; }
+DESK_KILL_GRACE_SECS=2
+# shellcheck source=desk-lib/timeout.sh
+source "$HERE/desk-lib/timeout.sh"
+# shellcheck source=desk-lib/restartable.sh
+source "$HERE/desk-lib/restartable.sh"
+# shellcheck source=desk-lib/liveness.sh
+source "$HERE/desk-lib/liveness.sh"
+# shellcheck source=desk-lib/tab-resume.sh
+source "$HERE/desk-lib/tab-resume.sh"
+
+READER="${DESK_READER:-session-status.sh}"
+TAB_HELPER="${DESK_CLOSE_TAB_BIN:-desk-close-tab.sh}"
+TAB_TIMEOUT="${GHOSTTY_UPDATE_TAB_TIMEOUT_SECS:-10}"
+BREW="${GHOSTTY_UPDATE_BREW:-brew}"
+STATE_DIR="${DESK_STATE_DIR:-$HOME/.local/state/desk}"
+CONFIG_DIRS="${GHOSTTY_UPDATE_CONFIG_DIRS:-$HOME/.claude:$HOME/.claude-work}"
+DELAY_SECS="${GHOSTTY_UPDATE_DELAY_SECS:-5}"
+GRACE="${GHOSTTY_UPDATE_GRACE_SECS:-10}"
+QUIT_SECS="${GHOSTTY_UPDATE_QUIT_SECS:-180}"
+LAUNCH_SECS="${GHOSTTY_UPDATE_LAUNCH_SECS:-180}"
+RESTORE_SECS="${GHOSTTY_UPDATE_RESTORE_SECS:-30}"
+PROMPT_SECS="${GHOSTTY_UPDATE_PROMPT_SECS:-15}"
+CONFIRM_SECS="${GHOSTTY_UPDATE_CONFIRM_SECS:-30}"
+LABEL=local.ghostty-update
+APP_PATH=/Applications/Ghostty.app
+BUNDLE_ID=com.mitchellh.ghostty
+CASKS="ghostty ghostty@tip"
+# Long enough for a slow download; a brew step that hangs past it is killed.
+BREW_TIMEOUT=1200
+
+usage() {
+	sed -n '/^# Usage:/,/^#   --dry-run/{s/^# \{0,1\}//;p;}' "$0" >&2
+	exit 2
+}
+
+dry_run=false
+to=""
+job=""
+while [ $# -gt 0 ]; do
+	case "$1" in
+		--dry-run) dry_run=true ;;
+		--to)
+			[ $# -ge 2 ] || usage
+			to="$2"
+			shift
+			;;
+		--job)
+			[ $# -ge 2 ] || usage
+			job="$2"
+			shift
+			;;
+		*) usage ;;
+	esac
+	shift
+done
+if [ -n "$to" ]; then
+	case " $CASKS " in *" $to "*) ;; *) usage ;; esac
+fi
+
+lua_string() {
+	local s=$1
+	s=${s//\\/\\\\}
+	s=${s//\"/\\\"}
+	s=${s//$'\n'/\\n}
+	printf '"%s"' "$s"
+}
+
+# hs -c with a hard limit and stdin from /dev/null (hs reads a piped stdin
+# as more commands), printing what it printed.
+hs_call() {
+	local out rc
+	out="$(mktemp "${TMPDIR:-/tmp}/ghostty-update.XXXXXX")"
+	run_with_timeout 10 "$out" hs -t 8 -c "$1" < /dev/null
+	rc=$?
+	cat "$out" "$out.stderr" 2> /dev/null
+	rm -f "$out" "$out.stderr"
+	return "$rc"
+}
+
+# Ghostty itself: running (exit 0 when it is), quit (as Cmd+Q, so it saves
+# its windows and asks about anything running), launch, and version (what the
+# installed app says it is).
+app() {
+	if [ -n "${GHOSTTY_UPDATE_APP_BIN:-}" ]; then
+		"$GHOSTTY_UPDATE_APP_BIN" "$@"
+		return
+	fi
+	case "$1" in
+		# By the executable's path: pgrep -f does not see the app's argv.
+		running) ps -axo comm= | grep -qxF "$APP_PATH/Contents/MacOS/ghostty" ;;
+		quit) hs_call "local a = hs.application.get(\"$BUNDLE_ID\"); if a then a:kill() end; return true" > /dev/null ;;
+		launch) open -a "$APP_PATH" ;;
+		version)
+			local plist="$APP_PATH/Contents/Info.plist" short build
+			short="$(defaults read "$plist" CFBundleShortVersionString 2> /dev/null)"
+			build="$(defaults read "$plist" CFBundleVersion 2> /dev/null)"
+			if [ -z "$short" ]; then
+				echo "none installed"
+			elif [ -n "$build" ] && [ "$build" != "$short" ]; then
+				echo "$short (build $build)"
+			else
+				echo "$short"
+			fi
+			;;
+	esac
+}
+
+notify() { # title text
+	if [ -n "${GHOSTTY_UPDATE_NOTIFY_BIN:-}" ]; then
+		"$GHOSTTY_UPDATE_NOTIFY_BIN" "$1" "$2"
+		return
+	fi
+	hs_call "hs.notify.new({title = $(lua_string "$1"), informativeText = $(lua_string "$2"), withdrawAfter = 0}):send(); return true" > /dev/null \
+		|| osascript -e 'on run argv' -e 'display notification (item 2 of argv) with title (item 1 of argv)' -e 'end run' "$1" "$2" > /dev/null 2>&1
+}
+
+by_hand() { # cwd config-dir carry id
+	printf '%sCLAUDE_CONFIG_DIR=%s claude %s--resume %s' \
+		"${1:+cd $(restartable_shq "$1") && }" "$(restartable_shq "$2")" "${3:+$3 }" "$4"
+}
+
+# ==========================================================================
+# The job: everything from the second look to the report, detached.
+# ==========================================================================
+run_job() {
+	local plan=$1
+	local log action from_cask to_cask from_version to_version was_running caller
+	log="$(jq -r '.log' "$plan")"
+	exec >> "$log" 2>&1
+	action="$(jq -r '.action' "$plan")"
+	from_cask="$(jq -r '.from_cask' "$plan")"
+	to_cask="$(jq -r '.to_cask' "$plan")"
+	from_version="$(jq -r '.from_version' "$plan")"
+	was_running="$(jq -r '.ghostty_running' "$plan")"
+	caller="$(jq -r '.caller // ""' "$plan")"
+	logl() { printf '%s %s\n' "$(date '+%H:%M:%S')" "$*"; }
+	what="$from_cask $from_version"
+	[ "$action" = switch ] && what="$what, moving to $to_cask"
+
+	mapfile -t sessions < <(jq -c '.sessions[]' "$plan")
+	logl "job started (pid $$): $what; ${#sessions[@]} session(s) to resume"
+	notify "Updating Ghostty" "$what. Ghostty quits in a moment and comes back with its sessions. If it asks to confirm quitting, confirm; if macOS asks whether to open it afterwards, open it. Log: $log"
+	sleep "$DELAY_SECS"
+
+	# --- the second look, just before anything is stopped ---
+	local s id name dir pid transcript cwd carry terminal pidfile kept=() abort=""
+	restartable_procs || abort="could not list processes"
+	for s in "${sessions[@]+"${sessions[@]}"}"; do
+		[ -z "$abort" ] || break
+		IFS=$'\t' read -r id name dir pid transcript < <(jq -r '[.id, .name, .config_dir, .pid, .transcript] | @tsv' <<< "$s")
+		pidfile="$dir/sessions/$pid.json"
+		if [ "$(jq -r '.sessionId // empty' "$pidfile" 2> /dev/null)" != "$id" ]; then
+			logl "$name ($id) has ended since the first look; not resumed"
+			continue
+		fi
+		if [ "$id" != "$caller" ]; then
+			CONFIG_DIR="$dir"
+			if ! restartable_idle "$pid" "$pidfile" "$(dirname "$transcript")/$id/subagents" \
+				|| ! restartable_schedules "$pidfile" "$transcript"; then
+				abort="$name ($id) is no longer idle: $restartable_why"
+				break
+			fi
+		fi
+		kept+=("$s")
+	done
+	if [ -z "$abort" ]; then
+		logl "fetching $to_cask"
+		"$BREW" fetch --cask "$to_cask" < /dev/null || abort="brew could not fetch $to_cask"
+	fi
+	if [ -n "$abort" ]; then
+		logl "nothing done: $abort"
+		notify "Ghostty not updated" "Nothing was done: $abort. Log: $log"
+		return 1
+	fi
+	sessions=(${kept[@]+"${kept[@]}"})
+
+	# --- stop the sessions, then quit Ghostty ---
+	for s in "${sessions[@]+"${sessions[@]}"}"; do
+		pid="$(jq -r '.pid' <<< "$s")"
+		kill -TERM "$pid" 2> /dev/null
+	done
+	local until_s=$((SECONDS + GRACE)) left
+	while :; do
+		left=0
+		for s in "${sessions[@]+"${sessions[@]}"}"; do
+			IFS=$'\t' read -r pid dir < <(jq -r '[.pid, .config_dir] | @tsv' <<< "$s")
+			{ desk_pid_alive "$pid" || [ -e "$dir/sessions/$pid.json" ]; } && left=$((left + 1))
+		done
+		[ "$left" -eq 0 ] || [ "$SECONDS" -ge "$until_s" ] && break
+		sleep 0.2
+	done
+	if [ "$left" -gt 0 ]; then
+		logl "stopped the sessions; $left still going after ${GRACE}s, left to Ghostty's quit"
+	else
+		logl "stopped the sessions"
+	fi
+
+	local quit=true updated=false brew_note=""
+	if [ "$was_running" = true ]; then
+		logl "quitting Ghostty"
+		app quit
+		until_s=$((SECONDS + QUIT_SECS))
+		while app running && [ "$SECONDS" -lt "$until_s" ]; do sleep 0.5; done
+		if app running; then
+			quit=false
+			brew_note="Ghostty did not quit within ${QUIT_SECS}s (a quit confirmation cancelled or left open?), so nothing was updated"
+			logl "$brew_note"
+		fi
+	fi
+
+	# --- the brew step ---
+	if [ "$quit" = true ]; then
+		local out rc
+		out="$(mktemp "${TMPDIR:-/tmp}/ghostty-update.XXXXXX")"
+		brew_step() { # args...
+			logl "brew $*"
+			run_with_timeout "$BREW_TIMEOUT" "$out" "$BREW" "$@" < /dev/null
+			rc=$?
+			cat "$out" "$out.stderr" 2> /dev/null
+			rm -f "$out.stderr"
+			return "$rc"
+		}
+		if [ "$action" = upgrade ]; then
+			brew_step upgrade --cask "$to_cask" && updated=true \
+				|| brew_note="brew upgrade --cask $to_cask failed (exit $rc)"
+		elif brew_step uninstall --cask "$from_cask"; then
+			if brew_step install --cask "$to_cask"; then
+				updated=true
+			else
+				brew_note="brew install --cask $to_cask failed (exit $rc)"
+				if brew_step install --cask "$from_cask"; then
+					brew_note="$brew_note; put $from_cask back"
+				else
+					brew_note="$brew_note, and putting $from_cask back failed too: install one by hand"
+				fi
+			fi
+		else
+			brew_note="brew uninstall --cask $from_cask failed (exit $rc), so $to_cask was not installed"
+		fi
+		rm -f "$out"
+		[ -z "$brew_note" ] || logl "$brew_note"
+	fi
+	to_version="$(app version)"
+	logl "Ghostty is now $to_version"
+
+	if [ "$quit" = true ] && [ "$was_running" = true ]; then
+		logl "launching Ghostty"
+		app launch || logl "launching Ghostty failed"
+	fi
+
+	# --- resume the sessions ---
+	local resumed=() reopen=() failed=() typed=() t look_until
+	# Ghostty may take a while to come up (macOS can ask whether to open an
+	# app just downloaded), and its restored terminals a moment more: wait
+	# for the first that was recorded, so a tab not found after that is one
+	# not restored.
+	look_until=$((SECONDS + LAUNCH_SECS))
+	until app running || [ "$SECONDS" -ge "$look_until" ]; do sleep 0.5; done
+	app running || logl "Ghostty is not running after ${LAUNCH_SECS}s"
+	look_until=$((SECONDS + RESTORE_SECS))
+	local any_terminal="" restored=""
+	for s in "${sessions[@]+"${sessions[@]}"}"; do
+		t="$(jq -r '.terminal' <<< "$s")"
+		[ -n "$t" ] && any_terminal=1
+	done
+	if [ -n "$any_terminal" ]; then
+		while [ "$SECONDS" -lt "$look_until" ]; do
+			for s in "${sessions[@]}"; do
+				t="$(jq -r '.terminal' <<< "$s")"
+				[ -n "$t" ] || continue
+				tab_call pid "$t"
+				[ "$tab_rc" -eq 0 ] && { restored=1; break 2; }
+			done
+			sleep 0.5
+		done
+	fi
+
+	for s in "${sessions[@]+"${sessions[@]}"}"; do
+		IFS=$'\t' read -r id name dir pid cwd terminal carry < <(jq -r '[.id, .name, .config_dir, .pid, .cwd, .terminal, .carry] | @tsv' <<< "$s")
+		if [ -z "$terminal" ]; then
+			reopen+=("$s")
+			continue
+		fi
+		# Once Ghostty has restored a recorded tab, one it says it has no
+		# terminal for is one it did not restore, not one still coming.
+		if [ -n "$restored" ]; then
+			tab_call pid "$terminal"
+			case "$tab_why" in
+				*"no Ghostty terminal has that id"*)
+					logl "$name ($id): Ghostty did not restore its tab; reopening it in a new tab"
+					reopen+=("$s")
+					continue ;;
+			esac
+		fi
+		if ! tab_await_prompt "$terminal" "$PROMPT_SECS"; then
+			logl "$name ($id): its tab showed no settled prompt (${tab_unreached:-${tab_last_seen:-nothing in the foreground}}); reopening it in a new tab"
+			reopen+=("$s")
+			continue
+		fi
+		tab_call type "$terminal" "$tab_shell_pid" "$(tab_resume_text "$cwd" "$dir" "${carry:+$carry }--resume $id")"
+		if [ "$tab_rc" -eq 0 ] || [ "$tab_rc" -eq 124 ]; then
+			typed+=("$(jq -c --arg maybe "$([ "$tab_rc" -eq 124 ] && echo true)" '. + {maybe: ($maybe == "true")}' <<< "$s")")
+		else
+			logl "$name ($id): the resume was not typed into its tab (${tab_why:-exit $tab_rc}); reopening it in a new tab"
+			reopen+=("$s")
+		fi
+	done
+
+	until_s=$((SECONDS + CONFIRM_SECS))
+	for s in "${typed[@]+"${typed[@]}"}"; do
+		IFS=$'\t' read -r id name dir pid cwd carry < <(jq -r '[.id, .name, .config_dir, .pid, .cwd, .carry] | @tsv' <<< "$s")
+		local now_pid=""
+		while :; do
+			now_pid="$(tab_resumed_pid "$dir" "$id" "$pid")" && break
+			now_pid=""
+			[ "$SECONDS" -ge "$until_s" ] && break
+			sleep 0.25
+		done
+		if [ -n "$now_pid" ]; then
+			resumed+=("$name: in its tab")
+		elif [ "$(jq -r '.maybe' <<< "$s")" = true ]; then
+			failed+=("$name: the helper timed out typing its resume and it is not live; if its tab shows nothing running: $(by_hand "$cwd" "$dir" "$carry" "$id")")
+		else
+			failed+=("$name: typed into its tab but not live after ${CONFIRM_SECS}s; look at the tab, else: $(by_hand "$cwd" "$dir" "$carry" "$id")")
+		fi
+	done
+
+	# The rest in new tabs, through reopen-sessions.sh, one call per config
+	# dir, since it reads one.
+	if [ "${#reopen[@]}" -gt 0 ]; then
+		local dirs d args out_json r st detail
+		dirs="$(printf '%s\n' "${reopen[@]}" | jq -r '.config_dir' | sort -u)"
+		while IFS= read -r d; do
+			args=()
+			for s in "${reopen[@]}"; do
+				[ "$(jq -r '.config_dir' <<< "$s")" = "$d" ] && args+=(--session "$(jq -r '.id' <<< "$s")")
+			done
+			out_json="$(CLAUDE_CONFIG_DIR="$d" "$HERE/reopen-sessions.sh" --json "${args[@]}" < /dev/null 2> /dev/null)"
+			for s in "${reopen[@]}"; do
+				[ "$(jq -r '.config_dir' <<< "$s")" = "$d" ] || continue
+				IFS=$'\t' read -r id name cwd carry < <(jq -r '[.id, .name, .cwd, .carry] | @tsv' <<< "$s")
+				r="$(jq -c --arg id "$id" '.sessions[]? | select(.id == $id)' <<< "$out_json" 2> /dev/null | head -n 1)"
+				st="$(jq -r '.status // empty' <<< "$r" 2> /dev/null)"
+				detail="$(jq -r '.detail // empty' <<< "$r" 2> /dev/null)"
+				case "$st" in
+					opened | running)
+						resumed+=("$name: in a new tab${carry:+ (without $carry)}") ;;
+					*)
+						failed+=("$name: ${detail:-reopen-sessions.sh gave no answer for it}; $(by_hand "$cwd" "$d" "$carry" "$id")") ;;
+				esac
+			done
+		done <<< "$dirs"
+	fi
+
+	# --- the report ---
+	local title text line
+	if [ "$updated" = true ]; then
+		title="Ghostty updated"
+		text="$from_cask $from_version -> $to_cask $to_version."
+	else
+		title="Ghostty not updated"
+		text="${brew_note:-nothing was updated}; it is $to_version."
+	fi
+	text="$text ${#resumed[@]} session(s) resumed"
+	[ "${#resumed[@]}" -eq 0 ] || text="$text ($(printf '%s; ' "${resumed[@]}" | sed 's/; $//'))"
+	[ "${#failed[@]}" -eq 0 ] || text="$text, ${#failed[@]} failed"
+	text="$text."
+	logl "$title: $text"
+	for line in "${resumed[@]+"${resumed[@]}"}"; do logl "  resumed  $line"; done
+	for line in "${failed[@]+"${failed[@]}"}"; do
+		logl "  FAILED   $line"
+		text="$text Failed: $line."
+	done
+	notify "$title" "$text Log: $log"
+	logl "job done"
+	[ "$updated" = true ] && [ "${#failed[@]}" -eq 0 ]
+}
+
+if [ -n "$job" ]; then
+	run_job "$job"
+	exit $?
+fi
+
+# ==========================================================================
+# The first look, in the foreground: what would change, and what refuses.
+# ==========================================================================
+die() {
+	printf 'ghostty-update: %s\n' "$1" >&2
+	exit 1
+}
+
+installed=""
+for c in $CASKS; do
+	if "$BREW" list --cask --versions "$c" > /dev/null 2>&1 < /dev/null; then
+		[ -z "$installed" ] || die "both $installed and $c are installed; uninstall one first"
+		installed="$c"
+	fi
+done
+[ -n "$installed" ] || die "neither of $CASKS is installed through Homebrew"
+target="${to:-$installed}"
+from_version="$(app version)"
+to_version="$("$BREW" info --cask --json=v2 "$target" < /dev/null 2> /dev/null | jq -r '.casks[0].version // empty' 2> /dev/null)"
+if [ "$target" = "$installed" ]; then
+	action=upgrade
+	if [ -z "$("$BREW" outdated --cask --greedy --quiet "$target" < /dev/null 2> /dev/null)" ]; then
+		echo "ghostty-update: $installed is up to date ($from_version); nothing to do"
+		exit 0
+	fi
+	headline="upgrade $installed from $from_version to ${to_version:-the latest}"
+else
+	action=switch
+	headline="move from $installed $from_version to $target ${to_version:-latest} (brew uninstall --cask $installed, then brew install --cask $target)"
+fi
+
+ghostty_running=false
+app running && ghostty_running=true
+
+# Every live session the readers report, one JSON object per line.
+read_live() {
+	local d
+	IFS=: read -r -a dirs <<< "$CONFIG_DIRS"
+	for d in "${dirs[@]}"; do
+		d="${d%/}"
+		[ -d "$d" ] || continue
+		CLAUDE_CONFIG_DIR="$d" "$READER" < /dev/null 2> /dev/null \
+			| jq -c --arg d "$d" 'select(.live == true) | . + {config_dir: $d}' 2> /dev/null
+	done
+}
+
+plan_sessions=()
+refusals=()
+alone=()
+caller="${CLAUDE_CODE_SESSION_ID:-}"
+if [ "$ghostty_running" = true ]; then
+	restartable_procs || die "could not list processes"
+	seen=" "
+	while IFS= read -r e; do
+		[ -n "$e" ] || continue
+		IFS=$'\t' read -r id name dir pid tty cwd transcript dup < <(jq -r '
+			[.id, (.name // "" | if . == "" then "(unnamed)" else . end), .config_dir, (.pid // "" | tostring),
+			 (.tty // ""), (.cwd // ""), (.transcript_path // ""), (.duplicate_pids == true | tostring)] | @tsv' <<< "$e")
+		case "$seen" in *" $id "*) continue ;; esac
+		seen="$seen$id "
+		label="$name ($id)"
+		if [ -z "$tty" ] || [ "$tty" = "??" ]; then
+			alone+=("$label: no terminal")
+			continue
+		fi
+		tab_call find "$tty" "$pid"
+		terminal=""
+		how="in its tab"
+		if [ "$tab_rc" -eq 0 ] && [ -n "$tab_out" ]; then
+			terminal="$tab_out"
+		elif [ "$tab_rc" -eq 1 ]; then
+			case "$tab_why" in
+				*"no Ghostty terminal is on"* | *"Ghostty is not running"*)
+					alone+=("$label: not in a Ghostty tab")
+					continue ;;
+			esac
+			how="in a new tab, since its tab could not be told apart ($tab_why)"
+		else
+			die "Hammerspoon did not answer about $label's tab (${tab_why:-exit $tab_rc}); nothing done"
+		fi
+		if [ "$dup" = true ]; then
+			refusals+=("$label: more than one process holds it")
+			continue
+		fi
+		if [ -z "$transcript" ]; then
+			refusals+=("$label: no transcript, so no way to tell whether subagents are running")
+			continue
+		fi
+		CONFIG_DIR="$dir"
+		pidfile="$dir/sessions/$pid.json"
+		if [ "$id" != "$caller" ]; then
+			if ! restartable_idle "$pid" "$pidfile" "$(dirname "$transcript")/$id/subagents" \
+				|| ! restartable_schedules "$pidfile" "$transcript"; then
+				refusals+=("$label: $restartable_why")
+				continue
+			fi
+		fi
+		if ! restartable_flags "$pid" "${cwd:-/}"; then
+			refusals+=("$label: $restartable_why")
+			continue
+		fi
+		if [ -n "$terminal" ] && ! restartable_prompt "$pid"; then
+			terminal=""
+			how="in a new tab, since its tab closes with the session"
+		fi
+		[ "$id" = "$caller" ] && how="$how (the session running this)"
+		plan_sessions+=("$(jq -cn --arg id "$id" --arg name "$name" --arg dir "$dir" --arg pid "$pid" --arg tty "$tty" \
+			--arg cwd "$cwd" --arg tp "$transcript" --arg terminal "$terminal" --arg carry "$restartable_carry" --arg how "$how" '
+			{id: $id, name: $name, config_dir: $dir, pid: $pid, tty: $tty, cwd: $cwd, transcript: $tp,
+			 terminal: $terminal, carry: $carry, how: $how}')")
+	done < <(read_live)
+fi
+
+echo "ghostty-update: $headline"
+if [ "$ghostty_running" != true ]; then
+	echo "Ghostty is not running, so no session is touched and it is not launched afterwards."
+fi
+if [ "${#plan_sessions[@]}" -gt 0 ]; then
+	echo "Sessions to stop and resume (${#plan_sessions[@]}):"
+	for s in "${plan_sessions[@]}"; do
+		jq -r '"  \(.name) (\(.id)), \(.how)\(if .carry == "" then "" else ", with \(.carry)" end)"' <<< "$s"
+	done
+elif [ "$ghostty_running" = true ] && [ "${#refusals[@]}" -eq 0 ]; then
+	echo "No Claude Code session is running in Ghostty."
+fi
+[ "${#alone[@]}" -eq 0 ] || { echo "Left alone:"; printf '  %s\n' "${alone[@]}"; }
+if [ "${#refusals[@]}" -gt 0 ]; then
+	echo "Refused, since these sessions could not come back as they are:"
+	printf '  %s\n' "${refusals[@]}"
+	echo "Nothing done. Let them finish, or end them, and run it again."
+	exit 1
+fi
+if [ "$ghostty_running" = true ]; then
+	[ "${#plan_sessions[@]}" -eq 0 ] || echo "Unsent text in their input boxes is lost."
+	echo "Ghostty asks to confirm quitting if a tab is running something else (an editor, a server); confirm it, or cancel to keep everything as it was, sessions resumed in their tabs."
+fi
+if [ "$dry_run" = true ]; then
+	echo "Dry run: nothing done."
+	exit 0
+fi
+
+# --- hand over to the job ---
+uid="$(id -u)"
+if [ -z "${GHOSTTY_UPDATE_DETACH_BIN:-}" ] \
+	&& launchctl print "gui/$uid/$LABEL" 2> /dev/null | grep -q 'state = running'; then
+	die "an update is already running (launchd job $LABEL)"
+fi
+stamp="$(date +%Y%m%d-%H%M%S)"
+job_dir="$STATE_DIR/ghostty-update"
+log="$STATE_DIR/logs/ghostty-update-$stamp.log"
+mkdir -p "$job_dir" "$STATE_DIR/logs" || die "could not create $job_dir"
+plan="$job_dir/plan-$stamp.json"
+printf '%s\n' "${plan_sessions[@]+"${plan_sessions[@]}"}" | jq -s \
+	--arg log "$log" --arg action "$action" --arg from "$installed" --arg to "$target" \
+	--arg fv "$from_version" --argjson running "$ghostty_running" --arg caller "$caller" '
+	{log: $log, action: $action, from_cask: $from, to_cask: $to, from_version: $fv,
+	 ghostty_running: $running, caller: $caller, sessions: .}' > "$plan" || die "could not write $plan"
+{
+	printf '%s ghostty-update: %s\n' "$(date '+%H:%M:%S')" "$headline"
+	printf '  plan: %s\n' "$plan"
+} > "$log"
+
+if [ -n "${GHOSTTY_UPDATE_DETACH_BIN:-}" ]; then
+	"$GHOSTTY_UPDATE_DETACH_BIN" "$BASH" "$SELF" --job "$plan" || die "could not start the job"
+	echo "Started the job through $GHOSTTY_UPDATE_DETACH_BIN."
+else
+	plist="$job_dir/job.plist"
+	jq -n --arg label "$LABEL" --arg bash "$BASH" --arg self "$SELF" --arg plan "$plan" --arg log "$log" \
+		--arg path "$PATH" --arg home "$HOME" --arg lang "${LANG:-en_US.UTF-8}" --arg state "$STATE_DIR" '
+		{Label: $label, ProgramArguments: [$bash, $self, "--job", $plan],
+		 RunAtLoad: true, KeepAlive: false, ProcessType: "Interactive",
+		 StandardOutPath: $log, StandardErrorPath: $log,
+		 EnvironmentVariables: {PATH: $path, HOME: $home, LANG: $lang, DESK_STATE_DIR: $state}}' > "$plist.json" \
+		&& plutil -convert xml1 -o "$plist" "$plist.json" && rm -f "$plist.json" \
+		|| die "could not write $plist"
+	launchctl bootout "gui/$uid/$LABEL" 2> /dev/null
+	launchctl bootstrap "gui/$uid" "$plist" || die "launchctl could not start $plist"
+	echo "Started as launchd job $LABEL, outside Ghostty; it acts in ${DELAY_SECS}s and reports in a notification."
+fi
+echo "Log: $log"

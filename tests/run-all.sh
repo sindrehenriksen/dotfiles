@@ -74,6 +74,7 @@ BASH_SUITES=(
 	nvim/tests/desk-follow-test.sh
 	claude/tests/close-session-test.sh
 	claude/tests/restart-session-test.sh
+	claude/tests/ghostty-update-test.sh
 	claude/tests/compact-handoff-test.sh
 	claude/tests/input-bell-test.sh
 	claude/tests/reopen-sessions-test.sh
@@ -133,6 +134,7 @@ SERIAL_SUITES=(
 	nvim/tests/desk-timeout-test.sh
 	claude/tests/close-session-test.sh
 	claude/tests/restart-session-test.sh
+	claude/tests/ghostty-update-test.sh
 	claude/tests/compact-handoff-test.sh
 	claude/tests/input-bell-test.sh
 	claude/tests/reopen-sessions-test.sh

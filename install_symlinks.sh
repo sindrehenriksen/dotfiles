@@ -85,6 +85,9 @@ if [[ "$(uname)" == "Darwin" ]]; then
         link ~/dotfiles/hammerspoon/"$helper" ~/.local/bin/"$helper"
     done
 
+    # macOS: updating the Ghostty cask without losing the sessions in it.
+    link ~/dotfiles/claude/ghostty-update ~/.local/bin/ghostty-update
+
     # macOS: keyboard remapping at login — see macos/README.md
     mkdir -p ~/Library/LaunchAgents
     link ~/dotfiles/macos/com.local.KeyRemapping.plist \
