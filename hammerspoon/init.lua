@@ -1333,7 +1333,7 @@ end
 
 -- A restart-session.sh result as { title, informativeText }: its output
 -- line is `<status>\t<id>\t<name>\t<detail>`.
-function DeskStale.restart_report(session, rc, out, err, timed_out)
+function DeskStale.restart_report(session, rc, out, err, timed_out, secs)
   if timed_out then
     local by_hand = (err or ""):match("if nothing more is reported, (resume it by hand: [^\n]*)")
     return {
@@ -1344,7 +1344,11 @@ function DeskStale.restart_report(session, rc, out, err, timed_out)
   end
   local status, _, _, detail = (out or ""):match("^([^\t]*)\t([^\t]*)\t([^\t]*)\t([^\n]*)")
   if rc == 0 then
-    return { title = "Restarted " .. session.name, informativeText = detail or "" }
+    return {
+      title = "Restarted " .. session.name .. " in this tab",
+      informativeText = (secs and string.format("in %ds", math.floor(secs + 0.5)) or "")
+        .. (detail and detail ~= "" and ((secs and ": " or "") .. detail) or ""),
+    }
   end
   if rc == 3 then
     return {
@@ -1406,10 +1410,15 @@ local function run_tool(session, tool, args, done) -- session may be nil
   }, done)
 end
 
+-- Restarts `session`, saying so at once and staying on screen until the
+-- outcome replaces it, as an alert and a notification.
 function DeskStale.restart(session)
-  hs.alert.show("Restarting " .. session.name .. "…", 2)
+  local started = hs.timer.secondsSinceEpoch()
+  local working = hs.alert.show("Restarting " .. session.name .. "…", DeskStale.timeouts["restart-session.sh"])
   run_tool(session, "restart-session.sh", { session.id }, function(rc, out, err, timed_out)
-    local report = DeskStale.restart_report(session, rc, out, err, timed_out)
+    hs.alert.closeSpecific(working)
+    local report = DeskStale.restart_report(session, rc, out, err, timed_out, hs.timer.secondsSinceEpoch() - started)
+    hs.alert.show(report.title .. "\n" .. report.informativeText, 4)
     hs.notify.new({ title = report.title, informativeText = report.informativeText }):send()
   end)
 end
@@ -1497,7 +1506,9 @@ function DeskStale.press()
     if armed and armed.pid == session.pid and pressed - armed.at <= DeskStale.confirm_secs then
       return DeskStale.restart(session)
     end
+    local working = hs.alert.show("Checking " .. session.name .. "…", DeskStale.timeouts["session-stale.sh"])
     run_tool(session, "session-stale.sh", { session.id }, function(rc, out, err)
+      hs.alert.closeSpecific(working)
       hs.alert.show(DeskStale.confirm_text(session, rc, out, err), DeskStale.confirm_secs)
       DeskStale.armed = { pid = session.pid, at = hs.timer.secondsSinceEpoch() }
     end)

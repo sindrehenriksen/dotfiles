@@ -782,7 +782,7 @@ assert_eq("Restart runs restart-session.sh on the session", DeskStale.bin_dir ..
   restart and (restart.path .. " " .. restart.args[1]))
 assert_eq("...in its own config dir, on the login PATH", "/b /login/bin:/usr/bin", restart.env.CLAUDE_CONFIG_DIR .. " " .. restart.env.PATH)
 restart.done(0, "restarted\t" .. S1 .. "\tnotes\tresumed in its tab (pid 77)\n", "")
-assert_eq("...and says how it went", "Restarted notes: resumed in its tab (pid 77)", last_note().attrs.title .. ": " .. last_note().attrs.informativeText)
+assert_eq("...and says how it went", "Restarted notes in this tab: in 0s: resumed in its tab (pid 77)", last_note().attrs.title .. ": " .. last_note().attrs.informativeText)
 local refused = DeskStale.restart_report(session, 1, "refused\t" .. S1 .. "\tnotes\tnot idle: its status is busy\n")
 assert_eq("a refusal says why", "notes not restarted: not idle: its status is busy", refused.title .. ": " .. refused.informativeText)
 assert_eq("exit 3 says how to get a tab that restarts", true,
@@ -842,6 +842,7 @@ focus_answers("4242\n", S1 .. "\t/b\tnotes\n")
 local first = last_task()
 assert_eq("the hotkey's first press restarts nothing: it asks session-stale.sh what a restart would do",
   DeskStale.bin_dir .. "/session-stale.sh " .. S1, first.path .. " " .. first.args[1])
+assert_eq("...saying at once that it is checking", "Checking notes…", alerts[#alerts])
 first.done(0, "version: 1 running, 2 installed\n", "")
 assert_eq("...and shows it, with what unsent input costs",
   "Restart notes? version: 1 running, 2 installed.\nUnsent text in its input box is lost. Press Cmd+Opt+R again to restart.",
@@ -851,7 +852,14 @@ DeskStale.hotkey.fn()
 focus_answers("4242\n", S1 .. "\t/b\tnotes\n")
 assert_eq("a second press within a few seconds restarts the focused tab's session", DeskStale.bin_dir .. "/restart-session.sh " .. S1,
   last_task().path .. " " .. last_task().args[1])
-last_task().done(0, "restarted\t" .. S1 .. "\tnotes\tok\n", "")
+assert_eq("...saying so at once", "Restarting notes…", alerts[#alerts])
+clock = clock + 7
+last_task().done(0, "restarted\t" .. S1 .. "\tnotes\tresumed in its tab (pid 78)\n", "")
+assert_eq("...and when it ends, that it restarted in this tab and how long it took",
+  "Restarted notes in this tab\nin 7s: resumed in its tab (pid 78)", alerts[#alerts])
+DeskStale.restart(session)
+last_task().done(1, "refused\t" .. S1 .. "\tnotes\tnot idle: its status is busy\n", "")
+assert_eq("a refusal is shown with its reason", "notes not restarted\nnot idle: its status is busy", alerts[#alerts])
 DeskStale.hotkey.fn()
 focus_answers("4242\n", S1 .. "\t/b\tnotes\n")
 clock = clock + 10
