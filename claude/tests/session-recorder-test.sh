@@ -171,6 +171,24 @@ mkdir -p "$(dirname "$tp_x")"
 : > "$tp_x"
 rec_start sess-x /tmp/x "$tp_x" startup
 
+echo "=== a start records the account its config dir is logged in as ==="
+# Its own config dir and store, so the reader scenarios below never see it.
+ACCT_DIR="$TMP/acct-config"
+ACCT_STORE="$TMP/acct-store"
+mkdir -p "$ACCT_DIR" "$ACCT_STORE"
+jq -n '{oauthAccount:{accountUuid:"acct-one", emailAddress:"someone@example.invalid", displayName:"Some One"}, userID:"u-1"}' > "$ACCT_DIR/.claude.json"
+CLAUDE_CONFIG_DIR="$ACCT_DIR" CLAUDE_SESSION_STORE="$ACCT_STORE" rec_start sess-acct /tmp/a /tmp/a/sess-acct.jsonl startup
+jq '.oauthAccount.accountUuid = "acct-two"' "$ACCT_DIR/.claude.json" > "$TMP/acct.json" && mv "$TMP/acct.json" "$ACCT_DIR/.claude.json"
+CLAUDE_CONFIG_DIR="$ACCT_DIR" CLAUDE_SESSION_STORE="$ACCT_STORE" rec_start sess-acct /tmp/a /tmp/a/sess-acct.jsonl resume
+assert_eq "each start records the accountUuid current then" "acct-one acct-two" \
+    "$(jq -r 'select(.event == "start") | .account' "$ACCT_STORE/sess-acct.jsonl" | paste -sd' ' -)"
+assert_eq "...and nothing else from that file" "false" \
+    "$(grep -q -e someone@ -e 'Some One' -e u-1 "$ACCT_STORE/sess-acct.jsonl" && echo true || echo false)"
+rm "$ACCT_DIR/.claude.json"
+CLAUDE_CONFIG_DIR="$ACCT_DIR" CLAUDE_SESSION_STORE="$ACCT_STORE" rec_start sess-acct /tmp/a /tmp/a/sess-acct.jsonl resume
+assert_eq "a config dir logged in as no one records no account" "null" \
+    "$(jq -s -c 'map(select(.event == "start")) | last | .account' "$ACCT_STORE/sess-acct.jsonl")"
+
 echo "=== recorder never logged an error ==="
 if [ -s "$LOG_FILE" ]; then
     bad "recorder log is empty (nothing swallowed)"
