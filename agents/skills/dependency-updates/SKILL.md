@@ -16,7 +16,7 @@ gh api --paginate 'repos/{owner}/{repo}/dependabot/alerts?state=open&per_page=10
 gh run list --workflow "Dependabot Updates" --limit 30   # then: gh run view <id> --log
 ```
 
-The alerts call needs `--paginate` and `per_page`, or it returns only the first 30. **List `classification=malware` alerts first**: they outrank every severity. An alert with no PR is still in the set, and alerts dismissed because no patched version existed don't reopen on their own: re-check them each sweep and reopen once a fix ships. Dependabot regroups between runs, so PR numbers aren't stable: re-derive the set each time, read each diff (`gh pr diff <n>`) for the actual bumps, and close what is superseded.
+The alerts call needs `--paginate` and `per_page`, or it returns only the first 30. **List `classification=malware` alerts first**: they outrank every severity. An alert with no PR is still in the set, and alerts dismissed because no patched version existed don't reopen on their own: re-check them each sweep and reopen once a fix ships. Dependabot regroups between runs, so PR numbers aren't stable, and a lockfile it regenerates under the cooldown can move a fresh security relock back to the vulnerable release (Config): re-derive the open alerts every run rather than trusting the last relock, read each diff (`gh pr diff <n>`) for the actual bumps, and close what is superseded.
 
 **Check each group PR against its job's log.** Dependabot silently drops a dependency it can't resolve from a group PR that still opens; the log's error tables, and the Dependabot updates page under Insights → Dependency graph, name it. "Nothing to update" is a quiet week, not a failure.
 
