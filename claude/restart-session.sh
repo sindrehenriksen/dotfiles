@@ -55,7 +55,9 @@
 # reopen-sessions.sh treats the session as it would have.
 #
 # The idle and prompt checks live in desk-lib/restartable.sh, shared with
-# session-stale.sh, which offers a restart only where this would accept it.
+# session-stale.sh, which offers a restart only where this would accept it;
+# the wait for the tab's prompt, the typing and the confirmation in
+# desk-lib/tab-resume.sh, shared with ghostty-update.
 #
 # Output: one tab-separated line, `<status> <id> <name> <detail>`, status
 # restarted, refused or failed. Exit 0 when restarted, 1 refused or failed,
@@ -92,13 +94,10 @@ source "$HERE/desk-lib/timeout.sh"
 source "$HERE/desk-lib/restartable.sh"
 # shellcheck source=desk-lib/liveness.sh
 source "$HERE/desk-lib/liveness.sh"
+# shellcheck source=desk-lib/tab-resume.sh
+source "$HERE/desk-lib/tab-resume.sh"
 
-# Milliseconds since some fixed point, for the phase timings this reports on
-# stderr; whole seconds where bash has no EPOCHREALTIME.
-now_ms() {
-	local t="${EPOCHREALTIME:-}"
-	if [ -n "$t" ]; then echo $((${t//[.,]/} / 1000)); else echo $((SECONDS * 1000)); fi
-}
+# The phase timings this reports on stderr.
 t0=$(now_ms)
 timings=""
 phase() { # name: the time since the last phase, added to $timings
@@ -182,17 +181,6 @@ if [ -n "$recorded_tty" ] && [ "${recorded_tty#/dev/}" != "${tty#/dev/}" ]; then
 	report refused "its tty $tty is not the one its start recorded ($recorded_tty)"
 fi
 
-tab_call() { # args... -> sets tab_rc, tab_out, tab_why
-	local out
-	out="$(mktemp "${TMPDIR:-/tmp}/restart-session.XXXXXX")"
-	run_with_timeout "$TAB_TIMEOUT" "$out" "$TAB_HELPER" "$@" < /dev/null
-	tab_rc=$?
-	tab_out="$(head -n 1 "$out" 2> /dev/null)"
-	tab_why="$(tr '\n' ' ' < "$out.stderr" 2> /dev/null | sed 's/[[:space:]]*$//')"
-	[ "$tab_rc" -eq 124 ] && tab_why="the tab helper timed out"
-	rm -f "$out" "$out.stderr"
-}
-
 tab_call find "$tty" "$pid"
 terminal="$tab_out"
 if [ "$tab_rc" -ne 0 ] || [ -z "$terminal" ]; then
@@ -209,8 +197,6 @@ restartable_procs || report failed "could not list processes"
 	|| report refused "$restartable_why (since the first look)"
 
 claude_args="${restartable_carry:+$restartable_carry }--resume $id"
-resume="CLAUDE_CONFIG_DIR=$(shq "$CONFIG_DIR") claude $claude_args"
-[ -n "$cwd" ] && resume="cd $(shq "$cwd") && $resume"
 by_hand="resume it by hand: ${cwd:+cd $(shq "$cwd") && }claude $claude_args"
 
 # The shells claude ran under, as they were before it ended: one that is
@@ -237,64 +223,24 @@ fi
 
 # --- resume it in the tab ---
 
-# The tab's shell counts as settled, and so ready for the Ctrl-C that clears
-# its line, when it is one claude ran under, unchanged, which was waiting at
-# its prompt all along; or, for a shell that started when claude ended (the
-# one a restarted tab execs), once two looks a second apart find it in the
-# foreground with the same children: a shell still reading its startup
-# files comes and goes through children, and a Ctrl-C then would cut its
-# startup short. The tab is looked at four times a second. A pid call that
-# fails is tried again until the wait runs out; it only reads, so nothing
-# can have been typed.
-children_of() { awk -v p="$1" '$2 == p { print $1 }' <<< "$procs" | sort | paste -sd, -; }
-was_waiting() { # pid args
-	{ [ "$1" = "$pre_parent" ] && [ "$2" = "$pre_parent_args" ]; } \
-		|| { [ "$1" = "$pre_grand" ] && [ "$2" = "$pre_grand_args" ]; }
-}
-shell_pid="" last_seen="" seen="" seen_ms=0 unreached=""
-until_ms=$(($(now_ms) + PROMPT_SECS * 1000))
-while :; do
-	tab_call pid "$terminal"
-	if [ "$tab_rc" -eq 0 ] && [[ "$tab_out" =~ ^[0-9]+$ ]]; then
-		unreached=""
-		restartable_procs
-		last_seen="$(args_of "$tab_out")"
-		if interactive_shell "$last_seen"; then
-			if was_waiting "$tab_out" "$last_seen"; then
-				shell_pid="$tab_out"
-				break
-			fi
-			look="$tab_out:$(children_of "$tab_out")"
-			if [ "$look" = "$seen" ] && [ $(($(now_ms) - seen_ms)) -ge 1000 ]; then
-				shell_pid="$tab_out"
-				break
-			fi
-			if [ "$look" != "$seen" ]; then
-				seen="$look"
-				seen_ms=$(now_ms)
-			fi
-		else
-			seen=""
-		fi
-	elif [ "$tab_rc" -ne 0 ]; then
-		unreached="${tab_why:-the tab helper failed}"
-	fi
-	[ "$(now_ms)" -ge "$until_ms" ] && break
-	sleep 0.25
-done
+# A shell claude ran under, unchanged, was waiting at its prompt all along;
+# any other (the one a restarted tab execs) must hold still first
+# (tab_await_prompt in desk-lib/tab-resume.sh).
+tab_await_prompt "$terminal" "$PROMPT_SECS" "$pre_parent" "$pre_parent_args" "$pre_grand" "$pre_grand_args"
+shell_pid="$tab_shell_pid"
 phase settle
-if [ -n "$unreached" ]; then
-	report failed "the session stopped, but its tab is out of reach ($unreached); $by_hand"
+if [ -n "$tab_unreached" ]; then
+	report failed "the session stopped, but its tab is out of reach ($tab_unreached); $by_hand"
 fi
 if [ -z "$shell_pid" ]; then
-	report failed "the session stopped, but its tab showed no settled prompt within ${PROMPT_SECS}s (${last_seen:-nothing in the foreground}); $by_hand"
+	report failed "the session stopped, but its tab showed no settled prompt within ${PROMPT_SECS}s (${tab_last_seen:-nothing in the foreground}); $by_hand"
 fi
 
 # A type that timed out may still have typed and run the resume, so a
 # manual resume is advised only once the session is seen not to be live:
 # two processes on one transcript is the outcome to avoid.
 maybe_typed=""
-tab_call type "$terminal" "$shell_pid" " exec /bin/zsh -lic $(shq "$resume$RESTARTABLE_HANDOVER")"
+tab_call type "$terminal" "$shell_pid" "$(tab_resume_text "$cwd" "$CONFIG_DIR" "$claude_args")"
 if [ "$tab_rc" -eq 124 ]; then
 	maybe_typed=1
 	[ "$CONFIRM_SECS" -gt 0 ] \
@@ -304,26 +250,13 @@ elif [ "$tab_rc" -ne 0 ]; then
 fi
 phase type
 
-# The resumed process shows as a new pid file naming the session, whose
-# process passes the liveness check session-status.sh makes; looked for
-# four times a second rather than through the reader, which takes seconds.
-resumed_pid() {
-	local f p ps
-	for f in "$CONFIG_DIR"/sessions/*.json; do
-		[ -f "$f" ] && grep -q "$id" "$f" 2> /dev/null || continue
-		IFS=$'\t' read -r p ps < <(jq -r --arg id "$id" \
-			'select(.sessionId == $id) | [(.pid // "" | tostring), (.procStart // "")] | @tsv' "$f" 2> /dev/null)
-		[[ "${p:-}" =~ ^[0-9]+$ ]] && [ "$p" != "$pid" ] || continue
-		check_live "$p" "$ps"
-		[ "$live" = true ] && { echo "$p"; return 0; }
-	done
-	return 1
-}
+# The resumed process shows as a new pid file naming the session
+# (tab_resumed_pid).
 [ "$CONFIRM_SECS" -gt 0 ] || report restarted "resume typed into its tab"
 until_s=$((SECONDS + CONFIRM_SECS))
 while [ "$SECONDS" -lt "$until_s" ]; do
 	sleep 0.25
-	if now="$(resumed_pid)"; then
+	if now="$(tab_resumed_pid "$CONFIG_DIR" "$id" "$pid")"; then
 		phase confirm
 		report restarted "resumed in its tab (pid $now)"
 	fi
