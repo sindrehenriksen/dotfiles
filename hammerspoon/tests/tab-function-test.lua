@@ -938,7 +938,7 @@ slow.done(15, "", "restart-session: stopping the session; if nothing more is rep
 assert_eq("a restart ended at its timeout says the session may be stopped, with the exact resume it printed",
   "Restarting notes timed out|The session may be stopped. If its tab shows nothing running, resume it by hand: cd '/p' && claude --model 'opus' --resume " .. S1,
   last_note().attrs.title .. "|" .. last_note().attrs.informativeText)
-assert_eq("...and its limit is above the script's own worst case", true, DeskStale.timeouts["restart-session.sh"] >= 510)
+assert_eq("...and its limit is above the script's own worst case", true, DeskStale.timeouts["restart-session.sh"] >= 95)
 hs.timer.doAfter = real_do_after
 DeskStale.recheck_secs = 30
 

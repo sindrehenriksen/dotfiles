@@ -37,17 +37,20 @@
 # straight after, as close-session.sh sends; and a wait for the process and
 # its pid file to go. A session that will not stop is reported and nothing
 # more is done. Once it has, the tab's foreground process is watched until
-# it is an interactive shell that has settled (the same shell with the same
-# children on two looks a second apart); then Ctrl-C clears the line, in vi
-# insert and command mode alike, and
+# it is an interactive shell that has settled: one claude ran under, still
+# the same, or else the same shell with the same children on two looks a
+# second apart; then Ctrl-C clears the line, in vi insert and command mode
+# alike, and
 #   exec /bin/zsh -lic 'cd <cwd> && CLAUDE_CONFIG_DIR=<dir> claude --resume <id>; exec /bin/zsh -il'
 # is pasted and entered, only while that shell is still the foreground
 # process. What that guarantees: nothing is typed into anything but that
 # shell, and whatever was on its line is discarded. What it does not: a key
 # pressed in the tab between the clear and the paste lands in front of the
-# resume. A helper call that times out while typing may have typed, so the
+# resume. The resume is confirmed by a new live pid file naming the session.
+# A helper call that times out while typing may have typed, so the
 # session is then watched for and a manual resume advised only once it is
-# seen not to be live. Nothing is recorded as a deliberate end: the
+# seen not to be live. How long each phase took (check, stop, settle, type,
+# confirm) goes to stderr as `restart-session: took …`. Nothing is recorded as a deliberate end: the
 # process's own SessionEnd records its stop like any other, so
 # reopen-sessions.sh treats the session as it would have.
 #
@@ -87,6 +90,24 @@ DESK_KILL_GRACE_SECS=2
 source "$HERE/desk-lib/timeout.sh"
 # shellcheck source=desk-lib/restartable.sh
 source "$HERE/desk-lib/restartable.sh"
+# shellcheck source=desk-lib/liveness.sh
+source "$HERE/desk-lib/liveness.sh"
+
+# Milliseconds since some fixed point, for the phase timings this reports on
+# stderr; whole seconds where bash has no EPOCHREALTIME.
+now_ms() {
+	local t="${EPOCHREALTIME:-}"
+	if [ -n "$t" ]; then echo $((${t//[.,]/} / 1000)); else echo $((SECONDS * 1000)); fi
+}
+t0=$(now_ms)
+timings=""
+phase() { # name: the time since the last phase, added to $timings
+	local t d
+	t=$(now_ms)
+	d=$(((t - t0) / 100))
+	timings="${timings:+$timings }$1=$((d / 10)).$((d % 10))s"
+	t0=$t
+}
 
 READER="${DESK_READER:-session-status.sh}"
 TAB_HELPER="${DESK_CLOSE_TAB_BIN:-desk-close-tab.sh}"
@@ -106,6 +127,7 @@ fi
 name=""
 report() { # status detail [exit code]
 	printf '%s\t%s\t%s\t%s\n' "$1" "$id" "${name:--}" "$2"
+	[ -z "${timings:-}" ] || echo "restart-session: took $timings" >&2
 	[ -n "${3:-}" ] && exit "$3"
 	[ "$1" = restarted ]
 	exit $?
@@ -191,15 +213,24 @@ resume="CLAUDE_CONFIG_DIR=$(shq "$CONFIG_DIR") claude $claude_args"
 [ -n "$cwd" ] && resume="cd $(shq "$cwd") && $resume"
 by_hand="resume it by hand: ${cwd:+cd $(shq "$cwd") && }claude $claude_args"
 
+# The shells claude ran under, as they were before it ended: one that is
+# still the same process, with the same argv, afterwards was already
+# sitting at its prompt, so it has settled.
+pre_parent="$(parent_of "$pid")"
+pre_parent_args="$(args_of "$pre_parent")"
+pre_grand="$(parent_of "$pre_parent")"
+pre_grand_args="$(args_of "$pre_grand")"
+phase check
+
 # Said before the signal, so a caller that has to end this script part way
 # still has what to tell the user.
 echo "restart-session: stopping the session; if nothing more is reported, $by_hand" >&2
 kill -TERM "$pid" 2> /dev/null
-waited=0
-while { desk_pid_alive "$pid" || [ -e "$pidfile" ]; } && [ "$waited" -lt "$GRACE" ]; do
-	sleep 1
-	waited=$((waited + 1))
+until_s=$((SECONDS + GRACE))
+while { desk_pid_alive "$pid" || [ -e "$pidfile" ]; } && [ "$SECONDS" -lt "$until_s" ]; do
+	sleep 0.2
 done
+phase stop
 if desk_pid_alive "$pid"; then
 	report failed "pid $pid survived SIGTERM for ${GRACE}s; nothing more done"
 fi
@@ -207,14 +238,21 @@ fi
 # --- resume it in the tab ---
 
 # The tab's shell counts as settled, and so ready for the Ctrl-C that clears
-# its line, once two looks a second apart find the same interactive shell in
-# the foreground with the same children: a shell still reading its startup
+# its line, when it is one claude ran under, unchanged, which was waiting at
+# its prompt all along; or, for a shell that started when claude ended (the
+# one a restarted tab execs), once two looks a second apart find it in the
+# foreground with the same children: a shell still reading its startup
 # files comes and goes through children, and a Ctrl-C then would cut its
-# startup short. A pid call that fails is tried again until the wait runs
-# out; it only reads, so nothing can have been typed.
+# startup short. The tab is looked at four times a second. A pid call that
+# fails is tried again until the wait runs out; it only reads, so nothing
+# can have been typed.
 children_of() { awk -v p="$1" '$2 == p { print $1 }' <<< "$procs" | sort | paste -sd, -; }
-shell_pid="" last_seen="" seen="" unreached=""
-waited=0
+was_waiting() { # pid args
+	{ [ "$1" = "$pre_parent" ] && [ "$2" = "$pre_parent_args" ]; } \
+		|| { [ "$1" = "$pre_grand" ] && [ "$2" = "$pre_grand_args" ]; }
+}
+shell_pid="" last_seen="" seen="" seen_ms=0 unreached=""
+until_ms=$(($(now_ms) + PROMPT_SECS * 1000))
 while :; do
 	tab_call pid "$terminal"
 	if [ "$tab_rc" -eq 0 ] && [[ "$tab_out" =~ ^[0-9]+$ ]]; then
@@ -222,22 +260,29 @@ while :; do
 		restartable_procs
 		last_seen="$(args_of "$tab_out")"
 		if interactive_shell "$last_seen"; then
-			look="$tab_out:$(children_of "$tab_out")"
-			if [ "$look" = "$seen" ]; then
+			if was_waiting "$tab_out" "$last_seen"; then
 				shell_pid="$tab_out"
 				break
 			fi
-			seen="$look"
+			look="$tab_out:$(children_of "$tab_out")"
+			if [ "$look" = "$seen" ] && [ $(($(now_ms) - seen_ms)) -ge 1000 ]; then
+				shell_pid="$tab_out"
+				break
+			fi
+			if [ "$look" != "$seen" ]; then
+				seen="$look"
+				seen_ms=$(now_ms)
+			fi
 		else
 			seen=""
 		fi
 	elif [ "$tab_rc" -ne 0 ]; then
 		unreached="${tab_why:-the tab helper failed}"
 	fi
-	[ "$waited" -ge "$PROMPT_SECS" ] && break
-	sleep 1
-	waited=$((waited + 1))
+	[ "$(now_ms)" -ge "$until_ms" ] && break
+	sleep 0.25
 done
+phase settle
 if [ -n "$unreached" ]; then
 	report failed "the session stopped, but its tab is out of reach ($unreached); $by_hand"
 fi
@@ -257,17 +302,33 @@ if [ "$tab_rc" -eq 124 ]; then
 elif [ "$tab_rc" -ne 0 ]; then
 	report failed "the session stopped, but the resume was not typed${tab_why:+: $tab_why}; $by_hand"
 fi
+phase type
 
+# The resumed process shows as a new pid file naming the session, whose
+# process passes the liveness check session-status.sh makes; looked for
+# four times a second rather than through the reader, which takes seconds.
+resumed_pid() {
+	local f p ps
+	for f in "$CONFIG_DIR"/sessions/*.json; do
+		[ -f "$f" ] && grep -q "$id" "$f" 2> /dev/null || continue
+		IFS=$'\t' read -r p ps < <(jq -r --arg id "$id" \
+			'select(.sessionId == $id) | [(.pid // "" | tostring), (.procStart // "")] | @tsv' "$f" 2> /dev/null)
+		[[ "${p:-}" =~ ^[0-9]+$ ]] && [ "$p" != "$pid" ] || continue
+		check_live "$p" "$ps"
+		[ "$live" = true ] && { echo "$p"; return 0; }
+	done
+	return 1
+}
 [ "$CONFIRM_SECS" -gt 0 ] || report restarted "resume typed into its tab"
-waited=0
-while [ "$waited" -lt "$CONFIRM_SECS" ]; do
-	sleep 1
-	waited=$((waited + 1))
-	now="$("$READER" < /dev/null 2> /dev/null | jq -r --arg id "$id" 'select(.id == $id and .live == true) | .pid' 2> /dev/null | head -n 1)"
-	if [[ "$now" =~ ^[0-9]+$ ]] && [ "$now" != "$pid" ]; then
+until_s=$((SECONDS + CONFIRM_SECS))
+while [ "$SECONDS" -lt "$until_s" ]; do
+	sleep 0.25
+	if now="$(resumed_pid)"; then
+		phase confirm
 		report restarted "resumed in its tab (pid $now)"
 	fi
 done
+phase confirm
 if [ -n "$maybe_typed" ]; then
 	report failed "the session stopped and the tab helper timed out while typing; it is not live after ${CONFIRM_SECS}s, so if its tab shows nothing running, $by_hand"
 fi

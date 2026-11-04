@@ -1246,15 +1246,14 @@ DeskStale.offer_secs = 60
 DeskStale.confirm_secs = 4
 DeskStale.recheck_secs = 30
 -- How long each kind of task may run before it is ended. restart-session.sh
--- bounds its own loops by count, not time, so its worst case is their sum
--- with every call in them at its own limit (tab helper calls 10s, plus 2s
--- for the kill): the session reader once (~15s at worst seen), the tab
--- lookup (12s), the signal's grace (10s), the prompt loop (11 looks of a
--- tab call and a second each, ~143s), the type (12s) and the confirm loop
--- (20 rounds of a second and a session reader read, ~320s), about 510s in
--- all. Its limit is set above that, so Hammerspoon only ever ends one that
--- is truly stuck.
-DeskStale.timeouts = { osascript = 5, ["session-stale.sh"] = 15, ["restart-session.sh"] = 600 }
+-- bounds its waits in time, so its worst case is their sum with every call
+-- in them at its own limit (tab helper calls 10s, plus 2s for the kill):
+-- the session reader once (~15s at worst seen), the tab lookup (12s), the
+-- signal's grace (10s), the prompt wait (10s, plus a last tab call, 12s),
+-- the type (12s) and the confirm wait (20s), about 95s in all. Its limit is
+-- set well above that, so Hammerspoon only ever ends one that is truly
+-- stuck.
+DeskStale.timeouts = { osascript = 5, ["session-stale.sh"] = 15, ["restart-session.sh"] = 240 }
 -- The tasks running now, so none is collected mid-run.
 DeskStale.running = {}
 -- Per pid: { reasons = <the reasons last offered>, checked = <time> }.

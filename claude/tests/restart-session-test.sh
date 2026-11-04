@@ -210,8 +210,9 @@ assert_eq "...exit 0" "0" "$rc"
 assert_eq "an MCP server child did not count as running" "restarted" "$(status)"
 assert_eq "the process is gone" "gone" "$(alive "$p1")"
 assert_eq "...and so is its pid file" "false" "$([ -e "$CONFIG_DIR/sessions/$p1.json" ] && echo true || echo false)"
-assert_eq "the tab was named while the process was alive, then typed into once the shell it came back to had settled" \
-	"find $tty1 $p1 alive|pid T-$p1|pid T-$p1|type T-$p1 9000" "$(paste -sd'|' "$TMP/tab.log")"
+assert_eq "the tab was named while the process was alive, then typed into at once at the login shell that had waited under it" \
+	"find $tty1 $p1 alive|pid T-$p1|type T-$p1 9000" "$(paste -sd'|' "$TMP/tab.log")"
+case "$(cat "$TMP/restart.err")" in *"restart-session: took check="*" stop="*" settle="*" type="*) ok "...saying how long each phase took" ;; *) bad "...saying how long each phase took (got [$(cat "$TMP/restart.err")])" ;; esac
 typed="$(cat "$TMP/typed")"
 assert_eq "a fresh login shell is exec'd, kept out of history by its leading space" " exec /bin/zsh -lic " "${typed:0:20}"
 eval "set -- ${typed# exec /bin/zsh -lic }"
@@ -234,6 +235,9 @@ for shape in hand restarted; do
 	sed 's|^9001 9000 .*|9001 9000 /bin/zsh -il|' "$TMP/procs" > "$TMP/procs.after"
 	run_restart "$s"
 	assert_eq "claude started from the $shape shell: restarted" "restarted" "$(status)"
+	settle=$(sed -n 's/.* settle=\([0-9]*\)\.\([0-9]\)s.*/\1\2/p' "$TMP/restart.err")
+	if [ "${settle:-0}" -ge 10 ]; then ok "...typed only once the new shell held still for a second (settle took ${settle}00 ms)"
+	else bad "...typed only once the new shell held still for a second (settle took ${settle:-?}00 ms)"; fi
 done
 
 echo "=== a tab that would close with the session is refused ==="
