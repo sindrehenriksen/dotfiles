@@ -48,8 +48,8 @@ echo "=== open: a new window running the command through a login shell ==="
 stub 'exit 0'
 "$OPEN" "claude --resume $UUID" "$UUID" "$ROOT" < /dev/null
 assert_eq "exit 0 when Ghostty took it" "0" "$?"
-assert_eq "argv: +new-window, the cwd, then the command under zsh -lic" \
-	"+new-window|--working-directory=$ROOT|-e|/bin/zsh|-lic|claude --resume $UUID; print -n \"\\n[exited \$?; press any key to close]\"; read -sk1" \
+assert_eq "argv: +new-window, the cwd, then the command under zsh -lic, handing over to a login shell" \
+	"+new-window|--working-directory=$ROOT|-e|/bin/zsh|-lic|claude --resume $UUID; exec /bin/zsh -il" \
 	"$(paste -sd'|' "$ARGV")"
 
 stub 'exit 0'

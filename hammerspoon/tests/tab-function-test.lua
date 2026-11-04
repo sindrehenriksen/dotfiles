@@ -215,6 +215,16 @@ assert_eq("the script wraps the command in a login+interactive zsh", true,
 assert_eq("the original command still appears, single-quoted for that shell", true,
   last_osascript_script ~= nil and last_osascript_script:find("'claude %-%-resume abc%-123'") ~= nil)
 
+assert_eq("a session tab hands the user's shell the command as input, not exec'd, so a prompt is left after it", true,
+  last_osascript_script ~= nil
+    and last_osascript_script:find('initial input:(" /bin/zsh -lic ', 1, true) ~= nil
+    and last_osascript_script:find("command:", 1, true) == nil)
+
+last_osascript_script = nil
+DeskOpenTab("true", nil, nil, { close_on_exit = true })
+assert_eq("a close tab exec's it, so the tab ends with the command", true,
+  last_osascript_script ~= nil and last_osascript_script:find('initial input:(" exec /bin/zsh -lic ', 1, true) ~= nil)
+
 -- A command holding its own single quote (as desk_shq-quoted argv often
 -- does) must come through re-escaped for the wrapping shell, never break
 -- the AppleScript string it's embedded in (or the content itself) either.

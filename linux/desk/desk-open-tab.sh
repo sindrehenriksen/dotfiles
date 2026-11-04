@@ -12,8 +12,8 @@
 #   background  accepted for the same calls, but the window manager decides
 #               focus: nothing here can keep the new window from taking it;
 #   close       close the window when its command exits; without it the
-#               window waits for a key, so a finished session can still be
-#               read.
+#               window is left at a shell prompt in its directory, so a
+#               finished session can still be read.
 #
 # The command runs through `/bin/zsh -lic`, as on macOS, so it gets the
 # login shell's PATH and CLAUDE_CONFIG_DIR rather than the environment of
@@ -43,10 +43,10 @@ if [ -n "$session_id" ] && ! [[ "$session_id" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-
     exit 1
 fi
 
-# Ghostty closes a window when its command exits, so the wait that keeps a
-# finished session readable is the shell's own.
+# Ghostty closes a window when its command exits, so the prompt a finished
+# session leaves, as on macOS, is a login shell the command hands over to.
 if [ "$close_on_exit" = false ]; then
-    cmd="$cmd"'; print -n "\n[exited $?; press any key to close]"; read -sk1'
+    cmd="$cmd; exec /bin/zsh -il"
 fi
 
 args=(+new-window)

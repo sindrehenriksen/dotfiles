@@ -508,21 +508,21 @@ local function wrap_in_login_shell(cmd)
 end
 
 -- Ghostty's AppleScript dictionary takes the new tab's (or window's) shell
--- command and cwd as a `configuration` record. Ghostty keeps a surface
--- given a `command` open after it exits ("Process exited. Press any key"),
--- and a record cannot turn that off, which suits a session tab the user may
--- want to read afterwards. A tab that should close when done
--- (`close_on_exit`) instead starts the user's own shell and hands it the
--- command as its initial input, `exec`ed so the surface ends with it, the
--- way Ghostty runs a script file it is asked to open. Either way the text
--- goes only to the new surface, never as keystrokes to whatever is focused.
+-- command and cwd as a `configuration` record. Every tab starts the user's
+-- own login shell and hands it the command as its initial input, so the
+-- text goes only to the new surface, never as keystrokes to whatever is
+-- focused. A session tab runs it as an ordinary command: when the session
+-- ends, the tab is back at a prompt in its directory, where the output can
+-- still be read and a session resumed by typing into it. A tab
+-- that should close when done (`close_on_exit`) `exec`s it instead, so the
+-- surface ends with it, the way Ghostty runs a script file it is asked to
+-- open. A `command` field would be the other way to run it, and leaves
+-- "Process exited. Press any key" with no shell behind it (`wait after
+-- command`), which a restart has nothing to type into.
 local function tab_configuration(cmd, cwd, close_on_exit)
-  local fields
-  if close_on_exit then
-    fields = { "initial input:(" .. as_string_literal(" exec " .. wrap_in_login_shell(cmd)) .. " & linefeed)" }
-  else
-    fields = { "command:" .. as_string_literal(wrap_in_login_shell(cmd)) }
-  end
+  local line = wrap_in_login_shell(cmd)
+  if close_on_exit then line = "exec " .. line end
+  local fields = { "initial input:(" .. as_string_literal(" " .. line) .. " & linefeed)" }
   if cwd and cwd ~= "" then
     fields[#fields + 1] = "initial working directory:" .. as_string_literal(cwd)
   end
