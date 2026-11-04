@@ -217,8 +217,7 @@ notify() { # title text
 }
 
 by_hand() { # cwd config-dir carry id
-	printf '%sCLAUDE_CONFIG_DIR=%s claude %s--resume %s' \
-		"${1:+cd $(restartable_shq "$1") && }" "$(restartable_shq "$2")" "${3:+$3 }" "$4"
+	tab_resume_command "$1" "$2" "${3:+$3 }--resume $4"
 }
 
 # ==========================================================================

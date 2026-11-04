@@ -28,15 +28,19 @@ tab_call() { # args... -> sets tab_rc, tab_out, tab_why
 	rm -f "$out" "$out.stderr"
 }
 
+# tab_resume_command <cwd> <config dir> <claude args>: the command that
+# resumes the session through the user's `claude` function in its
+# directory, under its config dir: what is typed into a tab, and what a
+# report gives the user to run by hand.
+tab_resume_command() {
+	printf '%sCLAUDE_CONFIG_DIR=%s claude %s' "${1:+cd $(restartable_shq "$1") && }" "$(restartable_shq "$2")" "$3"
+}
+
 # tab_resume_text <cwd> <config dir> <claude args>: what is typed into the
-# tab's shell: a fresh login shell that resumes the session through the
-# user's `claude` function in its directory, then leaves a prompt there.
-# The leading space keeps it out of history.
+# tab's shell: a fresh login shell that runs the resume, then leaves a
+# prompt in its directory. The leading space keeps it out of history.
 tab_resume_text() {
-	local resume
-	resume="CLAUDE_CONFIG_DIR=$(restartable_shq "$2") claude $3"
-	[ -n "$1" ] && resume="cd $(restartable_shq "$1") && $resume"
-	printf ' exec /bin/zsh -lic %s' "$(restartable_shq "$resume$RESTARTABLE_HANDOVER")"
+	printf ' exec /bin/zsh -lic %s' "$(restartable_shq "$(tab_resume_command "$@")$RESTARTABLE_HANDOVER")"
 }
 
 # tab_await_prompt <terminal> <secs> [<pid> <args>]...: watches the

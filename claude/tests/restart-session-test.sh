@@ -462,7 +462,7 @@ echo 9001 > "$TMP/fg"
 run_restart "$s5"
 assert_eq "no prompt in time: failed" "failed" "$(status)"
 assert_eq "...saying what was in the foreground and how to resume by hand" \
-	"the session stopped, but its tab showed no settled prompt within 2s (/bin/zsh -lic claude --resume x); resume it by hand: cd '$PROJ_DIR' && claude --resume $s5" "$(detail)"
+	"the session stopped, but its tab showed no settled prompt within 2s (/bin/zsh -lic claude --resume x); resume it by hand: cd '$PROJ_DIR' && CLAUDE_CONFIG_DIR='$CONFIG_DIR' claude --resume $s5" "$(detail)"
 assert_eq "...having typed nothing" "false" "$([ -e "$TMP/typed" ] && echo true || echo false)"
 
 fresh
@@ -472,7 +472,7 @@ desk_tab "$p6"
 : > "$TMP/type-fails"
 run_restart "$s6"
 assert_eq "the helper refusing to type: failed, with the reason" \
-	"failed	the session stopped, but the resume was not typed: DeskTypeInTerminal: not typed: its foreground process changed; resume it by hand: cd '$PROJ_DIR' && claude --resume $s6" \
+	"failed	the session stopped, but the resume was not typed: DeskTypeInTerminal: not typed: its foreground process changed; resume it by hand: cd '$PROJ_DIR' && CLAUDE_CONFIG_DIR='$CONFIG_DIR' claude --resume $s6" \
 	"$(status)	$(detail)"
 
 echo "=== a tab that is slow to answer ==="
@@ -492,7 +492,7 @@ desk_tab "$p11"
 echo 9 > "$TMP/pid-fails"
 run_restart "$s11"
 assert_eq "one that never answers: failed, nothing typed, a manual resume advised" \
-	"failed	the session stopped, but its tab is out of reach (DeskTerminalPid: osascript failed: busy); resume it by hand: cd '$PROJ_DIR' && claude --resume $s11" \
+	"failed	the session stopped, but its tab is out of reach (DeskTerminalPid: osascript failed: busy); resume it by hand: cd '$PROJ_DIR' && CLAUDE_CONFIG_DIR='$CONFIG_DIR' claude --resume $s11" \
 	"$(status)	$(detail)"
 assert_eq "...having typed nothing" "false" "$([ -e "$TMP/typed" ] && echo true || echo false)"
 
@@ -523,7 +523,7 @@ desk_tab "$p14"
 : > "$TMP/type-times-out"
 RESTART_SESSION_CONFIRM_SECS=2 run_restart "$s14"
 assert_eq "it had not, and the session stayed down: a manual resume, only now and with a look first" \
-	"failed	the session stopped and the tab helper timed out while typing; it is not live after 2s, so if its tab shows nothing running, resume it by hand: cd '$PROJ_DIR' && claude --resume $s14" \
+	"failed	the session stopped and the tab helper timed out while typing; it is not live after 2s, so if its tab shows nothing running, resume it by hand: cd '$PROJ_DIR' && CLAUDE_CONFIG_DIR='$CONFIG_DIR' claude --resume $s14" \
 	"$(status)	$(detail)"
 
 echo "=== a directory with a quote in its name ==="

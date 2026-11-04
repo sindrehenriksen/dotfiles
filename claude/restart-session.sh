@@ -132,8 +132,6 @@ report() { # status detail [exit code]
 	exit $?
 }
 
-shq() { printf "'%s'" "${1//\'/\'\\\'\'}"; }
-
 [[ "$id" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]] \
 	|| report refused "not a session id"
 
@@ -197,7 +195,7 @@ restartable_procs || report failed "could not list processes"
 	|| report refused "$restartable_why (since the first look)"
 
 claude_args="${restartable_carry:+$restartable_carry }--resume $id"
-by_hand="resume it by hand: ${cwd:+cd $(shq "$cwd") && }claude $claude_args"
+by_hand="resume it by hand: $(tab_resume_command "$cwd" "$CONFIG_DIR" "$claude_args")"
 
 # The shells claude ran under, as they were before it ended: one that is
 # still the same process, with the same argv, afterwards was already
