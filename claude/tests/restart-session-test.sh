@@ -221,6 +221,7 @@ table "$p2" "/bin/zsh -lic CLAUDE_CONFIG_DIR='/c' claude --resume x" "$LOGIN_ROW
 run_restart "$s2"
 assert_eq "refused" "refused" "$(status)"
 case "$(detail)" in "its tab would close with it: "*) ok "...saying why" ;; *) bad "...saying why (got [$(detail)])" ;; esac
+assert_eq "...exit 3, which tells it from the other refusals" "3" "$rc"
 assert_eq "...still running" "alive" "$(alive "$p2")"
 assert_eq "...and its tab never asked about" "" "$(cat "$TMP/tab.log")"
 

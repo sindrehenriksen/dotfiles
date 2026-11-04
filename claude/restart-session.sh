@@ -37,10 +37,15 @@
 # records its stop like any other, so reopen-sessions.sh treats the session
 # as it would have.
 #
+# The idle and prompt checks live in desk-lib/restartable.sh, shared with
+# session-stale.sh, which offers a restart only where this would accept it.
+#
 # Output: one tab-separated line, `<status> <id> <name> <detail>`, status
 # restarted, refused or failed. Exit 0 when restarted, 1 refused or failed,
-# 2 usage. `failed` after the signal says what state the session was left
-# in and how to resume it by hand.
+# 2 usage, 3 refused because its tab would close with it: a tab opened
+# before tabs left a prompt, where exiting the session and resuming it once
+# by hand gives a tab later restarts work in. `failed` after the signal says
+# what state the session was left in and how to resume it by hand.
 #
 # Overrides (tests): $DESK_READER, $DESK_CLOSE_TAB_BIN, $RESTART_SESSION_PS
 # (a command printing `pid ppid args` for every process, default ps),
@@ -66,19 +71,17 @@ desk_pid_alive() { kill -0 "$1" 2> /dev/null; }
 DESK_KILL_GRACE_SECS=2
 # shellcheck source=desk-lib/timeout.sh
 source "$HERE/desk-lib/timeout.sh"
+# shellcheck source=desk-lib/restartable.sh
+source "$HERE/desk-lib/restartable.sh"
 
 READER="${DESK_READER:-session-status.sh}"
 TAB_HELPER="${DESK_CLOSE_TAB_BIN:-desk-close-tab.sh}"
 CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 CONFIG_DIR="${CONFIG_DIR%/}"
-QUIET_MINS="${RESTART_SESSION_QUIET_MINS:-5}"
 GRACE="${RESTART_SESSION_GRACE_SECS:-10}"
 PROMPT_SECS="${RESTART_SESSION_PROMPT_SECS:-10}"
 CONFIRM_SECS="${RESTART_SESSION_CONFIRM_SECS:-20}"
 TAB_TIMEOUT="${RESTART_SESSION_TAB_TIMEOUT_SECS:-10}"
-# What the typed command ends with, and how a later restart of the same tab
-# knows a prompt follows the session.
-HANDOVER="; exec /bin/zsh -il"
 
 id="${1:-}"
 if [ $# -ne 1 ] || [ -z "$id" ]; then
@@ -87,8 +90,9 @@ if [ $# -ne 1 ] || [ -z "$id" ]; then
 fi
 
 name=""
-report() { # status detail
+report() { # status detail [exit code]
 	printf '%s\t%s\t%s\t%s\n' "$1" "$id" "${name:--}" "$2"
+	[ -n "${3:-}" ] && exit "$3"
 	[ "$1" = restarted ]
 	exit $?
 }
@@ -120,65 +124,15 @@ esac
 # --- idle, with nothing running ---
 
 pidfile="$CONFIG_DIR/sessions/$pid.json"
-state="$(jq -r '.status // empty' "$pidfile" 2> /dev/null)"
-[ -n "$state" ] || report refused "no status in its pid file ($pidfile)"
-[ "$state" = idle ] || report refused "not idle: its status is $state"
-
-procs="$("${RESTART_SESSION_PS:-ps}" -A -ww -o pid= -o ppid= -o args= 2> /dev/null)" \
-	|| report failed "could not list processes"
-args_of() { awk -v p="$1" '$1 == p { $1 = ""; $2 = ""; sub(/^  /, ""); print; exit }' <<< "$procs"; }
-parent_of() { awk -v p="$1" '$1 == p { print $2; exit }' <<< "$procs"; }
-
-running="$(awk -v p="$pid" -v pat=" -c source $CONFIG_DIR/shell-snapshots/snapshot-" \
-	'$2 == p && index($0, pat) { print $1 }' <<< "$procs" | head -n 1)"
-[ -z "$running" ] || report refused "not idle: it is running a shell command (pid $running)"
-
+restartable_procs || report failed "could not list processes"
 transcript="$(jq -r '.transcript_path // empty' <<< "$entries")"
 [ -n "$transcript" ] || report refused "no transcript, so no way to tell whether subagents are running"
-subagents="$(dirname "$transcript")/$id/subagents"
-if [ -d "$subagents" ]; then
-	recent="$(find "$subagents" -type f -mmin "-$QUIET_MINS" 2> /dev/null | head -n 1)"
-	[ -z "$recent" ] || report refused "not idle: a subagent wrote in the last ${QUIET_MINS} min ($(basename "$recent"))"
-fi
+restartable_idle "$pid" "$pidfile" "$(dirname "$transcript")/$id/subagents" \
+	|| report refused "$restartable_why"
 
 # --- the tab, and whether it is left at a prompt ---
 
-# A shell's argv: its name (a login shell's with a leading -), then option
-# words. One running a command has a `c` among them; an interactive one has
-# none and nothing after them.
-is_shell() {
-	local first="${1%% *}"
-	first="${first#-}"
-	case "${first##*/}" in zsh | bash | sh) return 0 ;; esac
-	return 1
-}
-runs_command() {
-	local word words
-	read -r -a words <<< "$1"
-	for word in "${words[@]:1}"; do
-		case "$word" in
-			--*) ;;
-			-*c*) return 0 ;;
-			-*) ;;
-			*) return 0 ;;
-		esac
-	done
-	return 1
-}
-interactive_shell() { is_shell "$1" && ! runs_command "$1"; }
-
-parent="$(parent_of "$pid")"
-parent_args="$(args_of "$parent")"
-grand_args="$(args_of "$(parent_of "$parent")")"
-if interactive_shell "$parent_args"; then
-	:
-elif is_shell "$parent_args" && [[ "$parent_args" == *"$HANDOVER" ]]; then
-	:
-elif is_shell "$parent_args" && interactive_shell "$grand_args"; then
-	:
-else
-	report refused "its tab would close with it: no shell in the tab outlives claude (${parent_args:-no parent})"
-fi
+restartable_prompt "$pid" || report refused "$restartable_why" 3
 
 tty="$(jq -r '.tty // empty' <<< "$entries")"
 recorded_tty="$(jq -r '.recorded_tty // empty' <<< "$entries")"
@@ -230,7 +184,7 @@ waited=0
 while :; do
 	tab_call pid "$terminal"
 	if [ "$tab_rc" -eq 0 ] && [[ "$tab_out" =~ ^[0-9]+$ ]]; then
-		procs="$("${RESTART_SESSION_PS:-ps}" -A -ww -o pid= -o ppid= -o args= 2> /dev/null)"
+		restartable_procs
 		last_seen="$(args_of "$tab_out")"
 		if interactive_shell "$last_seen"; then
 			shell_pid="$tab_out"
@@ -247,7 +201,7 @@ if [ -z "$shell_pid" ]; then
 	report failed "the session stopped, but its tab showed no prompt within ${PROMPT_SECS}s (${last_seen:-nothing in the foreground}); $by_hand"
 fi
 
-tab_call type "$terminal" "$shell_pid" " exec /bin/zsh -lic $(shq "$resume$HANDOVER")"
+tab_call type "$terminal" "$shell_pid" " exec /bin/zsh -lic $(shq "$resume$RESTARTABLE_HANDOVER")"
 if [ "$tab_rc" -ne 0 ]; then
 	report failed "the session stopped, but the resume was not typed${tab_why:+: $tab_why}; $by_hand"
 fi
