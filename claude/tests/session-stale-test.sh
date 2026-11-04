@@ -102,6 +102,15 @@ s2=$(uuid)
 session "$s2" 2.1.300 acct-a
 run "$s2"
 assert_eq "named, with both versions" "0|version: 2.1.300 running, 2.1.318 installed" "$rc|$out"
+jq '.status = "busy"' "$CLAUDE_CONFIG_DIR/sessions/$pid.json" > "$TMP/pf" && mv "$TMP/pf" "$CLAUDE_CONFIG_DIR/sessions/$pid.json"
+out="$("$STALE" "$s2" "version: 2.1.300 running, 2.1.318 installed" 2> /dev/null)"
+rc=$?
+assert_eq "the reasons last offered, unchanged: exit 4, the heavy checks skipped (busy goes unseen)" \
+	"4|version: 2.1.300 running, 2.1.318 installed" "$rc|$out"
+out="$("$STALE" "$s2" "shell: ~/.zshrc changed since it started" 2> /dev/null)"
+rc=$?
+assert_eq "...changed since: checked in full" "1|" "$rc|$out"
+jq '.status = "idle"' "$CLAUDE_CONFIG_DIR/sessions/$pid.json" > "$TMP/pf" && mv "$TMP/pf" "$CLAUDE_CONFIG_DIR/sessions/$pid.json"
 rm "$SESSION_STALE_CLAUDE_BIN"
 printf '#!/usr/bin/env bash\necho "2.1.300 (Claude Code)"\n' > "$SESSION_STALE_CLAUDE_BIN"
 chmod +x "$SESSION_STALE_CLAUDE_BIN"

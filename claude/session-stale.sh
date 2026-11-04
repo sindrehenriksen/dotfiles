@@ -5,7 +5,12 @@
 # are read, and the process table and transcripts only once there is a
 # reason to offer.
 #
-# Usage: session-stale.sh <session-id>
+# Usage: session-stale.sh <session-id> [<reasons last offered>]
+#            With the reasons last offered or dismissed (the lines this
+#            printed then), reasons that still match are printed with exit
+#            4 and none of the checks below run: they read the process
+#            table and the whole transcript, which a tab focused for a while
+#            would otherwise pay for again and again.
 #        session-stale.sh --pid <pid> <config-dir>...
 #            Names the session a live pid holds, for Hammerspoon, which has
 #            only a tab's foreground pid: `<id>\t<config dir>\t<name>` from
@@ -73,7 +78,7 @@ CLAUDE_BIN="${SESSION_STALE_CLAUDE_BIN:-$HOME/.local/bin/claude}"
 
 
 usage() {
-	echo "usage: session-stale.sh <session-id> | --pid <pid> <config-dir>..." >&2
+	echo "usage: session-stale.sh <session-id> [<reasons last offered>] | --pid <pid> <config-dir>..." >&2
 	exit 2
 }
 
@@ -105,7 +110,8 @@ if [ "${1:-}" = --pid ]; then
 fi
 
 id="${1:-}"
-[ $# -eq 1 ] && [ -n "$id" ] || usage
+known="${2:-}"
+[ $# -ge 1 ] && [ $# -le 2 ] && [ -n "$id" ] || usage
 not_now() {
 	echo "session-stale: $1" >&2
 	exit 1
@@ -157,6 +163,10 @@ if [ -n "$current" ] && [ -n "$loaded" ] && [ "$current" != "$loaded" ]; then
 fi
 
 [ "${#reasons[@]}" -gt 0 ] || exit 0
+if [ -n "$known" ] && [ "$(printf '%s\n' "${reasons[@]}")" = "${known%$'\n'}" ]; then
+	printf '%s\n' "${reasons[@]}"
+	exit 4
+fi
 
 # --- would restart-session.sh accept it ---
 

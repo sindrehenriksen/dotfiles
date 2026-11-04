@@ -1221,7 +1221,9 @@ end
 -- (or exits 1 when it cannot say now). A session is offered once per set
 -- of reasons: Dismiss, or ignoring the offer, quiets it until its reasons
 -- change, and a session found not stale is forgotten, so reasons coming
--- back are offered afresh. Restart runs claude/restart-session.sh. Cmd+Opt+R,
+-- back are offered afresh; while they match, the check skips its heavy
+-- part. Every task it starts has a timeout. Restart runs
+-- claude/restart-session.sh. Cmd+Opt+R,
 -- bound only while Ghostty is the active app, restarts the focused tab's
 -- session stale or not, after the checks restart-session.sh makes.
 -- The offer's buttons show only with Hammerspoon's notifications set to
@@ -1237,6 +1239,12 @@ DeskStale.config_dirs = { HOME .. "/.claude", HOME .. "/.claude-work" }
 DeskStale.bin_dir = HOME .. "/.local/bin"
 DeskStale.settle_secs = 0.4
 DeskStale.recheck_secs = 30
+-- How long each kind of task may run before it is ended. A restart waits
+-- on the session to stop, the tab's prompt and the resume, each bounded in
+-- restart-session.sh, so its limit covers all of them.
+DeskStale.timeouts = { osascript = 5, ["session-stale.sh"] = 15, ["restart-session.sh"] = 120 }
+-- The tasks running now, so none is collected mid-run.
+DeskStale.running = {}
 -- Per pid: { reasons = <the reasons last offered>, checked = <time> }.
 DeskStale.seen = {}
 
@@ -1255,12 +1263,14 @@ end
 
 -- What a session-stale.sh result means for a session last offered `prev`
 -- (nil if never): "offer" (restartable), "manual" (its tab would close with
--- it), "quiet" (already offered for these reasons), "clear" (not stale:
+-- it), "quiet" (already offered for these reasons, which session-stale.sh
+-- reports with exit 4 when told them), "clear" (not stale:
 -- forget it) or "wait" (cannot tell now: leave it be). Also returns the
 -- reasons as one string.
 function DeskStale.decide(prev, rc, out)
   local reasons = (out or ""):gsub("%s+$", "")
   if rc == 0 and reasons == "" then return "clear", "" end
+  if rc == 4 then return "quiet", reasons end
   if (rc ~= 0 and rc ~= 3) or reasons == "" then return "wait", reasons end
   if prev and prev.reasons == reasons then return "quiet", reasons end
   return rc == 3 and "manual" or "offer", reasons
@@ -1318,16 +1328,40 @@ hs.task.new("/bin/zsh", function(rc, out)
   if rc == 0 and type(out) == "string" and out ~= "" then login_path = out end
 end, { "-lc", 'printf %s "$PATH"' }):start()
 
+-- Starts `path` with `args`, held in DeskStale.running until it ends, and
+-- ended once it outruns its kind's timeout; `done` is called exactly once,
+-- with -1 when it could not start.
+local function start_task(path, args, env, done)
+  local kind = path:match("[^/]+$")
+  local finished, t, timer = false, nil, nil
+  local function finish(rc, out, err)
+    if finished then return end
+    finished = true
+    if timer then timer:stop() end
+    if t then DeskStale.running[t] = nil end
+    done(rc, out, err)
+  end
+  t = hs.task.new(path, finish, args)
+  if not t then return finish(-1, "", "could not start " .. kind) end
+  if env then t:setEnvironment(env) end
+  DeskStale.running[t] = kind
+  if not t:start() then
+    DeskStale.running[t] = nil
+    return finish(-1, "", "could not start " .. kind)
+  end
+  timer = hs.timer.doAfter(DeskStale.timeouts[kind] or 15, function()
+    if t.isRunning and t:isRunning() then t:terminate() end
+    finish(-1, "", kind .. " timed out")
+  end)
+end
+
 local function run_tool(session, tool, args, done) -- session may be nil
-  local t = hs.task.new(DeskStale.bin_dir .. "/" .. tool, done, args)
-  if not t then return done(-1, "", "could not start " .. tool) end
-  t:setEnvironment({
+  start_task(DeskStale.bin_dir .. "/" .. tool, args, {
     HOME = HOME, USER = os.getenv("USER"), LOGNAME = os.getenv("LOGNAME"),
     TMPDIR = os.getenv("TMPDIR"), LANG = os.getenv("LANG") or "en_US.UTF-8",
     PATH = login_path or "/usr/bin:/bin:/usr/sbin:/sbin",
     CLAUDE_CONFIG_DIR = session and session.dir,
-  })
-  t:start()
+  }, done)
 end
 
 function DeskStale.restart(session)
@@ -1359,7 +1393,7 @@ end
 -- focused terminal's foreground pid, then the session that pid holds.
 -- `done(session)` gets nil when there is none.
 local function focused_session(done)
-  local t = hs.task.new("/usr/bin/osascript", function(rc, out)
+  start_task("/usr/bin/osascript", { "-e", DeskStale.FOCUSED_PID_SCRIPT }, nil, function(rc, out)
     local pid = rc == 0 and tonumber((out or ""):match("^(%d+)")) or nil
     if not pid then return done(nil) end
     local args = { "--pid", string.format("%d", pid) }
@@ -1367,10 +1401,11 @@ local function focused_session(done)
     run_tool(nil, "session-stale.sh", args, function(rc2, out2)
       done(rc2 == 0 and DeskStale.parse_session(pid, out2) or nil)
     end)
-  end, { "-e", DeskStale.FOCUSED_PID_SCRIPT })
-  if t then t:start() else done(nil) end
+  end)
 end
 
+-- One check at a time. Every task in it ends, by itself or its timeout,
+-- and each end clears this, so it cannot stay set.
 local checking = false
 function DeskStale.check_focused()
   if checking then return end
@@ -1382,7 +1417,9 @@ function DeskStale.check_focused()
       checking = false
       return
     end
-    run_tool(session, "session-stale.sh", { session.id }, function(rc, out)
+    local args = { session.id }
+    if prev then args[2] = prev.reasons end
+    run_tool(session, "session-stale.sh", args, function(rc, out)
       checking = false
       if DeskStale.seen[session.pid] then DeskStale.seen[session.pid].checked = now end
       DeskStale.handle(session, rc, out)

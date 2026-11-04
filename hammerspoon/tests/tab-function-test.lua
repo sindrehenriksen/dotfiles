@@ -835,6 +835,42 @@ focus_answers("4242\n", S1 .. "\t/b\tnotes\n")
 assert_eq("the hotkey restarts the focused tab's session, stale or not", DeskStale.bin_dir .. "/restart-session.sh " .. S1,
   last_task().path .. " " .. last_task().args[1])
 
+-- What a check costs while a tab stays focused.
+assert_eq("reasons session-stale.sh says are the ones offered (exit 4): quiet", "quiet", decided(nil, 4, "version: 1 running, 2 installed\n"))
+DeskStale.recheck_secs = -1
+DeskStale.check_focused()
+focus_answers("4242\n", S1 .. "\t/b\tnotes\n")
+local again = last_task()
+assert_eq("a recheck of an offered session hands over the reasons offered, so the heavy checks can be skipped",
+  S1 .. "|shell: ~/.zshrc changed since it started", again.args[1] .. "|" .. tostring(again.args[2]))
+assert_eq("...a running task is held until it ends", "session-stale.sh", DeskStale.running[again])
+again.done(4, "shell: ~/.zshrc changed since it started\n", "")
+assert_eq("...and let go once it has", nil, DeskStale.running[again])
+local timers = {}
+local real_do_after = hs.timer.doAfter
+hs.timer.doAfter = function(secs, fn)
+  local t = { secs = secs, fn = fn, stopped = false }
+  function t:stop() self.stopped = true end
+  timers[#timers + 1] = t
+  return t
+end
+DeskStale.check_focused()
+local hung = last_task()
+local hung_timer = timers[#timers]
+assert_eq("the pid lookup has a timeout", 5, hung_timer.secs)
+n_tasks = #tasks_started
+DeskStale.check_focused()
+assert_eq("while a check runs, another focus starts nothing", n_tasks, #tasks_started)
+hung_timer.fn()
+assert_eq("a task that never answers is ended at its timeout", nil, DeskStale.running[hung])
+DeskStale.check_focused()
+assert_eq("...and the next focus checks again: nothing stays stuck", n_tasks + 1, #tasks_started)
+last_task().done(1, "", "")
+hung.done(0, "4242\n", "")
+assert_eq("a task's late answer, after its timeout, is ignored", n_tasks + 1, #tasks_started)
+hs.timer.doAfter = real_do_after
+DeskStale.recheck_secs = 30
+
 -- The hotkey, and the watchers that keep all of this to Ghostty.
 assert_eq("the hotkey is Cmd+Opt+R", "cmd+alt+r", table.concat(DeskStale.hotkey.mods, "+") .. "+" .. DeskStale.hotkey.key)
 assert_eq("...off while Ghostty is not the active app", false, DeskStale.hotkey.enabled)
