@@ -29,8 +29,8 @@
 # holds now: the claude.ai account its config dir was logged in as
 # (`account`, the accountUuid, when there is one), since a process loads
 # its connectors under the account current at its first start; and a
-# content hash of each file a login shell is made of (`shell`,
-# desk-lib/start-state.sh has which).
+# content hash of each file a login shell is made of, but only size and
+# mtime for the secrets file (`shell`, desk-lib/start-state.sh has which).
 #
 # Must never fail the session it's hooked into: every path exits 0, and
 # whatever goes wrong is logged instead of surfaced.

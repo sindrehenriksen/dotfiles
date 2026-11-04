@@ -27,14 +27,19 @@ desk_current_account() {
 DESK_SHELL_FILES=(.zprofile .zshrc .profile .shellrc .shellrc.early .secrets.env)
 
 # desk_shell_hashes: a JSON object of each of those files' content hash, the
-# first 16 hex digits of its SHA-256 (enough to tell an edit, and too little
-# to say anything about a secrets file's contents), "-" for one that is
-# missing. Content, not mtime, so a rewrite that changes nothing is no
+# first 16 hex digits of its SHA-256, "-" for one that is missing. Content,
+# not mtime, so a rewrite that changes nothing is no change. Except
+# ~/.secrets.env, of which nothing derived from its contents is ever
+# recorded: it gets `<size>:<mtime>` instead, so touching it reads as a
 # change.
 desk_shell_hashes() {
 	local f h
 	for f in "${DESK_SHELL_FILES[@]}"; do
-		h="$({ sha256sum < "$HOME/$f" || shasum -a 256 < "$HOME/$f"; } 2> /dev/null | cut -c1-16)"
+		if [ "$f" = .secrets.env ]; then
+			h="$(stat -L -c %s:%Y "$HOME/$f" 2> /dev/null || stat -L -f %z:%m "$HOME/$f" 2> /dev/null)"
+		else
+			h="$({ sha256sum < "$HOME/$f" || shasum -a 256 < "$HOME/$f"; } 2> /dev/null | cut -c1-16)"
+		fi
 		[ -e "$HOME/$f" ] && [ -n "$h" ] || h="-"
 		printf '%s\t%s\n' "$f" "$h"
 	done | jq -c -R -n '[inputs | split("\t") | {(.[0]): .[1]}] | add'

@@ -23,7 +23,8 @@
 #            `claude --version` says).
 #   shell    a file a fresh login shell is made of (DESK_SHELL_FILES in
 #            desk-lib/start-state.sh) has other contents than when its
-#            process started, by the hashes the recorder noted then, so its
+#            process started, by the hashes the recorder noted then (for
+#            ~/.secrets.env, only its size and mtime), so its
 #            environment, PATH and `claude` function predate the change. A
 #            rewrite that changes nothing is no change; one that changes
 #            only what another platform reads still counts. A session whose

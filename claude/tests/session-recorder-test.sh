@@ -190,6 +190,13 @@ HOME="$TMP/acct-home" CLAUDE_CONFIG_DIR="$ACCT_DIR" CLAUDE_SESSION_STORE="$ACCT_
 assert_eq "a start notes each login-shell file's hash, 16 hex digits, or - for one missing" \
     ".profile:- .secrets.env:- .shellrc:- .shellrc.early:- .zprofile:- .zshrc:$(printf 'export A=1\n' | { sha256sum 2> /dev/null || shasum -a 256; } | cut -c1-16)" \
     "$(jq -r '.shell | to_entries | sort_by(.key) | map("\(.key):\(.value)") | join(" ")' "$ACCT_STORE/sess-shell.jsonl")"
+printf 'export TOKEN=not-a-real-one\n' > "$TMP/acct-home/.secrets.env"
+touch -t 202001020304.05 "$TMP/acct-home/.secrets.env"
+HOME="$TMP/acct-home" CLAUDE_CONFIG_DIR="$ACCT_DIR" CLAUDE_SESSION_STORE="$ACCT_STORE" rec_start sess-shell /tmp/a /tmp/a/sess-shell.jsonl resume
+secrets_hash="$(printf 'export TOKEN=not-a-real-one\n' | { sha256sum 2> /dev/null || shasum -a 256; } | cut -c1-16)"
+assert_eq "...but for the secrets file only its size and mtime, never a hash of its contents" \
+    "$(wc -c < "$TMP/acct-home/.secrets.env" | tr -d ' '):$(date -j -f %Y%m%d%H%M.%S 202001020304.05 +%s 2> /dev/null || date -d '2020-01-02 03:04:05' +%s)|false" \
+    "$(jq -r -s 'last | .shell[".secrets.env"]' "$ACCT_STORE/sess-shell.jsonl")|$(grep -q "$secrets_hash" "$ACCT_STORE/sess-shell.jsonl" && echo true || echo false)"
 rm "$ACCT_DIR/.claude.json"
 CLAUDE_CONFIG_DIR="$ACCT_DIR" CLAUDE_SESSION_STORE="$ACCT_STORE" rec_start sess-acct /tmp/a /tmp/a/sess-acct.jsonl resume
 assert_eq "a config dir logged in as no one records no account" "null" \
