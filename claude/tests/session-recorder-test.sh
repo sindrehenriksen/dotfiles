@@ -31,6 +31,13 @@ TMP=$(mktemp -d)
 cleanup() { rm -rf "$TMP"; }
 trap cleanup EXIT
 
+# A home of its own: a start reads the login-shell files and the account
+# from under $HOME, and nothing here should read the real ones. The last
+# section's read-only look at the real config dir keeps the real home.
+REAL_HOME="$HOME"
+export HOME="$TMP/home"
+mkdir -p "$HOME"
+
 CONFIG_DIR="$TMP/config"
 STORE_DIR="$TMP/store"
 CACHE_DIR="$TMP/cache"
@@ -186,6 +193,7 @@ assert_eq "...and nothing else from that file" "false" \
     "$(grep -q -e someone@ -e 'Some One' -e u-1 "$ACCT_STORE/sess-acct.jsonl" && echo true || echo false)"
 mkdir -p "$TMP/acct-home"
 echo "export A=1" > "$TMP/acct-home/.zshrc"
+# Its own home again, with one shell file in it, so the hashes are known.
 HOME="$TMP/acct-home" CLAUDE_CONFIG_DIR="$ACCT_DIR" CLAUDE_SESSION_STORE="$ACCT_STORE" rec_start sess-shell /tmp/a /tmp/a/sess-shell.jsonl startup
 assert_eq "a start notes each login-shell file's hash, 16 hex digits, or - for one missing" \
     ".profile:- .secrets.env:- .shellrc:- .shellrc.early:- .zprofile:- .zshrc:$(printf 'export A=1\n' | { sha256sum 2> /dev/null || shasum -a 256; } | cut -c1-16)" \
@@ -323,7 +331,7 @@ wait "$c_pid" 2>/dev/null
 
 echo
 echo "=== reader on this machine's real ~/.claude-work (read-only, counts only) ==="
-REAL_CONFIG="$HOME/.claude-work"
+REAL_CONFIG="$REAL_HOME/.claude-work"
 if [ -d "$REAL_CONFIG" ]; then
     REAL_CACHE=$(mktemp -d)
     REAL_STORE=$(mktemp -d)   # empty: do not touch the real event-log store
