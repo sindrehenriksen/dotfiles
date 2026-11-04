@@ -24,19 +24,21 @@
 # Events written any other way (`close`, a desk-run call's own start/end)
 # carry none. A start with a pid also records that process's terminal
 # (`tty`, as `ps` names it) when it has one, so the session's tab can be told
-# apart later (claude/close-session.sh). Every start also records the
-# claude.ai account its config dir was logged in as then (`account`, the
-# accountUuid, when there is one): a process loads its connectors under the
-# account current at its first start, and claude/session-stale.sh compares
-# that with the current one.
+# apart later (claude/close-session.sh). Every start also records what its
+# process started under, for claude/session-stale.sh to compare with what
+# holds now: the claude.ai account its config dir was logged in as
+# (`account`, the accountUuid, when there is one), since a process loads
+# its connectors under the account current at its first start; and a
+# content hash of each file a login shell is made of (`shell`,
+# desk-lib/start-state.sh has which).
 #
 # Must never fail the session it's hooked into: every path exits 0, and
 # whatever goes wrong is logged instead of surfaced.
 set -u
 
-# shellcheck source=../desk-lib/account.sh
-source "$(dirname "${BASH_SOURCE[0]}")/../desk-lib/account.sh" 2>/dev/null \
-    || desk_current_account() { :; }
+# shellcheck source=../desk-lib/start-state.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../desk-lib/start-state.sh" 2>/dev/null \
+    || { desk_current_account() { :; }; desk_shell_hashes() { :; }; }
 
 STORE_DIR="${CLAUDE_SESSION_STORE:-$HOME/.local/state/claude/session-events}"
 LOG_FILE="${CLAUDE_SESSION_RECORDER_LOG:-$HOME/.local/state/claude/session-recorder.log}"
@@ -176,15 +178,18 @@ start_event() {
         tty=$(ps -o tty= -p "$pid" 2>/dev/null | tr -d ' ')
         case "$tty" in '?'|'??') tty="" ;; esac
     fi
-    local account
+    local account shell
     account=$(desk_current_account "${CLAUDE_CONFIG_DIR:-}")
-    printf '%s' "$input" | jq -c --arg boot "$(boot_id)" --argjson time "$(date +%s)" --arg override "$source_override" --arg pid "$pid" --arg tty "$tty" --arg account "$account" '
+    shell=$(desk_shell_hashes 2>/dev/null)
+    [ -n "$shell" ] || shell=null
+    printf '%s' "$input" | jq -c --arg boot "$(boot_id)" --argjson time "$(date +%s)" --arg override "$source_override" --arg pid "$pid" --arg tty "$tty" --arg account "$account" --argjson shell "$shell" '
         {event:"start", time:$time,
          source:(if $override != "" then $override else (.source // "unknown") end),
          cwd:(.cwd // ""), transcript_path:(.transcript_path // ""), boot:$boot}
         + (if $pid != "" then {pid: ($pid | tonumber)} else {} end)
         + (if $tty != "" then {tty: $tty} else {} end)
         + (if $account != "" then {account: $account} else {} end)
+        + (if $shell != null then {shell: $shell} else {} end)
     ' >> "$file" 2>>"$LOG_FILE"
     [ -z "$pid" ] || warn_if_open_elsewhere "$sid" "$pid" 2>>"$LOG_FILE"
 }

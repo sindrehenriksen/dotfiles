@@ -16,9 +16,13 @@
 #   version  its pid file's `version` is not the installed Claude Code
 #            (the version the ~/.local/bin/claude link points at, else what
 #            `claude --version` says).
-#   shell    a file that shapes a fresh login shell changed after its
-#            process started (SHELL_FILES below), so its environment, PATH
-#            and `claude` function predate the change.
+#   shell    a file a fresh login shell is made of (DESK_SHELL_FILES in
+#            desk-lib/start-state.sh) has other contents than when its
+#            process started, by the hashes the recorder noted then, so its
+#            environment, PATH and `claude` function predate the change. A
+#            rewrite that changes nothing is no change; one that changes
+#            only what another platform reads still counts. A session whose
+#            start noted no hashes is not flagged.
 #   account  the claude.ai account its process loaded its connectors under
 #            is not the one its config dir is logged in as now. A running
 #            session follows a /login made elsewhere for its usage, but its
@@ -59,23 +63,14 @@ HERE="$(script_dir)"
 source "$HERE/desk-lib/restartable.sh"
 # shellcheck source=desk-lib/liveness.sh
 source "$HERE/desk-lib/liveness.sh"
-# shellcheck source=desk-lib/account.sh
-source "$HERE/desk-lib/account.sh"
+# shellcheck source=desk-lib/start-state.sh
+source "$HERE/desk-lib/start-state.sh"
 
 CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 CONFIG_DIR="${CONFIG_DIR%/}"
 STORE_DIR="${CLAUDE_SESSION_STORE:-$HOME/.local/state/claude/session-events}"
 CLAUDE_BIN="${SESSION_STALE_CLAUDE_BIN:-$HOME/.local/bin/claude}"
 
-# What a fresh login shell in a tab is made of, as this repo sets one up:
-# zsh reads ~/.zprofile (login) and ~/.zshrc (interactive); .zprofile reads
-# ~/.profile, which puts ~/.local/bin on PATH, and .zshrc reads ~/.shellrc,
-# which holds the PATH, the environment and the `claude` account switcher
-# shared with bash, and reads the machine-local ~/.shellrc.early and
-# ~/.secrets.env. A session's environment, PATH and the flags its `claude`
-# function gave it all come from these. The plugins, fzf and the prompt are
-# left out: they shape the shell, not what a session runs with.
-SHELL_FILES=(.zprofile .zshrc .profile .shellrc .shellrc.early .secrets.env)
 
 usage() {
 	echo "usage: session-stale.sh <session-id> | --pid <pid> <config-dir>..." >&2
@@ -142,17 +137,21 @@ if [ -n "$running" ] && [ -n "$installed" ] && [ "$running" != "$installed" ]; t
 	reasons+=("version: $running running, $installed installed")
 fi
 
-changed=""
-for f in "${SHELL_FILES[@]}"; do
-	m="$(stat -L -c %Y "$HOME/$f" 2> /dev/null || stat -L -f %m "$HOME/$f" 2> /dev/null)"
-	[ -n "$m" ] && [ "$m" -gt "$started" ] && changed="${changed:+$changed, }~/$f"
-done
-[ -z "$changed" ] || reasons+=("shell: $changed changed since it started")
+
+# What the process started under: its own start (startup or resume), not a
+# clear or compaction since, which load nothing.
+IFS=$'\x1f' read -r loaded started_shell < <(jq -r --argjson pid "$pid" \
+	'select(.event == "start" and .pid == $pid and .source != "clear" and .source != "compact")
+	| "\(.account // "")\u001f\(.shell // {} | tojson)"' \
+	"$STORE_DIR/$id.jsonl" 2> /dev/null | tail -n 1)
+
+if [ -n "${started_shell:-}" ] && [ "$started_shell" != "{}" ]; then
+	changed="$(jq -r -n --argjson was "$started_shell" --argjson now "$(desk_shell_hashes)" \
+		'[$was | keys_unsorted[] | select($now[.] != $was[.]) | "~/\(.)"] | join(", ")' 2> /dev/null)"
+	[ -z "$changed" ] || reasons+=("shell: $changed changed since it started")
+fi
 
 current="$(desk_current_account "${CLAUDE_CONFIG_DIR:-}")"
-loaded="$(jq -r --argjson pid "$pid" \
-	'select(.event == "start" and .pid == $pid and .source != "clear" and .source != "compact") | .account // ""' \
-	"$STORE_DIR/$id.jsonl" 2> /dev/null | tail -n 1)"
 if [ -n "$current" ] && [ -n "$loaded" ] && [ "$current" != "$loaded" ]; then
 	reasons+=("account: its connectors are another account's than the one logged in now")
 fi

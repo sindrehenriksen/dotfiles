@@ -184,6 +184,12 @@ assert_eq "each start records the accountUuid current then" "acct-one acct-two" 
     "$(jq -r 'select(.event == "start") | .account' "$ACCT_STORE/sess-acct.jsonl" | paste -sd' ' -)"
 assert_eq "...and nothing else from that file" "false" \
     "$(grep -q -e someone@ -e 'Some One' -e u-1 "$ACCT_STORE/sess-acct.jsonl" && echo true || echo false)"
+mkdir -p "$TMP/acct-home"
+echo "export A=1" > "$TMP/acct-home/.zshrc"
+HOME="$TMP/acct-home" CLAUDE_CONFIG_DIR="$ACCT_DIR" CLAUDE_SESSION_STORE="$ACCT_STORE" rec_start sess-shell /tmp/a /tmp/a/sess-shell.jsonl startup
+assert_eq "a start notes each login-shell file's hash, 16 hex digits, or - for one missing" \
+    ".profile:- .secrets.env:- .shellrc:- .shellrc.early:- .zprofile:- .zshrc:$(printf 'export A=1\n' | { sha256sum 2> /dev/null || shasum -a 256; } | cut -c1-16)" \
+    "$(jq -r '.shell | to_entries | sort_by(.key) | map("\(.key):\(.value)") | join(" ")' "$ACCT_STORE/sess-shell.jsonl")"
 rm "$ACCT_DIR/.claude.json"
 CLAUDE_CONFIG_DIR="$ACCT_DIR" CLAUDE_SESSION_STORE="$ACCT_STORE" rec_start sess-acct /tmp/a /tmp/a/sess-acct.jsonl resume
 assert_eq "a config dir logged in as no one records no account" "null" \

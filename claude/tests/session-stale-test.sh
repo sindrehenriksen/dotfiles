@@ -47,16 +47,19 @@ ln -sfn "$TMP/versions/2.1.318" "$SESSION_STALE_CLAUDE_BIN"
 
 old_stamp() { date -r $(($(date +%s) - $1)) +%Y%m%d%H%M.%S 2> /dev/null || date -d @$(($(date +%s) - $1)) +%Y%m%d%H%M.%S; }
 for f in .zprofile .zshrc .profile .shellrc .shellrc.early .secrets.env; do
-	: > "$HOME/$f"
-	touch -t "$(old_stamp 7200)" "$HOME/$f"
+	echo "# $f" > "$HOME/$f"
 done
+# shellcheck source=../desk-lib/start-state.sh
+source "$HERE/../desk-lib/start-state.sh"
 
 uuid() { uuidgen | tr '[:upper:]' '[:lower:]'; }
 account() { jq -n --arg a "$1" '{oauthAccount:{accountUuid:$a, emailAddress:"someone@example.invalid"}}' > "$CLAUDE_CONFIG_DIR/.claude.json"; }
 
 # A live stand-in for session $1, started an hour ago as far as its pid file
-# says, on version $2, its start recorded under account $3 (none if empty).
-session() { # id version account -> sets pid
+# says, on version $2, its start recorded under account $3 (none if empty)
+# with the shell files as they are now, or as $4 gives them (none if
+# empty).
+session() { # id version account [shell hashes] -> sets pid
 	start_claude_stand_in "$TMP/bin" 300
 	pid=$!
 	echo "$pid" >> "$TMP/spawned"
@@ -66,8 +69,10 @@ session() { # id version account -> sets pid
 		> "$CLAUDE_CONFIG_DIR/sessions/$pid.json"
 	mkdir -p "$CLAUDE_CONFIG_DIR/projects/-p"
 	: > "$CLAUDE_CONFIG_DIR/projects/-p/$1.jsonl"
-	jq -cn --argjson pid "$pid" --arg a "$3" \
-		'{event:"start", source:"startup", pid:$pid} + (if $a != "" then {account:$a} else {} end)' \
+	local shell="${4-$(desk_shell_hashes)}"
+	jq -cn --argjson pid "$pid" --arg a "$3" --arg shell "$shell" \
+		'{event:"start", source:"startup", pid:$pid} + (if $a != "" then {account:$a} else {} end)
+		+ (if $shell != "" then {shell: ($shell | fromjson)} else {} end)' \
 		> "$CLAUDE_SESSION_STORE/$1.jsonl"
 	tab "$pid"
 }
@@ -107,17 +112,31 @@ ln -sfn "$TMP/versions/2.1.318" "$SESSION_STALE_CLAUDE_BIN"
 
 echo "=== shell files changed since it started ==="
 s3=$(uuid)
-session "$s3" 2.1.318 acct-a
-touch "$HOME/.zshrc"
-: > "$TMP/shellrc-target"
+echo "# .shellrc" > "$TMP/shellrc-target"
 ln -sfn "$TMP/shellrc-target" "$HOME/.shellrc"
-touch -h -t "$(old_stamp 7200)" "$HOME/.shellrc"
+session "$s3" 2.1.318 acct-a
+echo "# .zshrc" > "$HOME/.zshrc"
+touch "$HOME/.profile"
 run "$s3"
-assert_eq "named, a linked file by its target's time" "0|shell: ~/.zshrc, ~/.shellrc changed since it started" "$rc|$out"
-touch -t "$(old_stamp 7200)" "$HOME/.zshrc" "$TMP/shellrc-target"
-touch "$HOME/.bashrc" "$HOME/.fzf_config"
+assert_eq "a file rewritten with the same contents is no change" "0|" "$rc|$out"
+echo "export X=1" >> "$HOME/.zshrc"
+echo "export Y=1" >> "$TMP/shellrc-target"
+rm "$HOME/.secrets.env"
 run "$s3"
-assert_eq "files that do not shape a login session do not count" "0|" "$rc|$out"
+assert_eq "changed contents are named, a linked file's by its target's, and so is a file now gone" \
+	"0|shell: ~/.zshrc, ~/.shellrc, ~/.secrets.env changed since it started" "$rc|$out"
+echo "# .zshrc" > "$HOME/.zshrc"
+echo "# .shellrc" > "$TMP/shellrc-target"
+echo "# .secrets.env" > "$HOME/.secrets.env"
+echo "alias x=y" > "$HOME/.bashrc"
+run "$s3"
+assert_eq "put back, with only a file that does not shape a login session changed: nothing" "0|" "$rc|$out"
+s3b=$(uuid)
+session "$s3b" 2.1.318 acct-a ""
+echo "export X=1" >> "$HOME/.zshrc"
+run "$s3b"
+assert_eq "a start that noted no hashes is not flagged" "0|" "$rc|$out"
+echo "# .zshrc" > "$HOME/.zshrc"
 
 echo "=== the account its connectors loaded under ==="
 s4=$(uuid)
