@@ -103,7 +103,9 @@ export PLATFORM="$HERE/lib/platform.sh"
 source "$TMP/spawn.sh"
 
 # The fake tab helper: `find` names terminal T-<pid> (logging whether that
-# pid was still alive) unless $TMP/find-fails exists; `pid` prints the pid in
+# pid was still alive) unless $TMP/find-fails exists, and with
+# $TMP/busy-on-find marks the session busy, as a prompt arriving meanwhile
+# would; `pid` prints the pid in
 # $TMP/fg, first putting $TMP/procs.after in place as the process table
 # once the session has stopped, when there is one; `type` keeps the text in $TMP/typed and fails if $TMP/type-fails
 # exists, and with $TMP/resume-on-type naming a session starts a stand-in for
@@ -115,6 +117,10 @@ case "$1" in
 		alive=dead; kill -0 "$3" 2> /dev/null && alive=alive
 		echo "find $2 $3 $alive" >> "$TMP/tab.log"
 		[ -e "$TMP/find-fails" ] && { echo "DeskTabTerminal: no Ghostty terminal is on $2" >&2; exit 1; }
+		if [ -e "$TMP/busy-on-find" ]; then
+			jq '.status = "busy"' "$CLAUDE_CONFIG_DIR/sessions/$3.json" > "$TMP/pf.find" \
+				&& mv "$TMP/pf.find" "$CLAUDE_CONFIG_DIR/sessions/$3.json"
+		fi
 		echo "T-$3" ;;
 	pid)
 		echo "pid $2" >> "$TMP/tab.log"
@@ -162,7 +168,7 @@ status() { cut -f1 <<< "$out"; }
 alive() { kill -0 "$1" 2> /dev/null && echo alive || echo gone; }
 fresh() {
 	: > "$TMP/tab.log"
-	rm -f "$TMP/typed" "$TMP/find-fails" "$TMP/type-fails" "$TMP/resume-on-type" "$TMP/procs.after"
+	rm -f "$TMP/typed" "$TMP/find-fails" "$TMP/busy-on-find" "$TMP/type-fails" "$TMP/resume-on-type" "$TMP/procs.after"
 	echo 9000 > "$TMP/fg"
 }
 
@@ -262,6 +268,18 @@ assert_eq "a tab that cannot be told apart is refused" \
 	"refused	could not tell its tab apart: DeskTabTerminal: no Ghostty terminal is on $(field "$s3" .tty)" "$(status)	$(detail)"
 assert_eq "...still running after all of them" "alive" "$(alive "$p3")"
 assert_eq "...and nothing typed" "false" "$([ -e "$TMP/typed" ] && echo true || echo false)"
+
+echo "=== something that starts during the tab lookup stops the restart ==="
+fresh
+s9=$(uuid)
+p9=$(spawn "$s9")
+desk_tab "$p9"
+: > "$TMP/busy-on-find"
+run_restart "$s9"
+assert_eq "refused, saying it changed since the first look" \
+	"refused	not idle: its status is busy (since the first look)" "$(status)	$(detail)"
+assert_eq "...still running" "alive" "$(alive "$p9")"
+rm -f "$TMP/busy-on-find"
 
 echo "=== a session that will not stop ==="
 fresh

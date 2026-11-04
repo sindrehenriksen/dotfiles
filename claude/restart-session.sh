@@ -27,7 +27,8 @@
 # types. A tab whose only shell is the one running claude, which tabs
 # opened before desk-open-tab.sh left a prompt have, closes with it.
 #
-# Then: SIGTERM, as close-session.sh sends, and a wait for the process and
+# Then the idle checks again, since naming the tab can take seconds; SIGTERM
+# straight after, as close-session.sh sends; and a wait for the process and
 # its pid file to go. A session that will not stop is reported and nothing
 # more is done. Once it has, and the tab's foreground process is an
 # interactive shell, the tab's line is cleared and
@@ -161,6 +162,12 @@ if [ "$tab_rc" -ne 0 ] || [ -z "$terminal" ]; then
 fi
 
 # --- stop it ---
+
+# The tab lookup can take seconds, so anything that started meanwhile is
+# caught here, as close to the signal as the checks can get.
+restartable_procs || report failed "could not list processes"
+restartable_idle "$pid" "$pidfile" "$(dirname "$transcript")/$id/subagents" \
+	|| report refused "$restartable_why (since the first look)"
 
 cwd="$(jq -r '.cwd // empty' <<< "$entries")"
 resume="CLAUDE_CONFIG_DIR=$(shq "$CONFIG_DIR") claude --resume $id"
