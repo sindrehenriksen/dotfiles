@@ -176,8 +176,9 @@ Two rules that cost nothing and pay:
   the app instead: on a branch, with a local server the owner can
   click through and screenshots at desktop and phone width, iterated
   in place as they react. A plain HTML page is for a shape the app
-  can't show yet, one not worth building, or one to share with people
-  who can't run the app.
+  can't show yet, one not worth building, one to share with people
+  who can't run the app, or one kept with a ticket or pull request as
+  the record of a design.
   Better still, let the owner talk to the role that made it — see
   Authority.
 - **Show the content, not only the layout.** The list, the strings,
