@@ -1243,7 +1243,7 @@ DeskStale.settle_secs = 0.4
 -- that comes later does nothing.
 DeskStale.offer_secs = 60
 -- The hotkey's second press restarts only within this long of the first.
-DeskStale.confirm_secs = 4
+DeskStale.confirm_secs = 10
 DeskStale.recheck_secs = 30
 -- How long each kind of task may run before it is ended. restart-session.sh
 -- bounds its waits in time, so its worst case is their sum with every call
@@ -1418,7 +1418,7 @@ function DeskStale.restart(session)
   run_tool(session, "restart-session.sh", { session.id }, function(rc, out, err, timed_out)
     hs.alert.closeSpecific(working)
     local report = DeskStale.restart_report(session, rc, out, err, timed_out, hs.timer.secondsSinceEpoch() - started)
-    hs.alert.show(report.title .. "\n" .. report.informativeText, 4)
+    hs.alert.show(report.title .. "\n" .. report.informativeText, 8)
     hs.notify.new({ title = report.title, informativeText = report.informativeText }):send()
   end)
 end
