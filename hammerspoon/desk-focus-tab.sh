@@ -16,47 +16,19 @@
 # Usage: desk-focus-tab.sh <tty>
 set -u
 
+# Sourced from beside this script's own file, through the link
+# install_symlinks.sh puts on PATH.
+__src="${BASH_SOURCE[0]}"
+while [ -h "$__src" ]; do
+    __dir="$(cd -P "$(dirname "$__src")" && pwd)"
+    __src="$(readlink "$__src")"
+    [[ "$__src" != /* ]] && __src="$__dir/$__src"
+done
+# shellcheck source=hs-call.sh
+source "$(cd -P "$(dirname "$__src")" && pwd)/hs-call.sh"
+
 tty=${1:?usage: desk-focus-tab.sh <tty>}
 
-lua_string() {
-    local s=$1
-    s=${s//\\/\\\\}
-    s=${s//\"/\\\"}
-    printf '"%s"' "$s"
-}
-
-# Runs `hs -c "$1"` with a hard time limit, printing what hs printed.
-# stdin is /dev/null on purpose: hs reads a piped or socket stdin as more
-# commands and waits for its EOF, so a caller whose stdin never closes (an
-# agent's shell, a job runner) would otherwise hang here forever. `-t` bounds
-# the IPC send and receive; the watchdog is the backstop for anything else,
-# and a run it has to kill exits 124, the same as timeout(1).
-run_hs() {
-    local limit=${DESK_HS_TIMEOUT_SECS:-6}
-    local flag
-    flag=$(mktemp "${TMPDIR:-/tmp}/desk-hs.XXXXXX") || return 1
-    hs -t "$limit" -c "$1" < /dev/null &
-    local pid=$!
-    (
-        sleep "$limit"
-        if kill -0 "$pid" 2> /dev/null; then
-            printf 'killed' > "$flag"
-            kill -TERM "$pid" 2> /dev/null
-            sleep 1
-            kill -KILL "$pid" 2> /dev/null
-        fi
-    ) > /dev/null 2>&1 &
-    local watchdog=$!
-    wait "$pid"
-    local status=$?
-    kill "$watchdog" 2> /dev/null
-    if [ -s "$flag" ]; then
-        status=124
-        printf 'hs did not return within %ss; killed\n' "$limit" >&2
-    fi
-    rm -f "$flag"
-    return "$status"
-}
 
 out=$(run_hs "DeskFocusTab($(lua_string "$tty"))")
 hs_status=$?

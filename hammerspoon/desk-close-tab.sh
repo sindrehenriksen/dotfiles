@@ -22,45 +22,19 @@
 # when hs did not return in DESK_HS_TIMEOUT_SECS (default 6); 2 on usage.
 set -u
 
+# Sourced from beside this script's own file, through the link
+# install_symlinks.sh puts on PATH.
+__src="${BASH_SOURCE[0]}"
+while [ -h "$__src" ]; do
+    __dir="$(cd -P "$(dirname "$__src")" && pwd)"
+    __src="$(readlink "$__src")"
+    [[ "$__src" != /* ]] && __src="$__dir/$__src"
+done
+# shellcheck source=hs-call.sh
+source "$(cd -P "$(dirname "$__src")" && pwd)/hs-call.sh"
+
 usage='usage: desk-close-tab.sh find <tty> <pid> | close <terminal-id> | pid <terminal-id> | type <terminal-id> <pid> <text>'
 
-lua_string() {
-    local s=$1
-    s=${s//\\/\\\\}
-    s=${s//\"/\\\"}
-    printf '"%s"' "$s"
-}
-
-# Runs `hs -c "$1"` with a hard time limit, printing what hs printed.
-# stdin is /dev/null on purpose: hs reads a piped or socket stdin as more
-# commands and waits for its EOF. The watchdog is the backstop for anything
-# `-t` does not bound; a run it has to kill exits 124, like timeout(1).
-run_hs() {
-    local limit=${DESK_HS_TIMEOUT_SECS:-6}
-    local flag
-    flag=$(mktemp "${TMPDIR:-/tmp}/desk-hs.XXXXXX") || return 1
-    hs -t "$limit" -c "$1" < /dev/null &
-    local pid=$!
-    (
-        sleep "$limit"
-        if kill -0 "$pid" 2> /dev/null; then
-            printf 'killed' > "$flag"
-            kill -TERM "$pid" 2> /dev/null
-            sleep 1
-            kill -KILL "$pid" 2> /dev/null
-        fi
-    ) > /dev/null 2>&1 &
-    local watchdog=$!
-    wait "$pid"
-    local status=$?
-    kill "$watchdog" 2> /dev/null
-    if [ -s "$flag" ]; then
-        status=124
-        printf 'hs did not return within %ss; killed\n' "$limit" >&2
-    fi
-    rm -f "$flag"
-    return "$status"
-}
 
 case "${1:-}" in
     find)
