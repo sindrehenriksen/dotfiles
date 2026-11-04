@@ -12,7 +12,8 @@
 #               focused, as the notes hotkey wants;
 #   close       close the tab when its command exits (a check or one-shot
 #               tab); without it the tab is left at a shell prompt in its
-#               directory, so a finished session can still be read.
+#               directory, so a finished session can still be read, and
+#               restart-session.sh can resume it there.
 set -u
 
 usage='usage: desk-open-tab.sh <command> [session-id] [cwd] [background,close]'

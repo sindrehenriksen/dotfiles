@@ -83,14 +83,20 @@ assert_eq "exits 1" "1" "$?"
 assert_eq "...saying the session is running and its window cannot be brought forward" \
 	"the session is running on pts/7; Ghostty on Linux cannot bring its window forward" "$(cat "$ROOT/err")"
 
-echo "=== close: never names or closes a window ==="
+echo "=== close: never names, closes or types into a window ==="
 "$CLOSE" find pts/7 1234 2> "$ROOT/err"
 assert_eq "find exits 1, so close-session.sh leaves the window" "1" "$?"
-assert_eq "...saying why" "Ghostty on Linux cannot name or close a window from outside" "$(cat "$ROOT/err")"
+assert_eq "...saying why" "Ghostty on Linux cannot name, close or type into a window from outside" "$(cat "$ROOT/err")"
 "$CLOSE" close T-1 2> /dev/null
 assert_eq "close exits 1" "1" "$?"
 "$CLOSE" find pts/7 2> /dev/null
 assert_eq "find without a pid is a usage error" "2" "$?"
+"$CLOSE" pid T-1 2> /dev/null
+assert_eq "pid exits 1" "1" "$?"
+"$CLOSE" type T-1 1234 "claude --resume $UUID" 2> /dev/null
+assert_eq "type exits 1, so restart-session.sh restarts nothing" "1" "$?"
+"$CLOSE" type T-1 1234 2> /dev/null
+assert_eq "type without the text is a usage error" "2" "$?"
 
 echo
 echo "=== summary: $pass passed, $fail failed ==="

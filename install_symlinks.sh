@@ -66,7 +66,7 @@ done
 # these through PATH, never a repo-relative path. The tab helpers are linked
 # per platform below, under the same names, so callers never ask which.
 mkdir -p ~/.local/bin
-for tool in desk-run desk-follow desk-propose session-status.sh reopen-sessions.sh close-session.sh; do
+for tool in desk-run desk-follow desk-propose session-status.sh reopen-sessions.sh close-session.sh restart-session.sh; do
     link ~/dotfiles/claude/"$tool" ~/.local/bin/"$tool"
 done
 

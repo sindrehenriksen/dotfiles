@@ -513,7 +513,7 @@ end
 -- text goes only to the new surface, never as keystrokes to whatever is
 -- focused. A session tab runs it as an ordinary command: when the session
 -- ends, the tab is back at a prompt in its directory, where the output can
--- still be read and a session resumed by typing into it. A tab
+-- still be read and where claude/restart-session.sh types the resume. A tab
 -- that should close when done (`close_on_exit`) `exec`s it instead, so the
 -- surface ends with it, the way Ghostty runs a script file it is asked to
 -- open. A `command` field would be the other way to run it, and leaves
@@ -1098,6 +1098,107 @@ function DeskCloseTerminalTab(terminal_id)
     end
     return hs.timer.secondsSinceEpoch() - started > CLOSE_WATCH_SECS
   end)
+  return true
+end
+
+-- ---------------------------------------------------------------------------
+-- Desk: type a command into a session's tab once the session has ended
+-- (claude/restart-session.sh). The terminal is named by DeskTabTerminal
+-- while the session still runs; afterwards DeskTerminalPid reports what its
+-- foreground process has become, and DeskTypeInTerminal types only while it
+-- is still that process. `input text` arrives as a paste and `send key` as
+-- the terminal's own key event, so neither moves focus or reaches whatever
+-- the user is typing in.
+-- ---------------------------------------------------------------------------
+
+local function terminal_by_id_lines(terminal_id)
+  return {
+    "set matches to every terminal whose id is " .. as_string_literal(terminal_id),
+    'if (count of matches) = 0 then return "gone"',
+    'if (count of matches) > 1 then return "ambiguous"',
+    "set term to item 1 of matches",
+  }
+end
+
+-- The foreground pid of terminal `terminal_id` as text, or "gone" or
+-- "ambiguous".
+function DeskTab.terminal_pid_script(terminal_id)
+  local lines = { 'tell application "Ghostty"' }
+  for _, l in ipairs(terminal_by_id_lines(terminal_id)) do lines[#lines + 1] = l end
+  lines[#lines + 1] = "return (pid of term) as text"
+  lines[#lines + 1] = "end tell"
+  return table.concat(lines, "\n")
+end
+
+-- Clears the line, pastes `text` and presses enter in terminal
+-- `terminal_id`, only while its foreground pid is `pid`: "sent", else
+-- "gone", "ambiguous" or "moved", having typed nothing.
+function DeskTab.type_in_terminal_script(terminal_id, pid, text)
+  local lines = { 'tell application "Ghostty"' }
+  for _, l in ipairs(terminal_by_id_lines(terminal_id)) do lines[#lines + 1] = l end
+  for _, l in ipairs({
+    "if (pid of term) is not " .. string.format("%d", pid) .. ' then return "moved"',
+    'send key "u" modifiers "control" to term',
+    "input text " .. as_string_literal(text) .. " to term",
+    'send key "enter" to term',
+    'return "sent"',
+    "end tell",
+  }) do lines[#lines + 1] = l end
+  return table.concat(lines, "\n")
+end
+
+local TERMINAL_REFUSALS = {
+  gone = "no Ghostty terminal has that id any more",
+  ambiguous = "more than one Ghostty terminal reports that id",
+  moved = "its foreground process changed",
+}
+
+-- Returns "pid <n>" for terminal `terminal_id`'s foreground process, else
+-- false (printed, so `hs -c` surfaces why).
+function DeskTerminalPid(terminal_id)
+  if type(terminal_id) ~= "string" or terminal_id == "" then
+    print("DeskTerminalPid: no terminal id given")
+    return false
+  end
+  if not hs.application.get("Ghostty") then
+    print("DeskTerminalPid: Ghostty is not running")
+    return false
+  end
+  local ok, result, descriptor = hs.osascript.applescript(DeskTab.terminal_pid_script(terminal_id))
+  if not ok then
+    print("DeskTerminalPid: osascript failed: " .. DeskTab.osascript_error(descriptor))
+    return false
+  end
+  local pid = tostring(result or ""):match("^(%d+)$")
+  if not pid then
+    print("DeskTerminalPid: " .. (TERMINAL_REFUSALS[result] or ("unexpected reply from Ghostty: " .. tostring(result))))
+    return false
+  end
+  return "pid " .. pid
+end
+
+-- Types `text` and enter into terminal `terminal_id` while `pid` is its
+-- foreground process. True when typed; false, printed, when not.
+function DeskTypeInTerminal(terminal_id, pid, text)
+  if type(terminal_id) ~= "string" or terminal_id == "" or tonumber(pid) == nil
+    or type(text) ~= "string" or text == "" then
+    print("DeskTypeInTerminal: needs a terminal id, a pid and the text")
+    return false
+  end
+  if not hs.application.get("Ghostty") then
+    print("DeskTypeInTerminal: Ghostty is not running")
+    return false
+  end
+  local ok, result, descriptor = hs.osascript.applescript(
+    DeskTab.type_in_terminal_script(terminal_id, tonumber(pid), text))
+  if not ok then
+    print("DeskTypeInTerminal: osascript failed: " .. DeskTab.osascript_error(descriptor))
+    return false
+  end
+  if result ~= "sent" then
+    print("DeskTypeInTerminal: not typed: " .. (TERMINAL_REFUSALS[result] or tostring(result)))
+    return false
+  end
   return true
 end
 

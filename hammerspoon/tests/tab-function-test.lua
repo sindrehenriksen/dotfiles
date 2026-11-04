@@ -214,7 +214,6 @@ assert_eq("the script wraps the command in a login+interactive zsh", true,
   last_osascript_script ~= nil and last_osascript_script:find("/bin/zsh %-lic") ~= nil)
 assert_eq("the original command still appears, single-quoted for that shell", true,
   last_osascript_script ~= nil and last_osascript_script:find("'claude %-%-resume abc%-123'") ~= nil)
-
 assert_eq("a session tab hands the user's shell the command as input, not exec'd, so a prompt is left after it", true,
   last_osascript_script ~= nil
     and last_osascript_script:find('initial input:(" /bin/zsh -lic ', 1, true) ~= nil
@@ -573,6 +572,33 @@ for _, why in ipairs({ "gone", "ambiguous", "split" }) do
 end
 terminal_reply = { false, nil, { OSAScriptErrorMessageKey = "boom" } }
 assert_eq("an AppleScript error is a failure", false, silently(function() return DeskCloseTerminalTab("T1") end))
+
+-- Typing into a session's tab after the session ended: only into the
+-- terminal named, only while it runs the shell the restart checked.
+local type_script = DeskTab.type_in_terminal_script('T"1', 777, [[exec /bin/zsh -lic 'claude --resume "x"']])
+local function at(pat) return type_script:find(pat, 1, true) end
+assert_eq("the script looks the terminal up by its id, quoted for AppleScript", true, at('whose id is "T\\"1"') ~= nil)
+assert_eq("...checks its foreground pid before anything is typed", true,
+  at("if (pid of term) is not 777 then return \"moved\"") < at('send key "u" modifiers "control" to term'))
+assert_eq("...clears the line, pastes the text, then presses enter", true,
+  at('send key "u"') < at("input text ") and at("input text ") < at('send key "enter" to term'))
+assert_eq("...with the text's own quotes escaped", true, at([[input text "exec /bin/zsh -lic 'claude --resume \"x\"'" to term]]) ~= nil)
+terminal_reply = { true, "777", "" }
+assert_eq("a terminal's foreground pid is reported", "pid 777", DeskTerminalPid("T1"))
+for _, why in ipairs({ "gone", "ambiguous" }) do
+  terminal_reply = { true, why, "" }
+  assert_eq("no pid when the terminal is " .. why, false, silently(function() return DeskTerminalPid("T1") end))
+end
+terminal_reply = { true, "sent", "" }
+assert_eq("typed is success", true, DeskTypeInTerminal("T1", 777, "claude"))
+assert_eq("...a pid given as a string too", true, DeskTypeInTerminal("T1", "777", "claude"))
+for _, why in ipairs({ "gone", "ambiguous", "moved" }) do
+  terminal_reply = { true, why, "" }
+  assert_eq("not typed when " .. why, false, silently(function() return DeskTypeInTerminal("T1", 777, "claude") end))
+end
+assert_eq("no text is refused", false, silently(function() return DeskTypeInTerminal("T1", 777, "") end))
+terminal_reply = { false, nil, { OSAScriptErrorMessageKey = "boom" } }
+assert_eq("an AppleScript error types nothing", false, silently(function() return DeskTypeInTerminal("T1", 777, "claude") end))
 hs.osascript.applescript = real_close_as
 hs.application.get = function() return nil end
 
