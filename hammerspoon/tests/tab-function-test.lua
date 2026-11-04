@@ -907,12 +907,21 @@ n_tasks = #tasks_started
 DeskStale.check_focused()
 assert_eq("while a check runs, another focus starts nothing", n_tasks, #tasks_started)
 hung_timer.fn()
+timers[#timers].fn()
 assert_eq("a task that never answers is ended at its timeout", nil, DeskStale.running[hung])
 DeskStale.check_focused()
 assert_eq("...and the next focus checks again: nothing stays stuck", n_tasks + 1, #tasks_started)
 last_task().done(1, "", "")
 hung.done(0, "4242\n", "")
 assert_eq("a task's late answer, after its timeout, is ignored", n_tasks + 1, #tasks_started)
+DeskStale.restart({ id = S1, name = "notes", dir = "/b", pid = 42 })
+local slow = last_task()
+timers[#timers].fn()
+slow.done(15, "", "restart-session: stopping the session; if nothing more is reported, resume it by hand: cd '/p' && claude --model 'opus' --resume " .. S1 .. "\n")
+assert_eq("a restart ended at its timeout says the session may be stopped, with the exact resume it printed",
+  "Restarting notes timed out|The session may be stopped. If its tab shows nothing running, resume it by hand: cd '/p' && claude --model 'opus' --resume " .. S1,
+  last_note().attrs.title .. "|" .. last_note().attrs.informativeText)
+assert_eq("...and its limit is above the script's own worst case", true, DeskStale.timeouts["restart-session.sh"] >= 510)
 hs.timer.doAfter = real_do_after
 DeskStale.recheck_secs = 30
 

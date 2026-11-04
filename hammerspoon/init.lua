@@ -1245,10 +1245,16 @@ DeskStale.offer_secs = 60
 -- The hotkey's second press restarts only within this long of the first.
 DeskStale.confirm_secs = 4
 DeskStale.recheck_secs = 30
--- How long each kind of task may run before it is ended. A restart waits
--- on the session to stop, the tab's prompt and the resume, each bounded in
--- restart-session.sh, so its limit covers all of them.
-DeskStale.timeouts = { osascript = 5, ["session-stale.sh"] = 15, ["restart-session.sh"] = 120 }
+-- How long each kind of task may run before it is ended. restart-session.sh
+-- bounds its own loops by count, not time, so its worst case is their sum
+-- with every call in them at its own limit (tab helper calls 10s, plus 2s
+-- for the kill): the session reader once (~15s at worst seen), the tab
+-- lookup (12s), the signal's grace (10s), the prompt loop (11 looks of a
+-- tab call and a second each, ~143s), the type (12s) and the confirm loop
+-- (20 rounds of a second and a session reader read, ~320s), about 510s in
+-- all. Its limit is set above that, so Hammerspoon only ever ends one that
+-- is truly stuck.
+DeskStale.timeouts = { osascript = 5, ["session-stale.sh"] = 15, ["restart-session.sh"] = 600 }
 -- The tasks running now, so none is collected mid-run.
 DeskStale.running = {}
 -- Per pid: { reasons = <the reasons last offered>, checked = <time> }.
@@ -1328,7 +1334,15 @@ end
 
 -- A restart-session.sh result as { title, informativeText }: its output
 -- line is `<status>\t<id>\t<name>\t<detail>`.
-function DeskStale.restart_report(session, rc, out)
+function DeskStale.restart_report(session, rc, out, err, timed_out)
+  if timed_out then
+    local by_hand = (err or ""):match("if nothing more is reported, (resume it by hand: [^\n]*)")
+    return {
+      title = "Restarting " .. session.name .. " timed out",
+      informativeText = "The session may be stopped. If its tab shows nothing running, "
+        .. (by_hand or ("resume it by hand: claude --resume " .. session.id)),
+    }
+  end
   local status, _, _, detail = (out or ""):match("^([^\t]*)\t([^\t]*)\t([^\t]*)\t([^\n]*)")
   if rc == 0 then
     return { title = "Restarted " .. session.name, informativeText = detail or "" }
@@ -1354,17 +1368,19 @@ hs.task.new("/bin/zsh", function(rc, out)
 end, { "-lc", 'printf %s "$PATH"' }):start()
 
 -- Starts `path` with `args`, held in DeskStale.running until it ends, and
--- ended once it outruns its kind's timeout; `done` is called exactly once,
--- with -1 when it could not start.
+-- ended once it outruns its kind's timeout; `done(rc, out, err, timed_out)`
+-- is called exactly once, with rc -1 when it could not start. A task ended
+-- at its timeout passes on what it printed until then, when its own end
+-- reports it within a moment.
 local function start_task(path, args, env, done)
   local kind = path:match("[^/]+$")
-  local finished, t, timer = false, nil, nil
+  local finished, timed_out, t, timer = false, false, nil, nil
   local function finish(rc, out, err)
     if finished then return end
     finished = true
     if timer then timer:stop() end
     if t then DeskStale.running[t] = nil end
-    done(rc, out, err)
+    done(rc, out, err, timed_out)
   end
   t = hs.task.new(path, finish, args)
   if not t then return finish(-1, "", "could not start " .. kind) end
@@ -1375,8 +1391,10 @@ local function start_task(path, args, env, done)
     return finish(-1, "", "could not start " .. kind)
   end
   timer = hs.timer.doAfter(DeskStale.timeouts[kind] or 15, function()
+    timer = nil
+    timed_out = true
     if t.isRunning and t:isRunning() then t:terminate() end
-    finish(-1, "", kind .. " timed out")
+    hs.timer.doAfter(2, function() finish(-1, "", kind .. " timed out") end)
   end)
 end
 
@@ -1391,8 +1409,8 @@ end
 
 function DeskStale.restart(session)
   hs.alert.show("Restarting " .. session.name .. "…", 2)
-  run_tool(session, "restart-session.sh", { session.id }, function(rc, out)
-    local report = DeskStale.restart_report(session, rc, out)
+  run_tool(session, "restart-session.sh", { session.id }, function(rc, out, err, timed_out)
+    local report = DeskStale.restart_report(session, rc, out, err, timed_out)
     hs.notify.new({ title = report.title, informativeText = report.informativeText }):send()
   end)
 end

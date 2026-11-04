@@ -191,6 +191,9 @@ resume="CLAUDE_CONFIG_DIR=$(shq "$CONFIG_DIR") claude $claude_args"
 [ -n "$cwd" ] && resume="cd $(shq "$cwd") && $resume"
 by_hand="resume it by hand: ${cwd:+cd $(shq "$cwd") && }claude $claude_args"
 
+# Said before the signal, so a caller that has to end this script part way
+# still has what to tell the user.
+echo "restart-session: stopping the session; if nothing more is reported, $by_hand" >&2
 kill -TERM "$pid" 2> /dev/null
 waited=0
 while { desk_pid_alive "$pid" || [ -e "$pidfile" ]; } && [ "$waited" -lt "$GRACE" ]; do
