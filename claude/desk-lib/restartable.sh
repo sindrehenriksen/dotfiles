@@ -159,16 +159,18 @@ restartable_argv() {
 #   <file>`, which the user's `claude` function adds; -n/--name <name>;
 #   -r/--resume [value]; -c/--continue; --fork-session; and the prompt,
 #   any word that is not an option or an option's value, or after `--`.
-#   Carried: --model, --effort, --fallback-model, --agent, --permission-mode
-#   (but see below), a later --settings, --add-dir <directories...>,
-#   --verbose, --ide, --chrome and --no-chrome.
+#   Carried: --model, --effort, --fallback-model, --permission-mode (but see
+#   below), --add-dir <directories...>, --verbose, --ide, --chrome and
+#   --no-chrome.
 # Refused (returns 1, why in $restartable_why): an argv that cannot be read;
-# any other option, which a resume would silently drop; an --add-dir or
-# --settings value that is not an existing directory or file from <cwd>;
-# and, whatever else the argv says, a flag that bypasses permissions
-# (--dangerously-skip-permissions, --allow-dangerously-skip-permissions,
-# --permission-mode bypassPermissions), which a restart never passes on its
-# own: the user passes it again by hand.
+# any other option, which a resume would silently drop; an --add-dir value
+# that is not an existing directory from <cwd>; and, whatever else the argv
+# says, a flag that bypasses permissions or may: --dangerously-skip-
+# permissions, --allow-dangerously-skip-permissions, --permission-mode
+# bypassPermissions, and a --settings or --agent passed by hand, whose file
+# a resume reads again as it is then and which can set a permission mode.
+# A restart never passes those on its own: the user passes them again by
+# hand.
 restartable_flags() {
 	local cwd=$2 word name val has_val i n words=()
 	while IFS= read -r -d '' word; do words+=("$word"); done < <(restartable_argv "$1" 2> /dev/null)
@@ -220,16 +222,12 @@ restartable_flags() {
 					return 1
 				fi
 				_rf_carry "$name $(restartable_shq "$val")" ;;
-			--model | --effort | --fallback-model | --agent)
+			--model | --effort | --fallback-model)
 				_rf_take || return 1
 				_rf_carry "$name $(restartable_shq "$val")" ;;
-			--settings)
-				_rf_take || return 1
-				if ! _rf_at "$val"; then
-					restartable_why="its --settings $val is not a file a restart can find"
-					return 1
-				fi
-				_rf_carry "$name $(restartable_shq "$val")" ;;
+			--settings | --agent)
+				restartable_why="it was started with $name by hand, which a resume would read again as it is now and which can set permissions; restart it by hand"
+				return 1 ;;
 			--add-dir)
 				if [ -z "$has_val" ]; then
 					[ "$i" -lt "$n" ] && [[ "${words[$i]}" != -* ]] || {

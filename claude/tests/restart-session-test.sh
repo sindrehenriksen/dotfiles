@@ -376,6 +376,12 @@ assert_eq "--dangerously-skip-permissions: refused" \
 	"$(status)	$(detail)"
 flags_case claude --permission-mode=bypassPermissions --resume x
 assert_eq "...in its = form too" "refused" "$(status)"
+flags_case claude --resume x --settings /x/extra.json
+assert_eq "a --settings passed by hand, which could set a permission mode: refused" \
+	"refused	it was started with --settings by hand, which a resume would read again as it is now and which can set permissions; restart it by hand" \
+	"$(status)	$(detail)"
+flags_case claude --agent reviewer --resume x
+assert_eq "...an --agent too" "refused" "$(status)"
 flags_case claude --resume x --mcp-config extra.json
 assert_eq "an option a resume would drop: refused, saying which" \
 	"refused	it was started with --mcp-config, which a resume would drop; restart it by hand" "$(status)	$(detail)"
