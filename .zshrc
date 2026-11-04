@@ -34,6 +34,16 @@ else
 fi
 
 
+#### Ghostty shell integration
+# Ghostty injects this into the first shell of a tab only, so a shell exec'd
+# in its place (as a desk restart does, claude/restart-session.sh) would go
+# without prompt marks and cwd reporting. Sourced here, every interactive
+# shell in a Ghostty tab has it; it returns at once where it is loaded.
+if [[ -n $GHOSTTY_RESOURCES_DIR ]]; then
+    source "$GHOSTTY_RESOURCES_DIR"/shell-integration/zsh/ghostty-integration
+fi
+
+
 #### Plugins
 # No plugin manager. Plugins come from the system package manager (brew on
 # macOS, apt on Ubuntu) or, where they aren't packaged, from git clones in
