@@ -781,8 +781,9 @@ local restart = last_task()
 assert_eq("Restart runs restart-session.sh on the session", DeskStale.bin_dir .. "/restart-session.sh " .. S1,
   restart and (restart.path .. " " .. restart.args[1]))
 assert_eq("...in its own config dir, on the login PATH", "/b /login/bin:/usr/bin", restart.env.CLAUDE_CONFIG_DIR .. " " .. restart.env.PATH)
+local notes_before_done = #notes_sent
 restart.done(0, "restarted\t" .. S1 .. "\tnotes\tresumed in its tab (pid 77)\n", "")
-assert_eq("...and says how it went", "Restarted notes in this tab: in 0s: resumed in its tab (pid 77)", last_note().attrs.title .. ": " .. last_note().attrs.informativeText)
+assert_eq("...and says nothing more when it worked", notes_before_done, #notes_sent)
 local refused = DeskStale.restart_report(session, 1, "refused\t" .. S1 .. "\tnotes\tnot idle: its status is busy\n")
 assert_eq("a refusal says why", "notes not restarted: not idle: its status is busy", refused.title .. ": " .. refused.informativeText)
 assert_eq("exit 3 says how to get a tab that restarts", true,
@@ -854,9 +855,9 @@ assert_eq("a second press within a few seconds restarts the focused tab's sessio
   last_task().path .. " " .. last_task().args[1])
 assert_eq("...saying so at once", "Restarting notes…", alerts[#alerts])
 clock = clock + 7
+local alerts_before_done, notes_before_ok = #alerts, #notes_sent
 last_task().done(0, "restarted\t" .. S1 .. "\tnotes\tresumed in its tab (pid 78)\n", "")
-assert_eq("...and when it ends, that it restarted in this tab and how long it took",
-  "Restarted notes in this tab\nin 7s: resumed in its tab (pid 78)", alerts[#alerts])
+assert_eq("...and when it worked, no message after it", alerts_before_done .. " " .. notes_before_ok, #alerts .. " " .. #notes_sent)
 DeskStale.restart(session)
 last_task().done(1, "refused\t" .. S1 .. "\tnotes\tnot idle: its status is busy\n", "")
 assert_eq("a refusal is shown with its reason", "notes not restarted\nnot idle: its status is busy", alerts[#alerts])

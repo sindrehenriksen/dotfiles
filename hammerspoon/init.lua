@@ -1410,13 +1410,16 @@ local function run_tool(session, tool, args, done) -- session may be nil
   }, done)
 end
 
--- Restarts `session`, saying so at once and staying on screen until the
--- outcome replaces it, as an alert and a notification.
+-- Restarts `session`, saying so at once and staying on screen until it
+-- ends. A restart that worked says nothing more, since the session coming
+-- back in its tab shows it; one that didn't says why, as an alert and a
+-- notification.
 function DeskStale.restart(session)
   local started = hs.timer.secondsSinceEpoch()
   local working = hs.alert.show("Restarting " .. session.name .. "…", DeskStale.timeouts["restart-session.sh"])
   run_tool(session, "restart-session.sh", { session.id }, function(rc, out, err, timed_out)
     hs.alert.closeSpecific(working)
+    if rc == 0 and not timed_out then return end
     local report = DeskStale.restart_report(session, rc, out, err, timed_out, hs.timer.secondsSinceEpoch() - started)
     hs.alert.show(report.title .. "\n" .. report.informativeText, 8)
     hs.notify.new({ title = report.title, informativeText = report.informativeText }):send()
