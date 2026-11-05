@@ -207,13 +207,15 @@ case "$1" in
 		exit 0 ;;
 esac
 EOF
-# Ghostty, and the Hammerspoon driving it: accessibility answers true,
-# unless $TMP/hs-down (Hammerspoon unreachable) or $TMP/no-ax (false).
-# running while $TMP/running exists. quit ends it, unless $TMP/quit-fails
-# (Hammerspoon gone since; with $TMP/quit-delivered the call still timed
-# out after the quit reached it), $TMP/quit-refused (it stays, showing
-# nothing) or $TMP/dialog-checks (a confirmation it shows for that many
-# looks, after which it quits if $TMP/confirm-quit, else stays: a cancel).
+# Ghostty, and the Hammerspoon driving it: with $TMP/hs-down Hammerspoon
+# is unreachable, and accessibility, quit and dialog all fail, as they do
+# for real; $TMP/quit-kills-hs makes it so at the quit. Otherwise
+# accessibility answers true, or false with $TMP/no-ax. running while
+# $TMP/running exists. quit ends it, unless $TMP/quit-fails (the call
+# timed out before it reached Ghostty; with $TMP/quit-delivered it timed
+# out after), $TMP/quit-refused (it stays, showing nothing) or
+# $TMP/dialog-checks (a confirmation it shows for that many looks, after
+# which it quits if $TMP/confirm-quit, else stays: a cancel).
 # With $TMP/dialog-unknown, dialog cannot tell; when that file holds a
 # count, for that many looks, after which Ghostty is gone, as one shutting
 # down shows. launch starts it, unless $TMP/no-launch or no cask is
@@ -230,10 +232,13 @@ case "$1" in
 	running) [ -e "$TMP/running" ] ;;
 	quit)
 		echo quit >> "$TMP/app.log"
+		[ -e "$TMP/quit-kills-hs" ] && : > "$TMP/hs-down"
+		[ -e "$TMP/hs-down" ] && { echo "hs: can't access Hammerspoon message port"; exit 1; }
 		[ -e "$TMP/quit-delivered" ] && { gone; echo "hs did not return within 6s; killed"; exit 124; }
-		[ -e "$TMP/quit-fails" ] && { echo "hs: can't access Hammerspoon message port"; exit 1; }
+		[ -e "$TMP/quit-fails" ] && { echo "hs did not return within 6s; killed"; exit 124; }
 		[ -e "$TMP/quit-refused" ] || [ -e "$TMP/dialog-checks" ] || gone ;;
 	dialog)
+		[ -e "$TMP/hs-down" ] && { echo unreachable; exit 1; }
 		if [ -e "$TMP/dialog-unknown" ]; then
 			left=$(cat "$TMP/dialog-unknown")
 			if [ -z "$left" ]; then echo unknown; exit 1; fi
@@ -302,7 +307,7 @@ fresh() {
 		"$TMP/tab.log" "$TMP/opened" "$TMP/brew.log" "$TMP/app.log" "$TMP/notified" "$TMP/detached" \
 		"$TMP/before-job" "$TMP/quit-refused" "$TMP/no-resume" "$TMP/outdated" "$TMP/procs-extra" "$TMP/restore" \
 		"$TMP/on-fetch" "$TMP/quit-fails" "$TMP/dialog-checks" "$TMP/confirm-quit" "$TMP/no-launch" "$TMP/opener-fails" \
-		"$TMP/quit-delivered" "$TMP/dialog-unknown" "$TMP/hs-down" "$TMP/no-ax"
+		"$TMP/quit-delivered" "$TMP/dialog-unknown" "$TMP/hs-down" "$TMP/no-ax" "$TMP/quit-kills-hs"
 	rm -rf "$TMP/state"/*
 	echo ghostty@tip > "$TMP/installed"
 	touch "$TMP/running"
@@ -414,7 +419,7 @@ pa=$(spawn "$a" idle notty)
 tabs
 run_update --dry-run --to ghostty
 assert_eq "exit 1" "1" "$rc"
-assert_has "it names the cause" "($a): runs under Ghostty with no terminal" "$out"
+assert_has "it names the cause" "($a): runs under Ghostty with no terminal, so it has no tab to come back in and the quit may end it" "$out"
 assert_lacks "...not a config dir" "no reader reports" "$out"
 assert_lacks "...nor calls it left alone" "($a): no terminal" "$out"
 
@@ -478,6 +483,19 @@ assert_has "...the notification naming the new one" "outside the plan, which the
 assert_has "...by its session" "session $n" "$(note)"
 nothing_changed "...nothing installed"
 
+echo "=== Hammerspoon gone by the second look stops everything ==="
+fresh
+a=$(uuid)
+pa=$(spawn "$a")
+tabs "$pa"
+printf ': > "%s"\n' "$TMP/hs-down" > "$TMP/on-fetch"
+run_update --to ghostty
+assert_eq "the session still runs" "alive" "$(alive "$pa")"
+assert_eq "...Ghostty was not quit" "" "$(cat "$TMP/app.log" 2> /dev/null)"
+nothing_changed "...nothing installed"
+assert_has "...the notification naming Hammerspoon" \
+	"Ghostty not updated: Nothing was done: Hammerspoon is not running, or its hs command cannot reach it (hs: can't access Hammerspoon message port); start it and run ghostty-update again. Log: " "$(note)"
+
 echo "=== the session that ran this is waited for ==="
 fresh
 a=$(uuid)
@@ -538,7 +556,7 @@ tabs "$pa"
 : > "$TMP/quit-fails"
 run_update --to ghostty
 nothing_changed "nothing installed"
-assert_has "...the log naming the failed call" "the quit call to Hammerspoon failed (hs: can't access Hammerspoon message port)" "$(the_log)"
+assert_has "...the log naming the failed call" "the quit call to Hammerspoon failed (hs did not return within 6s; killed)" "$(the_log)"
 assert_has "...so does the notification" "Ghostty not updated: The quit call to Hammerspoon failed. Still ghostty@tip" "$(note)"
 assert_has "...and the session resumed where it was" "type T-$pa 7000" "$(cat "$TMP/tab.log")"
 fresh
@@ -550,6 +568,24 @@ printf 'T-%s\n' "$pa" > "$TMP/restore"
 run_update --to ghostty
 assert_has "a quit call that timed out after it was delivered: the update went on" "Ghostty updated: " "$(note)"
 assert_eq "...installed" "ghostty" "$(cat "$TMP/installed")"
+fresh
+a=$(uuid)
+pa=$(spawn "$a")
+tabs "$pa"
+printf 'T-%s\n' "$pa" > "$TMP/restore"
+: > "$TMP/quit-kills-hs"
+started=$SECONDS
+GHOSTTY_UPDATE_CONFIRM_WAIT_SECS=30 run_update --to ghostty
+took=$((SECONDS - started))
+nothing_changed "Hammerspoon gone at the quit: nothing installed"
+assert_eq "...the wait ended well before its limit" "under 20s" "$([ "$took" -lt 20 ] && echo "under 20s" || echo "${took}s")"
+assert_lacks "...no dialog claimed" "Ghostty update waiting" "$(cat "$TMP/notified")"
+assert_eq "...nothing typed into Ghostty" "" "$(grep '^type' "$TMP/tab.log")"
+assert_has "...the notification naming Hammerspoon and what to do" \
+	"Ghostty not updated: Hammerspoon stopped answering and Ghostty has not quit; start Hammerspoon, answer Ghostty if it asks whether to quit, then resume the sessions by hand. Still ghostty@tip b3dc3d794 (build 18248). 0 of 1 sessions resumed. Not resumed: $(name_of "$a")" "$(note)"
+assert_has "...the log the failed call" "Hammerspoon stopped answering (the quit call: hs: can't access Hammerspoon message port)" "$(the_log)"
+assert_has "...the file why, and the command" "not resumed while Hammerspoon does not answer" "$(resume_file)"
+assert_has "..." "cd '$PROJ_DIR' && CLAUDE_CONFIG_DIR='$CONFIG_DIR' claude --resume $a" "$(resume_file)"
 
 echo "=== a dialog that cannot be read counts as open ==="
 # The fake answers for the dialog check; the Lua that reads Ghostty's
@@ -564,7 +600,7 @@ run_update --to ghostty
 nothing_changed "nothing installed"
 assert_eq "...nothing typed into Ghostty, which may still quit" "" "$(grep '^type' "$TMP/tab.log")"
 assert_has "...the user told it waits, and that a cancel may not be seen" \
-	"whether it is asking to cannot be read. If it is asking, confirm to go on with the update. A cancel may not be seen: the update then gives up after 8s" "$(cat "$TMP/notified")"
+	"whether it is asking to cannot be read. If it is asking, confirm to go on with the update. A cancel may not be seen: the update then gives up within 8s of the quit" "$(cat "$TMP/notified")"
 assert_has "...and at the end, why and what to do" "Ghostty not updated: Ghostty has not quit and may be asking whether to; answer it, then resume the sessions by hand." "$(note)"
 assert_has "...the commands in the file" "cd '$PROJ_DIR' && CLAUDE_CONFIG_DIR='$CONFIG_DIR' claude --resume $a" "$(resume_file)"
 fresh
@@ -574,7 +610,7 @@ tabs "$pa"
 printf 'T-%s\n' "$pa" > "$TMP/restore"
 : > "$TMP/quit-refused"
 echo 2 > "$TMP/dialog-unknown"
-run_update --to ghostty
+GHOSTTY_UPDATE_QUIT_SECS=10 run_update --to ghostty
 assert_lacks "unreadable while Ghostty shuts down: no waiting notification" "Ghostty update waiting" "$(cat "$TMP/notified")"
 assert_has "...and the update went on" "Ghostty updated: " "$(note)"
 

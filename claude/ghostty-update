@@ -29,10 +29,10 @@
 # Ghostty that is not one of them (started under a config dir not listed,
 # say), since the quit would end it unrecorded; and, while Ghostty runs,
 # when Hammerspoon is not running or has no Accessibility, without which
-# the quit dialog cannot be read, checked on every run. The session running
-# this command, if one is, is spared the idle check at first, since what it
-# is running is this; the job waits for it to go idle. Unsent text in an
-# input box is lost.
+# the quit dialog cannot be read, checked on every run and again by the job
+# before it stops anything. The session running this command, if one is, is
+# spared the idle check at first, since what it is running is this; the job
+# waits for it to go idle. Unsent text in an input box is lost.
 #
 # Resuming into the restored tabs. Ghostty saves each terminal's id with its
 # window state and gives the terminal the same id when it restores it
@@ -64,8 +64,9 @@
 #      Ghostty for a download;
 #   2. checks again, right before stopping anything: every session idle with
 #      nothing scheduled (the one running this is waited for, up to
-#      $GHOSTTY_UPDATE_CALLER_SECS, default 120), and no `claude` process
-#      under Ghostty outside the plan. Any failing stops it there;
+#      $GHOSTTY_UPDATE_CALLER_SECS, default 120), no `claude` process
+#      under Ghostty outside the plan, and Hammerspoon still reachable with
+#      Accessibility. Any failing stops it there;
 #   3. stops each session with SIGTERM, as close-session.sh does, recording
 #      no end of its own, so each tab falls back to its prompt;
 #   4. quits Ghostty as Cmd+Q does, so it saves its windows. Ghostty asks to
@@ -83,7 +84,9 @@
 #      one that timed out may still have been delivered. Still asking, or
 #      not known not to be, when the wait runs out, it updates nothing and
 #      resumes nothing, since a later confirm would end them again, and
-#      reports the commands to run once it is answered;
+#      reports the commands to run once it is answered. Hammerspoon not
+#      answering for a few seconds once _QUIT_SECS have passed ends the
+#      wait the same way, at once, naming Hammerspoon;
 #   5. runs `brew upgrade --cask <cask>`, or for --to, `brew uninstall
 #      --cask <old>` then `brew install --cask <new>`, putting the old one
 #      back if the install fails;
@@ -197,7 +200,7 @@ fi
 # printed, when the call did not go through.
 hs_answer() {
 	local out
-	out="$(run_hs "$1" 2>&1)" || { printf '%s\n' "$out" | tr '\n' ' '; return 1; }
+	out="$(run_hs "$1" 2>&1)" || { printf '%s\n' "$out" | tr '\n' ' ' | sed 's/[[:space:]]*$//'; return 1; }
 	printf '%s\n' "$out" | tail -n 1
 }
 
@@ -206,8 +209,9 @@ hs_answer() {
 # reached), running (exit 0 when Ghostty is), quit (as Cmd+Q, so it saves
 # its windows and asks about anything running; fails, saying why, when the
 # call to Hammerspoon does), dialog (prints dialog while a sheet or an
-# alert is open in it, none when none is; fails, unknown, when it cannot
-# tell), launch, and version (what the installed app says it is).
+# alert is open in it, none when none is; fails, printing unknown when it
+# cannot tell, unreachable when Hammerspoon does not answer), launch, and
+# version (what the installed app says it is).
 app() {
 	if [ -n "${GHOSTTY_UPDATE_APP_BIN:-}" ]; then
 		"$GHOSTTY_UPDATE_APP_BIN" "$@"
@@ -238,7 +242,7 @@ app() {
 						if c:attributeValue(\"AXRole\") == \"AXSheet\" then return \"dialog\" end
 					end
 				end
-				return \"none\"")" || return 1
+				return \"none\"")" || { echo unreachable; return 1; }
 			case "$answer" in dialog | none) echo "$answer" ;; *) echo unknown; return 1 ;; esac
 			;;
 		launch) open -a "$APP_PATH" ;;
@@ -254,6 +258,18 @@ app() {
 				echo "$short"
 			fi
 			;;
+	esac
+}
+
+# Why Hammerspoon cannot quit Ghostty and read its quit dialog, printed;
+# fails when it can.
+hs_unfit() {
+	local state
+	state="$(app accessibility 2>&1)" || state="unreachable: ${state:-no answer}"
+	case "$state" in
+		true) return 1 ;;
+		false) echo "Hammerspoon has no Accessibility permission, without which it cannot see whether Ghostty asks to confirm the quit; grant it (System Settings > Privacy & Security > Accessibility) and run ghostty-update again" ;;
+		*) echo "Hammerspoon is not running, or its hs command cannot reach it (${state#unreachable: }); start it and run ghostty-update again" ;;
 	esac
 }
 
@@ -384,6 +400,9 @@ run_job() {
 		line="$(unplanned_claudes ${pids[@]+"${pids[@]}"} | paste -sd';' - | sed 's/;/; /g')"
 		[ -z "$line" ] || abort="Claude Code is running under Ghostty outside the plan, which the quit would end: $line"
 	fi
+	if [ -z "$abort" ] && [ "$was_running" = true ]; then
+		line="$(hs_unfit)" && abort="$line"
+	fi
 	if [ -n "$abort" ]; then
 		logl "nothing done: $abort"
 		notify "Ghostty not updated" "Nothing was done: $abort. Log: $log"
@@ -415,10 +434,11 @@ run_job() {
 
 	# quit: quit (Ghostty is gone), failed (the quit call failed and Ghostty
 	# stayed), cancelled (still running, no dialog), asking (a dialog open,
-	# or none that can be ruled out, when the wait ran out). A quit call that
-	# fails may still have been delivered (a timeout), so the wait runs
-	# whatever it returned.
-	local quit=quit updated=false brew_note="" short_note="" out d quit_err="" no_dialog_since told="" quit_until wait_until
+	# or none that can be ruled out, when the wait ran out), unreachable
+	# (still running, Hammerspoon not answering). A quit call that fails may
+	# still have been delivered (a timeout), so the wait runs whatever it
+	# returned.
+	local quit=quit updated=false brew_note="" short_note="" out d quit_err="" no_dialog_since told="" quit_until wait_until hs_gone_since=""
 	if [ "$was_running" = true ]; then
 		logl "quitting Ghostty"
 		if ! out="$(app quit 2>&1)"; then
@@ -431,7 +451,12 @@ run_job() {
 		while app running; do
 			# One it cannot tell about counts as open: resuming into a
 			# Ghostty that is about to quit is the outcome to avoid.
-			d="$(app dialog 2> /dev/null)" || d=unknown
+			d="$(app dialog 2> /dev/null)" || { [ "$d" = unreachable ] || d=unknown; }
+			if [ "$d" = unreachable ]; then
+				[ -n "$hs_gone_since" ] || hs_gone_since=$SECONDS
+			else
+				hs_gone_since=""
+			fi
 			if [ "$d" != none ]; then
 				no_dialog_since=""
 				# Windows that cannot be read are what a Ghostty shutting
@@ -444,7 +469,16 @@ run_job() {
 				elif [ "$d" = unknown ] && [ -z "$told" ] && [ "$SECONDS" -ge "$quit_until" ]; then
 					told=unknown
 					logl "Ghostty has not quit after ${QUIT_SECS}s and its windows cannot be read, so a dialog cannot be ruled out; waiting up to ${CONFIRM_WAIT_SECS}s"
-					notify "Ghostty update waiting" "Ghostty has not quit, and whether it is asking to cannot be read. If it is asking, confirm to go on with the update. A cancel may not be seen: the update then gives up after $(secs_text "$CONFIRM_WAIT_SECS"), updates nothing, and leaves the sessions for you to resume, with the commands to do it."
+					notify "Ghostty update waiting" "Ghostty has not quit, and whether it is asking to cannot be read. If it is asking, confirm to go on with the update. A cancel may not be seen: the update then gives up within $(secs_text "$CONFIRM_WAIT_SECS") of the quit, updates nothing, and leaves the sessions for you to resume, with the commands to do it."
+				fi
+				# Without Hammerspoon no dialog can be seen, nor a session
+				# resumed in a tab, so waiting on is for nothing.
+				if [ "$d" = unreachable ] && [ "$SECONDS" -ge "$quit_until" ] \
+					&& [ $((SECONDS - hs_gone_since)) -ge "$NO_DIALOG_SECS" ]; then
+					quit=unreachable
+					brew_note="Hammerspoon stopped answering${quit_err:+ (the quit call: $quit_err)} and Ghostty has not quit, so whether it is asking to confirm the quit cannot be seen; nothing was updated and no session resumed, since confirming would end them again"
+					short_note="Hammerspoon stopped answering and Ghostty has not quit; start Hammerspoon, answer Ghostty if it asks whether to quit, then resume the sessions by hand"
+					break
 				fi
 			else
 				[ -n "$no_dialog_since" ] || no_dialog_since=$SECONDS
@@ -527,6 +561,8 @@ run_job() {
 	}
 	if [ "$quit" = asking ]; then
 		unreachable="not resumed while Ghostty asks to confirm quitting"
+	elif [ "$quit" = unreachable ]; then
+		unreachable="not resumed while Hammerspoon does not answer and Ghostty may be asking to confirm quitting"
 	elif [ "$quit" = quit ] && [ "$was_running" = true ] && [ "$to_version" = "none installed" ]; then
 		logl "not launching Ghostty, since none is installed"
 		unreachable="no Ghostty is installed to resume it in"
@@ -717,13 +753,8 @@ app running && ghostty_running=true
 # Hammerspoon quits Ghostty and reads its quit dialog, so a cancel could not
 # be seen without it or its Accessibility. Either can change at any time, so
 # this is asked on every run.
-if [ "$ghostty_running" = true ]; then
-	hs_state="$(app accessibility 2>&1)" || hs_state="unreachable: ${hs_state:-no answer}"
-	case "$hs_state" in
-		true) ;;
-		false) die "Hammerspoon has no Accessibility permission, without which it cannot see whether Ghostty asks to confirm the quit; grant it (System Settings > Privacy & Security > Accessibility) and run this again. Nothing done." ;;
-		*) die "Hammerspoon is not running, or its hs command cannot reach it (${hs_state#unreachable: }); start it and run this again. Nothing done." ;;
-	esac
+if [ "$ghostty_running" = true ] && why="$(hs_unfit)"; then
+	die "$why. Nothing done."
 fi
 
 # Every live session the readers report, one JSON object per line.
@@ -765,7 +796,7 @@ if [ "$ghostty_running" = true ]; then
 		label="$name ($id)"
 		if [ -z "$tty" ] || [ "$tty" = "??" ]; then
 			left_alone "$pid" "$label" "no terminal" \
-				"runs under Ghostty with no terminal, so it has no tab to come back in and the quit would end it"
+				"runs under Ghostty with no terminal, so it has no tab to come back in and the quit may end it"
 			continue
 		fi
 		tab_call find "$tty" "$pid"
