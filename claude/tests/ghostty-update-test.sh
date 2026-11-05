@@ -80,13 +80,16 @@ export TMP PROJ_DIR TRANSCRIPTS RECORDER PLATFORM="$HERE/lib/platform.sh"
 
 # Starts a stand-in session $1 on a terminal of its own and prints its pid:
 # the SessionStart hook, then a wait; on SIGTERM the SessionEnd hook with
-# reason "other", its pid file removed, as Claude Code does. Shared with the
-# fake tab helper, whose `type` can stand for the resume.
+# reason "other", its pid file removed, as Claude Code does; with notty, in a
+# session of its own with no terminal at all. Shared with the fake tab
+# helper, whose `type` can stand for the resume.
 cat > "$TMP/spawn.sh" << 'SPAWN'
 source "$PLATFORM"
 name_of() { echo "s-${1:0:8}"; }
-spawn() { # sid [status]
-	local sid=$1 status=${2:-idle} tag i pid procstart now_ms
+no_terminal() { perl -MPOSIX -e 'POSIX::setsid(); exec @ARGV or die' "$@"; }
+spawn() { # sid [status] [notty]
+	local sid=$1 status=${2:-idle} run=on_a_terminal tag i pid procstart now_ms
+	[ "${3:-}" = notty ] && run=no_terminal
 	tag="$TMP/ctl/$sid.$RANDOM"
 	jq -cn --arg sid "$sid" --arg cwd "$PROJ_DIR" --arg tp "$TRANSCRIPTS/$sid.jsonl" \
 		'{session_id:$sid, cwd:$cwd, transcript_path:$tp, source:"startup", hook_event_name:"SessionStart"}' > "$tag.start.json"
@@ -94,7 +97,7 @@ spawn() { # sid [status]
 	[ -e "$TRANSCRIPTS/$sid.jsonl" ] \
 		|| printf '{"type":"user","timestamp":"%s","message":{"role":"user","content":"hello"}}\n{"type":"custom-title","customTitle":"%s","sessionId":"%s"}\n' \
 			"$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" "$(name_of "$sid")" "$sid" > "$TRANSCRIPTS/$sid.jsonl"
-	on_a_terminal "$TMP/bin/claude" -c '
+	"$run" "$TMP/bin/claude" -c '
 		trap "\"\$2\" end < \"\$1.end.json\"; rm -f \"\$3/sessions/\$\$.json\"; exit 0" TERM
 		"$2" start < "$1.start.json" > /dev/null
 		echo $$ > "$1.pid"
@@ -204,17 +207,26 @@ case "$1" in
 		exit 0 ;;
 esac
 EOF
-# Ghostty: running while $TMP/running exists. quit ends it, unless
-# $TMP/quit-fails (Hammerspoon unreachable; with $TMP/quit-delivered the
-# call still timed out after the quit reached it), $TMP/quit-refused (it stays,
-# showing nothing) or $TMP/dialog-checks (a confirmation it shows for that
-# many looks, after which it quits if $TMP/confirm-quit, else stays: a
-# cancel). With $TMP/dialog-unknown, dialog cannot tell. launch starts it, unless $TMP/no-launch, restoring the terminals
-# listed in $TMP/restore. version is the installed cask's.
+# Ghostty, and the Hammerspoon driving it: accessibility answers true,
+# unless $TMP/hs-down (Hammerspoon unreachable) or $TMP/no-ax (false).
+# running while $TMP/running exists. quit ends it, unless $TMP/quit-fails
+# (Hammerspoon gone since; with $TMP/quit-delivered the call still timed
+# out after the quit reached it), $TMP/quit-refused (it stays, showing
+# nothing) or $TMP/dialog-checks (a confirmation it shows for that many
+# looks, after which it quits if $TMP/confirm-quit, else stays: a cancel).
+# With $TMP/dialog-unknown, dialog cannot tell; when that file holds a
+# count, for that many looks, after which Ghostty is gone, as one shutting
+# down shows. launch starts it, unless $TMP/no-launch or no cask is
+# installed, restoring the terminals listed in $TMP/restore. version is
+# the installed cask's.
 cat > "$GHOSTTY_UPDATE_APP_BIN" << 'EOF'
 #!/usr/bin/env bash
 gone() { rm -f "$TMP/running"; : > "$TMP/terminals"; }
 case "$1" in
+	accessibility)
+		[ -e "$TMP/hs-down" ] && { echo "hs: can't access Hammerspoon message port"; exit 1; }
+		[ -e "$TMP/no-ax" ] && { echo false; exit 0; }
+		echo true ;;
 	running) [ -e "$TMP/running" ] ;;
 	quit)
 		echo quit >> "$TMP/app.log"
@@ -222,7 +234,14 @@ case "$1" in
 		[ -e "$TMP/quit-fails" ] && { echo "hs: can't access Hammerspoon message port"; exit 1; }
 		[ -e "$TMP/quit-refused" ] || [ -e "$TMP/dialog-checks" ] || gone ;;
 	dialog)
-		[ -e "$TMP/dialog-unknown" ] && { echo unknown; exit 1; }
+		if [ -e "$TMP/dialog-unknown" ]; then
+			left=$(cat "$TMP/dialog-unknown")
+			if [ -z "$left" ]; then echo unknown; exit 1; fi
+			if [ "$left" -gt 0 ]; then echo $((left - 1)) > "$TMP/dialog-unknown"; echo unknown; exit 1; fi
+			gone
+			echo none
+			exit 0
+		fi
 		left=$(cat "$TMP/dialog-checks" 2> /dev/null || echo 0)
 		if [ "$left" -gt 0 ]; then
 			echo $((left - 1)) > "$TMP/dialog-checks"
@@ -234,6 +253,7 @@ case "$1" in
 	launch)
 		echo launch >> "$TMP/app.log"
 		[ -e "$TMP/no-launch" ] && exit 1
+		[ -s "$TMP/installed" ] || { echo "Unable to find application named 'Ghostty'"; exit 1; }
 		touch "$TMP/running"
 		cp "$TMP/restore" "$TMP/terminals" 2> /dev/null ;;
 	version)
@@ -282,7 +302,7 @@ fresh() {
 		"$TMP/tab.log" "$TMP/opened" "$TMP/brew.log" "$TMP/app.log" "$TMP/notified" "$TMP/detached" \
 		"$TMP/before-job" "$TMP/quit-refused" "$TMP/no-resume" "$TMP/outdated" "$TMP/procs-extra" "$TMP/restore" \
 		"$TMP/on-fetch" "$TMP/quit-fails" "$TMP/dialog-checks" "$TMP/confirm-quit" "$TMP/no-launch" "$TMP/opener-fails" \
-		"$TMP/quit-delivered" "$TMP/dialog-unknown"
+		"$TMP/quit-delivered" "$TMP/dialog-unknown" "$TMP/hs-down" "$TMP/no-ax"
 	rm -rf "$TMP/state"/*
 	echo ghostty@tip > "$TMP/installed"
 	touch "$TMP/running"
@@ -318,6 +338,26 @@ assert_has "...the session in Ghostty, resumed in its tab with its flags" "($a),
 assert_has "...the one outside Ghostty, left alone" "($o): not in a Ghostty tab" "$out"
 assert_has "...and that unsent text is lost" "Unsent text in their input boxes is lost." "$out"
 assert_eq "nothing stopped" "alive alive" "$(alive "$pa") $(alive "$po")"
+assert_eq "...no brew step, no quit, no job" "||" "$(cat "$TMP/brew.log" 2> /dev/null)|$(cat "$TMP/app.log" 2> /dev/null)|$(cat "$TMP/detached" 2> /dev/null)"
+
+echo "=== Hammerspoon unreachable, or without Accessibility, refuses ==="
+fresh
+a=$(uuid)
+pa=$(spawn "$a")
+tabs "$pa"
+: > "$TMP/hs-down"
+run_update --dry-run --to ghostty
+assert_eq "a dry run: exit 1" "1" "$rc"
+assert_has "...saying Hammerspoon is not running" "Hammerspoon is not running, or its hs command cannot reach it (hs: can't access Hammerspoon message port" "$out"
+run_update --to ghostty
+assert_eq "the update: exit 1" "1" "$rc"
+assert_has "...saying the same" "Hammerspoon is not running" "$out"
+rm -f "$TMP/hs-down"
+: > "$TMP/no-ax"
+run_update --to ghostty
+assert_eq "no Accessibility: exit 1" "1" "$rc"
+assert_has "...saying so" "Hammerspoon has no Accessibility permission" "$out"
+assert_eq "nothing stopped" "alive" "$(alive "$pa")"
 assert_eq "...no brew step, no quit, no job" "||" "$(cat "$TMP/brew.log" 2> /dev/null)|$(cat "$TMP/app.log" 2> /dev/null)|$(cat "$TMP/detached" 2> /dev/null)"
 
 echo "=== a session that is busy or running something refuses the whole update ==="
@@ -366,6 +406,17 @@ assert_eq "exit 1" "1" "$rc"
 assert_has "it names the cause" "($a): runs under Ghostty inside another program's terminal" "$out"
 assert_lacks "...not a config dir" "no reader reports" "$out"
 assert_lacks "...nor calls it left alone" "not in a Ghostty tab" "$out"
+
+echo "=== Claude Code under Ghostty with no terminal refuses, saying so ==="
+fresh
+a=$(uuid)
+pa=$(spawn "$a" idle notty)
+tabs
+run_update --dry-run --to ghostty
+assert_eq "exit 1" "1" "$rc"
+assert_has "it names the cause" "($a): runs under Ghostty with no terminal" "$out"
+assert_lacks "...not a config dir" "no reader reports" "$out"
+assert_lacks "...nor calls it left alone" "($a): no terminal" "$out"
 
 echo "=== the move: each session back in the tab Ghostty restored for it ==="
 fresh
@@ -501,6 +552,8 @@ assert_has "a quit call that timed out after it was delivered: the update went o
 assert_eq "...installed" "ghostty" "$(cat "$TMP/installed")"
 
 echo "=== a dialog that cannot be read counts as open ==="
+# The fake answers for the dialog check; the Lua that reads Ghostty's
+# windows is covered by hand only.
 fresh
 a=$(uuid)
 pa=$(spawn "$a")
@@ -510,9 +563,20 @@ tabs "$pa"
 run_update --to ghostty
 nothing_changed "nothing installed"
 assert_eq "...nothing typed into Ghostty, which may still quit" "" "$(grep '^type' "$TMP/tab.log")"
-assert_has "...the user told it waits" "whether it is asking to cannot be seen" "$(cat "$TMP/notified")"
+assert_has "...the user told it waits, and that a cancel may not be seen" \
+	"whether it is asking to cannot be read. If it is asking, confirm to go on with the update. A cancel may not be seen: the update then gives up after 8s" "$(cat "$TMP/notified")"
 assert_has "...and at the end, why and what to do" "Ghostty not updated: Ghostty has not quit and may be asking whether to; answer it, then resume the sessions by hand." "$(note)"
 assert_has "...the commands in the file" "cd '$PROJ_DIR' && CLAUDE_CONFIG_DIR='$CONFIG_DIR' claude --resume $a" "$(resume_file)"
+fresh
+a=$(uuid)
+pa=$(spawn "$a")
+tabs "$pa"
+printf 'T-%s\n' "$pa" > "$TMP/restore"
+: > "$TMP/quit-refused"
+echo 2 > "$TMP/dialog-unknown"
+run_update --to ghostty
+assert_lacks "unreadable while Ghostty shuts down: no waiting notification" "Ghostty update waiting" "$(cat "$TMP/notified")"
+assert_has "...and the update went on" "Ghostty updated: " "$(note)"
 
 echo "=== brew failing ==="
 fresh
@@ -556,6 +620,8 @@ printf 'ghostty\nghostty@tip\n' > "$TMP/brew-fails-install"
 run_update --to ghostty
 assert_has "both the install and the put-back failing: the notification says what to run" \
 	"Ghostty not updated: Installing ghostty failed and putting ghostty@tip back did too; install Ghostty by hand: brew install --cask ghostty. No Ghostty is installed." "$(note)"
+assert_eq "...no launch tried" "quit" "$(paste -sd'|' "$TMP/app.log")"
+assert_has "...and why the session was not resumed" "no Ghostty is installed to resume it in" "$(resume_file)"
 
 echo "=== Ghostty restoring nothing, or not coming back ==="
 fresh

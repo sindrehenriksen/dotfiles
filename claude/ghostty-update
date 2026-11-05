@@ -27,10 +27,12 @@
 # transcript. The checks are restart-session.sh's (desk-lib/restartable.sh).
 # Refused too when the process table shows a `claude` process under
 # Ghostty that is not one of them (started under a config dir not listed,
-# say), since the quit would end it unrecorded. The session running this
-# command, if one is, is spared the idle check at first, since what it is
-# running is this; the job waits for it to go idle. Unsent text in an input
-# box is lost.
+# say), since the quit would end it unrecorded; and, while Ghostty runs,
+# when Hammerspoon is not running or has no Accessibility, without which
+# the quit dialog cannot be read, checked on every run. The session running
+# this command, if one is, is spared the idle check at first, since what it
+# is running is this; the job waits for it to go idle. Unsent text in an
+# input box is lost.
 #
 # Resuming into the restored tabs. Ghostty saves each terminal's id with its
 # window state and gives the terminal the same id when it restores it
@@ -69,25 +71,28 @@
 #   4. quits Ghostty as Cmd+Q does, so it saves its windows. Ghostty asks to
 #      confirm when a tab is running something (an editor, a server), in a
 #      sheet or an alert, which Hammerspoon sees through the accessibility
-#      tree. While one is open, or none can be ruled out (Hammerspoon without
-#      Accessibility), the job waits, up to $GHOSTTY_UPDATE_CONFIRM_WAIT_SECS
-#      (default 1800), and says so in a notification; confirmed, it goes on.
-#      Cancelled (Ghostty still running with no dialog,
-#      $GHOSTTY_UPDATE_QUIT_SECS after the quit, default 20), it updates
-#      nothing and resumes the sessions where they are. A quit call that
-#      fails gets the same wait, since one that timed out may still have
-#      been delivered. Still asking, or not known not to be, when the wait
-#      runs out, it updates nothing and resumes nothing, since a later
-#      confirm would end them again, and reports the commands to run once
-#      it is answered;
+#      tree. While one is open, or none can be ruled out (Ghostty's windows
+#      unreadable), the job waits, up to $GHOSTTY_UPDATE_CONFIRM_WAIT_SECS
+#      (default 1800), and says so in a notification: for unreadable
+#      windows only once $GHOSTTY_UPDATE_QUIT_SECS (default 20) have
+#      passed, since a Ghostty shutting down shows those too. Confirmed, it
+#      goes on. Cancelled (Ghostty still running with no dialog, _QUIT_SECS
+#      after the quit), it updates nothing and resumes the sessions where
+#      they are; a cancel behind unreadable windows goes unseen while they
+#      stay unreadable. A quit call that fails gets the same wait, since
+#      one that timed out may still have been delivered. Still asking, or
+#      not known not to be, when the wait runs out, it updates nothing and
+#      resumes nothing, since a later confirm would end them again, and
+#      reports the commands to run once it is answered;
 #   5. runs `brew upgrade --cask <cask>`, or for --to, `brew uninstall
 #      --cask <old>` then `brew install --cask <new>`, putting the old one
 #      back if the install fails;
-#   6. relaunches Ghostty (only if it was running), resumes the sessions,
-#      and reports in a notification: what was updated, from which version
-#      to which, or in a few words why not and what to do, how many
-#      sessions came back and the names of any that did not, the log, and a file beside it with each failed one's exact resume
-#      command (`<log>` with `.resume` for `.log`).
+#   6. relaunches Ghostty (only if it was running, and one is installed),
+#      resumes the sessions, and reports in a notification: what was
+#      updated, from which version to which, or in a few words why not and
+#      what to do, how many sessions came back and the names of any that
+#      did not, the log, and a file beside it with each failed one's exact
+#      resume command (`<log>` with `.resume` for `.log`).
 # The job is left loaded once it ends and booted out by the next run.
 #
 # Exit codes: 0 the job was started (or --dry-run, or nothing to update); 1
@@ -96,8 +101,8 @@
 # Overrides (tests): $DESK_READER, $DESK_CLOSE_TAB_BIN, $DESK_OPEN_TAB_BIN
 # (for reopen-sessions.sh), $DESK_STATE_DIR, $RESTART_SESSION_PS,
 # $RESTART_SESSION_ARGV, $GHOSTTY_UPDATE_BREW (default brew),
-# $GHOSTTY_UPDATE_APP_BIN (a command taking running, quit, dialog, launch
-# or version in place of the built-in Ghostty control),
+# $GHOSTTY_UPDATE_APP_BIN (a command taking accessibility, running, quit,
+# dialog, launch or version in place of the built-in Ghostty control),
 # $GHOSTTY_UPDATE_NOTIFY_BIN (given a title and a text),
 # $GHOSTTY_UPDATE_DETACH_BIN (given the job's spec, a JSON file holding its
 # ProgramArguments and EnvironmentVariables, in place of launchd),
@@ -196,12 +201,13 @@ hs_answer() {
 	printf '%s\n' "$out" | tail -n 1
 }
 
-# Ghostty itself: running (exit 0 when it is), quit (as Cmd+Q, so it saves
+# Ghostty itself, and the Hammerspoon that drives it: accessibility (prints
+# whether Hammerspoon has it; fails, saying why, when Hammerspoon cannot be
+# reached), running (exit 0 when Ghostty is), quit (as Cmd+Q, so it saves
 # its windows and asks about anything running; fails, saying why, when the
-# call to Hammerspoon does), dialog (prints dialog while a sheet or an alert
-# is open in it, none when none is; fails, unknown, when it cannot tell),
-# launch, and version
-# (what the installed app says it is).
+# call to Hammerspoon does), dialog (prints dialog while a sheet or an
+# alert is open in it, none when none is; fails, unknown, when it cannot
+# tell), launch, and version (what the installed app says it is).
 app() {
 	if [ -n "${GHOSTTY_UPDATE_APP_BIN:-}" ]; then
 		"$GHOSTTY_UPDATE_APP_BIN" "$@"
@@ -209,6 +215,7 @@ app() {
 	fi
 	local answer
 	case "$1" in
+		accessibility) DESK_HS_TIMEOUT_SECS=5 hs_answer 'print(hs.accessibilityState())' ;;
 		# By the executable's path: pgrep -f does not see the app's argv.
 		running) ps -axo comm= | grep -qxF "$APP_PATH/Contents/MacOS/ghostty" ;;
 		quit)
@@ -216,18 +223,14 @@ app() {
 				&& [ "$answer" = true ] || { echo "${answer:-no answer}"; return 1; }
 			;;
 		dialog)
-			# Without Accessibility, or with Ghostty's windows unreadable, no
-			# dialog would show either: that is unknown, never none.
-			answer="$(hs_answer "if not hs.accessibilityState() then return \"unknown\" end
-				local a = hs.application.get(\"$BUNDLE_ID\")
+			# With Ghostty's windows unreadable no dialog would show either:
+			# that is unknown, never none.
+			answer="$(hs_answer "local a = hs.application.get(\"$BUNDLE_ID\")
 				if not a then return \"none\" end
 				local ax = hs.axuielement.applicationElement(a)
 				if not ax then return \"unknown\" end
 				local windows = ax:attributeValue(\"AXWindows\")
-				if windows == nil then
-					if #a:allWindows() > 0 then return \"unknown\" end
-					return \"none\"
-				end
+				if windows == nil then return \"unknown\" end
 				for _, w in ipairs(windows) do
 					local sr = w:attributeValue(\"AXSubrole\")
 					if sr == \"AXDialog\" or sr == \"AXSystemDialog\" then return \"dialog\" end
@@ -261,6 +264,10 @@ notify() { # title text
 	fi
 	hs_answer "hs.notify.new({title = $(lua_string "$1"), informativeText = $(lua_string "$2"), withdrawAfter = 0}):send(); return true" > /dev/null \
 		|| osascript -e 'on run argv' -e 'display notification (item 2 of argv) with title (item 1 of argv)' -e 'end run' "$1" "$2" > /dev/null 2>&1
+}
+
+secs_text() { # seconds
+	if [ "$1" -ge 120 ]; then echo "$(($1 / 60)) min"; else echo "${1}s"; fi
 }
 
 by_hand() { # cwd config-dir carry id
@@ -427,15 +434,17 @@ run_job() {
 			d="$(app dialog 2> /dev/null)" || d=unknown
 			if [ "$d" != none ]; then
 				no_dialog_since=""
-				if [ -z "$told" ]; then
-					told=1
-					if [ "$d" = dialog ]; then
-						logl "Ghostty is asking to confirm the quit; waiting up to ${CONFIRM_WAIT_SECS}s"
-						notify "Ghostty update waiting" "Ghostty is asking whether to quit. Confirm to go on with the update; cancel to keep $from_cask, with the sessions resumed in their tabs."
-					else
-						logl "cannot tell whether Ghostty is asking to confirm the quit (Hammerspoon without Accessibility?); waiting up to ${CONFIRM_WAIT_SECS}s"
-						notify "Ghostty update waiting" "Ghostty has not quit, and whether it is asking to cannot be seen (Hammerspoon without Accessibility?). Confirm or cancel if it is asking; the update waits for it."
-					fi
+				# Windows that cannot be read are what a Ghostty shutting
+				# down shows too, so those are told of only once a quit
+				# should have ended.
+				if [ "$d" = dialog ] && [ "$told" != dialog ]; then
+					told=dialog
+					logl "Ghostty is asking to confirm the quit; waiting up to ${CONFIRM_WAIT_SECS}s"
+					notify "Ghostty update waiting" "Ghostty is asking whether to quit. Confirm to go on with the update; cancel to keep $from_cask, with the sessions resumed in their tabs."
+				elif [ "$d" = unknown ] && [ -z "$told" ] && [ "$SECONDS" -ge "$quit_until" ]; then
+					told=unknown
+					logl "Ghostty has not quit after ${QUIT_SECS}s and its windows cannot be read, so a dialog cannot be ruled out; waiting up to ${CONFIRM_WAIT_SECS}s"
+					notify "Ghostty update waiting" "Ghostty has not quit, and whether it is asking to cannot be read. If it is asking, confirm to go on with the update. A cancel may not be seen: the update then gives up after $(secs_text "$CONFIRM_WAIT_SECS"), updates nothing, and leaves the sessions for you to resume, with the commands to do it."
 				fi
 			else
 				[ -n "$no_dialog_since" ] || no_dialog_since=$SECONDS
@@ -518,6 +527,9 @@ run_job() {
 	}
 	if [ "$quit" = asking ]; then
 		unreachable="not resumed while Ghostty asks to confirm quitting"
+	elif [ "$quit" = quit ] && [ "$was_running" = true ] && [ "$to_version" = "none installed" ]; then
+		logl "not launching Ghostty, since none is installed"
+		unreachable="no Ghostty is installed to resume it in"
 	elif [ "$quit" = quit ] && [ "$was_running" = true ]; then
 		logl "launching Ghostty"
 		app launch || logl "launching Ghostty failed"
@@ -702,6 +714,18 @@ fi
 ghostty_running=false
 app running && ghostty_running=true
 
+# Hammerspoon quits Ghostty and reads its quit dialog, so a cancel could not
+# be seen without it or its Accessibility. Either can change at any time, so
+# this is asked on every run.
+if [ "$ghostty_running" = true ]; then
+	hs_state="$(app accessibility 2>&1)" || hs_state="unreachable: ${hs_state:-no answer}"
+	case "$hs_state" in
+		true) ;;
+		false) die "Hammerspoon has no Accessibility permission, without which it cannot see whether Ghostty asks to confirm the quit; grant it (System Settings > Privacy & Security > Accessibility) and run this again. Nothing done." ;;
+		*) die "Hammerspoon is not running, or its hs command cannot reach it (${hs_state#unreachable: }); start it and run this again. Nothing done." ;;
+	esac
+fi
+
 # Every live session the readers report, one JSON object per line.
 read_live() {
 	local d
@@ -716,9 +740,17 @@ read_live() {
 
 plan_sessions=()
 plan_pids=()
-declare -A not_in_tab=()
+# A session left alone, by pid: its line in $alone, and its refusal should
+# the process table show it under Ghostty after all.
+declare -A not_in_tab=() alone_as=()
 refusals=()
 alone=()
+left_alone() { # pid label why-alone refusal
+	alone+=("$2: $3")
+	[ -n "$1" ] || return 0
+	alone_as[$1]="$2: $3"
+	not_in_tab[$1]="$2: $4"
+}
 caller="${CLAUDE_CODE_SESSION_ID:-}"
 if [ "$ghostty_running" = true ]; then
 	restartable_procs || die "could not list processes"
@@ -732,7 +764,8 @@ if [ "$ghostty_running" = true ]; then
 		seen="$seen$id "
 		label="$name ($id)"
 		if [ -z "$tty" ] || [ "$tty" = "??" ]; then
-			alone+=("$label: no terminal")
+			left_alone "$pid" "$label" "no terminal" \
+				"runs under Ghostty with no terminal, so it has no tab to come back in and the quit would end it"
 			continue
 		fi
 		tab_call find "$tty" "$pid"
@@ -743,8 +776,8 @@ if [ "$ghostty_running" = true ]; then
 		elif [ "$tab_rc" -eq 1 ]; then
 			case "$tab_why" in
 				*"no Ghostty terminal is on"* | *"Ghostty is not running"*)
-					alone+=("$label: not in a Ghostty tab")
-					not_in_tab[$pid]="$label"
+					left_alone "$pid" "$label" "not in a Ghostty tab" \
+						"runs under Ghostty inside another program's terminal (an nvim :terminal, say), not in a tab's foreground, so its tab cannot be found and the quit would end it"
 					continue ;;
 			esac
 			how="in a new tab, since its tab could not be told apart ($tab_why)"
@@ -786,18 +819,18 @@ if [ "$ghostty_running" = true ]; then
 			{id: $id, name: $name, config_dir: $dir, pid: $pid, tty: $tty, cwd: $cwd, transcript: $tp,
 			 terminal: $terminal, carry: $carry, how: $how}')")
 	done < <(read_live)
-	# One a reader reports, but on a tty no Ghostty tab holds, runs inside
-	# another program's terminal in a tab (nvim's :terminal, say), where its
-	# tab cannot be named; one no reader reports runs under a config dir not
-	# listed.
+	# One a reader reports, but on no tty or one no Ghostty tab holds, runs
+	# with no terminal or inside another program's terminal in a tab (nvim's
+	# :terminal, say), where its tab cannot be named; one no reader reports
+	# runs under a config dir not listed.
 	while IFS= read -r line; do
 		[ -n "$line" ] || continue
 		pid="${line#pid }"
 		pid="${pid%% *}"
 		if [ -n "${not_in_tab[$pid]:-}" ]; then
-			refusals+=("${not_in_tab[$pid]}: runs under Ghostty inside another program's terminal (an nvim :terminal, say), not in a tab's foreground, so its tab cannot be found and the quit would end it")
+			refusals+=("${not_in_tab[$pid]}")
 			for i in "${!alone[@]}"; do
-				[ "${alone[$i]}" = "${not_in_tab[$pid]}: not in a Ghostty tab" ] && unset 'alone[i]'
+				[ "${alone[$i]}" = "${alone_as[$pid]}" ] && unset 'alone[i]'
 			done
 		else
 			refusals+=("Claude Code under Ghostty that no reader reports (a config dir not in GHOSTTY_UPDATE_CONFIG_DIRS?): $line")
