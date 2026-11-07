@@ -49,6 +49,8 @@ export RESTART_SESSION_PS="$TMP/bin/ps"
 export RESTART_SESSION_GRACE_SECS=3
 export RESTART_SESSION_PROMPT_SECS=2
 export RESTART_SESSION_CONFIRM_SECS=0
+# The tab-typing path is macOS's; the marker path has its own section below.
+export RESTART_SESSION_MODE=tab
 unset CLAUDE_CODE_SESSION_ID DESK_HEADLESS
 ln -sf "$(command -v bash)" "$TMP/bin/claude"
 export TMP PROJ_DIR RECORDER
@@ -561,6 +563,93 @@ desk_tab "$p8"
 RESTART_SESSION_CONFIRM_SECS=2 run_restart "$s8"
 assert_eq "not live again in time: failed, pointing at the tab" \
 	"failed	the resume was typed into its tab, but the session is not live after 2s; look at the tab" "$(status)	$(detail)"
+
+echo "=== marker mode (Linux): the resume is left for the session's shell, nothing typed ==="
+export RESTART_SESSION_MODE=marker
+export CLAUDE_RESTART_DIR="$TMP/markers"
+# A claude the `claude` function started: its parent shell's pid (9001, the
+# parent in table's process table) is in its environment.
+spawn_wrapped() { __CLAUDE_FN_SHELL="${2:-9001}" spawn "$1"; }
+
+fresh
+s20=$(uuid)
+p20=$(spawn_wrapped "$s20")
+desk_tab "$p20"
+run_restart "$s20"
+assert_eq "restarted, the resume left for its shell" "restarted	resume left for its shell" "$(status)	$(detail)"
+assert_eq "the process is gone" "gone" "$(alive "$p20")"
+assert_eq "the tab helper was never asked anything" "" "$(cat "$TMP/tab.log")"
+assert_eq "the marker is keyed by the shell's pid and holds claude's pid, the session and the resume" \
+	"$p20|$s20|cd '$PROJ_DIR' && CLAUDE_CONFIG_DIR='$CONFIG_DIR' claude --resume $s20" "$(paste -sd'|' "$TMP/markers/9001")"
+assert_eq "...in a directory it created for its owner alone" "700" "$(stat -c %a "$TMP/markers" 2> /dev/null || stat -f %Lp "$TMP/markers")"
+rm -f "$TMP/markers/9001"
+
+fresh
+s21=$(uuid)
+p21=$(spawn_wrapped "$s21")
+printf '%s\0' claude --model opus --resume x > "$TMP/argv"
+desk_tab "$p21"
+run_restart "$s21"
+assert_eq "the allowlisted flags of its argv are carried, by the same builder a tab uses" \
+	"cd '$PROJ_DIR' && CLAUDE_CONFIG_DIR='$CONFIG_DIR' claude --model 'opus' --resume $s21" "$(sed -n 3p "$TMP/markers/9001")"
+rm -f "$TMP/markers/9001"
+
+echo "=== marker mode: a session its shell cannot resume is refused, untouched ==="
+fresh
+s22=$(uuid)
+p22=$(spawn "$s22")
+desk_tab "$p22"
+run_restart "$s22"
+assert_eq "started without the function (no shell pid in its environment): refused" "refused" "$(status)"
+case "$(detail)" in *"not started through the \`claude\` shell function"*"exit it and resume it once by hand"*) ok "...saying to exit and resume once by hand" ;; *) bad "...saying to exit and resume once by hand (got [$(detail)])" ;; esac
+assert_eq "...exit 3" "3" "$rc"
+assert_eq "...still running, no marker left" "alive|" "$(alive "$p22")|$(ls "$TMP/markers")"
+kill -KILL "$p22" 2> /dev/null
+s23=$(uuid)
+p23=$(spawn_wrapped "$s23" 4242)
+desk_tab "$p23"
+run_restart "$s23"
+assert_eq "started by a function in some other shell than its parent: refused" "refused	3" "$(status)	$rc"
+
+echo "=== marker mode: the resume is confirmed, or the missing pickup is said ==="
+fresh
+s24=$(uuid)
+p24=$(spawn_wrapped "$s24")
+desk_tab "$p24"
+(
+	for _ in $(seq 1 100); do [ -f "$TMP/markers/9001" ] && break; sleep 0.05; done
+	sleep 0.3
+	rm -f "$TMP/markers/9001"
+	source "$TMP/spawn.sh"
+	spawn "$s24" > /dev/null
+) &
+RESTART_SESSION_CONFIRM_SECS=10 run_restart "$s24"
+new24=$(field "$s24" .pid)
+assert_eq "a shell that picks the marker up and resumes: restarted, naming the new pid" \
+	"restarted	resumed in its shell (pid $new24)" "$(status)	$(detail)"
+fresh
+s25=$(uuid)
+p25=$(spawn_wrapped "$s25")
+desk_tab "$p25"
+RESTART_SESSION_CONFIRM_SECS=2 run_restart "$s25"
+assert_eq "nothing picks it up: failed, with the resume by hand" \
+	"failed	the session stopped, but its shell did not pick up the resume within 2s (is it still there?); resume it by hand: cd '$PROJ_DIR' && CLAUDE_CONFIG_DIR='$CONFIG_DIR' claude --resume $s25" "$(status)	$(detail)"
+assert_eq "...and the marker is removed, so a later claude in that shell is not resumed" "" "$(ls "$TMP/markers")"
+
+fresh
+s26=$(uuid)
+p26=$(spawn_wrapped "$s26")
+desk_tab "$p26"
+# stubborn: ignores SIGTERM
+kill -KILL "$p26" 2> /dev/null
+s26=$(uuid)
+p26=$(__CLAUDE_FN_SHELL=9001 spawn "$s26" stubborn)
+desk_tab "$p26"
+RESTART_SESSION_GRACE_SECS=1 run_restart "$s26"
+assert_eq "a session that will not stop: failed, and no marker left behind" "failed|" "$(status)|$(ls "$TMP/markers")"
+kill -KILL "$p26" 2> /dev/null
+unset CLAUDE_RESTART_DIR
+export RESTART_SESSION_MODE=tab
 
 echo "=== recorder never logged an error ==="
 if [ -s "$TMP/recorder.log" ]; then bad "recorder log is empty"; cat "$TMP/recorder.log"; else ok "recorder log is empty"; fi

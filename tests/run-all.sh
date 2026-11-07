@@ -84,12 +84,14 @@ BASH_SUITES=(
 	claude/tests/session-status-human-test.sh
 	claude/tests/session-status-title-test.sh
 	claude/tests/session-two-process-test.sh
+	claude/tests/restart-self-test.sh
 	claude/tests/session-end-kind-test.sh
 	git-hooks/test-commit-msg.sh
 	hammerspoon/tests/hs-timeout-test.sh
 	linux/desk/tests/tabs-test.sh
 	git-hooks/test-desk-denylist.sh
 	tests/shellrc-desk-switch-test.sh
+	tests/shellrc-claude-restart-test.sh
 )
 
 LUA_SUITES=(

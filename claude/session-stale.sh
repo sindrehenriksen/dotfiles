@@ -45,7 +45,8 @@
 # scheduled in the process, a tab a prompt outlives, flags it can carry).
 # Exit 0 with nothing printed: nothing to restart for. Exit 3 with reasons:
 # its tab would close with it (a tab opened before tabs left a prompt), so
-# it cannot be restarted in place. Exit 1, nothing printed and why on
+# it cannot be restarted in place (on Linux also a session its shell cannot
+# resume: not started through the `claude` function). Exit 1, nothing printed and why on
 # stderr: it cannot be judged or restarted now (not live, not idle, held by
 # two processes). Exit 2: usage.
 #
@@ -53,6 +54,9 @@
 # $SESSION_STALE_CLAUDE_BIN (default ~/.local/bin/claude),
 # $RESTART_SESSION_PS and $RESTART_SESSION_QUIET_MINS as restart-session.sh
 # reads them.
+# $RESTARTABLE_FROM_INSIDE, set by restart-self.sh, which asks from a command
+# running in the session: its status and that shell command do not count as
+# busy.
 set -u
 
 script_dir() {

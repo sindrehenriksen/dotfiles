@@ -63,6 +63,8 @@ export DESK_READER="$READER"
 export DESK_CLOSE_TAB_BIN="$TMP/bin/desk-close-tab.sh"
 export DESK_OPEN_TAB_BIN="$TMP/bin/desk-open-tab.sh"
 export DESK_CONFIG_DEFAULT="$TMP/no-desk-config.json"
+# These suites cover the tab path (macOS); the marker path is in restart-session-test.sh.
+export RESTART_SESSION_MODE=tab
 export RESTART_SESSION_PS="$TMP/bin/ps"
 export RESTART_SESSION_ARGV="$TMP/bin/argv"
 export GHOSTTY_UPDATE_BREW="$TMP/bin/brew"

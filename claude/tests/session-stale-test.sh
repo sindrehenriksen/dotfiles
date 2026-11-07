@@ -32,6 +32,8 @@ export HOME="$TMP/home"
 export CLAUDE_CONFIG_DIR="$TMP/config"
 export CLAUDE_SESSION_STORE="$TMP/store"
 export SESSION_STALE_CLAUDE_BIN="$TMP/local-bin/claude"
+# These suites cover the tab path (macOS); the marker path is in restart-session-test.sh.
+export RESTART_SESSION_MODE=tab
 export RESTART_SESSION_PS="$TMP/ps"
 export RESTART_SESSION_ARGV="$TMP/argv-of"
 mkdir -p "$HOME" "$CLAUDE_CONFIG_DIR/sessions" "$CLAUDE_SESSION_STORE" "$TMP/local-bin" "$TMP/versions" "$TMP/bin"

@@ -96,6 +96,11 @@ else
     # Linux: Ghostty config
     mkdir -p ~/.config/ghostty
     link ~/dotfiles/ghostty/config ~/.config/ghostty/config
+    link ~/dotfiles/ghostty/linux-keybinds ~/.config/ghostty/linux-keybinds
+
+    # Linux: restarting the session a command runs in, bound to Super+Alt+R
+    # in ghostty/linux-keybinds. See docs/desk.md, "Stale sessions".
+    link ~/dotfiles/claude/restart-self.sh ~/.local/bin/restart-self.sh
 
     # Linux: systemd user manager — keeps an OOM-killed process from taking its
     # whole Ghostty tab with it. See system/README.md.

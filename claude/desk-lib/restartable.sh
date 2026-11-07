@@ -4,6 +4,9 @@
 # on these, and claude/session-stale.sh offers a restart only where they
 # pass, so the two never disagree about which sessions qualify.
 #
+# On Linux the prompt check also asks that claude was started by the `claude`
+# shell function (restartable_wrapped), the one that resumes it afterwards.
+#
 # Sourced. The caller sets CONFIG_DIR (the session's config dir, no trailing
 # slash), and may set $RESTART_SESSION_PS (a command printing `pid ppid args`
 # for every process, default ps) and $RESTART_SESSION_QUIET_MINS (default 5).
@@ -14,6 +17,36 @@ set -u
 # What a restart types after the resume, and how a later restart of the same
 # tab knows a prompt follows the session.
 RESTARTABLE_HANDOVER="; exec /bin/zsh -il"
+
+# How a restart gets the resume into the session's shell: `tab` types it into
+# the tab through the tab helper (macOS, where Hammerspoon can); `marker`
+# (Linux, where nothing outside Ghostty can type into a tab) leaves a marker
+# for the shell's `claude` function (.shellrc) to find once claude has ended,
+# which then runs the resume itself. $RESTART_SESSION_MODE overrides, for
+# tests.
+restartable_mode() {
+	case "${RESTART_SESSION_MODE:-}" in
+		tab | marker) echo "$RESTART_SESSION_MODE" ;;
+		*) if [ "$(uname)" = Linux ]; then echo marker; else echo tab; fi ;;
+	esac
+}
+
+# Where markers live: the same expression as `__claude-restart-cmd` in
+# .shellrc, which reads them.
+restartable_marker_dir() { echo "${CLAUDE_RESTART_DIR:-${XDG_RUNTIME_DIR:-/tmp}/claude-restart}"; }
+
+# restartable_wrapped <pid>: marker mode only. The process was started by the
+# `claude` function of the interactive shell that is its parent, which is the
+# one that will find the marker: the function puts that shell's pid in the
+# process's environment (__CLAUDE_FN_SHELL). Needs $procs loaded.
+restartable_wrapped() {
+	local want have
+	want="$(parent_of "$1")"
+	have="$(tr '\0' '\n' < "/proc/$1/environ" 2> /dev/null | sed -n 's/^__CLAUDE_FN_SHELL=//p' | head -n 1)"
+	[ -n "$want" ] && [ "$have" = "$want" ] && return 0
+	restartable_why="it was not started through the \`claude\` shell function, or was started before restarts worked this way, so nothing in its shell can resume it: exit it and resume it once by hand, and restarts work from then on"
+	return 1
+}
 
 # Loads the process table into $procs; 1 when it cannot be listed.
 restartable_procs() {
@@ -71,13 +104,19 @@ restartable_idle() {
 		restartable_why="no status in its pid file ($pidfile)"
 		return 1
 	fi
+	# Asked from a command the session itself is running (restart-self.sh's
+	# first press): its own status and shell are the asker, and are gone by
+	# the time a restart acts.
+	if [ -n "${RESTARTABLE_FROM_INSIDE:-}" ]; then
+		state=idle
+	fi
 	if [ "$state" != idle ]; then
 		restartable_why="not idle: its status is $state"
 		return 1
 	fi
 	running="$(awk -v p="$pid" -v pat=" -c source $CONFIG_DIR/shell-snapshots/snapshot-" \
 		'$2 == p && index($0, pat) { print $1 }' <<< "$procs" | head -n 1)"
-	if [ -n "$running" ]; then
+	if [ -n "$running" ] && [ -z "${RESTARTABLE_FROM_INSIDE:-}" ]; then
 		restartable_why="not idle: it is running a shell command (pid $running)"
 		return 1
 	fi
@@ -273,12 +312,15 @@ restartable_prompt() {
 	parent_args="$(args_of "$parent")"
 	grand_args="$(args_of "$(parent_of "$parent")")"
 	if interactive_shell "$parent_args"; then
-		return 0
+		:
 	elif is_shell "$parent_args" && [[ "$parent_args" == *"$RESTARTABLE_HANDOVER" ]]; then
-		return 0
+		:
 	elif is_shell "$parent_args" && interactive_shell "$grand_args"; then
-		return 0
+		:
+	else
+		restartable_why="its tab would close with it: no shell in the tab outlives claude (${parent_args:-no parent})"
+		return 1
 	fi
-	restartable_why="its tab would close with it: no shell in the tab outlives claude (${parent_args:-no parent})"
-	return 1
+	# In marker mode that shell must also be the one that will find the marker.
+	[ "$(restartable_mode)" = tab ] || restartable_wrapped "$1"
 }

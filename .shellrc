@@ -186,13 +186,43 @@ __claude-run() {
     # CLAUDE_CODE_NO_FLICKER=1 enables alt-screen rendering so the input stays
     # pinned and scrolling doesn't snap to bottom. Upstream's accepted answer
     # for anthropics/claude-code#13591 — also reachable via `/tui fullscreen`.
-    CLAUDE_CODE_NO_FLICKER=1 \
+    # __CLAUDE_FN_SHELL tells claude/restart-session.sh (Linux) that this
+    # shell will look for its restart marker once claude ends; nothing reads
+    # it on macOS.
+    __CLAUDE_FN_SHELL=$$ \
+        CLAUDE_CODE_NO_FLICKER=1 \
         CLAUDE_CONFIG_DIR="$dir" \
         GH_CONFIG_DIR=~/.config/gh-"$account" \
         DESK_CONFIG="$desk_config" \
         DESK_STATE_DIR="$desk_state" \
         __DESK_SWITCHED_CONFIG="$desk_mark" \
         command claude "$@"
+    local rc=$? resume
+    # A restart (claude/restart-session.sh) ended claude and left the command
+    # that resumes it: run it here, in this shell, which is how the session
+    # keeps its tab where nothing can type into one.
+    if resume=$(__claude-restart-cmd); then
+        eval "$resume"
+        return $?
+    fi
+    return $rc
+}
+# Prints, and removes, the resume command restart-session.sh left for this
+# shell when claude has ended; fails when there is none. The marker is
+# `<dir>/<this shell's pid>` holding claude's pid, the session id and the
+# command, in a private directory (the dir expression is
+# restartable_marker_dir in claude/desk-lib/restartable.sh). One whose claude
+# still runs belongs to a session started in the background from this shell
+# and is left for when that one ends; one older than five minutes is stale.
+__claude-restart-cmd() {
+    local f=${CLAUDE_RESTART_DIR:-${XDG_RUNTIME_DIR:-/tmp}/claude-restart}/$$ pid sid cmd fresh
+    [ -f "$f" ] && [ -O "$f" ] || return 1
+    { IFS= read -r pid; IFS= read -r sid; IFS= read -r cmd; } < "$f"
+    kill -0 "$pid" 2> /dev/null && return 1
+    fresh=$(find "$f" -mmin -5 2> /dev/null)
+    rm -f "$f"
+    [ -n "$cmd" ] && [ -n "$fresh" ] || return 1
+    printf '%s\n' "$cmd"
 }
 # Bare `claude` honors a CLAUDE_CONFIG_DIR that names one of the two config
 # dirs, as bare `gh` honors GH_CONFIG_DIR: a session started from inside a

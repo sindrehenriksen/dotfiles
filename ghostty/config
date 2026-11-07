@@ -61,6 +61,10 @@ keybind = super+7=goto_tab:7
 keybind = super+8=goto_tab:8
 keybind = super+9=last_tab
 
+# Keybinds that exist only on Linux; the file is linked beside this config
+# there and absent on macOS (hence the `?`).
+config-file = ?linux-keybinds
+
 # Misc
 copy-on-select = clipboard
 mouse-hide-while-typing = true

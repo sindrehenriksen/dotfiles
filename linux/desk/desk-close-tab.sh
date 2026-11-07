@@ -2,9 +2,10 @@
 # The Linux counterpart of hammerspoon/desk-close-tab.sh, with the same
 # arguments and exit codes. Ghostty on Linux exposes no way to name the
 # window a session runs in or to close one from outside, so `find` never
-# names one: claude/close-session.sh leaves the window open and
-# claude/restart-session.sh restarts nothing, each saying why. A session
-# closed that way leaves its window at the shell prompt it was opened with.
+# names one: claude/close-session.sh leaves the window open, saying why. A
+# session closed that way leaves its window at the shell prompt it was opened
+# with. claude/restart-session.sh does not use this on Linux: its shell
+# resumes the session itself (restart-session.sh, "marker").
 #
 # Usage: desk-close-tab.sh find <tty> <pid> | close <terminal-id>
 #                          | pid <terminal-id> | type <terminal-id> <pid> <text>

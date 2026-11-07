@@ -59,6 +59,20 @@
 # the wait for the tab's prompt, the typing and the confirmation in
 # desk-lib/tab-resume.sh, shared with ghostty-update.
 #
+# On Linux (restartable_mode in desk-lib/restartable.sh), where nothing
+# outside Ghostty can name a tab or type into one, there is no tab step:
+# before the signal this writes a marker, `<marker dir>/<pid of claude's
+# shell>` ($XDG_RUNTIME_DIR/claude-restart), holding claude's pid, the
+# session id and the same resume command a tab would be typed
+# (tab_resume_command), and the `claude` shell function in .shellrc, once
+# claude has ended, finds the marker, removes it and runs the resume in that
+# same shell. That works only for a session the function started (it puts
+# its shell's pid in claude's environment, __CLAUDE_FN_SHELL); any other is
+# refused, exit 3, with exit and resume it once by hand as the way to get
+# one. The shell is not replaced, so shell config that changed since it
+# started is not picked up by the resume. The resume is confirmed as below;
+# a marker nothing picked up is removed and the failure says so.
+#
 # Output: one tab-separated line, `<status> <id> <name> <detail>`, status
 # restarted, refused or failed. Exit 0 when restarted, 1 refused or failed,
 # 2 usage, 3 refused because its tab would close with it: a tab opened
@@ -72,7 +86,8 @@
 # $RESTART_SESSION_PROMPT_SECS (how long to wait for the tab's prompt,
 # default 10), $RESTART_SESSION_CONFIRM_SECS (how long to wait for the
 # resumed session to show as live, default 20; 0 skips the wait) and
-# $RESTART_SESSION_TAB_TIMEOUT_SECS (default 10).
+# $RESTART_SESSION_TAB_TIMEOUT_SECS (default 10), $RESTART_SESSION_MODE
+# (tab or marker) and $CLAUDE_RESTART_DIR (the marker dir).
 set -u
 
 script_dir() {
@@ -179,10 +194,14 @@ if [ -n "$recorded_tty" ] && [ "${recorded_tty#/dev/}" != "${tty#/dev/}" ]; then
 	report refused "its tty $tty is not the one its start recorded ($recorded_tty)"
 fi
 
-tab_call find "$tty" "$pid"
-terminal="$tab_out"
-if [ "$tab_rc" -ne 0 ] || [ -z "$terminal" ]; then
-	report refused "could not tell its tab apart${tab_why:+: $tab_why}"
+mode="$(restartable_mode)"
+terminal=""
+if [ "$mode" = tab ]; then
+	tab_call find "$tty" "$pid"
+	terminal="$tab_out"
+	if [ "$tab_rc" -ne 0 ] || [ -z "$terminal" ]; then
+		report refused "could not tell its tab apart${tab_why:+: $tab_why}"
+	fi
 fi
 
 # --- stop it ---
@@ -206,6 +225,18 @@ pre_grand="$(parent_of "$pre_parent")"
 pre_grand_args="$(args_of "$pre_grand")"
 phase check
 
+# In marker mode the shell's `claude` function runs the resume, so the marker
+# is in place before claude can end.
+marker=""
+if [ "$mode" = marker ]; then
+	marker="$(restartable_marker_dir)/$pre_parent"
+	if ! { mkdir -p -m 700 "$(dirname "$marker")" \
+		&& printf '%s\n%s\n%s\n' "$pid" "$id" "$(tab_resume_command "$cwd" "$CONFIG_DIR" "$claude_args")" > "$marker"; }; then
+		rm -f "$marker"
+		report failed "could not write the restart marker ($marker)"
+	fi
+fi
+
 # Said before the signal, so a caller that has to end this script part way
 # still has what to tell the user.
 echo "restart-session: stopping the session; if nothing more is reported, $by_hand" >&2
@@ -216,7 +247,27 @@ while { desk_pid_alive "$pid" || [ -e "$pidfile" ]; } && [ "$SECONDS" -lt "$unti
 done
 phase stop
 if desk_pid_alive "$pid"; then
+	[ -z "$marker" ] || rm -f "$marker"
 	report failed "pid $pid survived SIGTERM for ${GRACE}s; nothing more done"
+fi
+
+if [ "$mode" = marker ]; then
+	# The shell's function takes the marker (removing it) and resumes.
+	[ "$CONFIRM_SECS" -gt 0 ] || report restarted "resume left for its shell"
+	until_s=$((SECONDS + CONFIRM_SECS))
+	while [ "$SECONDS" -lt "$until_s" ]; do
+		sleep 0.25
+		if now="$(tab_resumed_pid "$CONFIG_DIR" "$id" "$pid")"; then
+			phase confirm
+			report restarted "resumed in its shell (pid $now)"
+		fi
+	done
+	phase confirm
+	if [ -e "$marker" ]; then
+		rm -f "$marker"
+		report failed "the session stopped, but its shell did not pick up the resume within ${CONFIRM_SECS}s (is it still there?); $by_hand"
+	fi
+	report failed "the resume was started by its shell, but the session is not live after ${CONFIRM_SECS}s; look at the tab"
 fi
 
 # --- resume it in the tab ---

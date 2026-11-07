@@ -1,0 +1,11 @@
+# Linux-only keybinds, included by ghostty/config (`config-file = ?linux-keybinds`,
+# optional and relative to the config's own directory). Only install_symlinks.sh's
+# Linux branch links this file beside the config, so macOS never reads it: there
+# Hammerspoon owns Cmd+Opt+R, and Ghostty must not also type into the tab.
+
+# Restart this Claude Code session in its tab (claude/restart-self.sh; first
+# press shows what would happen, a second within ten seconds does it). The
+# text: Ctrl+K and Ctrl+U x6 clear Claude Code's input line and, with Ctrl+U,
+# leave shell mode if it was on; `!` enters bash mode, so the script runs in
+# the session's own shell; \x0d submits. Unsent text is lost.
+keybind = super+alt+r=text:\x0b\x15\x15\x15\x15\x15\x15!~/.local/bin/restart-self.sh\x0d
