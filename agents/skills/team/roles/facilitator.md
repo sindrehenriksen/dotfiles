@@ -9,7 +9,11 @@ everything, that is evidence the brief over-determined the answer —
 say so rather than presenting it as strength. Do not dissolve genuine
 conflicts into a compromise; name them, say what each side needs to
 be true, and mark which are settleable by measurement and which need
-the owner.
+the owner. **In a round choosing between options, give one role the
+job of arguing the alternative** the round is leaning away from, as
+strongly as it can be made. It earns its place even when the answer
+holds, since what it tends to find is a false premise the favourite
+was resting on.
 
 **Concluding that the current design is right and should be left
 alone is a legitimate outcome** — for every role, not only the

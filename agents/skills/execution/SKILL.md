@@ -45,7 +45,7 @@ Being allowed to go back is the easy half; **noticing that an assumption broke**
 - **What would falsify this, and who would notice?** The assumption list above is the answer; an empty list is itself the finding.
 - **Who hasn't been asked whose objection would change the answer?** Not everyone relevant — only the ones who could move the decision.
 - **Is this the second or third fix at the same seam?** Make it a lookup rather than an intuition: `git log` the files being touched and read what the earlier fixes there were for. A second patch at one seam is a design (`~/.agents/principles.md`, "Ask what you are compensating for").
-- **Has anyone actually used it?** Not "do the gates pass" — has a person or an agent operated the surface end to end. This is the one that never fires on its own.
+- **Has anyone actually used it?** Not "do the gates pass" — has a person or an agent operated the surface end to end. This is the one that never fires on its own. An operator script (a deploy, a release, a migration helper) is a surface too: run it once on the real tool's real output before anything relies on it, since fixtures written beside the parser share its guess at the format.
 
 ## Debugging starts at a reproduction
 
@@ -177,4 +177,4 @@ How that lands on today's tiers: mechanical, well-specified work whose correctne
 - Before an autonomous stretch: confirm scope and batch clarifying questions in ONE round, then run (interruptions as under "Implement").
 - Durable learnings go to versioned docs (instruction files, skills, tickets) as they happen, not chat history, which gets summarized away.
 - When a compaction or a fresh session is coming, the `handoff` skill covers the prompt pair that carries the work across — and what belongs on disk instead of in a prompt.
-- Keep load-bearing state (task lists, decisions, open questions) in files the session can re-read, so the conversation surviving a compaction doesn't lose the plot. That is also what makes a run interruption-proof: an agent killed mid-run resumes from a short message stating the *disk* state — checkboxes, `git status`, which tests were red — with zero rework. Corollary for research agents: have them write the deliverable file incrementally, never only at the end.
+- Keep load-bearing state (task lists, decisions, open questions) in files the session can re-read, so the conversation surviving a compaction doesn't lose the plot. Put them in a repo or a durable product folder from the start: `/tmp` and session scratchpads do not survive a reboot. That is also what makes a run interruption-proof: an agent killed mid-run resumes from a short message stating the *disk* state — checkboxes, `git status`, which tests were red — with zero rework. Corollary for research agents: have them write the deliverable file incrementally, never only at the end.

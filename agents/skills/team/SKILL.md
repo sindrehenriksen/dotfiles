@@ -210,8 +210,11 @@ a retyped version of the role.
   framing from being invented is that the writer adds no conclusions,
   which quotation marks neither guarantee nor replace. Keep the raw
   wording in a local untracked file (a gitignored path inside the repo,
-  so it survives the session), point the round at it, and delete it
-  when the work it briefs is done. It is meant to be temporary.
+  so it survives the session) and point the round at it. The workspace
+  says which shape that file takes: one per round, deleted when the
+  work it briefs is done, or one per product, appended each round
+  under a dated heading, so a designer reads the owner's words across
+  rounds rather than one round's. Where it says nothing, per round.
 - **Carry measured facts forward** rather than making each round
   re-derive them — but "verified" must mean the number was checked,
   never that its reading was.
@@ -268,6 +271,11 @@ thing the owner said; a run of approvals is a thing that happened.**
 The first stays given until withdrawn — "push when it is ready"
 covers the next push. The second is not evidence of anything: five
 approved posts do not authorise a sixth.
+
+**A round starts on an explicit go.** A loose "sure" while questions
+put to the owner are still open answers the conversation, not the
+questions; start once they are answered, or once the owner says to go
+without them.
 
 **Scope is the exception, and it is absolute.** Anything outside what
 was asked for goes to the owner, however good the reason and however
@@ -344,7 +352,12 @@ round adds:
   message.
 - **Taste question or design question?** Send the first, answer the
   second. A question only the owner can answer is worth their
-  attention; one the team could settle by looking is not.
+  attention; one the team could settle by looking is not. **A choice
+  that is theirs arrives as the options with what each gives and
+  costs**, for them to choose, not as a conclusion with the losers
+  listed beneath it; a recommendation may follow, marked as one. Build
+  cost is one of those trade-offs, stated as a cost: it never takes an
+  option off the table before the owner has seen it.
 - **Correct your own figures out loud**, briefly, and move on.
 
 Closing a round: what they would observe, the accepted losses with
