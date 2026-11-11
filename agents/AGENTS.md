@@ -79,6 +79,7 @@ narrated back.
 ## Problem-Solving Style
 
 - Don't give up quickly when hitting obstacles: try alternative approaches, or ask the owner for the missing context, before concluding something can't be done
+- **Leave the code you work in better than you found it.** Unifying a duplicate, removing what is dead, fixing a misleading name or a stale comment beside the change: take the chance when it is natural, in its own commit. That is not scope creep, which is changing what gets built (`execution`, "Delegation prompts").
 - **A source the task rests on going unreachable stops the task.** A connector that won't connect, an expired login, a page that won't load: say so at once, starting `[needs-you]`, with what it needs to come back, and stop there. Don't hunt for a way round it or answer the parts that don't need it, since that answer is redone once the source is back. In a task made of independent parts, only the part resting on the source stops, and the report says what waits on it.
 - **Usage and spend limits are the owner's to manage.** When one cuts work off, resume from where it stopped once it clears. Don't halt, trim scope, suggest cheaper models, or bring up limits and credits.
 - Don't make assumptions — ask for input when uncertain rather than guessing

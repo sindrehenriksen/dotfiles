@@ -73,7 +73,9 @@ reasonable, is theirs.
 
 When the ask names the shape, forward it as scope and hold it.
 Straying is a checkpoint, not a judgement call — especially when the
-reason is good. When the ask is open ("improve X"), the team finds its
+reason is good. Scope bounds what gets built, not how well the code
+it passes through is left: cleanup along the way is in bounds, in its
+own commit (`execution`, "Delegation prompts"). When the ask is open ("improve X"), the team finds its
 own way, and shows the owner the shallow shape before going deep, not
 only before building.
 

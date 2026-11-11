@@ -67,6 +67,7 @@ The reproduction then stays as the guard: turn it into a failing test before fix
 Agents see nothing of the conversation. Every delegation prompt includes:
 
 - The full agreed design and decisions already made — the agent must not re-derive or re-litigate them.
+- **That the code it works in is its to improve.** Say it in every implementation brief, since a brief that only bounds scope reads as "leave everything else as you found it", and the agent then works around a duplicate rather than unifying it (`principles.md`, "One concept, one implementation"). In words like: *How the code you work in is built is yours to improve as you go: unify a duplicate, remove what's dead, fix a name or a stale comment beside your change. What it's for, and anything outside the agreed scope, is not; an improvement beyond your change goes in its own commit, named in the report.*
 - **Facts checked against the source, or marked as claims.** Most brief errors are a fact copied unverified from an earlier agent's report, or a guessed path. Root every path at the agent's worktree, or it may write into the base checkout.
 - Pointers to the repo's instruction files (`AGENTS.md`/`CLAUDE.md`) and applicable conventions (commits, style).
 - What to run (tests, linters) and hard boundaries: the agent commits locally, while pushing, merging and anything else outward-facing stay the main loop's. The standing exception is an agent that has to push in order to deploy or test its change, granted deliberately. Flag new dependencies in the report for sign-off.
