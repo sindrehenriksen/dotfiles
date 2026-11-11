@@ -65,8 +65,8 @@ A workspace may layer its own on top of both.
 subagents is whatever runs as a chain: looking into something
 (probes, log digging, checks on an API or the environment), running
 builds, tests or other actions, and any change that needs reading
-first. What it keeps costs a call or two: a lookup, or a doc or minor
-edit it can place from what it already holds, even across a few
+first. What it keeps costs a call or two: a lookup or a quick read, or a
+doc or minor edit it can place from what it already holds, even across a few
 files. The owner's messages reach a session only between its tool
 calls, so one busy running chains hears them late, clutters its
 thread for the owner and fills its context with what a subagent
