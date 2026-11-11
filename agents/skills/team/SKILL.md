@@ -48,13 +48,12 @@ and does not restate it.
 The lead holds scope, briefs, decides what reaches the owner, and
 carries context nobody else has.
 
-**The lead does not run things.** Devs write and test code; the trio
-may sketch something light; the lead may occasionally write
-documentation. Running gates is not lead work — and re-running someone
-else's suite is not verification anyway (see Reviews). Reading state
-to know where work stands is different and stays with the lead. The
-owner's messages reach a session only between its tool calls, so a
-lead busy running things hears them late.
+**The lead does not run things** (the rule and its why are in the
+user-level instructions, "How work runs"). Devs write and test code;
+the trio may sketch something light. Running gates is not lead work —
+and re-running someone else's suite is not verification anyway (see
+Reviews). Reading state to know where work stands is different and
+stays with the lead.
 
 **The lead does not investigate.** Reading to write a brief is
 bounded and fine. Spot-checking a delegated claim — the one number or
