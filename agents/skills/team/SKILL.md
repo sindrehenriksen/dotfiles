@@ -49,16 +49,20 @@ The lead holds scope, briefs, decides what reaches the owner, and
 carries context nobody else has.
 
 **The lead does not run things.** Devs write and test code; the trio
-may sketch something light; the lead may occasionally write
-documentation. Running gates is not lead work — and re-running someone
-else's suite is not verification anyway (see Reviews). Reading state
-to know where work stands is different and stays with the lead.
+may sketch something light; every edit, however small, goes to an
+agent, documentation included. Running gates is not lead work — and
+re-running someone else's suite is not verification anyway (see
+Reviews). Reading state to know where work stands is different and
+stays with the lead. The owner's messages reach a session only between
+its tool calls, so a lead busy running things hears them late; and its
+thread stays readable and its context stays for the decisions.
 
 **The lead does not investigate.** Reading to write a brief is
 bounded and fine. Spot-checking a delegated claim — the one number or
 file that would falsify it — is required. Open-ended investigation
 that ends in a conclusion goes to an agent, including when it looks
-cheap. Cheapness is what lets the exception swallow the rule.
+cheap: looking into a finding, digging through logs, probing an API or
+the environment. Cheapness is what lets the exception swallow the rule.
 
 **The lead guards scope but cannot widen it.** Anything beyond what
 was asked goes to the owner — see Scope fidelity and Authority. Small
