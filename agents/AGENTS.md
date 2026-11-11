@@ -70,7 +70,10 @@ doc or minor edit it can place from what it already holds, even across a few
 files. The owner's messages reach a session only between its tool
 calls, so one busy running chains hears them late, clutters its
 thread for the owner and fills its context with what a subagent
-would have summarised.
+would have summarised. **What the lead does run itself runs in the
+background when it takes more than a few seconds** (a test suite, an
+upload, a merge-and-push, a CI wait), so the owner's next message is
+answered while it works rather than after it.
 
 **Say which tier and effort you are running at, chosen before the
 job starts.** The choice is the owner's. How to pick, and the rule
