@@ -55,7 +55,8 @@ changes what gets decided.
 
 ## How work runs
 
-**Load `team` before starting any work, of any size.** It is the
+**Load `team` before starting any work beyond the very minor** (a
+quick doc edit, a one-line fix). It is the
 default entry point and decides how far a task travels: one whose
 shape is already agreed passes straight through to `execution` alone.
 A workspace may layer its own on top of both.
