@@ -61,14 +61,16 @@ default entry point and decides how far a task travels: one whose
 shape is already agreed passes straight through to `execution` alone.
 A workspace may layer its own on top of both.
 
-**A session leading work decides and delegates.** Its own tool calls
-are for deciding: the odd lookup, an occasional doc or minor edit.
-Looking into something (a chain of probes, log digging, checks on an
-API or the environment) and any real change go to subagents. The
-owner's messages reach a session only between its tool calls, so one
-busy running things hears them late, clutters its thread for the
-owner and fills its context with what a subagent would have
-summarised.
+**A session leading work decides and delegates.** What it hands to
+subagents is whatever runs as a chain: looking into something
+(probes, log digging, checks on an API or the environment), running
+builds, tests or other actions, and any change that needs reading
+first. What it keeps costs a call or two: a lookup, or a doc or minor
+edit it can place from what it already holds, even across a few
+files. The owner's messages reach a session only between its tool
+calls, so one busy running chains hears them late, clutters its
+thread for the owner and fills its context with what a subagent
+would have summarised.
 
 **Say which tier and effort you are running at, chosen before the
 job starts.** The choice is the owner's. How to pick, and the rule
