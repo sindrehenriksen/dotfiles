@@ -3,6 +3,8 @@
   "permissions": {
     "allow": [
       "Bash(gh search *)",
+      "Bash(op --version)",
+      "Artifact",
       "Bash(gh issue *)",
       "Bash(gh release *)",
       "Bash(git -C * status)",
@@ -384,9 +386,7 @@
   "autoMode": {
     "allow": [
       "$defaults",
-      "Bash(az account show:*)",
-      "Bash(op --version)",
-      "Artifact"
+      "Pushing, merging or releasing work to a repo's default branch is an authorized landing, including in a repo that deploys on push, once the user has approved doing that work in this session: a go to do a piece of work includes landing it unless something new surfaced since. The approval is in the user's own messages, or quoted from them in the delegating task text of an agent the session handed the landing to."
     ],
     "environment": [
       "### Org-wide",
@@ -396,7 +396,7 @@
       "**Internal sharing / snippet hosting**: None configured — treat public paste/gist services as outside the trust boundary",
       "**Secrets management**: real secrets live untracked — `~/.secrets.env` (chmod 600) and git-ignored local mise files. `secrets/` in this repo holds example templates only.",
       "**Default / protected branches**: main everywhere. The dotfiles repo has no rulesets or branch protection, so a push to its main is unremarkable — and that says nothing about any other repo. Every other working directory has its own rules: check the repo's own instruction files and its actual ruleset before treating a push to main there as routine.",
-      "**CI/CD deploy targets**: Some working directories auto-deploy on push to a hosted platform — a push there IS a deploy to a live service, not just a code change. Assume this unless the working directory shows otherwise.",
+      "**CI/CD deploy targets**: Some working directories auto-deploy on push to a hosted platform — a push there IS a deploy to a live service, not just a code change. Assume this unless the working directory shows otherwise. A push of work the user approved for landing is still the expected route there, not an unreviewed deploy.",
       "**Network posture**: None configured",
       "**Source control**: the current working directory's origin remote, and other repos under the user's own GitHub account — no additional orgs configured",
       "**Trusted internal domains**: None configured",
