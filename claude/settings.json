@@ -372,8 +372,14 @@
       "effortLevel": "high"
     }
   },
+  "voice": {
+    "enabled": true,
+    "mode": "hold"
+  },
   "theme": "dark",
   "editorMode": "vim",
+  "remoteControlAtStartup": true,
+  "agentPushNotifEnabled": true,
   "skipAutoPermissionPrompt": true,
   "autoMode": {
     "allow": [
@@ -407,10 +413,5 @@
       "**Trusted repo**: The current working directory and its origin remote. Repos under the user's own GitHub account are trusted destinations; anything else is not."
     ]
   },
-  "remoteControlAtStartup": true,
-  "voiceEnabled": true,
-  "voice": {
-    "enabled": true,
-    "mode": "hold"
-  }
+  "voiceEnabled": true
 }
