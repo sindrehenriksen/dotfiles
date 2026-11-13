@@ -26,7 +26,10 @@ own strings stay in the language they ship in; everything the
 mockup says around them — headings, annotations, state labels, what
 changed and why — is in English, whatever that language is. Something the
 owner can change directly beats a description they must react to in
-prose.
+prose. A block of facts (a card, a header) gets two or three
+arrangements to choose from, judged by `~/.agents/principles.md`,
+"A block of text says one thing first", since iterating one layout
+only patches it.
 
 Judge whether reported symptoms are one problem or several. Consider
 what a first-time reader sees, not only a returning one.

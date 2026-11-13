@@ -176,6 +176,16 @@ works to protect. The corollary is about coherence, not safety —
 one class of message, one place. Three status messages in three
 different corners is accretion, not design.
 
+## A block of text says one thing first
+
+Decide what the reader opens a block of facts for (a card, a header)
+and make that its one prominent line; the rest is subordinate, grouped
+by what belongs together, on one left edge, in at most three sizes and
+two greys. Every line earns its place, and no word repeats what the
+heading already says. Then fit the longest real content at the
+reader's own text size (check 20 px): whole figures wrap, no separator
+ends a line, and a 44 px tap target stays out of the line height.
+
 ## A user's "no" stays theirs to take back
 
 Anything a user turns off (a "don't show again", a stopped

@@ -20,7 +20,9 @@ authenticate.
 (the user's own words, which the brief quotes) and from the flows a
 user would run on an ordinary day. Then cover the edges the change
 touches: empty, long, many, slow, offline, the first visit and the
-hundredth, going back. Tap everything that looks tappable, and read
+hundredth, going back, and the reader's larger text size (a 20 px
+root; `~/.agents/principles.md`, "A block of text says one thing
+first", has what breaks there). Tap everything that looks tappable, and read
 every string as someone who was not in the room.
 
 **Report what you saw, with evidence.** Each finding comes with the
