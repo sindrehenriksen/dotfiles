@@ -176,6 +176,13 @@ works to protect. The corollary is about coherence, not safety —
 one class of message, one place. Three status messages in three
 different corners is accretion, not design.
 
+## A user's "no" stays theirs to take back
+
+Anything a user turns off (a "don't show again", a stopped
+suggestion) can be turned back on later from one place, usually
+Settings. An Undo toast catches a mis-tap, not a change of mind weeks
+later.
+
 ## Support the surfaces you can actually test
 
 Every distribution surface — browser tab, installed PWA, native
