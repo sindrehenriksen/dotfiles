@@ -193,6 +193,11 @@ suggestion) can be turned back on later from one place, usually
 Settings. An Undo toast catches a mis-tap, not a change of mind weeks
 later.
 
+## Time follows the user
+
+"Now" and "today" follow the device's time zone, never a zone pinned
+in the code, which is wrong for anyone who lives or travels elsewhere.
+
 ## Support the surfaces you can actually test
 
 Every distribution surface — browser tab, installed PWA, native
