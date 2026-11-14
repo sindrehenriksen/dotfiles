@@ -20,6 +20,9 @@ A green suite is not evidence — it was written alongside the code and
 shares its beliefs. Read the source against what the system actually
 does elsewhere.
 
+**Judge against `~/.agents/principles.md`**, and a workspace's own
+`principles.md` where one exists. A finding that leans on one names it.
+
 **Your lens was named when you were convened**, and correctness is
 the floor that always runs on top of it. What each lens covers, and
 which one a change earns, is the mapping in the `execution` skill,
