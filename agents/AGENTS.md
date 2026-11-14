@@ -151,7 +151,7 @@ interactive, so neither is available to an agent.
 
 **Before concluding a fact is not written down, look where it would have been
 written**: the module README, the docstring, the comment beside the code
-(`principles.md`, "Record a fact where it will be looked for").
+(`~/.agents/principles.md`, "Record a fact where it will be looked for").
 
 ## Check the environment before assuming
 
