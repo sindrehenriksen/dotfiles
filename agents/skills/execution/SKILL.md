@@ -59,7 +59,7 @@ The reproduction then stays as the guard: turn it into a failing test before fix
 
 ## Measure it
 
-- **Everything should be measurable.** Any mechanism that silently changes what happens ships with the counter that makes it visible, and a check that cannot run fails loudly rather than degrading to "pass" (`~/.agents/principles.md`, "Log for the debugging you will actually do"). Before merging, ask: if this misbehaved, what number would move, and is anyone emitting it?
+- **Everything should be measurable.** Any mechanism that silently changes what happens ships with the counter that makes it visible, and a check that cannot run fails loudly rather than degrading to "pass" (`~/.agents/principles.md`, "Log for the debugging you will actually do"). Before merging, ask: if this misbehaved, what number would move, and is anyone emitting it? For a decision made item by item, could the logs alone name each item and its outcome?
 - **Be evidence-driven from the start.** Collect metrics, quantitative or qualitative, *before* deciding. A number collected afterwards to confirm a choice already made measures the choice rather than the problem, and it agrees, because agreeing is what it was collected for.
 
 ## Delegation prompts

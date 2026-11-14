@@ -139,7 +139,14 @@ reported zero for weeks because the file it read had been
 gitignored. Each looked healthy precisely because the thing that
 would have shown otherwise was never emitted. The test is simple
 and worth applying before merging: if this mechanism misbehaved,
-what number would move — and is anyone emitting it?
+what number would move — and is anyone emitting it? For a
+per-item decision: could the logs alone name each item and its
+outcome?
+
+A count is not enough for a decision made item by item (a model's
+yes or no, a rating, a veto, a merge, a drop): log each item and its
+answer, the declines too. A count says something moved; only the
+record says which.
 
 The counterpart is what such a mechanism owes when it cannot judge
 at all: a guard, gate or probe that loses the input it judges has
