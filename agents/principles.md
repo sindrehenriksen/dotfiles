@@ -193,6 +193,14 @@ heading already says. Then fit the longest real content at the
 reader's own text size (check 20 px): whole figures wrap, no separator
 ends a line, and a 44 px tap target stays out of the line height.
 
+## Categorical colours are measured, not picked
+
+Colours that tell categories apart start from a tested palette
+(Okabe–Ito, Paul Tol, ColorBrewer), and every pair that can touch is
+measured under normal and colour-blind vision, in light and dark, and
+held by a test. Related categories share a hue and differ clearly in
+lightness; past a few hues, a label carries identity and colour is a cue.
+
 ## A user's "no" stays theirs to take back
 
 Anything a user turns off (a "don't show again", a stopped
