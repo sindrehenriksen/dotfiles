@@ -170,7 +170,10 @@ Two rules that cost nothing and pay:
 
 - **Relay the artifact, not a description of it.** A paragraph
   describing a screen does not provoke the question a picture does.
-  Show it as a picture the owner can open, and the lead updates it in
+  Show it as a picture the owner can open (one holding many screens at
+  2–3× pixel density, so text stays readable when zoomed on a phone, and
+  split into parts rather than downscaled where a viewer caps the size),
+  and the lead updates it in
   place as the shape moves —
   carrying, on the page, what changed since they last looked.
   Without that they re-read the whole thing hunting for the diff, and
