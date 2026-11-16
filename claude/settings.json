@@ -285,6 +285,7 @@
       "/private/tmp"
     ]
   },
+  "model": "claude-fable-5-2",
   "hooks": {
     "SessionStart": [
       {
@@ -372,6 +373,9 @@
   "modelSettings": {
     "claude-opus-5-5": {
       "effortLevel": "high"
+    },
+    "claude-fable-5-2": {
+      "effortLevel": "medium"
     }
   },
   "voice": {

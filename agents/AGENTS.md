@@ -76,9 +76,9 @@ upload, a merge-and-push, a CI wait), so the owner's next message is
 answered while it works rather than after it.
 
 **Say which tier and effort you are running at, chosen before the
-job starts.** The choice is the owner's. How to pick, and the rule
-that a frontier-class tier never goes on a subagent without the
-owner's specific go, are in `execution`, "Model and effort choice".
+job starts.** The choice is the owner's. How to pick, and which
+model is the strong tier (a Fable 5.2 trial runs from 2026-11-16),
+are in `execution`, "Model and effort choice".
 
 ## Incidents are not a pattern
 
