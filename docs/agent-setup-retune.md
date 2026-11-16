@@ -126,3 +126,31 @@ Baseline, Opus 5.5 period 2026-09-23 to 2026-11-16 (both config dirs):
   it can.
 - On a subscription the binding cost is the weekly allocation: note the
   `/usage` share each week of the trial against the weeks before.
+
+## Start-up load
+
+What a subagent holds before its brief is paid for on every turn of every
+subagent, so it is worth a look at each re-tune, and whenever a tool, a
+connector or a batch of skills has been added (a Claude Code update can add
+them unasked).
+
+To measure: start a throwaway subagent on the cheapest model with a
+one-line task, and read `cache_creation_input_tokens` on the first message
+that has `usage` in its transcript
+(`<config dir>/projects/<project>/<session>/subagents/agent-<id>.jsonl`).
+That number is the load. The same file's first lines hold the parts
+(instruction files, skill listing, tool definitions, listings), so their
+sizes show where it goes. `AGENTS.md`, "What every session loads at start",
+has the conventions that keep it down.
+
+The number to compare the next measurement with: 27k tokens on 2026-11-16,
+down from 44k. The largest parts, in order, were the tool definitions (one
+unused built-in tool was about a quarter of the whole), the user instruction
+file and the skill listing.
+
+Two things found then about a long-lived subagent's cost:
+
+- It compacts only when its window is nearly full, so in practice never,
+  and the compaction hooks do fire for it.
+- Its cache lasts five minutes. A message after a longer pause re-sends
+  nearly the whole history as a cache write, with no compaction first.

@@ -50,3 +50,13 @@ has passed.
 - **Neither an ask nor a block is the cheap option**, which is the argument for allowing more rather than less. Both interrupt, both land at the same point in a sequence, and both can leave work half-applied. A block is if anything the lesser cost, since work that doesn't depend on it carries on while it waits. So `ask` earns its place rarely: it spends the owner's attention without adding a guarantee the rules don't already give. Where a rule can pin an action narrowly, prefer the rule.
 
 The `git -C * <subcommand>` rules print a warning on every launch (anthropics/claude-code#90879, tracked in `TODO.md`). They are deliberate. The `-C` form is what keeps a command aimed at another repo matching a rule at all, the paths are worktrees made per task and cannot be enumerated, and a partial wildcard does not silence the warning either. Don't narrow them to quiet it.
+
+## What every session loads at start
+
+Every session and every subagent starts with the tool definitions, the instruction files, the skill listing and the connectors' own text in context, before its task, and reads them again on each turn. So an addition to `claude/settings.json`, `agents/AGENTS.md` or `agents/skills/` is paid for in all of them, a subagent's included:
+
+- **A skill used day to day keeps its description**, since the description is what makes it load at the right moment. One wanted only occasionally is listed by name (`skillOverrides`, `"name-only"`): still loadable, without the description. That holds for bundled and account skills as well as ours.
+- **A built-in tool or connector nothing here uses is switched off** (`enableArtifact`, `deniedMcpServers`) rather than carried. A built-in tool cannot be deferred, only on or off.
+- **The settings file is shared with the work account**, so a switch here applies there too.
+
+How to measure the load, and when to look again, is in `docs/agent-setup-retune.md`, "Start-up load".
