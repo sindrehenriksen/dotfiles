@@ -31,6 +31,12 @@
 #         COMPACT_STATE_COMMANDS adds). Plain stdout is added as context for
 #         SessionStart.
 #
+# For a subagent compacting (the hook input carries a non-empty `agent_id`,
+# from Claude Code 2.1.323) there is no user to hand off to and the main
+# session's state is not its own: `pre` and `post` print nothing, and
+# `session-start` prints a short note for a worker instead of the above, with no
+# state block. Input without `agent_id` is treated as the main session's.
+#
 # Claude Code shows both hooks' stdout in full after the compaction, and for
 # these two events it ignores `systemMessage`, so `post` prints text, not JSON.
 # The guidance is read from the skill at run time, so it has one home; if its
@@ -46,9 +52,15 @@ HEADING='## Suggested kick-off'
 WAITING='## Waiting on you'
 GOS='## Gos in force'
 
+# True when the hook input ($1) comes from a subagent compacting.
+is_worker() {
+    [ -n "$(jq -r '.agent_id // ""' <<<"$1" 2>/dev/null)" ]
+}
+
 pre() {
     local input instructions guidance
     input=$(cat)
+    is_worker "$input" && exit 0
     instructions=$(jq -r '.custom_instructions // ""' <<<"$input" 2>/dev/null)
     [ -n "${instructions//[[:space:]]/}" ] && exit 0
 
@@ -105,6 +117,7 @@ blank() {
 post() {
     local input summary kickoff waiting gos out=""
     input=$(cat)
+    is_worker "$input" && exit 0
     summary=$(jq -r '.compact_summary // ""' <<<"$input" 2>/dev/null)
     # The compactor closes its summary with `</summary>`. Cut at the last one,
     # since the kick-off itself may mention the tag.
@@ -126,6 +139,10 @@ post() {
 session_start() {
     local input transcript
     input=$(cat)
+    if is_worker "$input"; then
+        echo "Your context was just compacted: what is above is a summary, not the conversation itself. Your brief and any file text restored are copies from before; re-read from disk what the work in hand still rests on (the plan, the files you are changing), and check \`git status\` in your checkout before continuing. If the summary leaves you unsure what was asked or agreed, ask the agent that started you rather than guess."
+        return
+    fi
     transcript=$(jq -r '.transcript_path // ""' <<<"$input" 2>/dev/null)
     printf '%s' "This session was just compacted: the conversation above is a summary of it, not the conversation itself."
     [ -n "$transcript" ] && printf ' %s' "For a specific the summary lacks, the full pre-compaction conversation is in its transcript, $transcript; search it with rg or jq rather than guess, and do not read the whole file into context."

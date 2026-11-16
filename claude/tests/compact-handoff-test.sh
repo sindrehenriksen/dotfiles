@@ -237,5 +237,15 @@ check "session-start: without a transcript, names none" '[ "$(head -1 <<<"$out")
 out=$(jq -n '{session_id:"s3",compact_summary:"## Summary\nno kick-off"}' | "$HOOK" post)
 check "post: silent when the summary has none of the sections" '[ -z "$out" ]'
 
+W='"agent_id":"a1","agent_type":"general-purpose"'
+out=$(echo "{\"trigger\":\"auto\",\"custom_instructions\":null,$W}" | "$HOOK" pre)
+check "subagent: pre prints nothing" '[ -z "$out" ]'
+out=$(jq -n '{compact_summary:"## Suggested kick-off\nGo on.",agent_id:"a1"}' | "$HOOK" post)
+check "subagent: post prints nothing" '[ -z "$out" ]'
+out=$(echo "{\"source\":\"compact\",\"transcript_path\":\"/x\",$W}" | "$HOOK" session-start)
+check "subagent: session-start prints only the worker note" '[[ $out == "Your context was just compacted"* && $out == *"ask the agent that started you"* && $out != *"Current state"* && $out != *"transcript"* ]]'
+out=$(echo '{"trigger":"auto","custom_instructions":null,"agent_id":""}' | "$HOOK" pre)
+check "subagent: an empty agent_id is the main session" '[[ $out == *"keep-list guidance"* ]]'
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
