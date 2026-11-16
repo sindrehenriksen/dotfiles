@@ -378,6 +378,31 @@
       "effortLevel": "medium"
     }
   },
+  "enableArtifact": false,
+  "deniedMcpServers": [
+    {
+      "serverName": "claude.ai Claude Docs"
+    }
+  ],
+  "skillOverrides": {
+    "dataviz": "name-only",
+    "artifact-design": "name-only",
+    "artifact-diagramming": "name-only",
+    "artifact-capabilities": "name-only",
+    "anthropic-skills:built-in-browser": "name-only",
+    "anthropic-skills:chrome-browser": "name-only",
+    "anthropic-skills:computer-use": "name-only",
+    "anthropic-skills:deep-research": "name-only",
+    "anthropic-skills:docs": "name-only",
+    "anthropic-skills:docx": "name-only",
+    "anthropic-skills:google-workspace": "name-only",
+    "anthropic-skills:import-memory": "name-only",
+    "anthropic-skills:morning": "name-only",
+    "anthropic-skills:pdf": "name-only",
+    "anthropic-skills:pptx": "name-only",
+    "anthropic-skills:skill-creator": "name-only",
+    "anthropic-skills:xlsx": "name-only"
+  },
   "voice": {
     "enabled": true,
     "mode": "hold"
