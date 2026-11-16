@@ -100,3 +100,29 @@ next pass, not settled facts.
   the session's, and the next run compares the two (the script splits tokens
   by requested effort). Also open: whether the provider's advisor tool earns a
   place.
+
+## Fable 5.2 trial, from 2026-11-16
+
+Fable 5.2 (released 2026-11-09) is, by the provider's account, above Opus
+5.5 on almost every benchmark, and at a lower effort matches Opus's scores
+for less per task, at twice the per-token price ($8/$40 against $4/$20 per
+MTok; cache reads $0.20 on both). The trial tests that on this setup's work:
+Fable 5.2 at medium takes Opus 5.5's place in sessions and strong-tier
+subagents (`execution`, "Model and effort choice"), Sonnet and Haiku keep
+theirs, and Opus is only the fallback. It runs two to three weeks, then the
+method above compares it with the baseline below and settles the tier.
+
+Baseline, Opus 5.5 period 2026-09-23 to 2026-11-16 (both config dirs):
+
+- Main loop: about 590 output tokens per message; by tokens almost all Opus
+  5.5 (2.59B cache read, 62.5M cache write, 5.95M output).
+- Subagents: 5.2x the main loop's total tokens (4.75x on output); 84% of
+  total tokens Opus, 16% Sonnet; 44% started by another subagent. Requested
+  model: Opus 36%, inherit 35%, Sonnet 28%. Effort was inherited for 92%.
+- Comparable only from CLI 2.1.310 on: the recording gap above covers about
+  three weeks of this window, so subagent output is compared on that slice.
+- Sessions ran at high before and run at medium in the trial, so effort and
+  model change together; the per-call effort split keeps them apart where
+  it can.
+- On a subscription the binding cost is the weekly allocation: note the
+  `/usage` share each week of the trial against the weeks before.
