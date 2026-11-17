@@ -75,8 +75,9 @@ background when it takes more than a few seconds** (a test suite, an
 upload, a merge-and-push, a CI wait), so the owner's next message is
 answered while it works rather than after it.
 
-**Run few teams at once: one or two rounds, carried to landing before
-the next starts.** Several rounds in parallel spend a usage window in
+**Run few teams at once: two or three rounds a session, carried to
+landing before
+the next starts.** Many rounds in parallel spend a usage window in
 a fraction of its length, and each limit reset then costs again, since
 every cut-off agent re-reads its context uncached before it moves.
 They are also harder for the owner and the lead to follow: reports from
