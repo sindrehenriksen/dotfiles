@@ -152,5 +152,17 @@ Two things found then about a long-lived subagent's cost:
 
 - It compacts only when its window is nearly full, so in practice never,
   and the compaction hooks do fire for it.
-- Its cache lasts five minutes. A message after a longer pause re-sends
-  nearly the whole history as a cache write, with no compaction first.
+- Its cache lasts five minutes by default. A message after a longer pause
+  re-sends nearly the whole history as a cache write, with no compaction
+  first.
+- `subagentPromptCacheTtl: "1h"` in settings moves every subagent to the
+  one-hour cache: each write costs more (reportedly 2x input against
+  1.25x; not checked against the price list), and a write after a pause of
+  5 to 60 minutes becomes a read. It pays when more than about 40% of
+  cache writes follow such a pause. Estimated from the usage numbers in
+  subagent transcripts, 2026-10-21 to 2026-11-16, it came out about 1%
+  cheaper overall, within the estimate's error: 3% cheaper on Opus (46%
+  of writes followed a pause), 17–27% dearer on Sonnet, Haiku and Fable
+  (9–14%). So it is left off. Re-measure at a re-tune, since the answer
+  turns on how many workers are long-lived. A per-agent `cacheTtl` exists
+  for custom agent types only, not the built-in one or a single call.
