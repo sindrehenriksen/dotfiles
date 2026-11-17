@@ -75,6 +75,15 @@ background when it takes more than a few seconds** (a test suite, an
 upload, a merge-and-push, a CI wait), so the owner's next message is
 answered while it works rather than after it.
 
+**Run few teams at once: one or two rounds, carried to landing before
+the next starts.** Several rounds in parallel spend a usage window in
+a fraction of its length, and each limit reset then costs again, since
+every cut-off agent re-reads its context uncached before it moves.
+They are also harder for the owner and the lead to follow: reports from
+five rounds interleave in one thread. Queue what arrives while rounds are running
+(a TODO line is enough) and start it when one lands. Independent
+read-only lookups are not rounds and may run alongside.
+
 **Say which tier and effort you are running at, chosen before the
 job starts.** The choice is the owner's. How to pick, and which
 model is the strong tier (a Fable 5.2 trial runs from 2026-11-16),
