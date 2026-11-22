@@ -20,7 +20,8 @@ input="$(cat)"
 
 case "$input" in
 *pnpm-lock.yaml* | *package-lock.json* | *yarn.lock* | *bun.lock* | *uv.lock* | *poetry.lock* | \
-    *Cargo.lock* | *Gemfile.lock* | *composer.lock* | *go.sum* | *flake.lock* | *npm-shrinkwrap.json*) ;;
+    *Cargo.lock* | *Gemfile.lock* | *composer.lock* | *go.sum* | *flake.lock* | *npm-shrinkwrap.json* | \
+    *actions.lock*) ;;
 *) exit 0 ;;
 esac
 command -v jq >/dev/null 2>&1 || exit 0
@@ -28,7 +29,8 @@ command -v jq >/dev/null 2>&1 || exit 0
 is_lockfile() {
     case "${1##*/}" in
     pnpm-lock.yaml | package-lock.json | yarn.lock | bun.lock | bun.lockb | uv.lock | poetry.lock | \
-        Cargo.lock | Gemfile.lock | composer.lock | go.sum | flake.lock | npm-shrinkwrap.json) return 0 ;;
+        Cargo.lock | Gemfile.lock | composer.lock | go.sum | flake.lock | npm-shrinkwrap.json | \
+        actions.lock) return 0 ;;
     esac
     return 1
 }
