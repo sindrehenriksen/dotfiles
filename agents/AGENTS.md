@@ -159,6 +159,10 @@ interactive, so neither is available to an agent.
 **`find … -exec grep` is not a search idiom**: `rg -g '<glob>' <pattern>
 <path>` filters and searches in one pass, and `-exec` sits in the `ask` list.
 
+**A lockfile or other generated file is queried, never read through**: `rg`
+it for the package, or ask the package manager (`pnpm why <pkg>`), and read a
+change to it as `git diff --stat`.
+
 **Before concluding a fact is not written down, look where it would have been
 written**: the module README, the docstring, the comment beside the code
 (`~/.agents/principles.md`, "Record a fact where it will be looked for").
