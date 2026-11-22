@@ -163,6 +163,10 @@ interactive, so neither is available to an agent.
 it for the package, or ask the package manager (`pnpm why <pkg>`), and read a
 change to it as `git diff --stat`.
 
+**A long document is read by its headings first**: list them
+(`rg -n '^#' <file>`), then read the sections the task needs with an
+offset and limit. Read it whole only when the task is the document itself.
+
 **Before concluding a fact is not written down, look where it would have been
 written**: the module README, the docstring, the comment beside the code
 (`~/.agents/principles.md`, "Record a fact where it will be looked for").
