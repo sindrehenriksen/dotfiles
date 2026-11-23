@@ -262,15 +262,18 @@ export DESK_CLAUDE_BIN="$FAKEBIN/claude"
 
 # gh: `pr list` replies $FIX/prs-<owner>_<name>[-open].json when there is
 # one (-open for --state open), else $FIX/prs.json for org/repo and none
-# for another repo; `pr view N` replies $FIX/pr-N.json, keeping only the
+# for another repo, and with $FAKE_GH_PR_MAX set fails as a timeout when
+# asked for more than that many, else replies --limit of $FIX/prs.json;
+# `pr view N` replies $FIX/pr-N.json, keeping only the
 # fields its --json asks for, as gh does; `run list` replies
 # $FIX/runs-<owner>_<name>.json; `repo view` names main as the default.
 cat > "$FAKEBIN/gh" << FAKE
 #!/usr/bin/env bash
 echo "gh \$*" >> "$CALLS"
-fields="" repo="" open=""
+fields="" repo="" open="" limit=""
 args=("\$@")
 for ((i = 0; i < \${#args[@]}; i++)); do
+	[ "\${args[\$i]}" = --limit ] && limit="\${args[\$((i + 1))]}"
 	[ "\${args[\$i]}" = --json ] && fields="\${args[\$((i + 1))]}"
 	[ "\${args[\$i]}" = --repo ] && repo="\${args[\$((i + 1))]}"
 	[ "\${args[\$i]}" = --state ] && [ "\${args[\$((i + 1))]}" = open ] && open="-open"
@@ -278,6 +281,11 @@ done
 slug="\$(tr / _ <<< "\$repo")"
 case "\$1 \$2" in
 	"pr list")
+		if [ -n "\${FAKE_GH_PR_MAX:-}" ]; then
+			[ "\$limit" -le "\$FAKE_GH_PR_MAX" ] || { echo "HTTP 504: 504 Gateway Timeout" >&2; exit 1; }
+			jq -c --argjson l "\$limit" '.[:\$l]' "$FIX/prs.json"
+			exit 0
+		fi
 		if [ -f "$FIX/prs-\$slug\$open.json" ]; then cat "$FIX/prs-\$slug\$open.json"
 		elif [ "\$repo" = org/repo ]; then cat "$FIX/prs.json"
 		else echo '[]'; fi ;;
@@ -1101,6 +1109,15 @@ assert_contains "the listing asks for the oldest updates first" "sort:updated-as
 assert_contains "reaching the limit is logged" "reached the 100-PR limit" "$out"
 assert_eq "the next window starts at the newest update listed" \
 	"$(jq -n '"2026-10-07T08:39:00Z" | fromdateiso8601')" "$(jq -r '.last_gh_ok' "$DESK_FOLLOW_STATE_FILE")"
+
+echo
+echo "=== a PR listing the server times out on is asked again for half as many ==="
+jq '.last_run.at -= 3600 | .last_jira_ok -= 3600 | .last_gh_ok = (.last_run.at - 86400)' "$DESK_FOLLOW_STATE_FILE" > "$ROOT/s" && mv "$ROOT/s" "$DESK_FOLLOW_STATE_FILE"
+out="$(FAKE_GH_PR_MAX=60 "$RUN" follow 2>&1)"
+assert_contains "the failure is logged with gh's own error" "at 100 PRs (HTTP 504" "$out"
+assert_contains "the run still ends ok" "done: ok" "$out"
+assert_eq "the window moves to the newest update the shorter listing got to" \
+	"$(jq -n '"2026-10-07T07:49:00Z" | fromdateiso8601')" "$(jq -r '.last_gh_ok' "$DESK_FOLLOW_STATE_FILE")"
 echo '[]' > "$FIX/prs.json"
 
 echo

@@ -810,13 +810,14 @@ desk_follow_repo_set() {
 # `repo_set` (desk_follow_repo_set), or its github_repos when it has none.
 # Normalized, as one JSON array in <out>; returns non-zero (and writes
 # null) when a listing fails. <limit> is per repo, default 100. With
-# `oldest_first` each listing runs oldest update first, and one that
+# `oldest_first` each listing runs oldest update first, one that fails is
+# asked again for half as many, and one that
 # reaches the limit is logged and sets DESK_FOLLOW_PRS_REACHED to the
 # newest update it got to (the earliest across repos): the window is
 # covered only that far.
 desk_follow_fetch_prs() {
 	local pass="$1" pass_config="$2" state="$3" keys="$4" since="$5" with_comments="$6" out="$7" limit="${8:-100}" order="${9:-}"
-	local since_iso all='[]' repo listed search reached n_repos r repo_keys
+	local since_iso all='[]' repo listed search reached n_repos r repo_keys repo_limit err
 	DESK_FOLLOW_PRS_REACHED=""
 	echo null > "$out"
 	local repo_set
@@ -833,13 +834,28 @@ desk_follow_fetch_prs() {
 		repo="$(jq -r ".[$r].repo" <<< "$repo_set")"
 		repo_keys="$keys"
 		[ "$(jq -r ".[$r].all" <<< "$repo_set")" = "true" ] && repo_keys=null
-		listed="$(desk_follow_gh pr list --repo "$repo" --state all --limit "$limit" --search "$search" \
-			--json "$DESK_FOLLOW_PR_FIELDS" 2> /dev/null)" \
-			|| { desk_log "$pass" "follow: gh pr list failed for $repo"; return 1; }
+		# A long window (the first run after days off) can hold more PRs
+		# than the server lists in one query before timing out, and would
+		# then fail the same way every run. Oldest first, a shorter listing
+		# is only a window that moves less far, so a failed one is asked
+		# again for half as many.
+		repo_limit="$limit"
+		until listed="$(desk_follow_gh pr list --repo "$repo" --state all --limit "$repo_limit" --search "$search" \
+			--json "$DESK_FOLLOW_PR_FIELDS" 2> "$out.err")"; do
+			err="$(head -n 1 "$out.err" 2> /dev/null | cut -c 1-200)"
+			rm -f "$out.err"
+			if [ "$order" != "oldest_first" ] || [ "$repo_limit" -lt 20 ]; then
+				desk_log "$pass" "follow: gh pr list failed for $repo${err:+: $err}"
+				return 1
+			fi
+			desk_log "$pass" "follow: gh pr list failed for $repo at $repo_limit PRs${err:+ ($err)} — asking for $((repo_limit / 2))"
+			repo_limit=$((repo_limit / 2))
+		done
+		rm -f "$out.err"
 		jq -e 'type == "array"' > /dev/null 2>&1 <<< "$listed" || { desk_log "$pass" "follow: gh pr list for $repo was not a list"; return 1; }
-		if [ "$order" = "oldest_first" ] && jq -e --argjson l "$limit" 'length >= $l' > /dev/null 2>&1 <<< "$listed"; then
+		if [ "$order" = "oldest_first" ] && jq -e --argjson l "$repo_limit" 'length >= $l' > /dev/null 2>&1 <<< "$listed"; then
 			reached="$(jq -r '[.[].updatedAt | fromdateiso8601] | max' <<< "$listed" 2> /dev/null)"
-			desk_log "$pass" "follow: $repo reached the $limit-PR limit; the window moves only to its newest update listed, and the next run carries on from there"
+			desk_log "$pass" "follow: $repo reached the $repo_limit-PR limit; the window moves only to its newest update listed, and the next run carries on from there"
 			if [[ "$reached" =~ ^[0-9]+$ ]] && { [ -z "$DESK_FOLLOW_PRS_REACHED" ] || [ "$reached" -lt "$DESK_FOLLOW_PRS_REACHED" ]; }; then
 				DESK_FOLLOW_PRS_REACHED="$reached"
 			fi
