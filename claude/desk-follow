@@ -1,17 +1,19 @@
 #!/usr/bin/env bash
-# desk-follow: the follow list a desk follow pass forwards ticket movement
-# from (docs/desk.md, "The follow pass"). Installed as ~/.local/bin/desk-follow.
+# desk-follow: the follow list a desk follow pass forwards ticket, repo and
+# Slack news from (docs/desk.md, "The follow pass"). Installed as ~/.local/bin/desk-follow.
 #
-#   desk-follow add [--session <id|name>] [--label <text>] [--related <KEY>...] [--repo <owner/name>]... [<KEY>...]
-#   desk-follow remove [--session <id|name>] [--repo <owner/name>]... [<KEY>...]
+#   desk-follow add [--session <id|name>] [--label <text>] [--related <KEY>...] [--repo <owner/name>]... [--slack <channel|thread>]... [<KEY>...]
+#   desk-follow remove [--session <id|name>] [--repo <owner/name>]... [--slack <channel|thread>]... [<KEY>...]
 #   desk-follow list [--json]
 #   desk-follow run [--dry-run] [--lookback-minutes N]
 #
 # --session defaults to $CLAUDE_CODE_SESSION_ID, which Claude Code sets in
 # its Bash tool's environment, so a session can register itself. `--repo`
 # follows a whole GitHub repo: every PR in it, whatever its title, and its
-# failed CI runs; repeat it for more than one. `remove` without keys or
-# repos stops the whole follow; with some, drops only those.
+# failed CI runs; repeat it for more than one. `--slack` follows a Slack
+# channel, by its id or its link, or one thread, by a link to a message in
+# it or as <channel id>:<parent ts>. `remove` without keys, repos or Slack
+# sources stops the whole follow; with some, drops only those.
 # `run` runs the follow pass now (`desk-run <pass>`, the pass of kind
 # "follow" in $DESK_CONFIG), outside its
 # schedule. With $DESK_CONFIG unset, `run` uses ${XDG_CONFIG_HOME:-~/.config}/desk/config.json if it exists.
@@ -38,6 +40,7 @@ label=""
 keys=()
 related=()
 repos=()
+slack=()
 json=""
 run_args=()
 while [ $# -gt 0 ]; do
@@ -45,6 +48,10 @@ while [ $# -gt 0 ]; do
 		--session) [ $# -ge 2 ] || usage; session="$2"; shift 2 ;;
 		--label) [ $# -ge 2 ] || usage; label="$2"; shift 2 ;;
 		--repo) [ $# -ge 2 ] || usage; repos+=("$2"); shift 2 ;;
+		--slack)
+			[ $# -ge 2 ] || usage
+			ref="$(desk_follow_slack_ref "$2")" || { echo "desk-follow: '$2' is not a Slack channel id, a Slack link, or <channel id>:<thread ts>" >&2; exit 2; }
+			slack+=("$ref"); shift 2 ;;
 		--related)
 			shift
 			while [ $# -gt 0 ] && [[ "$1" != --* ]]; do related+=("$(tr '[:lower:]' '[:upper:]' <<< "$1")"); shift; done
@@ -71,11 +78,11 @@ case "$cmd" in
 	add)
 		need_session
 		desk_follow_cli_add "$session" "$label" "$(join_csv "${keys[@]+"${keys[@]}"}")" "$(join_csv "${related[@]+"${related[@]}"}")" \
-			"$(join_csv "${repos[@]+"${repos[@]}"}")"
+			"$(join_csv "${repos[@]+"${repos[@]}"}")" "$(join_csv "${slack[@]+"${slack[@]}"}")"
 		;;
 	remove)
 		need_session
-		desk_follow_cli_remove "$session" "$(join_csv "${keys[@]+"${keys[@]}"}" "${related[@]+"${related[@]}"}" "${repos[@]+"${repos[@]}"}")"
+		desk_follow_cli_remove "$session" "$(join_csv "${keys[@]+"${keys[@]}"}" "${related[@]+"${related[@]}"}" "${repos[@]+"${repos[@]}"}" "${slack[@]+"${slack[@]}"}")"
 		;;
 	list) desk_follow_cli_list "$json" ;;
 	run)

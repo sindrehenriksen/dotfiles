@@ -1,14 +1,17 @@
 #!/usr/bin/env bash
-# The follow pass: forwards movement on the tickets a Claude Code session
-# tracks to that session, as a cross-session message. docs/desk.md, "The
+# The follow pass: forwards movement on the tickets, GitHub repos and Slack
+# channels or threads a Claude Code session follows to that session, as a
+# cross-session message. docs/desk.md, "The
 # follow pass", has the whole contract; this file is its runner and the
 # follow list's CLI (claude/desk-follow).
 #
 # Two files, both machine-local, because session ids only exist on this
 # machine:
 #   $DESK_FOLLOW_FILE        the follow list, edited only by the CLI:
-#                           {"entries": {<session id>: {label, keys, related, repos, added_at}}}
-#                           (repos: whole GitHub repositories, as owner/name)
+#                           {"entries": {<session id>: {label, keys, related, repos, slack, added_at}}}
+#                           (repos: whole GitHub repositories, as owner/name;
+#                           slack: channel ids, and <channel id>:<parent ts>
+#                           for one thread)
 #   $DESK_FOLLOW_STATE_FILE  the runner's own state: snapshots, scope, the
 #                           per-session queues, last runs. Written only by
 #                           a non-dry run, under the follow lock.
@@ -22,6 +25,8 @@ DESK_FOLLOW_FILE="${DESK_FOLLOW_FILE:-$DESK_STATE_DIR/follow.json}"
 DESK_FOLLOW_STATE_FILE="${DESK_FOLLOW_STATE_FILE:-$DESK_STATE_DIR/follow-state.json}"
 DESK_GH_BIN="${DESK_GH_BIN:-gh}"
 DESK_FOLLOW_DIFF_JQ="$DESK_LIB_DIR/follow-diff.jq"
+# shellcheck source=follow-slack.sh
+source "$DESK_LIB_DIR/follow-slack.sh"
 
 # The first characters of every follow message. A follow session's
 # preamble names it, and a hook can tell a follow turn by it.
@@ -107,7 +112,8 @@ desk_follow_intro_text() {
 		"This session is now a followed session. It follows "
 		+ ([(if (.keys | length) > 0 then "\(.keys | join(", ")) (with their children, grandchildren and linked tickets)" else empty end),
 		    (if ((.related // []) | length) > 0 then "\(.related | join(", ")) (only as themselves)" else empty end),
-		    (if ((.repos // []) | length) > 0 then "the GitHub repo\(if (.repos | length) > 1 then "s" else "" end) \(.repos | join(", ")) (every PR in it, and its failed CI runs)" else empty end)] | join(", and "))
+		    (if ((.repos // []) | length) > 0 then "the GitHub repo\(if (.repos | length) > 1 then "s" else "" end) \(.repos | join(", ")) (every PR in it, and its failed CI runs)" else empty end),
+		    (if ((.slack // []) | length) > 0 then "in Slack \(.slack | join(", ")) (new messages in a channel and replies in its recent threads; new replies in a thread)" else empty end)] | join(", and "))
 		+ ". A background follow pass sends it updates on them as [desk-follow] messages. Load the desk-follow skill now if it is not loaded: it says how to take an update in and when to involve the user. On /handoff or before compacting, carry what its \"Before compacting\" section lists."' <<< "$1"
 }
 
@@ -154,50 +160,56 @@ _desk_follow_load_send_libs() {
 	done
 }
 
-# desk_follow_cli_add <session id> <label or ""> <keys csv> <related csv> [<repos csv>]
+# desk_follow_cli_add <session id> <label or ""> <keys csv> <related csv> [<repos csv>] [<slack refs csv>]
 # From outside the session (its id is not $CLAUDE_CODE_SESSION_ID), a new
-# follow, new keys or a new repo also send the session its intro.
+# follow, new keys, a new repo or a new Slack source also send the session
+# its intro. A Slack ref is as desk_follow_slack_ref prints it.
 desk_follow_cli_add() {
-	local sid="$1" label="$2" keys="$3" related="$4" repos="${5:-}" k entries before after
+	local sid="$1" label="$2" keys="$3" related="$4" repos="${5:-}" slack="${6:-}" k entries before after
 	for k in ${keys//,/ } ${related//,/ }; do
 		_desk_follow_valid_key "$k" || { echo "desk-follow: '$k' is not a ticket key (like ABC-123)" >&2; return 2; }
 	done
 	for k in ${repos//,/ }; do
 		_desk_follow_valid_repo "$k" || { echo "desk-follow: '$k' is not a GitHub repo (like owner/name)" >&2; return 2; }
 	done
-	[ -n "$keys$related$repos" ] || { echo "desk-follow: name at least one ticket key or --repo" >&2; return 2; }
+	for k in ${slack//,/ }; do
+		[ "$(desk_follow_slack_ref "$k")" = "$k" ] || { echo "desk-follow: '$k' is not a Slack channel id or <channel id>:<thread ts>" >&2; return 2; }
+	done
+	[ -n "$keys$related$repos$slack" ] || { echo "desk-follow: name at least one ticket key, --repo or --slack" >&2; return 2; }
 	if [ -z "$label" ]; then
 		label="$(_desk_follow_reader resolve "$sid" 2> /dev/null | jq -r '.name // empty' 2> /dev/null)"
 		[ -n "$label" ] || label="${sid:0:8}"
 	fi
 	entries="$(desk_follow_entries)"
-	before="$(jq -c --arg sid "$sid" '.[$sid] // {} | [(.keys // []), (.related // []), (.repos // [])]' <<< "$entries")"
+	before="$(jq -c --arg sid "$sid" '.[$sid] // {} | [(.keys // []), (.related // []), (.repos // []), (.slack // [])]' <<< "$entries")"
 	# A repo is one repo whatever its case, as GitHub has it; the first
 	# spelling stays.
 	entries="$(jq -c --arg sid "$sid" --arg label "$label" --arg keys "$keys" --arg related "$related" --arg repos "$repos" \
-		--argjson now "$(desk_now)" '
+		--arg slack "$slack" --argjson now "$(desk_now)" '
 		def csv: split(",") | map(select(. != ""));
 		.[$sid] = ((.[$sid] // {added_at: $now, keys: [], related: []})
 			| .label = $label
 			| .keys = ((.keys + ($keys | csv)) | unique)
 			| .related = ((.related + ($related | csv)) - .keys | unique)
 			| .repos = (((.repos // []) + ($repos | csv)) | reduce .[] as $r ([]; if any(.[]; ascii_downcase == ($r | ascii_downcase)) then . else . + [$r] end))
-			| if (.repos | length) == 0 then del(.repos) else . end)' <<< "$entries")"
-	after="$(jq -c --arg sid "$sid" '.[$sid] | [.keys, .related, (.repos // [])]' <<< "$entries")"
+			| if (.repos | length) == 0 then del(.repos) else . end
+			| .slack = (((.slack // []) + ($slack | csv)) | unique)
+			| if (.slack | length) == 0 then del(.slack) else . end)' <<< "$entries")"
+	after="$(jq -c --arg sid "$sid" '.[$sid] | [.keys, .related, (.repos // []), (.slack // [])]' <<< "$entries")"
 	# Inside the target session itself the skill is loaded already, and an
 	# intro still waiting is moot.
 	if [ "$sid" = "${CLAUDE_CODE_SESSION_ID:-}" ]; then
 		entries="$(jq -c --arg sid "$sid" '.[$sid] |= del(.intro_due_at)' <<< "$entries")"
 	fi
 	_desk_follow_write_list "$entries"
-	jq -r --arg sid "$sid" '.[$sid] | "following \(.keys + .related + (.repos // []) | join(", ")) for \(.label)"' <<< "$entries"
+	jq -r --arg sid "$sid" '.[$sid] | "following \(.keys + .related + (.repos // []) + (.slack // []) | join(", ")) for \(.label)"' <<< "$entries"
 	if [ "$before" != "$after" ] && [ "$sid" != "${CLAUDE_CODE_SESSION_ID:-}" ]; then
 		desk_follow_cli_intro "$sid" "$(jq -c --arg sid "$sid" '.[$sid]' <<< "$entries")"
 	fi
 }
 
-# desk_follow_cli_remove <session id> [keys and repos csv]: without any,
-# the whole follow goes; with some, only those.
+# desk_follow_cli_remove <session id> [keys, repos and Slack refs csv]:
+# without any, the whole follow goes; with some, only those.
 desk_follow_cli_remove() {
 	local sid="$1" keys="${2:-}" entries
 	entries="$(desk_follow_entries)"
@@ -212,11 +224,13 @@ desk_follow_cli_remove() {
 		  | .[$sid].keys -= $drop | .[$sid].related -= $drop
 		  | .[$sid].repos = [(.[$sid].repos // [])[] | select(ascii_downcase as $r | $drop_lc | index($r) | not)]
 		  | if (.[$sid].repos | length) == 0 then .[$sid] |= del(.repos) else . end
-		  | if ((.[$sid].keys + .[$sid].related + (.[$sid].repos // [])) | length) == 0 then del(.[$sid]) else . end
+		  | .[$sid].slack = ((.[$sid].slack // []) - $drop)
+		  | if (.[$sid].slack | length) == 0 then .[$sid] |= del(.slack) else . end
+		  | if ((.[$sid].keys + .[$sid].related + (.[$sid].repos // []) + (.[$sid].slack // [])) | length) == 0 then del(.[$sid]) else . end
 		  end' <<< "$entries")"
 	_desk_follow_write_list "$entries"
 	if jq -e --arg sid "$sid" 'has($sid)' <<< "$entries" > /dev/null; then
-		jq -r --arg sid "$sid" '.[$sid] | "still following \(.keys + .related + (.repos // []) | join(", ")) for \(.label)"' <<< "$entries"
+		jq -r --arg sid "$sid" '.[$sid] | "still following \(.keys + .related + (.repos // []) + (.slack // []) | join(", ")) for \(.label)"' <<< "$entries"
 	else
 		echo "stopped following for session ${sid:0:8}"
 	fi
@@ -236,6 +250,9 @@ desk_follow_cli_list() {
 		[to_entries[] | .key as $sid | .value
 		 | . + {session_id: $sid,
 		        name: ($live[$sid].name // null), live: ($live[$sid].live // false),
+		        slack_named: [(.slack // [])[] | . as $r | ($r | split(":")) as $p
+		            | ($s.slack.sources[$p[0]].name // $p[0])
+		              + (if ($p | length) > 1 then " thread " + ($s.slack.sources[$r].title // $p[1] | tojson) else "" end)],
 		        queued: (($s.queues[$sid].changes // []) | length),
 		        queued_since: ($s.queues[$sid].queued_since // null),
 		        last_sent: ($s.last_sent[$sid] // null),
@@ -247,7 +264,7 @@ desk_follow_cli_list() {
 	jq -r '
 		if length == 0 then "nothing is followed"
 		else .[] | "\(.label)  (\(.session_id[0:8]), \(if .live then "live" else "not running" end)\(if .name and .name != .label then ", now named " + .name else "" end))\n"
-			+ "  tracks: \(if (.keys | length) > 0 then .keys | join(", ") else "no tickets" end)\(if (.related | length) > 0 then "; related: " + (.related | join(", ")) else "" end)\(if ((.repos // []) | length) > 0 then "; repos: " + (.repos | join(", ")) else "" end)\n"
+			+ "  tracks: \(if (.keys | length) > 0 then .keys | join(", ") else "no tickets" end)\(if (.related | length) > 0 then "; related: " + (.related | join(", ")) else "" end)\(if ((.repos // []) | length) > 0 then "; repos: " + (.repos | join(", ")) else "" end)\(if (.slack_named | length) > 0 then "; slack: " + (.slack_named | join(", ")) else "" end)\n"
 			+ "  queued: \(.queued)\(if .queued_since then " since " + (.queued_since | strflocaltime("%a %d %b %H:%M")) else "" end)"
 			+ "; last update sent: \(if .last_sent then (.last_sent.at | strflocaltime("%a %d %b %H:%M")) else "never" end)"
 			+ (if .all_closed_since then "\n  everything it tracks is closed (since \(.all_closed_since | strflocaltime("%d %b"))): retire it?" else "" end)
@@ -937,8 +954,10 @@ desk_follow_message() {
 		| ([$c[].ref] | unique) as $refs
 		| ($q.dropped // 0) as $dropped
 		| ($c | to_entries | group_by(.value.group // .value.ref) | sort_by(.[0].key) | map(map(.value))) as $groups
-		| [$groups[] | if length == 1 then (.[0] | "- \(.at | when) \(.ref) \"\(.title // "")\"\(ctx_of): \(.what)")
-		               else "- \(.[0].ref) \"\(.[-1].title // "")\"\(.[0] | ctx_of):\n" + (map("  - \(.at | when): \(.what)") | join("\n")) end] as $lines
+		# A message in a Slack channel has no title.
+		| def titled: if (.title // "") == "" then "" else " \"\(.title)\"" end;
+		  [$groups[] | if length == 1 then (.[0] | "- \(.at | when) \(.ref)\(titled)\(ctx_of): \(.what)")
+		               else "- \(.[0].ref)\(.[-1] | titled)\(.[0] | ctx_of):\n" + (map("  - \(.at | when): \(.what)") | join("\n")) end] as $lines
 		| ("\($marker) Update for \($e.label): \($c | length) change\(if ($c | length) == 1 then "" else "s" end) on \($refs | .[0:6] | join(", "))\(if ($refs | length) > 6 then " and more" else "" end). Not from the user.") as $head
 		| ($preamble | sub("\\s+$"; "")) as $pre
 		| ("Changes since \(if $q.since then ($q.since | when) else "following started" end), oldest first:") as $intro
@@ -1222,17 +1241,24 @@ desk_follow_main() {
 			"$gh_since" "$work/runs.json" || gh_ok="false"
 	fi
 
+	# Slack: each followed channel's and thread's messages since the pass
+	# last read it; a source read for the first time is only recorded.
+	local slack_ok="true"
+	desk_follow_fetch_slack "$pass" "$pass_config" "$entries" "$(jq -c '.slack // {}' <<< "$state")" "$now" \
+		"${lookback:+$((now - lookback * 60))}" "$work" || slack_ok="false"
+
 	local new_state
 	jq -n --argjson entries "$entries" --slurpfile state <(printf '%s\n' "$state") \
 		--slurpfile scope "$work/scope.json" --slurpfile changes "$work/changes.json" --slurpfile prs "$work/prs.json" \
 		--slurpfile seed "$work/seed.json" --slurpfile runs "$work/runs.json" --argjson repo_info "$repo_info" \
+		--slurpfile slack "$work/slack.json" \
 		--argjson now "$now" --argjson jira_since "${jira_since:-$now}" --argjson gh_since "$gh_since" \
 		--argjson baseline_jira "$baseline_jira" --argjson baseline_gh "$baseline_gh" \
 		--argjson queue_max "$(jq -r '.queue_max // 200' <<< "$pass_config")" \
 		--argjson skip "$(jq -c '.skip // {}' <<< "$pass_config")" --argjson self "$(jq -c '.self // []' <<< "$pass_config")" \
 		--arg cl "$(desk_follow_changelog_configured "$pass_config" && echo yes || echo no)" --argjson lookback "$([ -n "$lookback" ] && echo true || echo false)" '
 		{entries: $entries, state: $state[0], scope_issues: $scope[0], change_issues: $changes[0], prs: $prs[0],
-		 seed_prs: $seed[0].prs, runs: $runs[0], follow_repos: $repo_info,
+		 seed_prs: $seed[0].prs, runs: $runs[0], follow_repos: $repo_info, slack_events: $slack[0].events,
 		 now: $now, jira_since: $jira_since, gh_since: $gh_since,
 		 baseline_jira: $baseline_jira, baseline_gh: $baseline_gh, queue_max: $queue_max,
 		 skip: $skip, self: $self, lookback: $lookback,
@@ -1257,8 +1283,9 @@ desk_follow_main() {
 		fi
 	fi
 	new_state="$(jq -c --argjson k "$keys_sig" --argjson c "$children_sig" --argjson now "$now" --arg jira_ok "$jira_ok" --arg gh_ok "$gh_ok" \
-		--argjson gh_through "$gh_through" --arg lookback "$lookback" '
-		.scope.keys_sig = (if .scope.refreshed_at == $now then $k else .scope.keys_sig end)
+		--argjson gh_through "$gh_through" --arg lookback "$lookback" --slurpfile slack "$work/slack.json" '
+		.slack = $slack[0].state
+		| .scope.keys_sig = (if .scope.refreshed_at == $now then $k else .scope.keys_sig end)
 		| .scope.children_sig = (if .scope.refreshed_at == $now then $c else .scope.children_sig end)
 		| if $lookback != "" then . else
 		    (if $jira_ok == "true" then .last_jira_ok = $now else . end)
@@ -1365,9 +1392,9 @@ desk_follow_main() {
 	local cost
 	cost="$(jq -s 'add // 0' "$DESK_FOLLOW_COSTS" 2> /dev/null || echo 0)"
 	local result="ok"
-	{ [ "$jira_ok" = "true" ] && [ "$gh_ok" = "true" ]; } || result="partial"
+	{ [ "$jira_ok" = "true" ] && [ "$gh_ok" = "true" ] && [ "$slack_ok" = "true" ]; } || result="partial"
 	if [ "$dry_run" = "true" ]; then
-		desk_log "$pass" "follow: dry run — nothing sent, no state written (jira $jira_ok, github $gh_ok, cost \$$cost)"
+		desk_log "$pass" "follow: dry run — nothing sent, no state written (jira $jira_ok, github $gh_ok, slack $slack_ok, cost \$$cost)"
 		return 0
 	fi
 	new_state="$(jq -c --argjson now "$now" --arg r "$result" --argjson sent "$sent" --argjson held "$held" --argjson cost "$cost" \

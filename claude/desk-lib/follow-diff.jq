@@ -3,7 +3,7 @@
 # queued per followed session. Called by claude/desk-lib/follow.sh on one
 # input object (a file, since these run past what an argument holds) with:
 #
-#   entries        the follow list: {<session id>: {label, keys, related}}
+#   entries        the follow list: {<session id>: {label, keys, related, repos, slack}}
 #   $state          the previous follow state (see follow.sh)
 #   $scope_issues   normalized tickets from the scope query, or null when it
 #                   did not run this time
@@ -15,6 +15,8 @@
 #                   desk_follow_fetch_runs), or null when that fetch failed
 #   follow_repos    {<repo, lowercased>: {default_branch}} for the followed
 #                   repos, kept in the state as it is
+#   slack_events    the new Slack messages (follow-slack.jq), each naming
+#                   the followed channel or thread it came from as `src`
 #   $now, $jira_since, $gh_since   epoch seconds; an item first seen with a
 #                   creation time after its source's `since` counts as new
 #   $baseline_jira, $baseline_gh   true on a source's first run: snapshots
@@ -59,6 +61,7 @@
 | (.lookback // false) as $lookback
 | (.self // []) as $self
 | (.seed_prs // []) as $seed_prs | .runs as $runs | (.follow_repos // {}) as $follow_repos
+| (.slack_events // []) as $slack_events
 |
 
 # HTML comments (bots' hidden metadata) are dropped: they carry nothing a
@@ -426,6 +429,28 @@ def also_pr($sid; $maps; $keys; $repo):
 	[$entries | to_entries[] | select(.key != $sid) | .key as $o | .value as $e
 	 | select(any($keys[]; has_ticket($e; $maps; .; null)) or follows_repo($e; $repo)) | $o];
 
+# --- Slack messages ----------------------------------------------------------------
+
+# A session's Slack changes: the new messages of the channels and threads
+# it follows, a channel's own under the channel and a thread's replies under
+# the thread. A reply reached both through its channel and through its
+# followed thread is one change. The user's own, bots' and the notices of
+# someone joining or leaving are counted.
+def slack_changes($sid; $e):
+	[ $slack_events[] | . as $ev
+	  | select((($e.slack // []) | index($ev.src)) != null)
+	  | [$entries | to_entries[] | select(.key != $sid and (((.value.slack // []) | index($ev.src)) != null)) | .key] as $also
+	  | {at: $ev.at, uid: "\($ev.cid):\($ev.ts)",
+	     ref: (($ev.name // $ev.cid) + (if $ev.thread != null then " thread" else "" end)),
+	     title: ($ev.title // ""),
+	     context: ("Slack \($ev.cid)" + (if $ev.thread != null then ", thread \($ev.thread)" else "" end)),
+	     what: "\(if $ev.kind == "reply" then "reply" else "new message" end) by \($ev.author): \"\($ev.body | excerpt(500))\"",
+	     group: ("slack:\($ev.cid)" + (if $ev.thread != null then ":\($ev.thread)" else "" end)),
+	     skip: (if $ev.system then "channel joins" elif is_self($ev.author) then "own posts"
+	            elif is_bot($ev.author; $ev.body) then "bot posts" else null end)}
+	    + (if ($also | length) > 0 then {also: $also} else {} end) ]
+	| group_by(.uid) | map((map(select(.group | test(":.*:"))) | first) // first) | map(del(.uid));
+
 # --- attribution and queues --------------------------------------------------
 
 # How a ticket relates to a session's own keys, for the change line: "" for
@@ -527,7 +552,8 @@ scope_maps as $maps
 	       | {at: ($ev.at // $now), ref: $ev.ref, title: $ev.title, context: "in \($ev.repo)",
 	          what: $ev.what, group: $ev.group, skip: $ev.skip}
 	         + (if $ev.url then {url: $ev.url} else {} end)
-	         + (if ($also | length) > 0 then {also: $also} else {} end) ]) as $events
+	         + (if ($also | length) > 0 then {also: $also} else {} end) ]
+	   + slack_changes($sid; $e)) as $events
 	| [$events[] | select(.skip == null) | del(.skip)] as $new
 	| ($queues[$sid] // {changes: [], dropped: 0}) as $q
 	| (($q.changes // []) + $new | sort_by(.at)) as $all
