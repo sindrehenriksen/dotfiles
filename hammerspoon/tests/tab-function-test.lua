@@ -831,6 +831,23 @@ n_tasks = #tasks_started
 DeskStale.check_focused()
 last_task().done(1, "", "Ghostty is not running")
 assert_eq("...as is one Ghostty cannot name", n_tasks + 1, #tasks_started)
+-- The focused terminal's id is kept current in the session's record.
+local TID = "AB12CD34-0000-4000-8000-000000000001"
+DeskStale.recorded = {}
+n_tasks = #tasks_started
+DeskStale.check_focused()
+last_task().done(0, "4242\t" .. TID .. "\n", "")
+last_task().done(0, S1 .. "\t/b\tnotes\n", "")
+local rec = last_task()
+assert_eq("a focused tab's terminal id is recorded for its session", DeskStale.recorder .. " terminal " .. S1 .. " " .. TID,
+  rec.path .. " " .. table.concat(rec.args, " "))
+rec.done(0, "", "")
+n_tasks = #tasks_started
+DeskStale.check_focused()
+last_task().done(0, "4242\t" .. TID .. "\n", "")
+last_task().done(0, S1 .. "\t/b\tnotes\n", "")
+assert_eq("...once: the same id again records nothing more", n_tasks + 2, #tasks_started)
+
 local alerts = {}
 local real_alert = hs.alert.show
 hs.alert.show = function(text) alerts[#alerts + 1] = text; return "alert-uuid" end

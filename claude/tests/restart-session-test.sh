@@ -90,7 +90,7 @@ spawn() { # sid [stubborn]
 	on_a_terminal "$TMP/bin/claude" -c '
 		if [ "$4" = stubborn ]; then trap "" TERM
 		else trap "\"\$2\" end < \"\$1.end.json\"; rm -f \"\$3/sessions/\$\$.json\"; exit 0" TERM; fi
-		"$2" start < "$1.start.json" > /dev/null
+		DESK_CLOSE_TAB_BIN=/usr/bin/false "$2" start < "$1.start.json" > /dev/null
 		echo $$ > "$1.pid"
 		while :; do sleep 1 & wait $!; done' _ "$tag" "$RECORDER" "$CLAUDE_CONFIG_DIR" "$mode" < /dev/null > /dev/null 2>&1 &
 	echo "$!" >> "$TMP/spawned"

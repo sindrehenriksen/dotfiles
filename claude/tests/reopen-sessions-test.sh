@@ -77,9 +77,45 @@ EOF
 chmod +x "$TMP/opener"
 export DESK_OPEN_TAB_BIN="$TMP/opener"
 
+# The tab helper and the process table behind it. `pid` answers for the
+# terminals listed in $TMP/terminals (7000, a login shell at its prompt;
+# 7001 for those in $TMP/busy-terminals, which run vim); no list means
+# Ghostty is not running. `type` logs, and by $TMP/type-mode fails or hangs;
+# otherwise it brings the session it resumes live, as the resume would.
+mkdir -p "$TMP/bin"
+cat > "$TMP/bin/tab-helper" <<EOF
+#!/usr/bin/env bash
+case "\$1" in
+	pid)
+		[ -f "$TMP/terminals" ] || { echo "DeskTerminalPid: Ghostty is not running" >&2; exit 1; }
+		if grep -qxF "\$2" "$TMP/busy-terminals" 2> /dev/null; then echo 7001; exit 0; fi
+		grep -qxF "\$2" "$TMP/terminals" || { echo "DeskTerminalPid: no Ghostty terminal has that id any more" >&2; exit 1; }
+		echo 7000 ;;
+	type)
+		printf '%s\t%s\t%s\n' "\$2" "\$3" "\$4" >> "$TMP/typed"
+		case "\$(cat "$TMP/type-mode" 2> /dev/null)" in
+			fail) echo "DeskTypeInTerminal: moved" >&2; exit 1 ;;
+			hang) sleep 60 ;;
+		esac
+		sed -n "s/.*--resume '\\([0-9a-f-]*\\)'.*/\\1/p" <<< "\$4" >> "$TMP/opened-ids" ;;
+esac
+exit 0
+EOF
+chmod +x "$TMP/bin/tab-helper"
+export DESK_CLOSE_TAB_BIN="$TMP/bin/tab-helper"
+cat > "$TMP/bin/ps" <<'EOF'
+#!/usr/bin/env bash
+echo "7000 1 -zsh"
+echo "7001 1 vim notes.md"
+EOF
+chmod +x "$TMP/bin/ps"
+export RESTART_SESSION_PS="$TMP/bin/ps"
+export REOPEN_PROMPT_SECS=4
+
 # --- fixtures ---------------------------------------------------------------
 
-ev_start() { jq -cn --arg b "$1" --argjson t "$2" --arg s "${3:-resume}" '{event:"start", time:$t, source:$s, cwd:"", transcript_path:"", boot:$b}'; }
+ev_start() { jq -cn --arg b "$1" --argjson t "$2" --arg s "${3:-resume}" --arg term "${4:-}" '{event:"start", time:$t, source:$s, cwd:"", transcript_path:"", boot:$b} + (if $term == "" then {} else {terminal: $term} end)'; }
+ev_terminal() { jq -cn --argjson t "$1" --arg term "$2" '{event:"terminal", time:$t, terminal:$term}'; }
 ev_end() { jq -cn --argjson t "$1" --arg r "${2:-other}" '{event:"end", time:$t, reason:$r}'; }
 epoch() { date -u -j -f "%Y-%m-%dT%H:%M:%SZ" "$1" +%s 2> /dev/null || date -u -d "$1" +%s; }
 
@@ -103,6 +139,7 @@ reader_line() {
 }
 
 reset_fixtures() {
+	rm -rf "$TMP/terminals" "$TMP/busy-terminals" "$TMP/typed" "$TMP/type-mode"
 	rm -rf "$CLAUDE_SESSION_STORE" "$TMP/reader.jsonl" "$TMP/reader-calls" "$TMP/opener-calls" \
 		"$TMP/opener-stdin" "$TMP/opener-mode" "$TMP/opened-ids" "$TMP/hung" "$TMP/reader-fail"
 	mkdir -p "$CLAUDE_SESSION_STORE"
@@ -383,6 +420,76 @@ assert_eq "a plain finish is not rung, and says so" "false 0" \
 assert_eq "an already-running session is never rung; one rang in all" "0 1" \
 	"$(wc -c < "$REOPEN_TTY_DIR/ttys${LIVE:0:8}" | tr -d ' ') $(jq '.summary.rang' <<< "$json")"
 unset REOPEN_TTY_DIR
+
+echo
+echo "=== a session goes back into the tab Ghostty restored for it ==="
+T_A=AAAAAAAA-1111-4111-8111-000000000001
+T_B=AAAAAAAA-1111-4111-8111-000000000002
+T_C=AAAAAAAA-1111-4111-8111-000000000003
+T_D=AAAAAAAA-1111-4111-8111-000000000004
+T_OLD=AAAAAAAA-1111-4111-8111-0000000000ff
+S_REST=a1111111-0000-4000-8000-000000000001 # its tab came back at a prompt
+S_GONE=a2222222-0000-4000-8000-000000000001 # its tab did not come back
+S_BUSY=a3333333-0000-4000-8000-000000000001 # its tab is running something
+S_NONE=a4444444-0000-4000-8000-000000000001 # recorded no terminal
+S_MOVED=a5555555-0000-4000-8000-000000000001 # moved: the newest id wins
+S_RIVAL=a6666666-0000-4000-8000-000000000001 # claims the same tab, recorded earlier
+terminal_fixtures() {
+	reset_fixtures
+	local S="$CLAUDE_SESSION_STORE"
+	ev_start "$PREV_BOOT" 1790100000 resume "$T_A" > "$S/$S_REST.jsonl"
+	reader_line "$S_REST" 2026-10-06T09:00:00Z
+	ev_start "$PREV_BOOT" 1790100000 resume "$T_B" > "$S/$S_GONE.jsonl"
+	reader_line "$S_GONE" 2026-10-06T08:59:00Z
+	ev_start "$PREV_BOOT" 1790100000 resume "$T_C" > "$S/$S_BUSY.jsonl"
+	reader_line "$S_BUSY" 2026-10-06T08:58:00Z
+	ev_start "$PREV_BOOT" 1790100000 > "$S/$S_NONE.jsonl"
+	reader_line "$S_NONE" 2026-10-06T08:57:00Z
+	{ ev_start "$PREV_BOOT" 1790100000 resume "$T_OLD"; ev_terminal 1790150000 "$T_D"; } > "$S/$S_MOVED.jsonl"
+	reader_line "$S_MOVED" 2026-10-06T08:56:00Z
+	ev_start "$PREV_BOOT" 1790090000 resume "$T_A" > "$S/$S_RIVAL.jsonl"
+	reader_line "$S_RIVAL" 2026-10-06T08:55:00Z
+	printf '%s\n' "$T_A" "$T_C" "$T_D" > "$TMP/terminals"
+	printf '%s\n' "$T_C" > "$TMP/busy-terminals"
+}
+terminal_fixtures
+out=$("$CLI" --dry-run)
+assert_eq "a dry run says it would use the restored tab" "would-open true" 	"$(status_of "$out" "$S_REST") $(detail_of "$out" "$S_REST" | grep -q 'would resume in its restored tab' && echo true || echo false)"
+assert_eq "a session whose tab did not come back goes in a new tab, saying why" "true" 	"$(detail_of "$out" "$S_GONE" | grep -q 'would resume in a new background tab (restored tab not found)' && echo true || echo false)"
+assert_eq "a tab busy with something is not typed into" "true" 	"$(detail_of "$out" "$S_BUSY" | grep -q 'not at an idle shell prompt' && echo true || echo false)"
+assert_eq "no recorded terminal: a new tab, as before" "would resume in a new background tab; no end recorded" 	"$(detail_of "$out" "$S_NONE")"
+assert_eq "the newest recorded id is the one looked for" "true" 	"$(detail_of "$out" "$S_MOVED" | grep -q 'its restored tab' && echo true || echo false)"
+assert_eq "two sessions naming one tab: the one recorded there last has it" "true" 	"$(detail_of "$out" "$S_RIVAL" | grep -q 'new background tab (another session was recorded in its tab since)' && echo true || echo false)"
+assert_eq "the summary counts restored-tab resumes" 2 "$(summary_field "$(tail -n 1 <<< "$out")" restored_tab)"
+assert_eq "a dry run types and opens nothing" "0 false" "$(opener_calls) $([ -e "$TMP/typed" ] && echo true || echo false)"
+
+out=$("$CLI" --json)
+typed_a="$(grep -F "$T_A" "$TMP/typed")"
+assert_eq "the resume is typed into the restored tab's shell, the way restart-session types it" "true" \
+	"$([[ "$typed_a" == "$T_A"$'\t'7000$'\t'" exec /bin/zsh -lic "*"cd "*"$WORK"*"claude --resume "*"$S_REST"*"exec /bin/zsh -il"* ]] && echo true || echo false)"
+assert_eq "...only for the sessions with a usable restored tab" "$T_A $T_D" "$(cut -f1 "$TMP/typed" | sort | paste -sd' ' -)"
+assert_eq "...and those are not given a new tab too" "0" "$(grep -cE "$S_REST|$S_MOVED" "$TMP/opener-calls" 2> /dev/null)"
+assert_eq "the others open new tabs" "4" "$(opener_calls)"
+assert_eq "the result says where each went" "restored-tab new-tab" \
+	"$(jq -r --arg a "$S_REST" '.sessions[] | select(.id == $a) | .placement' <<< "$out") $(jq -r --arg a "$S_GONE" '.sessions[] | select(.id == $a) | .placement' <<< "$out")"
+
+echo
+echo "=== a failed or uncertain typing ==="
+terminal_fixtures
+echo fail > "$TMP/type-mode"
+out=$("$CLI")
+assert_eq "a refused typing falls back to a new tab, saying so" "opened true" \
+	"$(status_of "$out" "$S_REST") $(detail_of "$out" "$S_REST" | grep -q 'not typed into its restored tab' && echo true || echo false)"
+terminal_fixtures
+echo hang > "$TMP/type-mode"
+out=$("$CLI")
+assert_eq "a typing that timed out is not repeated in a new tab" "failed 0" \
+	"$(status_of "$out" "$S_REST") $(grep -c "$S_REST" "$TMP/opener-calls" 2> /dev/null)"
+terminal_fixtures
+rm -f "$TMP/terminals"
+out=$("$CLI" --dry-run)
+assert_eq "with Ghostty unreachable everything falls back to new tabs" "0 6" \
+	"$(summary_field "$(tail -n 1 <<< "$out")" restored_tab) $(summary_field "$(tail -n 1 <<< "$out")" would_open)"
 
 echo
 echo "=== preflight failures ==="

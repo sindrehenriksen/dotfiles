@@ -32,6 +32,13 @@
 # content hash of each file a login shell is made of, but only size and
 # mtime for the secrets file (`shell`, desk-lib/start-state.sh has which).
 #
+# The start also records the Ghostty terminal the process runs in
+# (`terminal`, the id Ghostty keeps for a tab across a restore, asked of the
+# tab helper by tty and pid), so claude/reopen-sessions.sh can resume the
+# session in the tab Ghostty restored for it. A `terminal` event (verb
+# `terminal <session id> <terminal id>`) refreshes it later; the newest of
+# the two wins. The session-status.sh reader ignores it.
+#
 # Must never fail the session it's hooked into: every path exits 0, and
 # whatever goes wrong is logged instead of surfaced.
 set -u
@@ -144,6 +151,17 @@ warn_if_open_elsewhere() { # sid own_pid
     jq -cn --arg where "$where" '{systemMessage: ("This session is already open in another Claude Code process (\($where)). Both write the same transcript; close one of them.")}'
 }
 
+# The Ghostty terminal id of the tab pid $1 runs in on tty $2, or nothing:
+# not in Ghostty, no helper, or no answer in time (a hung Hammerspoon must
+# not hold the session's start).
+terminal_of() { # pid tty
+    local out
+    out=$(DESK_HS_TIMEOUT_SECS="${RECORDER_TERMINAL_TIMEOUT_SECS:-3}" \
+        "${DESK_CLOSE_TAB_BIN:-desk-close-tab.sh}" find "$2" "$1" 2>/dev/null </dev/null | head -n 1)
+    case "$out" in ''|*[!0-9A-Fa-f-]*) return 0 ;; esac
+    printf '%s' "$out"
+}
+
 start_event() {
     local input sid file
     input=$(cat)
@@ -178,16 +196,18 @@ start_event() {
         tty=$(ps -o tty= -p "$pid" 2>/dev/null | tr -d ' ')
         case "$tty" in '?'|'??') tty="" ;; esac
     fi
-    local account shell
+    local account shell terminal=""
+    [ -n "$pid" ] && [ -n "$tty" ] && terminal=$(terminal_of "$pid" "$tty")
     account=$(desk_current_account "${CLAUDE_CONFIG_DIR:-}")
     shell=$(desk_shell_hashes 2>/dev/null)
     [ -n "$shell" ] || shell=null
-    printf '%s' "$input" | jq -c --arg boot "$(boot_id)" --argjson time "$(date +%s)" --arg override "$source_override" --arg pid "$pid" --arg tty "$tty" --arg account "$account" --argjson shell "$shell" '
+    printf '%s' "$input" | jq -c --arg boot "$(boot_id)" --argjson time "$(date +%s)" --arg override "$source_override" --arg pid "$pid" --arg tty "$tty" --arg terminal "$terminal" --arg account "$account" --argjson shell "$shell" '
         {event:"start", time:$time,
          source:(if $override != "" then $override else (.source // "unknown") end),
          cwd:(.cwd // ""), transcript_path:(.transcript_path // ""), boot:$boot}
         + (if $pid != "" then {pid: ($pid | tonumber)} else {} end)
         + (if $tty != "" then {tty: $tty} else {} end)
+        + (if $terminal != "" then {terminal: $terminal} else {} end)
         + (if $account != "" then {account: $account} else {} end)
         + (if $shell != null then {shell: $shell} else {} end)
     ' >> "$file" 2>>"$LOG_FILE"
@@ -235,7 +255,17 @@ close_failed_verb() {
     jq -cn --argjson time "$(date +%s)" '{event:"close-failed", time:$time}' >> "$file" 2>>"$LOG_FILE"
 }
 
+terminal_verb() { # session id, terminal id
+    local sid=$1 terminal=${2:-}
+    case "$sid" in ''|*/*|.*) log_error terminal "unsafe session_id: $sid"; return ;; esac
+    case "$terminal" in ''|*[!0-9A-Fa-f-]*) log_error terminal "bad terminal id"; return ;; esac
+    [ -f "$STORE_DIR/$sid.jsonl" ] || return 0
+    jq -cn --argjson time "$(date +%s)" --arg terminal "$terminal" \
+        '{event:"terminal", time:$time, terminal:$terminal}' >> "$STORE_DIR/$sid.jsonl" 2>>"$LOG_FILE"
+}
+
 case "${1:-}" in
+    terminal) terminal_verb "${2:-}" "${3:-}" ;;
     start) start_event ;;
     end) end_event ;;
     close) close_verb "${2:-}" ;;

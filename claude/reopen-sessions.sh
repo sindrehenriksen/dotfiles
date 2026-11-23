@@ -37,6 +37,19 @@
 # it), else 3. Idle ones are listed with their last-message date and not
 # opened, so the user decides.
 #
+# Restored tabs. After a crash or shutdown Ghostty restores its windows and
+# tabs as blank shells, each with the terminal id it had. The recorder notes
+# the id of the tab each session started or was resumed in (and refreshes it
+# when Hammerspoon sees the session's tab focused), so a session whose
+# newest recorded id belongs to a restored tab sitting idle at a shell
+# prompt is resumed there, typed the way restart-session.sh and ghostty-update
+# type it (desk-lib/tab-resume.sh), keeping its window and place among the
+# tabs. Anything else (no id, no such tab, a tab busy with something, a tab
+# another session also claims, the tab helper unreachable) opens a new tab
+# as before; the line's detail says which, and --dry-run says it too. A
+# resume typed by a helper call that timed out may have run, so that session
+# is reported failed rather than opened a second time elsewhere.
+#
 # Line format (tab-separated):
 #   <status> <id> <last message, local YYYY-MM-DD HH:MM> <idle working days>
 #   <name> <cwd> <detail>
@@ -66,6 +79,9 @@
 #
 # Overrides (tests): $DESK_READER, $DESK_OPEN_TAB_BIN, $CLAUDE_SESSION_STORE,
 # $CLAUDE_CONFIG_DIR, $REOPEN_NOW and $REOPEN_BOOT_TIME (epochs),
+# $DESK_CLOSE_TAB_BIN (the tab helper, default desk-close-tab.sh),
+# $RESTART_SESSION_PS, $REOPEN_PROMPT_SECS (how long a restored tab gets to
+# show a settled shell prompt, default 10),
 # $REOPEN_TAB_TIMEOUT_SECS (default 10), $REOPEN_CONFIRM_SECS (how long to
 # wait for an opened session to show as live, default 20; 0 skips the wait,
 # and with it the bell), $REOPEN_TTY_DIR (where the reader's tty names
@@ -100,6 +116,12 @@ DESK_KILL_GRACE_SECS=2
 source "$HERE/desk-lib/lock.sh"
 # shellcheck source=desk-lib/timeout.sh
 source "$HERE/desk-lib/timeout.sh"
+# shellcheck source=desk-lib/restartable.sh
+source "$HERE/desk-lib/restartable.sh"
+# shellcheck source=desk-lib/liveness.sh
+source "$HERE/desk-lib/liveness.sh"
+# shellcheck source=desk-lib/tab-resume.sh
+source "$HERE/desk-lib/tab-resume.sh"
 
 dry_run=false
 json=false
@@ -134,6 +156,8 @@ CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 # Above desk-open-tab.sh's own limit on hs (6s and a kill), so that one
 # reports first when it fires; this is the backstop for everything else.
 TAB_TIMEOUT="${REOPEN_TAB_TIMEOUT_SECS:-10}"
+TAB_HELPER="${DESK_CLOSE_TAB_BIN:-desk-close-tab.sh}"
+PROMPT_SECS="${REOPEN_PROMPT_SECS:-10}"
 CONFIRM_SECS="${REOPEN_CONFIRM_SECS:-20}"
 TTY_DIR="${REOPEN_TTY_DIR:-/dev}"
 BELL_HOOK="$HERE/hooks/input-bell.sh"
@@ -208,7 +232,11 @@ shopt -u nullglob
 
 # A file that does not parse (a record from before the recorder's format) is
 # skipped, like the reader does.
-RUNS_JQ='{runs: map(select(.event == "start") | {boot: ((.boot // "") | tostring)})}'
+# The terminal is the newest one a start or a terminal event names; a start
+# that found none makes it unknown, since an older id may be another tab's.
+RUNS_JQ='{runs: map(select(.event == "start") | {boot: ((.boot // "") | tostring)}),
+	terminal: ([.[] | select(.event == "start" or .event == "terminal")] | last | (.terminal // "") | tostring),
+	terminal_time: ([.[] | select(.event == "start" or .event == "terminal")] | last | (.time // 0))}'
 records=()
 # The latest event of any kind before this boot: the machine went down
 # somewhere between it and the boot itself.
@@ -273,15 +301,16 @@ older_count="$(jq --argjson r "$reader_json" '[.[] | select((.latest_boot == "ol
 # Selection, when --session narrows it: each selector must resolve to exactly
 # one candidate.
 results=()
-add_result() { # status id name cwd last_human idle_wd detail [confirmed] [bell_rung]
+add_result() { # status id name cwd last_human idle_wd detail [confirmed] [bell_rung] [placement]
 	results+=("$(jq -cn --arg status "$1" --arg id "$2" --arg name "$3" --arg cwd "$4" \
-		--arg lh "$5" --arg wd "$6" --arg detail "$7" --arg confirmed "${8:-}" --arg bell "${9:-}" '
+		--arg lh "$5" --arg wd "$6" --arg detail "$7" --arg confirmed "${8:-}" --arg bell "${9:-}" --arg placement "${10:-}" '
 		{status: $status, id: $id, name: $name, cwd: $cwd,
 		 last_human_message: ($lh | tonumber? // null),
 		 idle_working_days: ($wd | tonumber? // null),
 		 detail: $detail}
 		+ (if $confirmed == "" then {} else {confirmed_live: ($confirmed == "true")} end)
-		+ (if $bell == "" then {} else {bell_rung: ($bell == "true")} end)')")
+		+ (if $bell == "" then {} else {bell_rung: ($bell == "true")} end)
+		+ (if $placement == "" then {} else {placement: $placement} end)')")
 }
 
 selected_ids=()
@@ -377,7 +406,9 @@ for line in "${cand_lines[@]+"${cand_lines[@]}"}"; do
 			continue
 			;;
 	esac
-	to_open+=("$(jq -cn --arg id "$id" --arg name "$name" --arg cwd "$cwd" --arg lh "$lh" --arg wd "$wd" --arg how "$how" --arg tp "$tp" '{id: $id, name: $name, cwd: $cwd, lh: $lh, wd: $wd, how: $how, tp: $tp}')")
+	to_open+=("$(jq -cn --arg id "$id" --arg name "$name" --arg cwd "$cwd" --arg lh "$lh" --arg wd "$wd" --arg how "$how" --arg tp "$tp" \
+		--arg terminal "$(jq -r '.c.terminal // ""' <<< "$line")" --argjson tt "$(jq -r '.c.terminal_time // 0' <<< "$line")" \
+		'{id: $id, name: $name, cwd: $cwd, lh: $lh, wd: $wd, how: $how, tp: $tp, terminal: $terminal, terminal_time: $tt}')")
 done
 
 # --------------------------------------------------------------------------
@@ -445,6 +476,38 @@ ring_tty() { # tty name as the reader reports it (ttys012, pts/3) -> 0 when BEL 
 	printf '\a' 2> /dev/null > "$TTY_DIR/$1"
 }
 
+# A terminal id two sessions both name (one was resumed in the tab the
+# other ran in) belongs to the one recorded there last; the other opens a
+# new tab.
+if [ "${#to_open[@]}" -gt 0 ]; then
+	mapfile -t to_open < <(printf '%s\n' "${to_open[@]}" | jq -cs '
+		. as $all | to_entries[] | .key as $i | .value as $v
+		| if $v.terminal == "" then $v
+		  elif ([$all | to_entries[] | select(.value.terminal == $v.terminal)]
+		        | sort_by([-.value.terminal_time, .key]) | .[0].key) == $i then $v
+		  else $v + {terminal: "", shared: true} end')
+fi
+
+# restored_tab <terminal id>: 0 when Ghostty has a terminal with that id,
+# sitting at a settled interactive shell, and $tab_shell_pid is that shell;
+# otherwise 1 with the reason in $tab_reason. Only reads.
+restored_tab() {
+	tab_reason=""
+	tab_call pid "$1"
+	if [ "$tab_rc" -ne 0 ]; then
+		case "$tab_why" in
+			*"no Ghostty terminal has that id"*) tab_reason="restored tab not found" ;;
+			*) tab_reason="restored tab not reachable: ${tab_why:-exit $tab_rc}" ;;
+		esac
+		return 1
+	fi
+	if ! tab_await_prompt "$1" "$PROMPT_SECS"; then
+		tab_reason="its restored tab is not at an idle shell prompt (${tab_unreached:-${tab_last_seen:-nothing in the foreground}})"
+		return 1
+	fi
+	return 0
+}
+
 for item in "${to_open[@]+"${to_open[@]}"}"; do
 	id="$(jq -r '.id' <<< "$item")"
 	name="$(jq -r '.name' <<< "$item")"
@@ -453,8 +516,16 @@ for item in "${to_open[@]+"${to_open[@]}"}"; do
 	wd="$(jq -r '.wd' <<< "$item")"
 	how="$(jq -r '.how' <<< "$item")"
 	tp="$(jq -r '.tp' <<< "$item")"
+	terminal="$(jq -r '.terminal' <<< "$item")"
+	tabnote=""
+	[ "$(jq -r '.shared // false' <<< "$item")" = true ] && tabnote="another session was recorded in its tab since"
 	if [ "$dry_run" = true ]; then
-		add_result would-open "$id" "$name" "$cwd" "$lh" "$wd" "would resume in a background tab; $how"
+		if [ -n "$terminal" ] && restored_tab "$terminal"; then
+			add_result would-open "$id" "$name" "$cwd" "$lh" "$wd" "would resume in its restored tab; $how" "" "" restored-tab
+		else
+			[ -n "$terminal" ] && tabnote="$tab_reason"
+			add_result would-open "$id" "$name" "$cwd" "$lh" "$wd" "would resume in a new background tab${tabnote:+ ($tabnote)}; $how" "" "" new-tab
+		fi
 		continue
 	fi
 	fresh="$(reader_entry "$id")" || fresh=""
@@ -468,24 +539,48 @@ for item in "${to_open[@]+"${to_open[@]}"}"; do
 	fi
 	# Judged before the open, from the transcript as the session left it.
 	needs_you="$("$BELL_HOOK" --last-turn "$tp" < /dev/null 2> /dev/null)"
-	if open_tab "$id" "$cwd"; then
-		confirm_live "$id"
-		case $? in
-			0)
-				if [ "$needs_you" = ring ] && ring_tty "$live_tty"; then
-					add_result opened "$id" "$name" "$cwd" "$lh" "$wd" "resumed in a background tab; rang the bell (its last turn needs you); $how" true true
-				elif [ "$needs_you" = ring ]; then
-					add_result opened "$id" "$name" "$cwd" "$lh" "$wd" "resumed in a background tab; its last turn needs you, but its tty (${live_tty:-none}) could not be rung; $how" true false
-				else
-					add_result opened "$id" "$name" "$cwd" "$lh" "$wd" "resumed in a background tab; $how" true false
-				fi
-				;;
-			1) add_result opened "$id" "$name" "$cwd" "$lh" "$wd" "tab opened; not live yet after ${CONFIRM_SECS}s; $how" false ;;
-			*) add_result opened "$id" "$name" "$cwd" "$lh" "$wd" "tab opened; $how" ;;
-		esac
-	else
-		add_result failed "$id" "$name" "$cwd" "$lh" "$wd" "$open_detail"
+	placed=""
+	if [ -n "$terminal" ]; then
+		if restored_tab "$terminal"; then
+			tab_call type "$terminal" "$tab_shell_pid" "$(tab_resume_text "$cwd" "$CONFIG_DIR" "--resume $id")"
+			if [ "$tab_rc" -eq 0 ]; then
+				placed=restored-tab
+				where="its restored tab"
+			elif [ "$tab_rc" -eq 124 ]; then
+				add_result failed "$id" "$name" "$cwd" "$lh" "$wd" "the helper timed out typing the resume into its restored tab, so it may have run; look at the tab before resuming it elsewhere"
+				continue
+			else
+				tabnote="the resume was not typed into its restored tab: ${tab_why:-exit $tab_rc}"
+			fi
+		else
+			tabnote="$tab_reason"
+		fi
 	fi
+	if [ -z "$placed" ]; then
+		if open_tab "$id" "$cwd"; then
+			placed=new-tab
+			where="a background tab${tabnote:+ ($tabnote)}"
+		else
+			add_result failed "$id" "$name" "$cwd" "$lh" "$wd" "$open_detail"
+			continue
+		fi
+	fi
+	opened_txt="tab opened${tabnote:+ ($tabnote)}"
+	[ "$placed" = restored-tab ] && opened_txt="typed into its restored tab"
+	confirm_live "$id"
+	case $? in
+		0)
+			if [ "$needs_you" = ring ] && ring_tty "$live_tty"; then
+				add_result opened "$id" "$name" "$cwd" "$lh" "$wd" "resumed in $where; rang the bell (its last turn needs you); $how" true true "$placed"
+			elif [ "$needs_you" = ring ]; then
+				add_result opened "$id" "$name" "$cwd" "$lh" "$wd" "resumed in $where; its last turn needs you, but its tty (${live_tty:-none}) could not be rung; $how" true false "$placed"
+			else
+				add_result opened "$id" "$name" "$cwd" "$lh" "$wd" "resumed in $where; $how" true false "$placed"
+			fi
+			;;
+		1) add_result opened "$id" "$name" "$cwd" "$lh" "$wd" "$opened_txt; not live yet after ${CONFIRM_SECS}s; $how" false "" "$placed" ;;
+		*) add_result opened "$id" "$name" "$cwd" "$lh" "$wd" "$opened_txt; $how" "" "" "$placed" ;;
+	esac
 done
 
 # --------------------------------------------------------------------------
@@ -509,6 +604,7 @@ summary_json="$(jq -c \
 	 idle_after_working_days: $thr, idle_threshold_from: $thr_src,
 	 opened: n("opened"), would_open: n("would-open"), running: n("running"),
 	 rang: (map(select(.bell_rung == true)) | length),
+	 restored_tab: (map(select(.placement == "restored-tab")) | length),
 	 idle: n("idle"), failed: n("failed"),
 	 older_orphans: $older, older_included: $all,
 	 ended_deliberately: $deliberate}
@@ -527,7 +623,7 @@ else
 	down_fmt="$(fmt_time "$last_before_boot" | tr ' ' T)"
 	boot_fmt="$(fmt_time "$boot_now" | tr ' ' T)"
 	jq -r --arg down "$down_fmt" --arg boot "$boot_fmt" '
-		"summary\tdry_run=\(.dry_run) opened=\(.opened) rang=\(.rang) would_open=\(.would_open) running=\(.running) idle=\(.idle) failed=\(.failed) older_orphans=\(.older_orphans) ended_deliberately=\(.ended_deliberately) idle_after_working_days=\(.idle_after_working_days)(\(.idle_threshold_from)) went_down_after=\($down) booted=\($boot)"
+		"summary\tdry_run=\(.dry_run) opened=\(.opened) restored_tab=\(.restored_tab) rang=\(.rang) would_open=\(.would_open) running=\(.running) idle=\(.idle) failed=\(.failed) older_orphans=\(.older_orphans) ended_deliberately=\(.ended_deliberately) idle_after_working_days=\(.idle_after_working_days)(\(.idle_threshold_from)) went_down_after=\($down) booted=\($boot)"
 	' <<< "$summary_json"
 fi
 

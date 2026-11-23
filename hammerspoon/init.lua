@@ -1259,8 +1259,13 @@ DeskStale.running = {}
 -- Per pid: { reasons = <the reasons last offered>, checked = <time> }.
 DeskStale.seen = {}
 
-DeskStale.FOCUSED_PID_SCRIPT =
-  'tell application "Ghostty" to return (pid of focused terminal of selected tab of front window) as text'
+-- The pid, a tab, then the id of that terminal: the id is for keeping the
+-- session's recorded terminal id current (DeskStale.record_terminal).
+DeskStale.FOCUSED_PID_SCRIPT = 'tell application "Ghostty" to tell focused terminal of selected tab of front window '
+  .. 'to return ((pid as text) & tab & (id as text))'
+DeskStale.recorder = HOME .. "/dotfiles/claude/hooks/session-recorder.sh"
+-- Per session id: the terminal id last handed to the recorder from here.
+DeskStale.recorded = {}
 
 -- The session `session-stale.sh --pid` names for `pid`, as { id, name,
 -- dir, pid }: it reads the pid file and checks that its process is that
@@ -1445,17 +1450,32 @@ function DeskStale.handle(session, rc, out)
   return action
 end
 
+-- Records `terminal` as where `session` runs now, once per change, so a tab
+-- whose id changed when it was moved (if Ghostty does that) is found by
+-- reopen-sessions.sh under its current id. Best effort: a failure leaves
+-- the id recorded at the session's start.
+function DeskStale.record_terminal(session, terminal)
+  if not terminal or DeskStale.recorded[session.id] == terminal then return end
+  DeskStale.recorded[session.id] = terminal
+  start_task(DeskStale.recorder, { "terminal", session.id, terminal }, {
+    HOME = HOME, USER = os.getenv("USER"), TMPDIR = os.getenv("TMPDIR"),
+  }, function() end)
+end
+
 -- The session in Ghostty's focused tab, asked off the main thread: its
 -- focused terminal's foreground pid, then the session that pid holds.
 -- `done(session)` gets nil when there is none.
 local function focused_session(done)
   start_task("/usr/bin/osascript", { "-e", DeskStale.FOCUSED_PID_SCRIPT }, nil, function(rc, out)
     local pid = rc == 0 and tonumber((out or ""):match("^(%d+)")) or nil
+    local terminal = rc == 0 and (out or ""):match("^%d+\t([%x%-]+)") or nil
     if not pid then return done(nil) end
     local args = { "--pid", string.format("%d", pid) }
     for _, dir in ipairs(DeskStale.config_dirs) do args[#args + 1] = dir end
     run_tool(nil, "session-stale.sh", args, function(rc2, out2)
-      done(rc2 == 0 and DeskStale.parse_session(pid, out2) or nil)
+      local session = rc2 == 0 and DeskStale.parse_session(pid, out2) or nil
+      if session then DeskStale.record_terminal(session, terminal) end
+      done(session)
     end)
   end)
 end

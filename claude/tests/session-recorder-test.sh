@@ -210,6 +210,54 @@ CLAUDE_CONFIG_DIR="$ACCT_DIR" CLAUDE_SESSION_STORE="$ACCT_STORE" rec_start sess-
 assert_eq "a config dir logged in as no one records no account" "null" \
     "$(jq -s -c 'map(select(.event == "start")) | last | .account' "$ACCT_STORE/sess-acct.jsonl")"
 
+echo "=== a start records the Ghostty terminal its tab holds, and a later event refreshes it ==="
+# A stand-in `claude` process fires the hook (the recorder only records a
+# terminal for a pid it can tell is claude's), with a ps that gives it a tty
+# and a tab helper that names its terminal.
+TERM_STORE="$TMP/term-store"
+mkdir -p "$TMP/shim" "$TMP/fakebin" "$TERM_STORE"
+cp "$(command -v bash)" "$TMP/fakebin/claude"
+cat > "$TMP/shim/ps" <<SHIM
+#!/usr/bin/env bash
+case "\$*" in
+    *"tty="*) echo ttys099 ;;
+    *) exec "$(command -v ps)" "\$@" ;;
+esac
+SHIM
+cat > "$TMP/shim/tab-helper" <<HELPER
+#!/usr/bin/env bash
+echo "\$*" >> "$TMP/tab-helper.log"
+case "\$(cat "$TMP/tab-helper-mode" 2> /dev/null)" in
+    none) echo "DeskTabTerminal: no Ghostty terminal is on \$2" >&2; exit 1 ;;
+    junk) echo "not an id!" ;;
+    *) echo "AB12CD34-0000-4000-8000-000000000001" ;;
+esac
+HELPER
+chmod +x "$TMP/shim/ps" "$TMP/shim/tab-helper"
+rec_start_as_claude() { # sid
+    PATH="$TMP/shim:$PATH" DESK_CLOSE_TAB_BIN="$TMP/shim/tab-helper" CLAUDE_SESSION_STORE="$TERM_STORE" \
+        "$TMP/fakebin/claude" -c "jq -cn --arg sid $1 '{session_id:\$sid, hook_event_name:\"SessionStart\", cwd:\"/tmp\", transcript_path:\"/tmp/t.jsonl\", source:\"resume\"}' | $RECORDER start; true"
+}
+rec_start_as_claude sess-term
+assert_eq "the terminal id is asked of the tab helper by tty and pid, and recorded" \
+    "find ttys099|AB12CD34-0000-4000-8000-000000000001" \
+    "$(sed 's/ [0-9]*$//' "$TMP/tab-helper.log" | head -n 1)|$(jq -r 'select(.event == "start") | .terminal' "$TERM_STORE/sess-term.jsonl")"
+echo none > "$TMP/tab-helper-mode"
+rec_start_as_claude sess-term
+echo junk > "$TMP/tab-helper-mode"
+rec_start_as_claude sess-term
+assert_eq "a start the helper cannot place, or answers with junk for, records no terminal" "1 2" \
+    "$(jq -s 'map(select(.event == "start" and has("terminal"))) | length' "$TERM_STORE/sess-term.jsonl") $(jq -s 'map(select(.event == "start" and (has("terminal") | not))) | length' "$TERM_STORE/sess-term.jsonl")"
+CLAUDE_SESSION_STORE="$TERM_STORE" "$RECORDER" terminal sess-term 11111111-0000-4000-8000-000000000002
+CLAUDE_SESSION_STORE="$TERM_STORE" "$RECORDER" terminal sess-term 'not an id'
+CLAUDE_SESSION_STORE="$TERM_STORE" "$RECORDER" terminal sess-never 11111111-0000-4000-8000-000000000002
+assert_eq "the terminal verb appends a refresh for a known session only, with a sane id" \
+    "11111111-0000-4000-8000-000000000002 false" \
+    "$(jq -rs 'map(select(.event == "terminal")) | last | .terminal' "$TERM_STORE/sess-term.jsonl") $([ -e "$TERM_STORE/sess-never.jsonl" ] && echo true || echo false)"
+assert_eq "...and the reader still reads the session as before" "true" \
+    "$(CLAUDE_SESSION_STORE="$TERM_STORE" CLAUDE_SESSION_READER_CACHE="$CACHE_DIR/term" "$READER" 2> /dev/null | jq -s 'map(select(.id == "sess-term")) | length == 1')"
+: > "$LOG_FILE"
+
 echo "=== recorder never logged an error ==="
 if [ -s "$LOG_FILE" ]; then
     bad "recorder log is empty (nothing swallowed)"
