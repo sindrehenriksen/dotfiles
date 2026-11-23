@@ -105,6 +105,13 @@ for ((i = 0; i < ${#args[@]}; i++)); do
 		--tools) tools="${args[$((i + 1))]}" ;;
 	esac
 done
+# As Claude Code ends a call: its Stop hooks run, then the results it saved
+# to files are deleted with the rest of an unpersisted session.
+finish() {
+	[ -z "$settings" ] || jq -r '.hooks.Stop[]?.hooks[]?.command' "$settings" 2> /dev/null | while IFS= read -r c; do bash -c "$c"; done
+	rm -rf "$CLAUDE_CONFIG_DIR/projects/$(printf '%s' "$(pwd -P)" | tr -c 'A-Za-z0-9' '-')"
+}
+trap finish EXIT
 emit_use() { jq -cn --arg id "$1" --arg name "$2" --argjson input "$3" '{type:"assistant",message:{content:[{type:"tool_use",id:$id,name:$name,input:$input}]}}'; }
 emit_result() { jq -cn --arg id "$1" --arg t "$2" --argjson e "$3" '{type:"user",message:{content:[{type:"tool_result",tool_use_id:$id,content:$t,is_error:$e}]}}'; }
 # A tool's own result, as Claude Code writes it: one text block.

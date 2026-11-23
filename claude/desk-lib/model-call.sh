@@ -96,7 +96,8 @@ desk_write_deny_hook_settings() {
 # CLAUDE_CONFIG_DIR=--config-dir, writing its stream-json to --out. Its
 # project folder is removed afterwards; with --spill-dir, any tool result
 # Claude Code saved to a file there (one past the output limit) is copied
-# out first. Returns 0, 124 on a timeout, else the call's exit code.
+# out before the call exits. Returns 0, 124 on a timeout, else the call's
+# exit code.
 desk_call_model() {
 	local tools_given="false" allowed_given="false" scratch="" prompt_file="" allowed_tools="" tools="" restricted="false"
 	local mcp_config="" strict_mcp="false" settings="" max_budget_usd="" timeout_secs="" config_dir="" out="" model="" spill_dir=""
@@ -139,6 +140,22 @@ desk_call_model() {
 	[ "$restricted" = "true" ] && argv+=(--restricted)
 	[ -n "$mcp_config" ] && argv+=(--mcp-config "$mcp_config")
 	[ "$strict_mcp" = "true" ] && argv+=(--strict-mcp-config)
+	local project=""
+	if [ -n "$spill_dir" ]; then
+		# Claude Code deletes a call's saved results as it exits, so a Stop
+		# hook, added to the call's settings, copies them out while it is
+		# still running.
+		mkdir -p "$spill_dir"
+		project="$config_dir/projects/$(desk_project_folder_name "$scratch")"
+		local spill_settings="$scratch/spill-settings.json"
+		if jq --arg cmd "find $(desk_shq "$project") -path '*/tool-results/*' -type f -exec cp {} $(desk_shq "$spill_dir")/ \\;" \
+			'.hooks.Stop = ((.hooks.Stop // []) + [{hooks: [{type: "command", command: $cmd, timeout: 30}]}])' \
+			< <(if [ -n "$settings" ]; then cat "$settings"; else echo '{}'; fi) > "$spill_settings" 2> /dev/null; then
+			settings="$spill_settings"
+		else
+			desk_log - "desk_call_model: couldn't add the hook that copies saved results out ($out) — a result past the output limit will be missing"
+		fi
+	fi
 	[ -n "$settings" ] && argv+=(--settings "$settings")
 	[ -n "$max_budget_usd" ] && argv+=(--max-budget-usd "$max_budget_usd")
 	[ -n "$model" ] && argv+=(--model "$model")
@@ -160,10 +177,10 @@ desk_call_model() {
 	fi
 	rm -f "$out.stderr"
 
+	# Again after the call: one that was stopped before its Stop hook ran
+	# leaves its saved results behind.
 	if [ -n "$spill_dir" ]; then
-		mkdir -p "$spill_dir"
-		find "$config_dir/projects/$(desk_project_folder_name "$scratch")" -path '*/tool-results/*' -type f \
-			-exec cp {} "$spill_dir"/ \; 2> /dev/null
+		find "$project" -path '*/tool-results/*' -type f -exec cp {} "$spill_dir"/ \; 2> /dev/null
 	fi
 	desk_cleanup_project_folder "$config_dir" "$scratch"
 	return "$rc"

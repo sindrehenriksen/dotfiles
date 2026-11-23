@@ -102,7 +102,7 @@ else
 	bad "F-gh: a step with a tool pattern gets the deny hook as --settings"
 fi
 check F-web-again '{"id":"F-web","kind":"fetch","tools":["WebSearch"],"connector":false,"timeout":30}' WebSearch empty
-assert_eq "F-web: no pattern: no --settings" false "$(has_flag --settings)"
+assert_eq "F-web: no pattern: no deny hook, only the one that copies saved results out" '["Stop"]' "$(jq -c '.hooks | keys' "$SETTINGS_LOG")"
 
 echo
 echo "=== summary: $pass passed, $fail failed ==="
