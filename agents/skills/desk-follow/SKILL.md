@@ -41,7 +41,7 @@ All of these change only that local file, nothing anyone else sees, and a remova
 
 - **The session's name is its address.** The follow pass looks up the current name on every run, so renaming the session is fine. If two running sessions share a name, it holds the update rather than guess.
 - **A session that is not running misses nothing.** Its changes queue up, and the next time it runs they arrive as one message.
-- **An instance can hold updates back from an idle session** (`queue_idle_minutes` on the follow pass): one the user has not typed in for that long gets its update in its session queue, and is handed it when its next turn starts instead of being woken for it. `desk-queue list` shows what waits where.
+- **An idle session is not woken for an update.** One the user last typed in more than an hour ago gets its update in its session queue and is handed it when its next turn starts; a session being worked in is sent it at once. So a queued update is judged only then: `desk-queue list` and `q:<n>` in the session's status line show what waits. An instance can change the hour or turn this off (`queue_idle_minutes` on the follow pass).
 - **A new follow, or new keys, starts from now.** Earlier history is not replayed. For anything older, read the tickets directly.
 - **A change can reach more than one session.** A line that says `also followed by <name>` is on a ticket another followed session also has, and that session gets the same news.
 - **The follow pass only reads.** It never writes to the tracker, GitHub or Slack, and its messages ask the session never to act outward on them.
@@ -51,7 +51,7 @@ All of these change only that local file, nothing anyone else sees, and a remova
 
 It comes from the follow pass, not from the user, and its own preamble says how to handle it: take the update in, and start the reply with `[needs-you]` only when the bar it sets is met. Don't answer it with SendMessage: the sender has already exited, and the reply in this session is the whole channel.
 
-An update that waited in the session queue arrives inside a `[session-queue]` block at the start of a turn something else started. Do what the turn was started for, then judge the update by the same bar and tell the user in a line or two what in it needs them, in place of the `[needs-you]` or quiet-line reply.
+An update that waited in the session queue arrives inside a `[session-queue]` block at the start of a turn something else started, relayed by the follow pass. Do what the turn was started for, then judge the update by the same bar and tell the user in a line or two what in it needs them, in place of the `[needs-you]` or quiet-line reply.
 
 A message saying this session is now followed is the intro from a follow another session added (it names the tickets and points here), or leads a first update: load this skill if it isn't loaded, and reply with one quiet line.
 

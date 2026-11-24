@@ -38,6 +38,9 @@ DESK_FOLLOW_MIN_INTERVAL=15
 # How many sends that ran but went unconfirmed the same queue gets before
 # its changes count as sent.
 DESK_FOLLOW_MAX_UNCONFIRMED="${DESK_FOLLOW_MAX_UNCONFIRMED:-2}"
+# How long after the user last typed in a session its updates are queued
+# for its next turn instead of sent, unless the pass sets its own.
+DESK_FOLLOW_QUEUE_IDLE_MINUTES=60
 # Who an update left in a session's queue is from.
 DESK_FOLLOW_SENDER="the desk follow pass"
 
@@ -1325,16 +1328,17 @@ desk_follow_main() {
 
 	# Delivery: one message per followed session with anything queued, to
 	# its current name, only while it is live and the name addresses it
-	# alone. The queue empties only on a confirmed send. With
-	# `queue_idle_minutes` set, a session the user last typed in longer ago
-	# than that gets the message in its session queue (queue.sh) instead,
-	# to be handed over when its next turn starts: no turn is started in a
-	# session nobody is at.
+	# alone. The queue empties only on a confirmed send. A session the
+	# user last typed in more than `queue_idle_minutes` ago (default
+	# DESK_FOLLOW_QUEUE_IDLE_MINUTES) gets the message in its session queue
+	# (queue.sh) instead, to be handed over when its next turn starts: no
+	# turn is started in a session nobody is at. `false` there sends every
+	# update.
 	local send preamble_file max_chars tz sent=0 held=0 queue_idle
-	queue_idle="$(jq -r '.queue_idle_minutes // empty' <<< "$pass_config")"
+	queue_idle="$(jq -r --argjson d "$DESK_FOLLOW_QUEUE_IDLE_MINUTES" 'if .queue_idle_minutes == false then "" else .queue_idle_minutes // $d end' <<< "$pass_config")"
 	if [ -n "$queue_idle" ] && ! [[ "$queue_idle" =~ ^[0-9]+$ ]]; then
-		desk_log "$pass" "follow: queue_idle_minutes takes whole minutes, not '$queue_idle' — sending as if it were unset"
-		queue_idle=""
+		desk_log "$pass" "follow: queue_idle_minutes takes whole minutes or false, not '$queue_idle' — using $DESK_FOLLOW_QUEUE_IDLE_MINUTES"
+		queue_idle="$DESK_FOLLOW_QUEUE_IDLE_MINUTES"
 	fi
 	send="$(jq -c '.send // {}' <<< "$pass_config")"
 	preamble_file="$(desk_prompt_path "$(jq -r '.preamble // "prompts/follow-preamble.md"' <<< "$pass_config")")"

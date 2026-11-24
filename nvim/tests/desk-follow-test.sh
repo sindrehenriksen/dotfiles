@@ -51,6 +51,7 @@ export CLAUDE_SESSION_STORE="$ROOT/session-events"
 export CLAUDE_SESSION_READER_CACHE="$ROOT/reader-cache"
 export DESK_FOLLOW_FILE="$STATE/follow.json"
 export DESK_FOLLOW_STATE_FILE="$STATE/follow-state.json"
+export DESK_QUEUE_DIR="$ROOT/session-queue"
 mkdir -p "$CLAUDE_CONFIG_DIR" "$CLAUDE_SESSION_STORE"
 unset CLAUDE_CODE_SESSION_ID
 
@@ -83,12 +84,12 @@ FAKE
 chmod +x "$FAKEBIN/session-status.sh"
 export DESK_READER="$FAKEBIN/session-status.sh"
 
-sessions() { # lines of: id name live
+sessions() { # lines of: id name live; each as if the user just typed in it
 	: > "$FIX/sessions.jsonl"
 	while read -r id name live; do
 		[ -n "$id" ] || continue
-		jq -cn --arg id "$id" --arg n "$name" --argjson l "$live" \
-			'{id:$id, name:$n, live:$l, status:(if $l then "idle" else "ended" end), duplicate_pids:false}' >> "$FIX/sessions.jsonl"
+		jq -cn --arg id "$id" --arg n "$name" --argjson l "$live" --argjson t "$(date +%s)" \
+			'{id:$id, name:$n, live:$l, status:(if $l then "idle" else "ended" end), duplicate_pids:false, last_human_message:$t}' >> "$FIX/sessions.jsonl"
 	done
 }
 
@@ -514,9 +515,11 @@ assert_contains "it says when the last update went out" "Changes since " "$msg"
 assert_eq "and the queue is empty afterwards" "0" "$(jq --arg s "$SID_A" '.queues[$s].changes | length' "$DESK_FOLLOW_STATE_FILE")"
 
 echo
-echo "=== with queue_idle_minutes, a session nobody is at gets its update in its session queue ==="
-export DESK_QUEUE_DIR="$ROOT/session-queue"
-jq '.passes.follow.queue_idle_minutes = 60' "$DESK_CONFIG" > "$ROOT/c" && mv "$ROOT/c" "$DESK_CONFIG"
+echo "=== a session nobody is at gets its update in its session queue, not sent ==="
+typed_ago() { # seconds since the user last typed in every session
+	jq -c --argjson t "$(($(date +%s) - $1))" '.last_human_message = $t' "$FIX/sessions.jsonl" > "$ROOT/s" && mv "$ROOT/s" "$FIX/sessions.jsonl"
+}
+typed_ago 7200
 issue ABC-2 "To Do" | with_assignee "Dev Queue" | rest > "$FIX/changes-result.json"
 : > "$FOLLOW_TEST_SENT"
 "$RUN" follow > "$ROOT/idle.out" 2>&1
@@ -527,11 +530,17 @@ assert_contains "whole, with its change" "assignee Dev Three → Dev Queue" "$(j
 assert_contains "and the preamble" "STANDING PREAMBLE" "$(jq -r .text <<< "$queued")"
 assert_eq "the follow's own queue is emptied" "0" "$(jq --arg s "$SID_A" '.queues[$s].changes | length' "$DESK_FOLLOW_STATE_FILE")"
 assert_contains "the log says it was queued" "queued 1 change(s) for alpha-renamed" "$(cat "$ROOT/idle.out")"
-jq -c --argjson t "$(date +%s)" '.last_human_message = $t' "$FIX/sessions.jsonl" > "$ROOT/s" && mv "$ROOT/s" "$FIX/sessions.jsonl"
-issue ABC-2 "To Do" | with_assignee "Dev Three" | rest > "$FIX/changes-result.json"
+typed_ago 600
+issue ABC-2 "To Do" | with_assignee "Dev Sent" | rest > "$FIX/changes-result.json"
 "$RUN" follow > /dev/null 2>&1
-assert_eq "a session the user just typed in is sent its update as before" "alpha-renamed" "$(jq -r .to "$FOLLOW_TEST_SENT" | tr '\n' ' ' | sed 's/ $//')"
+assert_eq "a session the user typed in ten minutes ago is sent its update" "alpha-renamed" "$(jq -r .to "$FOLLOW_TEST_SENT" | tr '\n' ' ' | sed 's/ $//')"
 assert_eq "and nothing more is queued for it" "1" "$(ls "$DESK_QUEUE_DIR/$SID_A" | wc -l | tr -d ' ')"
+typed_ago 7200
+jq '.passes.follow.queue_idle_minutes = false' "$DESK_CONFIG" > "$ROOT/c" && mv "$ROOT/c" "$DESK_CONFIG"
+issue ABC-2 "To Do" | with_assignee "Dev Three" | rest > "$FIX/changes-result.json"
+: > "$FOLLOW_TEST_SENT"
+"$RUN" follow > /dev/null 2>&1
+assert_eq "with queue_idle_minutes false, an idle session is sent its update too" "alpha-renamed" "$(jq -r .to "$FOLLOW_TEST_SENT" | tr '\n' ' ' | sed 's/ $//')"
 write_config
 
 echo
