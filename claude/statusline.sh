@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Claude Code status line. Reads JSON on stdin and prints a single line:
-#   [<vim>] t:<tokens> (<ctx%>)[ q:<queued>] | [!mem:<rss>] 5h:<rem%> w:<rem%> | <model>[ th:<state>] | <dir>[ <branch>][ #<pr>]
+#   [<vim>] t:<tokens> (<ctx%>)[ | q:<queued>] | [!mem:<rss>] 5h:<rem%> w:<rem%> | <model>[ th:<state>] | <dir>[ <branch>][ #<pr>]
 # q:<queued> is how many messages wait in this session's queue, when any do.
 # th:<state> is the effort level when thinking is on, "on" when thinking is on but the
 # model has no effort parameter, or "off" when thinking is disabled.
@@ -43,7 +43,7 @@ if [ -n "$sid" ]; then
     for f in "${DESK_QUEUE_DIR:-$HOME/.local/state/claude/session-queue}/$sid"/*.json; do
         [ -f "$f" ] && queued=$((queued + 1))
     done
-    [ "$queued" -gt 0 ] && left="$left q:$queued"
+    [ "$queued" -gt 0 ] && left="$left | q:$queued"
 fi
 [ -n "$vim_mode" ] && left="[${vim_mode:0:1}] $left"
 
