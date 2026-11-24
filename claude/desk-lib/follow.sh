@@ -38,9 +38,6 @@ DESK_FOLLOW_MIN_INTERVAL=15
 # How many sends that ran but went unconfirmed the same queue gets before
 # its changes count as sent.
 DESK_FOLLOW_MAX_UNCONFIRMED="${DESK_FOLLOW_MAX_UNCONFIRMED:-2}"
-# How long after the user last typed in a session its updates are queued
-# for its next turn instead of sent, unless the pass sets its own.
-DESK_FOLLOW_QUEUE_IDLE_MINUTES=60
 # Who an update left in a session's queue is from.
 DESK_FOLLOW_SENDER="the desk follow pass"
 
@@ -1122,6 +1119,32 @@ desk_follow_send() {
 	printf '%s\n' "$verdict"
 }
 
+# desk_follow_cache_cold <transcript path> <now> [<lifetime minutes>]
+# Whether a turn started in that session now would find its prompt cache
+# expired, read from the end of its transcript. Every model call a session
+# makes refreshes its cache, whoever started the turn, so the clock runs
+# from its last assistant record. The lifetime is the one its last cache
+# write used (`usage.cache_creation`): five minutes when any of it went to
+# the five-minute cache, an hour when it all went to the one-hour one, and
+# an hour when no record says; a lifetime given replaces it. A minute is
+# taken off for the time a send takes to start a turn. No transcript, or no
+# assistant record near its end, is unknown, and counts as cold.
+desk_follow_cache_cold() {
+	local path="$1" now="$2" minutes="${3:-}" at ttl
+	[ -n "$path" ] && [ -f "$path" ] || return 0
+	read -r at ttl < <(tail -c 4000000 "$path" 2> /dev/null | rg -N '"type":"assistant"' | tail -n 200 | jq -rRn '
+		[inputs | fromjson? | select(.type == "assistant" and .isSidechain != true and .message.model != "<synthetic>" and .timestamp != null)]
+		| if length == 0 then empty else
+			(last | .timestamp | sub("\\.[0-9]+"; "") | fromdateiso8601) as $at
+			| ([.[] | .message.usage.cache_creation // empty
+				| if (.ephemeral_5m_input_tokens // 0) > 0 then 300 elif (.ephemeral_1h_input_tokens // 0) > 0 then 3600 else empty end]
+				| last // 3600) as $ttl
+			| "\($at) \($ttl)" end' 2> /dev/null)
+	[ -n "${at:-}" ] || return 0
+	[ -z "$minutes" ] || ttl=$((minutes * 60))
+	[ $((now - at)) -ge $((ttl - 60)) ]
+}
+
 # _desk_follow_mark_sent <state> <session id> <name> <now> <changes> <extra>
 # The state with that session's queue emptied and the update recorded as
 # its last; <extra> is merged into the record.
@@ -1328,17 +1351,17 @@ desk_follow_main() {
 
 	# Delivery: one message per followed session with anything queued, to
 	# its current name, only while it is live and the name addresses it
-	# alone. The queue empties only on a confirmed send. A session the
-	# user last typed in more than `queue_idle_minutes` ago (default
-	# DESK_FOLLOW_QUEUE_IDLE_MINUTES) gets the message in its session queue
-	# (queue.sh) instead, to be handed over when its next turn starts: no
-	# turn is started in a session nobody is at. `false` there sends every
-	# update.
+	# alone. The queue empties only on a confirmed send. A session whose
+	# prompt cache has gone cold (desk_follow_cache_cold) gets the message
+	# in its session queue (queue.sh) instead, to be handed over when its
+	# next turn starts: a turn there now would re-read its whole context
+	# at full price. `queue_idle_minutes` on the pass replaces the cache's
+	# own lifetime, and `false` there sends every update.
 	local send preamble_file max_chars tz sent=0 held=0 queue_idle
-	queue_idle="$(jq -r --argjson d "$DESK_FOLLOW_QUEUE_IDLE_MINUTES" 'if .queue_idle_minutes == false then "" else .queue_idle_minutes // $d end' <<< "$pass_config")"
-	if [ -n "$queue_idle" ] && ! [[ "$queue_idle" =~ ^[0-9]+$ ]]; then
-		desk_log "$pass" "follow: queue_idle_minutes takes whole minutes or false, not '$queue_idle' — using $DESK_FOLLOW_QUEUE_IDLE_MINUTES"
-		queue_idle="$DESK_FOLLOW_QUEUE_IDLE_MINUTES"
+	queue_idle="$(jq -r 'if .queue_idle_minutes == false then "off" else .queue_idle_minutes // "" end' <<< "$pass_config")"
+	if [ -n "$queue_idle" ] && [ "$queue_idle" != "off" ] && ! [[ "$queue_idle" =~ ^[0-9]+$ ]]; then
+		desk_log "$pass" "follow: queue_idle_minutes takes whole minutes or false, not '$queue_idle' — going by each session's cache"
+		queue_idle=""
 	fi
 	send="$(jq -c '.send // {}' <<< "$pass_config")"
 	preamble_file="$(desk_prompt_path "$(jq -r '.preamble // "prompts/follow-preamble.md"' <<< "$pass_config")")"
@@ -1368,10 +1391,10 @@ desk_follow_main() {
 		# A send that failed backs off before a scheduled run tries again,
 		# doubling from the interval up to four hours; a manual run always
 		# tries.
-		local retry_at to_queue="" last_human
-		if [ -n "$queue_idle" ]; then
-			last_human="$(_desk_follow_reader resolve "$sid" 2> /dev/null | jq -r '.last_human_message // 0' 2> /dev/null)"
-			[ $((now - ${last_human:-0})) -lt $((queue_idle * 60)) ] || to_queue="true"
+		local retry_at to_queue=""
+		if [ "$queue_idle" != "off" ] && desk_follow_cache_cold \
+			"$(_desk_follow_reader resolve "$sid" 2> /dev/null | jq -r '.transcript_path // empty' 2> /dev/null)" "$now" "$queue_idle"; then
+			to_queue="true"
 		fi
 		retry_at="$(jq -r --arg s "$sid" '.queues[$s].retry_at // 0' <<< "$new_state")"
 		if [ -z "$to_queue" ] && [ "$scheduled" = "true" ] && [ "$dry_run" != "true" ] && [ "$now" -lt "$retry_at" ]; then
@@ -1403,7 +1426,7 @@ desk_follow_main() {
 		if [ -n "$to_queue" ]; then
 			if desk_queue_put "$sid" "$DESK_FOLLOW_SENDER" "" "$msg_file" > /dev/null; then
 				sent=$((sent + 1))
-				desk_log "$pass" "follow: $label: queued $n change(s) for $name, which the user last typed in over $queue_idle minutes ago — it gets them when its next turn starts"
+				desk_log "$pass" "follow: $label: queued $n change(s) for $name, whose prompt cache has gone cold — it gets them when its next turn starts"
 				new_state="$(_desk_follow_mark_sent "$new_state" "$sid" "$name" "$now" "$n" '{"queued": true}' | jq -c "$mark_intro")"
 			else
 				held=$((held + 1))
