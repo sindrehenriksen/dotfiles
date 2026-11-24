@@ -63,6 +63,10 @@ assert_contains "list counts what waits, with the senders" "alpha-session  2 wai
 assert_contains "the sender defaults to the sending session's name" "central" "$("$CLI" list)"
 assert_contains "show prints a message without delivering it" "The release moved to Thursday." "$("$CLI" show alpha-session)"
 assert_eq "and it still waits" "2" "$("$CLI" list --json | jq '.[0].waiting')"
+assert_eq "list --json gives each message's sender and headline, not its text" \
+	'[["central","The release moved to Thursday."],["a scheduled pass","Second note."]]' \
+	"$("$CLI" list --json | jq -c '.[0].messages | map([.from, .headline])')"
+assert_eq "and the id to show or drop it by" "$(ls "$DESK_QUEUE_DIR/$SID_A" | head -n1)" "$("$CLI" list --json | jq -r '.[0].messages[0].id + ".json"')"
 out="$(printf 'x\n' | "$CLI" put alpha-session 2>&1)"; rc=$?
 assert_eq "a message from nobody is refused" "2" "$rc"
 out="$(printf '  \n' | "$CLI" put alpha-session --from x 2>&1)"; rc=$?

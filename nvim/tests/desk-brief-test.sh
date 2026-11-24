@@ -135,6 +135,10 @@ export CLAUDE_CONFIG_DIR="$ROOT/claude-config"
 export CLAUDE_SESSION_READER_CACHE="$ROOT/reader-cache"
 export DESK_LOCK_MAX_WAIT_SECS=2
 export DESK_LOCK_POLL_SECS=1
+export DESK_QUEUE_DIR="$ROOT/session-queue"
+mkdir -p "$DESK_QUEUE_DIR/$IDLE"
+jq -n '{from: "another session", from_session: null, at: 1700000000, text: "The release moved.\nIts details stay out of the listing."}' \
+	> "$DESK_QUEUE_DIR/$IDLE/1700000000-1-1.json"
 
 repo="$ROOT/notes"
 desk_test_assert_repo_under_root "$repo" "$ROOT"
@@ -170,7 +174,7 @@ jq -n --arg repo "$repo" --arg central "$CENTRAL" '{
 				{id: "close", kind: "close"}
 			],
 			brief: {
-				input_files: ["notes.md", "open-items.json"],
+				input_files: ["notes.md", "open-items.json", "session-queue.json"],
 				instructions: ["brief.md", "close.md"],
 				send: {prompt: "send.md"}
 			}
@@ -207,7 +211,9 @@ assert_eq "the message it waits with starts with the marker" \
 	"[desk-brief] The testpass pass of 2026-10-05 is ready for you to judge. Not from the user." "$(head -n1 <<< "$msg")"
 assert_contains "it names the run directory" "Run directory: $R1" "$msg"
 assert_contains "and the instruction files to judge by, in order" "- Judge it by: $R1/instructions/brief.md, then $R1/instructions/close.md" "$msg"
-assert_contains "and the inputs" "- inputs/: notes.md, open-items.json" "$msg"
+assert_contains "and the inputs" "- inputs/: notes.md, open-items.json, session-queue.json" "$msg"
+assert_eq "the sessions' waiting messages are seeded by headline, without their text" \
+	'[["another session","The release moved."]]' "$(jq -c '[.[].messages[] | [.from, .headline]]' "$R1/inputs/session-queue.json" 2> /dev/null)"
 assert_contains "and how it went" "- How it went: finished ok." "$msg"
 assert_eq "the first brief has no run to compare the notes against" "No earlier brief run is kept, so there is nothing to compare the notes against." "$(cat "$R1/notes-changes.txt")"
 

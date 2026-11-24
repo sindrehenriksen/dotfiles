@@ -15,7 +15,9 @@
 # when it is live, its name addresses it alone and its prompt cache is still
 # warm (the follow pass's own rule, desk_follow_session_cold), `put` exits 3
 # saying to send the message directly, which costs little there and reaches
-# it now. --anyway queues regardless. `list` counts what waits, per session; `show`
+# it now. --anyway queues regardless. `list` counts what waits, per session,
+# and with --json adds each waiting message's id, sender, time and headline
+# (its first line, which is the sender's text: data, like the rest); `show`
 # prints one session's waiting messages with their ids, delivering nothing;
 # `drop` withdraws those ids, or without any, everything waiting there.
 set -u
@@ -107,8 +109,11 @@ case "$cmd" in
 			mapfile -t files < <(desk_queue_files "$sid")
 			[ "${#files[@]}" -gt 0 ] || continue
 			listed="$(jq -c --argjson l "$listed" --arg sid "$sid" --argjson names "$sessions" -n \
-				'[inputs] as $m | $l + [{session_id: $sid, name: ($names[$sid] // null), waiting: ($m | length),
-					oldest: ($m | map(.at) | min), from: ($m | map(.from) | unique)}]' "${files[@]}")"
+				'def clean: gsub("\\p{Cc}+"; " ") | sub("^ +"; "") | sub(" +$"; "");
+				[inputs | {id: (input_filename | sub("^.*/"; "") | sub("\\.json$"; "")), from: (.from | clean), at,
+					headline: ([.text | split("\n")[] | clean | select(. != "")][0] // "" | .[0:200])}] as $m
+				| $l + [{session_id: $sid, name: ($names[$sid] // null), waiting: ($m | length),
+					oldest: ($m | map(.at) | min), from: ($m | map(.from) | unique), messages: $m}]' "${files[@]}")"
 		done
 		if [ -n "$json" ]; then
 			printf '%s\n' "$listed"

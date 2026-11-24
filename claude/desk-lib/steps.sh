@@ -141,6 +141,15 @@ desk_write_sessions_summary() {
 	[ -s "$out" ] || echo '[]' > "$out"
 }
 
+# `session-queue.json`: what waits in the sessions' queues, as `desk-queue
+# list --json` gives it: per session, each message's sender, time and
+# headline, never its text.
+desk_write_session_queue() {
+	local out="$1"
+	"$DESK_LIB_DIR/../desk-queue" list --json > "$out" 2> /dev/null
+	jq -e 'type == "array"' "$out" > /dev/null 2>&1 || echo '[]' > "$out"
+}
+
 # desk_write_open_items <repo> <files-json-array> <out>: `open-items.json`,
 # every suggestion still waiting on the user, in the item shape.
 desk_write_open_items() {
@@ -231,6 +240,9 @@ desk_seed_named_file() {
 			;;
 		open-items.json)
 			desk_write_open_items "$repo" "$(jq -c '.files // []' <<< "$ctx_json")" "$dest_dir/open-items.json"
+			;;
+		session-queue.json)
+			desk_write_session_queue "$dest_dir/session-queue.json"
 			;;
 		*)
 			desk_log - "desk_seed_named_file: unknown file kind: $name (skipped)"
