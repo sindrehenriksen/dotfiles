@@ -109,6 +109,8 @@
       "Bash(az monitor activity-log list *)",
       "Bash(az bicep build *)",
       "Bash(gh pr checks *)",
+      "Bash(gh pr merge * --repo sindrehenriksen/*)",
+      "Bash(gh pr comment * --repo sindrehenriksen/* --body \"@dependabot rebase\")",
       "Bash(gh label list *)",
       "Bash(gh workflow list *)",
       "Bash(gh run watch *)",
