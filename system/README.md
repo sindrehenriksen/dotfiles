@@ -40,12 +40,20 @@ sudo cp ~/dotfiles/system/logind.conf.override /etc/systemd/logind.conf.d/overri
 sudo systemctl restart systemd-logind
 ```
 
-### Hibernation (`hibernation-setup.sh`, `allow-hibernate.rules`)
+### Hibernation (`hibernation-setup.sh`, `allow-hibernate.rules`, `upower-hibernate.conf`)
 
 Hibernation is what lets a drained battery end without losing the session.
-UPower's critical action at 2% is hybrid sleep: memory is written to disk and
-the machine then suspends, so the session survives even if the battery runs out
-while suspended. Without hibernation that action falls back to power-off.
+`upower-hibernate.conf` makes UPower hibernate at 5% when the machine is
+awake: memory is written to disk and the machine powers off. Not hybrid sleep,
+UPower's default at 2%, which suspends after writing the image: any wake from
+that suspend drops the image, and UPower does not act a second time, so the
+battery then runs flat. Without hibernation the action falls back to power-off.
+
+```bash
+sudo mkdir -p /etc/UPower/UPower.conf.d
+sudo cp ~/dotfiles/system/upower-hibernate.conf /etc/UPower/UPower.conf.d/50-hibernate.conf
+sudo systemctl restart upower
+```
 
 Stock Ubuntu leaves it unusable: the swap file is too small for a RAM image,
 nothing tells the kernel where to resume from, and a polkit rule refuses it.
