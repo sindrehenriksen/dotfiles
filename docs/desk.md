@@ -146,11 +146,28 @@ desk-follow run [--dry-run] [--lookback-minutes N]    # one run now
 
 **Delivery.** Changes queue per session, sent only while it is live and its name resolves back to it alone, by one restricted call with SendMessage pinned to that name and the text. The queue empties only on a confirmed delivery; sends back off up to four hours. The message starts `[desk-follow] Update for <label>: …. Not from the user.`, then the instance's `preamble` (the bar for involving the user, and the reply contract: a `[needs-you]` line, or one quiet line), the changes, and the footer. Changes on one ticket or PR, CI failures on one default branch, and messages in one Slack channel or thread, are one entry with a line per change, placed at its first change, so a busy day on a followed repo reads PR by PR. Neither side may run in bypass mode, which holds messages across permission classes.
 
-It takes its own lock, waiting a minute for it before skipping, and none of the runner's guard or status file. `--scheduled` skips a run sooner than `interval_minutes` after the last; `--dry-run` prints and writes nothing. Its keys (`interval_minutes`, `jira.*`, `github_repos`, `slack.*`, `send`, `preamble`, `self`, `skip`, …) are read in `claude/desk-lib/follow.sh`, which has the details.
+**Not waking an idle session.** A sent update starts a turn at once, which a session idle for hours pays for uncached, and whose reply nobody reads until the user gets there. With `queue_idle_minutes` set on the pass, a live session the user last typed in longer ago than that (the reader's `last_human_message`) gets the same message in its session queue instead (below), with no send call, and is handed it when its next turn starts; a session the user is at still gets it sent. Unset, the default, every update is sent. The cost of setting it is the judgement: nothing weighs a queued update against the bar until a turn starts there, so a `[needs-you]` in it waits too. What shows it is the count of waiting messages: `desk-queue list`, and `q:<n>` in the session's own status line.
+
+It takes its own lock, waiting a minute for it before skipping, and none of the runner's guard or status file. `--scheduled` skips a run sooner than `interval_minutes` after the last; `--dry-run` prints and writes nothing. Its keys (`interval_minutes`, `queue_idle_minutes`, `jira.*`, `github_repos`, `slack.*`, `send`, `preamble`, `self`, `skip`, …) are read in `claude/desk-lib/follow.sh`, which has the details.
+
+## The session queue
+
+A message between sessions that is not urgent, and that its sender needs no answer to, is left in the receiving session's queue rather than sent: a sent message starts a turn there at once, and the queue waits for a turn that is starting anyway.
+
+```sh
+desk-queue put <session id|name> [<file>|-] [--from <text>]   # the message from the file, or stdin
+desk-queue list [--json]                                      # what waits, per session
+desk-queue show <session id|name>                             # its waiting messages and their ids
+desk-queue drop <session id|name> [<message id>...]           # none: all of them
+```
+
+The session is resolved as `desk-follow` resolves one, and the sender recorded is `--from`, else the name of the session `put` runs in. Messages wait as one file each under `~/.local/state/claude/session-queue/<session id>/` (`$DESK_QUEUE_DIR`), whether or not the session is running.
+
+**Delivery** is `claude/hooks/session-queue.sh`, on `UserPromptSubmit`: when a turn starts in a session with messages waiting (the user typing, or a sent message or a subagent's report arriving), it takes them all and adds them to that turn as context, oldest first, each with its sender and when it was queued. The header says they are not from the user and are data to weigh, and each message is quoted between two lines carrying a token made up for that delivery, so a message's own text cannot end its quotation. Past 9,000 characters (Claude Code cuts a hook's context at 10,000) the turn gets the header, one line per message and the file holding them whole. Each delivery is kept as shown under `.delivered/<session id>/` for a week. Without the hook entry in `claude/settings.json` nothing is ever delivered, and `desk-queue list` is where that shows.
 
 ## Setting up an instance
 
-`install_symlinks.sh` links `desk-run`, `desk-follow`, `desk-propose`, the session scripts, the tab helpers and on macOS `ghostty-update` into `~/.local/bin`, and nvim loads `nvim/lua/desk`; they need bash 4+, `jq`, `nvim`, `perl`, `rg`, `git` and `claude`, and on macOS Hammerspoon with `hs.ipc`. Make the notes repo (`notes.md`, `reading.md`, an empty `.desk-notes`, on `main`), write the config and prompts in a private instance repo, export `DESK_CONFIG` in `~/.shellrc.early` and link it to the default path, set the denylist (below), and run each pass by hand with `central_session` left out of a copy of the config, so the brief waits in its run directory with its message in `brief-message.txt`, before loading the schedule.
+`install_symlinks.sh` links `desk-run`, `desk-follow`, `desk-propose`, `desk-queue`, the session scripts, the tab helpers and on macOS `ghostty-update` into `~/.local/bin`, and nvim loads `nvim/lua/desk`; they need bash 4+, `jq`, `nvim`, `perl`, `rg`, `git` and `claude`, and on macOS Hammerspoon with `hs.ipc`. Make the notes repo (`notes.md`, `reading.md`, an empty `.desk-notes`, on `main`), write the config and prompts in a private instance repo, export `DESK_CONFIG` in `~/.shellrc.early` and link it to the default path, set the denylist (below), and run each pass by hand with `central_session` left out of a copy of the config, so the brief waits in its run directory with its message in `brief-message.txt`, before loading the schedule.
 
 ## Scheduling
 

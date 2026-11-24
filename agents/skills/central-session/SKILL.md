@@ -14,8 +14,12 @@ The user works from one long-lived session and has other sessions do the work: o
 ## Doing it
 
 - **Start a session:** `desk-open-tab.sh "claude -n <name> <prompt>" "" <cwd> background < /dev/null`, with the prompt quoted for the shell. Name it as the work is named (a ticket key and slug, or a topic). Write the prompt in the user's voice: what to do, the process skills to read and the stage to start at, what needs the user's go, and where to bring questions. Check with `session-status.sh` that it came up.
-- **Brief or nudge a live session:** SendMessage to its name. Say who it is from, that no reply is needed unless it has questions, and what it should do with the news (rework a proposal, resume after a limit, drop something). Keep facts and decisions apart from suggestions, and mark which is which.
-- **Bring back a stopped session:** resume it in a tab with `claude --resume <id>` in its recorded cwd, wait until it is live, then message it.
+- **Brief or nudge a session:** queue it unless it is urgent or the answer is wanted here. A sent message starts a turn in the session at once, paid uncached when it has been idle, with a reply nobody reads until the user gets there; a queued one waits and is handed over when the session's next turn starts.
+  - **Queue** news, context and decisions the session needs when it is next worked in: write the message to a scratch file with the Write tool and run `desk-queue put <name> <file>`. It works for a stopped session too.
+  - **Send** (SendMessage to its name) what cannot wait for that: something to act on now (resume after a limit, stop, drop something), or a question whose answer this session needs.
+  - Either way, say who it is from, that no reply is needed unless it has questions, and what it should do with the news. Keep facts and decisions apart from suggestions, and mark which is which.
+  - `desk-queue list` counts what waits per session: name those sessions when saying what is running or what to pick up next, since their queued news has been judged by nobody yet. `desk-queue show <name>` and `desk-queue drop <name>` read and withdraw.
+- **Bring back a stopped session:** resume it in a tab with `claude --resume <id>` in its recorded cwd, wait until it is live, then message it. For news that can wait, queue it instead and leave the session stopped.
 - **A pass's brief:** when a `[desk-brief]` message from the desk runner arrives, judge that run by the files the message names, in its order.
 - **Follow its tickets:** `desk-follow add` names the session and its keys, so the follow pass sends it the news (the `desk-follow` skill).
 - **End a session:** `close-session.sh <id>` records a deliberate end and closes its tab. Use it only when the user says the work is done or parked.
