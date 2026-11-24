@@ -1145,6 +1145,29 @@ desk_follow_cache_cold() {
 	[ $((now - at)) -ge $((ttl - 60)) ]
 }
 
+# desk_follow_queue_idle <pass_config> [<pass>]: the follow pass's
+# `queue_idle_minutes` as desk_follow_cache_cold takes it: whole minutes,
+# "" to go by each session's own cache, or "off" (`false`) to queue nothing.
+desk_follow_queue_idle() {
+	local v
+	v="$(jq -r 'if .queue_idle_minutes == false then "off" else .queue_idle_minutes // "" end' <<< "$1" 2> /dev/null)"
+	if [ -n "$v" ] && [ "$v" != "off" ] && ! [[ "$v" =~ ^[0-9]+$ ]]; then
+		desk_log "${2:--}" "follow: queue_idle_minutes takes whole minutes or false, not '$v' — going by each session's cache"
+		v=""
+	fi
+	printf '%s' "$v"
+}
+
+# desk_follow_session_cold <session id> <now> [<lifetime minutes>]: whether
+# a message to that session should wait in its session queue rather than
+# start a turn there (desk_follow_cache_cold, on its transcript). The one
+# rule for the follow pass's updates and for a session asking with
+# `desk-queue put`.
+desk_follow_session_cold() {
+	desk_follow_cache_cold \
+		"$(_desk_follow_reader resolve "$1" 2> /dev/null | jq -r '.transcript_path // empty' 2> /dev/null)" "$2" "${3:-}"
+}
+
 # _desk_follow_mark_sent <state> <session id> <name> <now> <changes> <extra>
 # The state with that session's queue emptied and the update recorded as
 # its last; <extra> is merged into the record.
@@ -1358,11 +1381,7 @@ desk_follow_main() {
 	# at full price. `queue_idle_minutes` on the pass replaces the cache's
 	# own lifetime, and `false` there sends every update.
 	local send preamble_file max_chars tz sent=0 held=0 queue_idle
-	queue_idle="$(jq -r 'if .queue_idle_minutes == false then "off" else .queue_idle_minutes // "" end' <<< "$pass_config")"
-	if [ -n "$queue_idle" ] && [ "$queue_idle" != "off" ] && ! [[ "$queue_idle" =~ ^[0-9]+$ ]]; then
-		desk_log "$pass" "follow: queue_idle_minutes takes whole minutes or false, not '$queue_idle' — going by each session's cache"
-		queue_idle=""
-	fi
+	queue_idle="$(desk_follow_queue_idle "$pass_config" "$pass")"
 	send="$(jq -c '.send // {}' <<< "$pass_config")"
 	preamble_file="$(desk_prompt_path "$(jq -r '.preamble // "prompts/follow-preamble.md"' <<< "$pass_config")")"
 	max_chars="$(jq -r '.message_max_chars // 8000' <<< "$pass_config")"
@@ -1392,8 +1411,7 @@ desk_follow_main() {
 		# doubling from the interval up to four hours; a manual run always
 		# tries.
 		local retry_at to_queue=""
-		if [ "$queue_idle" != "off" ] && desk_follow_cache_cold \
-			"$(_desk_follow_reader resolve "$sid" 2> /dev/null | jq -r '.transcript_path // empty' 2> /dev/null)" "$now" "$queue_idle"; then
+		if [ "$queue_idle" != "off" ] && desk_follow_session_cold "$sid" "$now" "$queue_idle"; then
 			to_queue="true"
 		fi
 		retry_at="$(jq -r --arg s "$sid" '.queues[$s].retry_at // 0' <<< "$new_state")"

@@ -4,14 +4,18 @@
 # its next turn starts (claude/hooks/session-queue.sh; docs/desk.md, "The
 # session queue"). Installed as ~/.local/bin/desk-queue.
 #
-#   desk-queue put <session id|name> [<file>|-] [--from <text>]
+#   desk-queue put <session id|name> [<file>|-] [--from <text>] [--anyway]
 #   desk-queue list [--json]
 #   desk-queue show <session id|name>
 #   desk-queue drop <session id|name> [<message id>...]
 #
 # `put` reads the message from the file, or from stdin without one. The
 # sender it records is --from, else the name of the session it runs in
-# ($CLAUDE_CODE_SESSION_ID). `list` counts what waits, per session; `show`
+# ($CLAUDE_CODE_SESSION_ID). A session being worked in gets nothing queued:
+# when it is live, its name addresses it alone and its prompt cache is still
+# warm (the follow pass's own rule, desk_follow_session_cold), `put` exits 3
+# saying to send the message directly, which costs little there and reaches
+# it now. --anyway queues regardless. `list` counts what waits, per session; `show`
 # prints one session's waiting messages with their ids, delivering nothing;
 # `drop` withdraws those ids, or without any, everything waiting there.
 set -u
@@ -35,11 +39,13 @@ shift
 
 from=""
 json=""
+anyway=""
 args=()
 while [ $# -gt 0 ]; do
 	case "$1" in
 		--from) [ $# -ge 2 ] || usage; from="$2"; shift 2 ;;
 		--json) json="1"; shift ;;
+		--anyway) anyway="1"; shift ;;
 		-) args+=("$1"); shift ;;
 		--*) echo "desk-queue: unknown option $1" >&2; usage ;;
 		*) args+=("$1"); shift ;;
@@ -54,9 +60,26 @@ target() {
 	[ -n "$name" ] || name="${sid:0:8}"
 }
 
+# The cache lifetime the instance's follow pass sets (`queue_idle_minutes`),
+# so the two agree on what warm is; "" without one, and where the pass
+# queues nothing (`false`), which is about its own updates.
+queue_idle() {
+	local v=""
+	desk_resolve_config
+	if [ -n "$DESK_CONFIG" ] && [ -f "$DESK_CONFIG" ]; then
+		v="$(desk_follow_queue_idle "$(jq -c '[.passes[]? | select(.kind == "follow")][0] // {}' "$DESK_CONFIG" 2> /dev/null)" 2> /dev/null)"
+	fi
+	[ "$v" != "off" ] || v=""
+	printf '%s' "$v"
+}
+
 case "$cmd" in
 	put)
 		target
+		if [ -z "$anyway" ] && to="$(desk_follow_address "$sid")" && ! desk_follow_session_cold "$sid" "$(desk_now)" "$(queue_idle)"; then
+			echo "not queued: $to is being worked in (its prompt cache is still warm). Send this to it directly instead, with SendMessage to $to; \`desk-queue put --anyway\` queues it regardless."
+			exit 3
+		fi
 		src="${args[1]:--}"
 		text="$(mktemp)"
 		trap 'rm -f "$text"' EXIT

@@ -125,5 +125,27 @@ mkdir "$DESK_QUEUE_DIR/$SID_A/.claim.999999"
 mv "$DESK_QUEUE_DIR/$SID_A"/*.json "$DESK_QUEUE_DIR/$SID_A/.claim.999999/"
 assert_contains "the next turn delivers what it had claimed" "survivor" "$(deliver "$SID_A")"
 
+echo
+echo "=== a session being worked in is not queued for: the sender is told to send ==="
+"$CLI" drop alpha-session > /dev/null
+SID_W="dddddddd-4444-4444-8444-444444444444"
+SID_S="eeeeeeee-5555-4555-8555-555555555555"
+jq -cn --arg t "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" \
+	'{type: "assistant", timestamp: $t, message: {role: "assistant", model: "some-model", content: []}}' > "$TMP/warm.jsonl"
+printf '%s\n' \
+	"{\"id\":\"$SID_W\",\"name\":\"warm-session\",\"live\":true,\"transcript_path\":\"$TMP/warm.jsonl\"}" \
+	"{\"id\":\"$SID_S\",\"name\":\"stopped-session\",\"live\":false,\"transcript_path\":\"$TMP/warm.jsonl\"}" >> "$TMP/sessions.jsonl"
+out="$(printf 'A note.\n' | "$CLI" put warm-session --from x)"; rc=$?
+assert_eq "put exits with a status of its own" "3" "$rc"
+assert_contains "and says to send it directly" "Send this to it directly instead, with SendMessage to warm-session" "$out"
+assert_eq "nothing is queued there" "nothing is queued" "$("$CLI" list)"
+out="$(printf 'A note.\n' | "$CLI" put warm-session --from x --anyway)"; rc=$?
+assert_eq "--anyway queues regardless" "0 1" "$rc $("$CLI" list --json | jq '.[0].waiting')"
+"$CLI" drop warm-session > /dev/null
+printf 'A note.\n' | "$CLI" put stopped-session --from x > /dev/null; rc=$?
+assert_eq "a session that is not running cannot be sent to, so it is queued for" "0 1" "$rc $("$CLI" list --json | jq '.[0].waiting')"
+printf 'A note.\n' | "$CLI" put alpha-session --from x > /dev/null; rc=$?
+assert_eq "as is one whose cache is cold or unknown" "0" "$rc"
+
 printf '\n%s passed, %s failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

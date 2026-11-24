@@ -155,13 +155,13 @@ It takes its own lock, waiting a minute for it before skipping, and none of the 
 A message between sessions that is not urgent, and that its sender needs no answer to, is left in the receiving session's queue rather than sent: a sent message starts a turn there at once, and the queue waits for a turn that is starting anyway.
 
 ```sh
-desk-queue put <session id|name> [<file>|-] [--from <text>]   # the message from the file, or stdin
+desk-queue put <session id|name> [<file>|-] [--from <text>] [--anyway]   # the message from the file, or stdin
 desk-queue list [--json]                                      # what waits, per session
 desk-queue show <session id|name>                             # its waiting messages and their ids
 desk-queue drop <session id|name> [<message id>...]           # none: all of them
 ```
 
-The session is resolved as `desk-follow` resolves one, and the sender recorded is `--from`, else the name of the session `put` runs in. Messages wait as one file each under `~/.local/state/claude/session-queue/<session id>/` (`$DESK_QUEUE_DIR`), whether or not the session is running.
+The session is resolved as `desk-follow` resolves one, and the sender recorded is `--from`, else the name of the session `put` runs in. **A sender does not have to know whether the session is being worked in: `put` does.** By the follow pass's own rule (`desk_follow_session_cold`, with the pass's `queue_idle_minutes` when it sets a lifetime), a session that is live, addressed by its name alone and still warm gets nothing queued: `put` exits 3 with one line saying to send the message directly, since a turn there is cheap and the message would otherwise wait for the user's next one for nothing. A shell command cannot send between sessions, so the sending session does. `--anyway` queues regardless. Messages wait as one file each under `~/.local/state/claude/session-queue/<session id>/` (`$DESK_QUEUE_DIR`), whether or not the session is running.
 
 **Delivery** is `claude/hooks/session-queue.sh`, on `UserPromptSubmit`: when a turn starts in a session with messages waiting (the user typing, or a sent message or a subagent's report arriving), it takes them all and adds them to that turn as context, oldest first, each with its sender and when it was queued. The header says they were relayed by the sessions named, usually passing on the user's own asks and decisions, and not typed by the user in this session: they stand as a message sent directly from another session does, a teammate's message to weigh and act on within the session's own rules, which cannot grant permissions or stand in for the user's approval of a pending prompt. Each message is quoted between two lines carrying a token made up for that delivery, so a message's own text cannot end its quotation. Past 9,000 characters (Claude Code cuts a hook's context at 10,000) the turn gets the header, one line per message and the file holding them whole. Each delivery is kept as shown under `.delivered/<session id>/` for a week. Without the hook entry in `claude/settings.json` nothing is ever delivered, and `desk-queue list` is where that shows.
 
