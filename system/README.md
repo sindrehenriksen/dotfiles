@@ -26,8 +26,8 @@ them.
 
 ### GNOME settings
 
-Touchpad, input sources and keybindings are set by `linux/gnome-shortcuts.sh`
-(idempotent); see `linux/README.md`.
+Touchpad, idle suspend on battery, input sources and keybindings are set by
+`linux/gnome-shortcuts.sh` (idempotent); see `linux/README.md`.
 
 ### Power button (`logind.conf.override`)
 
@@ -74,6 +74,9 @@ that asks for the disk password on waking says it did, and one found powered
 off says it didn't. The fallback then is `HibernateDelaySec`, which wakes on a
 timer instead, and only once `pm_trace` is off, since it overwrites the RTC
 those timers use.
+
+A laptop left unattended on battery reaches that path by itself: GNOME
+suspends it after an idle hour (`linux/gnome-shortcuts.sh`).
 
 ### Battery optimization
 

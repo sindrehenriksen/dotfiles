@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
-# GNOME settings: touchpad, input sources, and the defaults that collide with
-# Super as the app-command modifier.
+# GNOME settings: touchpad, idle suspend on battery, input sources, and the
+# defaults that collide with Super as the app-command modifier.
 # Idempotent; safe to re-run. See ../docs/keyboard.md for what stays and why.
 set -euo pipefail
 
 # Two-finger tap/click is right-click.
 gsettings set org.gnome.desktop.peripherals.touchpad click-method 'fingers'
+
+# Idle on battery for an hour: suspend, which then hibernates before a drain.
+gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-battery-type 'suspend'
+gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-battery-timeout 3600
 
 # Lock screen on Super+Q, which frees Super+L for the dash-to-dock overlay
 # numbers (needs that extension).
