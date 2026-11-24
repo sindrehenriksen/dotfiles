@@ -86,6 +86,7 @@ BASH_SUITES=(
 	claude/tests/session-two-process-test.sh
 	claude/tests/restart-self-test.sh
 	claude/tests/session-end-kind-test.sh
+	claude/tests/session-queue-test.sh
 	git-hooks/test-commit-msg.sh
 	hammerspoon/tests/hs-timeout-test.sh
 	linux/desk/tests/tabs-test.sh

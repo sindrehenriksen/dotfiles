@@ -514,6 +514,27 @@ assert_contains "it says when the last update went out" "Changes since " "$msg"
 assert_eq "and the queue is empty afterwards" "0" "$(jq --arg s "$SID_A" '.queues[$s].changes | length' "$DESK_FOLLOW_STATE_FILE")"
 
 echo
+echo "=== with queue_idle_minutes, a session nobody is at gets its update in its session queue ==="
+export DESK_QUEUE_DIR="$ROOT/session-queue"
+jq '.passes.follow.queue_idle_minutes = 60' "$DESK_CONFIG" > "$ROOT/c" && mv "$ROOT/c" "$DESK_CONFIG"
+issue ABC-2 "To Do" | with_assignee "Dev Queue" | rest > "$FIX/changes-result.json"
+: > "$FOLLOW_TEST_SENT"
+"$RUN" follow > "$ROOT/idle.out" 2>&1
+assert_eq "no message starts a turn in a session last typed in long ago" "0" "$(wc -l < "$FOLLOW_TEST_SENT" | tr -d ' ')"
+queued="$(cat "$DESK_QUEUE_DIR/$SID_A"/*.json 2> /dev/null)"
+assert_eq "the update waits in its session queue, from the follow pass" "the desk follow pass" "$(jq -r .from <<< "$queued")"
+assert_contains "whole, with its change" "assignee Dev Three → Dev Queue" "$(jq -r .text <<< "$queued")"
+assert_contains "and the preamble" "STANDING PREAMBLE" "$(jq -r .text <<< "$queued")"
+assert_eq "the follow's own queue is emptied" "0" "$(jq --arg s "$SID_A" '.queues[$s].changes | length' "$DESK_FOLLOW_STATE_FILE")"
+assert_contains "the log says it was queued" "queued 1 change(s) for alpha-renamed" "$(cat "$ROOT/idle.out")"
+jq -c --argjson t "$(date +%s)" '.last_human_message = $t' "$FIX/sessions.jsonl" > "$ROOT/s" && mv "$ROOT/s" "$FIX/sessions.jsonl"
+issue ABC-2 "To Do" | with_assignee "Dev Three" | rest > "$FIX/changes-result.json"
+"$RUN" follow > /dev/null 2>&1
+assert_eq "a session the user just typed in is sent its update as before" "alpha-renamed" "$(jq -r .to "$FOLLOW_TEST_SENT" | tr '\n' ' ' | sed 's/ $//')"
+assert_eq "and nothing more is queued for it" "1" "$(ls "$DESK_QUEUE_DIR/$SID_A" | wc -l | tr -d ' ')"
+write_config
+
+echo
 echo "=== a name that does not address the session alone holds the queue ==="
 issue ABC-2 "To Do" | with_assignee "Dev Four" | rest > "$FIX/changes-result.json"
 sessions << EOF

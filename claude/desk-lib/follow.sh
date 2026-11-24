@@ -27,6 +27,8 @@ DESK_GH_BIN="${DESK_GH_BIN:-gh}"
 DESK_FOLLOW_DIFF_JQ="$DESK_LIB_DIR/follow-diff.jq"
 # shellcheck source=follow-slack.sh
 source "$DESK_LIB_DIR/follow-slack.sh"
+# shellcheck source=queue.sh
+source "$DESK_LIB_DIR/queue.sh"
 
 # The first characters of every follow message. A follow session's
 # preamble names it, and a hook can tell a follow turn by it.
@@ -36,6 +38,8 @@ DESK_FOLLOW_MIN_INTERVAL=15
 # How many sends that ran but went unconfirmed the same queue gets before
 # its changes count as sent.
 DESK_FOLLOW_MAX_UNCONFIRMED="${DESK_FOLLOW_MAX_UNCONFIRMED:-2}"
+# Who an update left in a session's queue is from.
+DESK_FOLLOW_SENDER="the desk follow pass"
 
 _desk_follow_reader() { "${DESK_READER:-session-status.sh}" "$@"; }
 
@@ -56,6 +60,7 @@ _desk_follow_write_list() { # entries-json
 # A session token (a full id, a name, or an 8+ character id prefix) to its
 # session id, through the reader. A full id the reader does not know is
 # still accepted, since the session may not have been recorded yet.
+# desk-queue resolves its sessions here too, under its own name.
 desk_follow_resolve_session() {
 	local token="$1" hit id
 	if [[ "$token" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]]; then
@@ -63,11 +68,11 @@ desk_follow_resolve_session() {
 		return 0
 	fi
 	hit="$(_desk_follow_reader resolve "$token" 2> /dev/null)" || {
-		echo "desk-follow: no single session matches '$token'" >&2
+		echo "${DESK_CLI_NAME:-desk-follow}: no single session matches '$token'" >&2
 		return 1
 	}
 	id="$(jq -r '.id // empty' <<< "$hit" 2> /dev/null)"
-	[ -n "$id" ] || { echo "desk-follow: no single session matches '$token'" >&2; return 1; }
+	[ -n "$id" ] || { echo "${DESK_CLI_NAME:-desk-follow}: no single session matches '$token'" >&2; return 1; }
 	printf '%s\n' "$id"
 }
 
@@ -1114,6 +1119,16 @@ desk_follow_send() {
 	printf '%s\n' "$verdict"
 }
 
+# _desk_follow_mark_sent <state> <session id> <name> <now> <changes> <extra>
+# The state with that session's queue emptied and the update recorded as
+# its last; <extra> is merged into the record.
+_desk_follow_mark_sent() {
+	jq -c --arg s "$2" --arg name "$3" --argjson now "$4" --argjson n "$5" --argjson extra "$6" '
+		.queues[$s].changes = [] | .queues[$s].dropped = 0 | .queues[$s].skipped = {}
+		| .queues[$s] |= del(.queued_since, .unconfirmed_sends, .failed_sends, .retry_at)
+		| .last_sent[$s] = {at: $now, name: $name, changes: $n} + $extra' <<< "$1"
+}
+
 # --- the pass ------------------------------------------------------------------------
 
 # desk_follow_main <pass> <pass_config> [--dry-run] [--scheduled] [--lookback-minutes N]
@@ -1310,8 +1325,17 @@ desk_follow_main() {
 
 	# Delivery: one message per followed session with anything queued, to
 	# its current name, only while it is live and the name addresses it
-	# alone. The queue empties only on a confirmed send.
-	local send preamble_file max_chars tz sent=0 held=0
+	# alone. The queue empties only on a confirmed send. With
+	# `queue_idle_minutes` set, a session the user last typed in longer ago
+	# than that gets the message in its session queue (queue.sh) instead,
+	# to be handed over when its next turn starts: no turn is started in a
+	# session nobody is at.
+	local send preamble_file max_chars tz sent=0 held=0 queue_idle
+	queue_idle="$(jq -r '.queue_idle_minutes // empty' <<< "$pass_config")"
+	if [ -n "$queue_idle" ] && ! [[ "$queue_idle" =~ ^[0-9]+$ ]]; then
+		desk_log "$pass" "follow: queue_idle_minutes takes whole minutes, not '$queue_idle' — sending as if it were unset"
+		queue_idle=""
+	fi
 	send="$(jq -c '.send // {}' <<< "$pass_config")"
 	preamble_file="$(desk_prompt_path "$(jq -r '.preamble // "prompts/follow-preamble.md"' <<< "$pass_config")")"
 	max_chars="$(jq -r '.message_max_chars // 8000' <<< "$pass_config")"
@@ -1340,9 +1364,13 @@ desk_follow_main() {
 		# A send that failed backs off before a scheduled run tries again,
 		# doubling from the interval up to four hours; a manual run always
 		# tries.
-		local retry_at
+		local retry_at to_queue="" last_human
+		if [ -n "$queue_idle" ]; then
+			last_human="$(_desk_follow_reader resolve "$sid" 2> /dev/null | jq -r '.last_human_message // 0' 2> /dev/null)"
+			[ $((now - ${last_human:-0})) -lt $((queue_idle * 60)) ] || to_queue="true"
+		fi
 		retry_at="$(jq -r --arg s "$sid" '.queues[$s].retry_at // 0' <<< "$new_state")"
-		if [ "$scheduled" = "true" ] && [ "$dry_run" != "true" ] && [ "$now" -lt "$retry_at" ]; then
+		if [ -z "$to_queue" ] && [ "$scheduled" = "true" ] && [ "$dry_run" != "true" ] && [ "$now" -lt "$retry_at" ]; then
 			desk_log "$pass" "follow: $label: the last send failed — $n change(s) stay queued until the next try at $(desk_follow_clock "$retry_at" "$tz")"
 			held=$((held + 1))
 			continue
@@ -1357,11 +1385,26 @@ desk_follow_main() {
 			lead="$(desk_follow_intro_text "$entry")"
 			mark_intro=".intro_done[\"$sid\"] = $due"
 		fi
-		desk_follow_message "$entry" "$queue" "$name" "$preamble_file" "$max_chars" "$tz" "$lead" > "$msg_file"
+		# An update joining one still waiting in the session's queue leaves
+		# the preamble to that one.
+		local pre="$preamble_file"
+		[ -z "$to_queue" ] || ! desk_queue_has_from "$sid" "$DESK_FOLLOW_SENDER" || pre=""
+		desk_follow_message "$entry" "$queue" "$name" "$pre" "$max_chars" "$tz" "$lead" > "$msg_file"
 		if [ "$dry_run" = "true" ]; then
-			printf '=== would send to %s (%s change(s)) ===\n' "$name" "$n"
+			printf '=== would %s %s (%s change(s)) ===\n' "$([ -n "$to_queue" ] && printf 'queue for' || printf 'send to')" "$name" "$n"
 			cat "$msg_file"
 			printf '\n'
+			continue
+		fi
+		if [ -n "$to_queue" ]; then
+			if desk_queue_put "$sid" "$DESK_FOLLOW_SENDER" "" "$msg_file" > /dev/null; then
+				sent=$((sent + 1))
+				desk_log "$pass" "follow: $label: queued $n change(s) for $name, which the user last typed in over $queue_idle minutes ago — it gets them when its next turn starts"
+				new_state="$(_desk_follow_mark_sent "$new_state" "$sid" "$name" "$now" "$n" '{"queued": true}' | jq -c "$mark_intro")"
+			else
+				held=$((held + 1))
+				desk_log "$pass" "follow: $label: couldn't write to the session queue ($DESK_QUEUE_DIR) — $n change(s) stay queued"
+			fi
 			continue
 		fi
 		local result_line verdict detail
@@ -1375,17 +1418,11 @@ desk_follow_main() {
 			# copy: sending the same changes again would only repeat them.
 			desk_log "$pass" "follow: $label: the send to $name ran but was not confirmed, ${DESK_FOLLOW_MAX_UNCONFIRMED} times — treating the $n change(s) as sent, not sending them again (result: $detail)"
 			sent=$((sent + 1))
-			new_state="$(jq -c --arg s "$sid" --arg name "$name" --argjson now "$now" --argjson n "$n" '
-				.queues[$s].changes = [] | .queues[$s].dropped = 0 | .queues[$s].skipped = {}
-				| .queues[$s] |= del(.queued_since, .unconfirmed_sends, .failed_sends, .retry_at)
-				| .last_sent[$s] = {at: $now, name: $name, changes: $n, confirmed: false}' <<< "$new_state" | jq -c "$mark_intro")"
+			new_state="$(_desk_follow_mark_sent "$new_state" "$sid" "$name" "$now" "$n" '{"confirmed": false}' | jq -c "$mark_intro")"
 		elif [ "$verdict" = "confirmed" ]; then
 			sent=$((sent + 1))
 			desk_log "$pass" "follow: $label: sent $n change(s) to $name"
-			new_state="$(jq -c --arg s "$sid" --arg name "$name" --argjson now "$now" --argjson n "$n" '
-				.queues[$s].changes = [] | .queues[$s].dropped = 0 | .queues[$s].skipped = {}
-				| .queues[$s] |= del(.queued_since, .unconfirmed_sends, .failed_sends, .retry_at)
-				| .last_sent[$s] = {at: $now, name: $name, changes: $n}' <<< "$new_state" | jq -c "$mark_intro")"
+			new_state="$(_desk_follow_mark_sent "$new_state" "$sid" "$name" "$now" "$n" '{}' | jq -c "$mark_intro")"
 		elif [ "$verdict" = "unconfirmed" ]; then
 			held=$((held + 1))
 			desk_log "$pass" "follow: $label: the send to $name ran but was not confirmed — $n change(s) stay queued for one more try (result: $detail)"

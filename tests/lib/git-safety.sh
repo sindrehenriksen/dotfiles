@@ -205,7 +205,9 @@ desk_test_guard_not_real_repo() {
 # file) is caught as well as one that adds or removes files. Directory
 # mtimes are deliberately not part of it.
 # Some real state changes during any test run on a machine in use: Claude
-# Code's per-version lock files (`locks/`, skipped), the recorder hook's
+# Code's per-version lock files (`locks/`, skipped), the session queue
+# (`session-queue/`, skipped: a live session leaves a message there and a
+# turn starting in another takes its own away), the recorder hook's
 # event files and log, which every live session appends to, and the
 # reader's cache, which the nvim marks, the status line and any `resolve`
 # rewrite in place, and the bell hook's per-session `input-bell-<id>`
@@ -228,9 +230,10 @@ desk_test_state_guard_snapshot() {
 	mkdir -p "$dest"
 	for dir in "${DESK_TEST_STATE_GUARD_DIRS[@]}"; do
 		{
-			find "$dir" -path "$dir/locks" -prune -o -type d -print 2> /dev/null | sed 's/^/d /'
-			find "$dir" -path "$dir/locks" -prune -o -type f \( "${_DESK_TEST_STATE_LIVE_APPENDED[@]}" \) -print 2> /dev/null | sed 's/^/l /'
-			find "$dir" -path "$dir/locks" -prune -o -type f ! \( "${_DESK_TEST_STATE_LIVE_APPENDED[@]}" \) -exec shasum -a 256 {} + 2> /dev/null | sed 's/^/f /'
+			local skip=(\( -path "$dir/locks" -o -path "$dir/session-queue" \) -prune)
+			find "$dir" "${skip[@]}" -o -type d -print 2> /dev/null | sed 's/^/d /'
+			find "$dir" "${skip[@]}" -o -type f \( "${_DESK_TEST_STATE_LIVE_APPENDED[@]}" \) -print 2> /dev/null | sed 's/^/l /'
+			find "$dir" "${skip[@]}" -o -type f ! \( "${_DESK_TEST_STATE_LIVE_APPENDED[@]}" \) -exec shasum -a 256 {} + 2> /dev/null | sed 's/^/f /'
 		} | LC_ALL=C sort > "$dest/state-$i.$suffix"
 		i=$((i + 1))
 	done
@@ -360,6 +363,7 @@ desk_test_safe_env_init() {
 	export CLAUDE_SESSION_RECORDER_LOG="$dest/state/session-recorder.log"
 	export DESK_TICKET_CACHE="$dest/state/ticket-status.json"
 	export DESK_STATUS_FILE="$dest/state/status.json"
+	export DESK_QUEUE_DIR="$dest/state/session-queue"
 	export CLAUDE_CONFIG_DIR="$dest/claude-config"
 	export DESK_CLAUDE_BIN="$dest/bin/claude"
 	export DESK_OPEN_TAB_BIN="$dest/bin/desk-open-tab.sh"

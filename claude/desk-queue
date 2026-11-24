@@ -1,0 +1,121 @@
+#!/usr/bin/env bash
+# desk-queue: leaves a message for another Claude Code session without
+# starting a turn there. It waits on disk and the session is handed it when
+# its next turn starts (claude/hooks/session-queue.sh; docs/desk.md, "The
+# session queue"). Installed as ~/.local/bin/desk-queue.
+#
+#   desk-queue put <session id|name> [<file>|-] [--from <text>]
+#   desk-queue list [--json]
+#   desk-queue show <session id|name>
+#   desk-queue drop <session id|name> [<message id>...]
+#
+# `put` reads the message from the file, or from stdin without one. The
+# sender it records is --from, else the name of the session it runs in
+# ($CLAUDE_CODE_SESSION_ID). `list` counts what waits, per session; `show`
+# prints one session's waiting messages with their ids, delivering nothing;
+# `drop` withdraws those ids, or without any, everything waiting there.
+set -u
+
+_src="${BASH_SOURCE[0]}"
+while [ -h "$_src" ]; do
+	_dir="$(cd -P "$(dirname "$_src")" && pwd)"
+	_src="$(readlink "$_src")"
+	[[ "$_src" != /* ]] && _src="$_dir/$_src"
+done
+DESK_QUEUE_BIN_DIR="$(cd -P "$(dirname "$_src")" && pwd)"
+source "$DESK_QUEUE_BIN_DIR/desk-lib/common.sh"
+source "$DESK_QUEUE_BIN_DIR/desk-lib/follow.sh"
+DESK_CLI_NAME="desk-queue"
+
+usage() { sed -n '7,10p' "$DESK_QUEUE_BIN_DIR/desk-queue" | sed 's/^#   //' >&2; exit 2; }
+
+cmd="${1:-}"
+[ -n "$cmd" ] || usage
+shift
+
+from=""
+json=""
+args=()
+while [ $# -gt 0 ]; do
+	case "$1" in
+		--from) [ $# -ge 2 ] || usage; from="$2"; shift 2 ;;
+		--json) json="1"; shift ;;
+		-) args+=("$1"); shift ;;
+		--*) echo "desk-queue: unknown option $1" >&2; usage ;;
+		*) args+=("$1"); shift ;;
+	esac
+done
+
+# The session a message is for, and the name to call it by.
+target() {
+	[ -n "${args[0]:-}" ] || usage
+	sid="$(desk_follow_resolve_session "${args[0]}")" || exit 1
+	name="$(_desk_follow_reader resolve "$sid" 2> /dev/null | jq -r '.name // empty' 2> /dev/null)"
+	[ -n "$name" ] || name="${sid:0:8}"
+}
+
+case "$cmd" in
+	put)
+		target
+		src="${args[1]:--}"
+		text="$(mktemp)"
+		trap 'rm -f "$text"' EXIT
+		if [ "$src" = "-" ]; then cat > "$text"; else cat -- "$src" > "$text" || exit 1; fi
+		if ! rg -q '\S' "$text"; then
+			echo "desk-queue: the message is empty" >&2
+			exit 2
+		fi
+		own="${CLAUDE_CODE_SESSION_ID:-}"
+		if [ -z "$from" ] && [ -n "$own" ]; then
+			from="$(_desk_follow_reader resolve "$own" 2> /dev/null | jq -r '.name // empty' 2> /dev/null)"
+			[ -n "$from" ] || from="session ${own:0:8}"
+		fi
+		[ -n "$from" ] || { echo "desk-queue: no --from given and \$CLAUDE_CODE_SESSION_ID is unset — say who the message is from" >&2; exit 2; }
+		desk_queue_put "$sid" "$from" "$own" "$text" > /dev/null || { echo "desk-queue: couldn't write to $DESK_QUEUE_DIR/$sid" >&2; exit 1; }
+		echo "queued for $name ($(desk_queue_count "$sid") waiting): it gets it when its next turn starts"
+		;;
+	list)
+		sessions="$(_desk_follow_reader 2> /dev/null | jq -cs 'map({(.id): .name}) | add // {}' 2> /dev/null)"
+		[ -n "$sessions" ] || sessions='{}'
+		listed="[]"
+		for d in "$DESK_QUEUE_DIR"/*/; do
+			[ -d "$d" ] || continue
+			sid="$(basename "$d")"
+			mapfile -t files < <(desk_queue_files "$sid")
+			[ "${#files[@]}" -gt 0 ] || continue
+			listed="$(jq -c --argjson l "$listed" --arg sid "$sid" --argjson names "$sessions" -n \
+				'[inputs] as $m | $l + [{session_id: $sid, name: ($names[$sid] // null), waiting: ($m | length),
+					oldest: ($m | map(.at) | min), from: ($m | map(.from) | unique)}]' "${files[@]}")"
+		done
+		if [ -n "$json" ]; then
+			printf '%s\n' "$listed"
+		else
+			jq -r 'if length == 0 then "nothing is queued"
+				else .[] | "\(.name // .session_id[0:8])  \(.waiting) waiting since \(.oldest | strflocaltime("%a %d %b %H:%M")), from \(.from | join(", "))" end' <<< "$listed"
+		fi
+		;;
+	show)
+		target
+		mapfile -t files < <(desk_queue_files "$sid")
+		[ "${#files[@]}" -gt 0 ] || { echo "nothing is queued for $name"; exit 0; }
+		for f in "${files[@]}"; do
+			jq -r --arg id "$(basename "$f" .json)" \
+				'"\($id)  from \(.from), queued \(.at | strflocaltime("%a %d %b %H:%M"))\n\(.text | sub("\\s+$"; ""))\n"' "$f"
+		done
+		;;
+	drop)
+		target
+		n=0
+		if [ "${#args[@]}" -gt 1 ]; then
+			for id in "${args[@]:1}"; do
+				case "$id" in */* | .*) echo "desk-queue: '$id' is not a message id" >&2; exit 2 ;; esac
+				if rm "$DESK_QUEUE_DIR/$sid/$id.json" 2> /dev/null; then n=$((n + 1)); else echo "desk-queue: no waiting message $id for $name" >&2; fi
+			done
+		else
+			while IFS= read -r f; do rm -f "$f" && n=$((n + 1)); done < <(desk_queue_files "$sid")
+		fi
+		rmdir "$DESK_QUEUE_DIR/$sid" 2> /dev/null
+		echo "dropped $n message(s) for $name"
+		;;
+	*) usage ;;
+esac
