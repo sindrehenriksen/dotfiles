@@ -1336,12 +1336,13 @@ desk_follow_main() {
 		--argjson baseline_jira "$baseline_jira" --argjson baseline_gh "$baseline_gh" \
 		--argjson queue_max "$(jq -r '.queue_max // 200' <<< "$pass_config")" \
 		--argjson skip "$(jq -c '.skip // {}' <<< "$pass_config")" --argjson self "$(jq -c '.self // []' <<< "$pass_config")" \
+		--argjson self_ids "$(jq -c '[.self_account_id, .self_slack_id | strings | select(. != "")]' <<< "$pass_config")" \
 		--arg cl "$(desk_follow_changelog_configured "$pass_config" && echo yes || echo no)" --argjson lookback "$([ -n "$lookback" ] && echo true || echo false)" '
 		{entries: $entries, state: $state[0], scope_issues: $scope[0], change_issues: $changes[0], prs: $prs[0],
 		 seed_prs: $seed[0].prs, runs: $runs[0], follow_repos: $repo_info, slack_events: $slack[0].events,
 		 now: $now, jira_since: $jira_since, gh_since: $gh_since,
 		 baseline_jira: $baseline_jira, baseline_gh: $baseline_gh, queue_max: $queue_max,
-		 skip: $skip, self: $self, lookback: $lookback,
+		 skip: $skip, self: $self, self_ids: $self_ids, lookback: $lookback,
 		 own_check: (if $cl == "yes" then "pending" else "off" end)}' > "$work/diff-input.json"
 	new_state="$(jq -c -f "$DESK_FOLLOW_DIFF_JQ" "$work/diff-input.json" 2> "$work/diff.err")" || new_state=""
 	if [ -z "$new_state" ]; then
@@ -1379,7 +1380,8 @@ desk_follow_main() {
 	# in its session queue (queue.sh) instead, to be handed over when its
 	# next turn starts: a turn there now would re-read its whole context
 	# at full price. `queue_idle_minutes` on the pass replaces the cache's
-	# own lifetime, and `false` there sends every update.
+	# own lifetime, and `false` there sends every update. An update holding
+	# a change the diff marked `direct` is sent whatever the cache.
 	local send preamble_file max_chars tz sent=0 held=0 queue_idle
 	queue_idle="$(desk_follow_queue_idle "$pass_config" "$pass")"
 	send="$(jq -c '.send // {}' <<< "$pass_config")"
@@ -1410,9 +1412,14 @@ desk_follow_main() {
 		# A send that failed backs off before a scheduled run tries again,
 		# doubling from the interval up to four hours; a manual run always
 		# tries.
-		local retry_at to_queue=""
+		local retry_at to_queue="" direct
+		direct="$(jq '[.changes[] | select(.direct == true)] | length' <<< "$queue")"
 		if [ "$queue_idle" != "off" ] && desk_follow_session_cold "$sid" "$now" "$queue_idle"; then
-			to_queue="true"
+			if [ "$direct" -gt 0 ]; then
+				desk_log "$pass" "follow: $label: its prompt cache has gone cold, but $direct of its $n change(s) always go straight through"
+			else
+				to_queue="true"
+			fi
 		fi
 		retry_at="$(jq -r --arg s "$sid" '.queues[$s].retry_at // 0' <<< "$new_state")"
 		if [ -z "$to_queue" ] && [ "$scheduled" = "true" ] && [ "$dry_run" != "true" ] && [ "$now" -lt "$retry_at" ]; then

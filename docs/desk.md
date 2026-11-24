@@ -148,7 +148,15 @@ desk-follow run [--dry-run] [--lookback-minutes N]    # one run now
 
 **Not waking a session whose cache is cold.** A sent update starts a turn at once, and in a session whose prompt cache has expired that turn re-reads the whole context at full price, for a reply nobody reads until the user gets there. So a live session whose cache has gone cold gets the same message in its session queue instead (below), with no send call, and is handed it when its next turn starts; one whose cache is still warm is sent it. Every model call a session makes refreshes its cache, so the clock runs from the last assistant record in its transcript, and the lifetime is the one its last cache write used (five minutes or an hour, from the record's `usage.cache_creation`; an hour when no record says), less a minute for the send. A session with no transcript to read counts as cold. `queue_idle_minutes` on the pass replaces that lifetime, and `false` there sends every update. **A queued update is judged only when a turn next starts in that session**: until then nothing weighs it against the bar, so a `[needs-you]` in it waits too. What waits shows in `desk-queue list`, per session, and as `q:<n>` in the session's own status line.
 
-It takes its own lock, waiting a minute for it before skipping, and none of the runner's guard or status file. `--scheduled` skips a run sooner than `interval_minutes` after the last; `--dry-run` prints and writes nothing. Its keys (`interval_minutes`, `queue_idle_minutes`, `jira.*`, `github_repos`, `slack.*`, `send`, `preamble`, `self`, `skip`, …) are read in `claude/desk-lib/follow.sh`, which has the details.
+**What always goes straight through**, by rule, with no model deciding and whatever the cache; an update holding one such change is sent whole:
+
+- a failed CI run on an open pull request in a followed repo;
+- a review request naming the user (`self`, which may list a team as `team <slug>`);
+- a comment, review or Slack message that mentions the user: `@` with one of `self`'s names or logins as a whole token, the user's tracker account id (`self_account_id`) in a comment, or the user's Slack id (`self_slack_id`) among the ids a message mentions.
+
+The rest keeps the warm/cold rule, including what the pass's data does not tell apart: a failed run on a default branch (a deploy after a merge names no pull request), CI on a pull request followed only by a ticket key (runs are read for followed repos alone), a request to a team `self` does not list, and an escalation written only as a bot's text.
+
+It takes its own lock, waiting a minute for it before skipping, and none of the runner's guard or status file. `--scheduled` skips a run sooner than `interval_minutes` after the last; `--dry-run` prints and writes nothing. Its keys (`interval_minutes`, `queue_idle_minutes`, `jira.*`, `github_repos`, `slack.*`, `send`, `preamble`, `self`, `self_account_id`, `self_slack_id`, `skip`, …) are read in `claude/desk-lib/follow.sh`, which has the details.
 
 ## The session queue
 

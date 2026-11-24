@@ -72,7 +72,9 @@ def tail_meta:
 		| .b |= (sub("(^|\\n)Reactions: [^\\n]*$"; "") | sub("\\s+$"; "")));
 
 def message($m): ($m.body | tail_meta) as $t
-	| {ts: $m.ts, author: ($m.who | who), body: ($t.b | mentions), replies: $t.replies, latest: $t.latest};
+	| {ts: $m.ts, author: ($m.who | who), body: ($t.b | mentions), replies: $t.replies, latest: $t.latest,
+	   # The user ids the message mentions, as the connector writes a mention.
+	   mentions: ([$t.b | scan("<@([A-Z0-9]+)[|>]") | .[0]] | unique)};
 
 # A channel read's text: "Channel: <name> (<id>)", then per message
 # "=== Message from <who> at <time> ===", "Message TS: <ts>" and its text.
@@ -141,10 +143,10 @@ def do_channel($c):
 	                 + [$ths[] | select(.more == true) | "\($c) thread \(.ts) has more than 200 new replies; the next run reads on from there"]),
 	         thread_calls: [$ths[] | .pending | values],
 	         events: ([$msgs[] | select($from != null and .ts > $from)
-	                   | {src: $c, cid: $c, name: $cm.name, ts, at: (.ts | epoch), author, body, kind: "message",
+	                   | {src: $c, cid: $c, name: $cm.name, ts, at: (.ts | epoch), author, body, mentions, kind: "message",
 	                      thread: null, title: null, system: (.body | is_system)}]
 	                  + [$ths[] | . as $th | (.new // [])[]
-	                     | {src: $c, cid: $c, name: $cm.name, ts, at: (.ts | epoch), author, body, kind: "reply",
+	                     | {src: $c, cid: $c, name: $cm.name, ts, at: (.ts | epoch), author, body, mentions, kind: "reply",
 	                        thread: $th.ts, title: $th.title, system: false}]),
 	         state: {name: $cm.name,
 	                 seen: ([($p.seen // $nowstr), ($msgs | map(.ts) | max // "")] | max),
@@ -168,7 +170,7 @@ def do_thread($r):
 	    else replies_since($from; $t) as $new
 	    | {ref: $r, ok: true,
 	       notes: (if ($b | more) then ["\($c) thread \($pts) has more than 200 new replies; the next run reads on from there"] else [] end),
-	       events: [$new[] | {src: $r, cid: $c, name: $name, ts, at: (.ts | epoch), author, body, kind: "reply",
+	       events: [$new[] | {src: $r, cid: $c, name: $name, ts, at: (.ts | epoch), author, body, mentions, kind: "reply",
 	                          thread: $pts, title: ($t.parent.body | title), system: false}],
 	       state: {title: ($t.parent.body | title),
 	               seen: ([($p.seen // $nowstr), ($new | map(.ts) | max // "")] | max)}}

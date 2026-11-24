@@ -30,6 +30,9 @@
 #                   opened in the window that only the user committed to are
 #                   counted, not sent; on an older PR of the user's, only its
 #                   state moves are
+#   self_ids        the user's account ids (the tracker's, Slack's): a comment
+#                   holding one, or a Slack message whose mentions name one,
+#                   mentions the user
 #   own_check       "off" (no changelog read: a ticket the user created in
 #                   the window is counted on its creator alone), "pending"
 #                   (the first diff of a run that reads changelogs: such a
@@ -49,6 +52,13 @@
 # labels, check results, a ticket only first seen) is counted per kind in
 # the queue's `skipped`, which the message's footer reports.
 #
+# A change is marked `direct` when it always goes straight to the session,
+# whatever its prompt cache (follow.sh's delivery): a failed CI run on an
+# open pull request, a review request naming the user, and a comment,
+# review or Slack message that mentions the user. Each is read from the
+# data's own fields or the mention's own syntax, never from what a text
+# seems to say.
+#
 # Prints the new state. Every change it queues is one line of plain text a
 # follow session reads; the message around them is built in follow.sh.
 
@@ -59,7 +69,7 @@
 | .baseline_jira as $baseline_jira | .baseline_gh as $baseline_gh | .queue_max as $queue_max
 | (.skip.bot_authors // []) as $bot_authors | (.skip.bot_signatures // []) as $bot_signatures
 | (.lookback // false) as $lookback
-| (.self // []) as $self
+| (.self // []) as $self | (.self_ids // []) as $self_ids
 | (.seed_prs // []) as $seed_prs | .runs as $runs | (.follow_repos // {}) as $follow_repos
 | (.slack_events // []) as $slack_events
 |
@@ -92,6 +102,16 @@ def is_bot($author; $body):
 	or (($body // "") | sub("^\\s+"; "") as $b | any($bot_signatures[]; . as $re | $b | test($re)));
 
 def is_self($who): ($who // "") as $w | any($self[]; ascii_downcase == ($w | ascii_downcase));
+
+# Whether a comment or message mentions the user: `@` and one of the user's
+# names or logins as a whole token, or one of the user's account ids, which
+# is how a tracker serializes a mention.
+def re_quote: gsub("(?<c>[\\\\.^$|?*+()\\[\\]{}])"; "\\\(.c)");
+def mentions_user:
+	(. // "") as $t
+	| any($self_ids[]; . as $id | $t | contains($id))
+	  or any($self[]; . as $n | $t | test("(^|[^A-Za-z0-9_@/.-])@" + ($n | re_quote) + "($|[^A-Za-z0-9_-])"; "i"));
+def direct_if($yes): if $yes then {direct: true} else {} end;
 
 def desc_sig: if . == null then null else (length | tostring) + ":" + .[0:200] + "|" + .[-200:] end;
 
@@ -229,7 +249,8 @@ def field_changes($prev):
 def field_event($f):
 	if ($f | length) == 0 then empty
 	elif any($f[]; .skip == null) then {what: ([$f[].text] | join("; ")), skip: null}
-	else {what: ([$f[].text] | join("; ")), skip: $f[0].skip} end;
+	else {what: ([$f[].text] | join("; ")), skip: $f[0].skip} end
+	| . + direct_if(any($f[]; .direct == true));
 
 def comment_changes($prev):
 	. as $i
@@ -246,7 +267,8 @@ def comment_changes($prev):
 	        elif (($c.created | ts) // 0) > $jira_since then
 	          {at: ($c.created | ts), what: "new comment by \($c.author): \"\($c.body | excerpt(500))\""}
 	        else empty end
-	      | . + {author: $c.author, skip: (if is_bot($c.author; $c.body) then "bot comments" else null end)} ]
+	      | . + {author: $c.author, skip: (if is_bot($c.author; $c.body) then "bot comments" else null end)}
+	        + direct_if($c.body | mentions_user) ]
 	  end;
 
 # Each ticket's change lines (empty when nothing moved), keyed by ticket.
@@ -322,7 +344,7 @@ def pr_field_changes($prev):
 		# one to a team, whose members the listing does not say; one naming
 		# someone else is counted.
 		(if ($prev | has("requested")) then
-			(($p.requested - $prev.requested)[] | asks_text("review requested from"; "review requests")),
+			(($p.requested - $prev.requested)[] | asks_text("review requested from"; "review requests") + direct_if(is_self(.))),
 			(($prev.requested - $p.requested) | if length > 0 then {text: "review request removed: \(join(", "))", skip: "review requests"} else empty end)
 		 else empty end),
 		(if ($prev | has("assignees")) then
@@ -356,7 +378,8 @@ def pr_comment_changes($prev):
 	            skip: (if is_bot($c.author; $c.body) then (if $c.kind == "review" then "bot reviews" else "bot comments" end) else null end),
 	            what: (if $c.kind == "review"
 	                   then "review by \($c.author): \($c.state | ascii_downcase)\(if ($c.body // "") != "" then ", \"" + ($c.body | excerpt(500)) + "\"" else "" end)"
-	                   else "comment by \($c.author): \"\($c.body | excerpt(500))\"" end)} ]
+	                   else "comment by \($c.author): \"\($c.body | excerpt(500))\"" end)}
+	           + direct_if($c.body | mentions_user) ]
 	  end;
 
 def pr_events:
@@ -379,7 +402,8 @@ def pr_events:
 	                   opened: $opened, commits: $p.commits,
 	                   what: ((if $opened then "opened" else "new under the follow" end)
 	                          + " (\($p.state | ascii_downcase)\(if $p.draft then ", draft" else "" end), branch \($p.branch))"
-	                          + ($asks | map("; " + .) | join("")))},
+	                          + ($asks | map("; " + .) | join("")))}
+	          + direct_if(any(($p.requested // [])[]; is_self(.))),
 	          ($p | pr_comment_changes({}) | .[] | $base + .)
 	      else
 	        (($p | pr_field_changes($prev)) as $f
@@ -419,7 +443,7 @@ def run_events($snaps):
 	           elif $pr != null then
 	             {at: ($r.ended | ts), ref: ("PR " + ($pr.key | sub("^.*#"; "#"))), title: $pr.value.title, repo: $r.repo,
 	              group: $pr.key, url: $pr.value.url, what: "CI failed: \($what)",
-	              skip: (if is_bot($pr.value.author; "") then "bot CI failures" else null end)}
+	              skip: (if is_bot($pr.value.author; "") then "bot CI failures" else null end), direct: true}
 	           else empty end ]
 	  end;
 
@@ -448,6 +472,7 @@ def slack_changes($sid; $e):
 	     group: ("slack:\($ev.cid)" + (if $ev.thread != null then ":\($ev.thread)" else "" end)),
 	     skip: (if $ev.system then "channel joins" elif is_self($ev.author) then "own posts"
 	            elif is_bot($ev.author; $ev.body) then "bot posts" else null end)}
+	    + direct_if(any(($ev.mentions // [])[]; . as $m | $self_ids | index($m)) or ($ev.body | mentions_user))
 	    + (if ($also | length) > 0 then {also: $also} else {} end) ]
 	| group_by(.uid) | map((map(select(.group | test(":.*:"))) | first) // first) | map(del(.uid));
 
@@ -534,6 +559,7 @@ scope_maps as $maps
 	     | also_having($sid; $maps; [$ev.key]; ($tix[$ev.key].parent // null)) as $also
 	     | {at: ($ev.at // $now), ref: $ev.key, title: $ev.title, context: $rel, what: $ev.what, skip: $ev.skip}
 	       + (if $ev.field == true then {field_run: $now} else {} end)
+	       + direct_if($ev.direct == true)
 	       + (if ($also | length) > 0 then {also: $also} else {} end) ]
 	   # A PR matched both by a key and by its repo is one change, counted
 	   # as the repo follow counts it.
@@ -545,12 +571,14 @@ scope_maps as $maps
 	       | {at: ($ev.at // $now), ref: ("PR " + ($ev.key | sub("^.*#"; "#"))), title: $ev.title,
 	          context: (if ($hit | length) > 0 then ($hit | join(", ")) else "in \($ev.repo)" end),
 	          what: $ev.what, url: $ev.url, group: $ev.key, skip: (if $via_repo then $ev.repo_skip else $ev.skip end)}
+	         + direct_if($ev.direct == true)
 	         + (if ($also | length) > 0 then {also: $also} else {} end) ]
 	   + [ $rev[] | . as $ev
 	       | select(follows_repo($e; $ev.repo))
 	       | also_pr($sid; $maps; []; $ev.repo) as $also
 	       | {at: ($ev.at // $now), ref: $ev.ref, title: $ev.title, context: "in \($ev.repo)",
 	          what: $ev.what, group: $ev.group, skip: $ev.skip}
+	         + direct_if($ev.direct == true)
 	         + (if $ev.url then {url: $ev.url} else {} end)
 	         + (if ($also | length) > 0 then {also: $also} else {} end) ]
 	   + slack_changes($sid; $e)) as $events
