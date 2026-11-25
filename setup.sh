@@ -66,7 +66,7 @@ zsh
 brew install pipx
 # if linux
 sudo apt install pipx
-pipx install hatch==1.18.1
+pipx install hatch==1.18.2
 
 #### Hammerspoon (macOS window manager — replaces Divvy)
 # if mac
