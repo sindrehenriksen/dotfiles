@@ -185,8 +185,32 @@ assert_eq "...why on stderr" "session-stale: not idle: its status is busy" "$(ca
 jq '.status = "idle"' "$CLAUDE_CONFIG_DIR/sessions/$pid.json" > "$TMP/pf" && mv "$TMP/pf" "$CLAUDE_CONFIG_DIR/sessions/$pid.json"
 mkdir -p "$CLAUDE_CONFIG_DIR/projects/-p/$s6/subagents"
 : > "$CLAUDE_CONFIG_DIR/projects/-p/$s6/subagents/agent-x.jsonl"
+echo '{"description":"Read the  docs"}' > "$CLAUDE_CONFIG_DIR/projects/-p/$s6/subagents/agent-x.meta.json"
 run "$s6"
-assert_eq "a subagent writing: exit 1" "1|" "$rc|$out"
+assert_eq "a subagent writing: exit 5, the reasons still printed" "5|version: 2.1.300 running, 2.1.318 installed" "$rc|$out"
+case "$(cat "$TMP/err")" in
+	"session-stale: 1 subagent active, last write "*"s ago (Read the docs)") ok "...how many, how recently and what for on stderr" ;;
+	*) bad "...how many, how recently and what for on stderr (got [$(cat "$TMP/err")])" ;;
+esac
+jq '.status = "busy"' "$CLAUDE_CONFIG_DIR/sessions/$pid.json" > "$TMP/pf" && mv "$TMP/pf" "$CLAUDE_CONFIG_DIR/sessions/$pid.json"
+run "$s6"
+assert_eq "...but busy as well: exit 1, as a restart cannot work" "1|session-stale: not idle: its status is busy" "$rc|$out$(cat "$TMP/err")"
+jq '.status = "idle"' "$CLAUDE_CONFIG_DIR/sessions/$pid.json" > "$TMP/pf" && mv "$TMP/pf" "$CLAUDE_CONFIG_DIR/sessions/$pid.json"
+p6=$pid
+s6b=$(uuid)
+session "$s6b" 2.1.318 acct-a
+mkdir -p "$CLAUDE_CONFIG_DIR/projects/-p/$s6b/subagents"
+: > "$CLAUDE_CONFIG_DIR/projects/-p/$s6b/subagents/agent-y.jsonl"
+run "$s6b"
+assert_eq "nothing stale: its subagents go unlooked at" "0|" "$rc|$out"
+out="$("$STALE" --check "$s6b" 2> "$TMP/err")"
+rc=$?
+assert_eq "...unless asked to check anyway: exit 5, no reasons" "5|" "$rc|$out"
+rm -r "$CLAUDE_CONFIG_DIR/projects/-p/$s6b"
+out="$("$STALE" --check "$s6b" 2> "$TMP/err")"
+assert_eq "...and exit 0 with nothing printed once they are gone" "0||" "$?|$out|$(cat "$TMP/err")"
+pid=$p6
+tab "$pid"
 rm -r "$CLAUDE_CONFIG_DIR/projects/-p/$s6"
 printf '%s\0' claude --resume x --dangerously-skip-permissions > "$TMP/argv"
 run "$s6"

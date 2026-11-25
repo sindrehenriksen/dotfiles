@@ -176,8 +176,8 @@ desk_tab() { table "$1" "/bin/zsh -lic claude --resume x" "-/bin/zsh" "${@:2}"; 
 
 field() { "$READER" | jq -r --arg id "$1" "select(.id == \$id) | $2"; }
 uuid() { uuidgen | tr '[:upper:]' '[:lower:]'; }
-run_restart() { # id -> sets out, rc
-	out="$("$RESTART" "$1" 2> "$TMP/restart.err")"
+run_restart() { # [--force] id -> sets out, rc
+	out="$("$RESTART" "$@" 2> "$TMP/restart.err")"
 	rc=$?
 }
 detail() { cut -f4 <<< "$out"; }
@@ -267,7 +267,10 @@ jq '.status = "idle"' "$CONFIG_DIR/sessions/$p2.json" > "$TMP/pf" && mv "$TMP/pf
 mkdir -p "$PROJ_DIR/$s2/subagents"
 : > "$PROJ_DIR/$s2/subagents/agent-a1.jsonl"
 run_restart "$s2"
-assert_eq "a subagent writing just now: refused" "refused	not idle: a subagent wrote in the last 5 min (agent-a1.jsonl)" "$(status)	$(detail)"
+case "$(status)	$(detail)" in
+	"refused	not idle: 1 subagent active, last write "*"s ago (agent-a1)") ok "a subagent writing just now: refused, saying how many and how recently" ;;
+	*) bad "a subagent writing just now: refused, saying how many and how recently (got [$(status)	$(detail)])" ;;
+esac
 assert_eq "...still running after all of them" "alive" "$(alive "$p2")"
 assert_eq "...with its tab never asked about" "" "$(cat "$TMP/tab.log")"
 touch -t 202001010000 "$PROJ_DIR/$s2/subagents/agent-a1.jsonl"
@@ -293,7 +296,7 @@ echo '{"agentType":"general-purpose"}' > "$sub16/agent-slow.meta.json"
 touch -t "$ten_min_ago" "$sub16/agent-slow.meta.json"
 run_restart "$s16"
 assert_eq "one it started, not finished, quiet for ten minutes: refused" \
-	"refused	not idle: a subagent it started has not finished (agent-slow)" "$(status)	$(detail)"
+	"refused	not idle: 1 subagent active, last write 10 min ago (agent-slow)" "$(status)	$(detail)"
 rm "$sub16/agent-slow.meta.json"
 s16b=$(uuid)
 p16b=$(spawn "$s16b")
@@ -311,6 +314,47 @@ fresh
 desk_tab "$p16"
 run_restart "$s16"
 assert_eq "finished ones, and one an earlier process left unfinished, do not hold it up" "restarted" "$(status)"
+
+echo "=== forced: running subagents do not hold it up, every other refusal does ==="
+fresh
+s17=$(uuid)
+p17=$(spawn "$s17")
+desk_tab "$p17"
+sub17="$PROJ_DIR/$s17/subagents"
+mkdir -p "$sub17"
+echo '{"agentType":"general-purpose","description":"Survey the tests"}' > "$sub17/agent-b1.meta.json"
+: > "$sub17/agent-b1.jsonl"
+: > "$sub17/agent-b2.jsonl"
+run_restart "$s17"
+case "$(status)	$(detail)" in
+	"refused	not idle: 2 subagents active, last write "*"s ago ("*"Survey the tests"*")") ok "unforced: refused, counting each subagent once and naming what it is for" ;;
+	*) bad "unforced: refused, counting each subagent once and naming what it is for (got [$(status)	$(detail)])" ;;
+esac
+jq '.status = "busy"' "$CONFIG_DIR/sessions/$p17.json" > "$TMP/pf" && mv "$TMP/pf" "$CONFIG_DIR/sessions/$p17.json"
+run_restart --force "$s17"
+assert_eq "forced, but busy: still refused" "refused	not idle: its status is busy" "$(status)	$(detail)"
+jq '.status = "idle"' "$CONFIG_DIR/sessions/$p17.json" > "$TMP/pf" && mv "$TMP/pf" "$CONFIG_DIR/sessions/$p17.json"
+table "$p17" "/bin/zsh -lic CLAUDE_CONFIG_DIR='/c' claude --resume x" "$LOGIN_ROW"
+run_restart --force "$s17"
+assert_eq "forced, in a tab that would close with it: still refused, exit 3" "refused	3" "$(status)	$rc"
+desk_tab "$p17"
+printf '%s\0' claude --dangerously-skip-permissions --resume x > "$TMP/argv"
+run_restart --force "$s17"
+assert_eq "forced, with a flag a restart will not carry: still refused" "refused" "$(status)"
+assert_eq "...still running after all of them" "alive" "$(alive "$p17")"
+run_restart --force "$(uuid)"
+assert_eq "forced, no such session: still refused" "refused	no such session" "$(status)	$(detail)"
+fresh
+: > "$sub17/agent-b2.jsonl"
+run_restart --force "$s17"
+assert_eq "forced, with only its subagents in the way: restarted" "restarted	gone" "$(status)	$(alive "$p17")"
+s17b=$(uuid)
+p17b=$(spawn "$s17b")
+desk_tab "$p17b"
+mkdir -p "$PROJ_DIR/$s17b/subagents"
+: > "$PROJ_DIR/$s17b/subagents/agent-c1.jsonl"
+RESTART_SESSION_FORCE=1 run_restart "$s17b"
+assert_eq "...and the same asked through the environment" "restarted" "$(status)"
 
 echo "=== something scheduled in the process ==="
 iso() { date -u -r "$1" +%Y-%m-%dT%H:%M:%S.000Z 2> /dev/null || date -u -d "@$1" +%Y-%m-%dT%H:%M:%S.000Z; }
@@ -610,6 +654,18 @@ desk_tab "$p21"
 run_restart "$s21"
 assert_eq "the allowlisted flags of its argv are carried, by the same builder a tab uses" \
 	"cd '$PROJ_DIR' && CLAUDE_CONFIG_DIR='$CONFIG_DIR' claude --model 'opus' --resume $s21" "$(sed -n 3p "$TMP/markers/9001")"
+rm -f "$TMP/markers/9001"
+
+fresh
+s27=$(uuid)
+p27=$(spawn_wrapped "$s27")
+desk_tab "$p27"
+mkdir -p "$PROJ_DIR/$s27/subagents"
+: > "$PROJ_DIR/$s27/subagents/agent-m1.jsonl"
+run_restart "$s27"
+assert_eq "a subagent writing just now: refused, no marker left" "refused|" "$(status)|$(ls "$TMP/markers")"
+run_restart --force "$s27"
+assert_eq "...forced: restarted over it" "restarted	resume left for its shell" "$(status)	$(detail)"
 rm -f "$TMP/markers/9001"
 
 echo "=== marker mode: a session its shell cannot resume is refused, untouched ==="

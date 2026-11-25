@@ -12,7 +12,10 @@
 # Unsent text in the session's input box is lost: the restart ends the
 # process holding it and clears the tab's line before typing the resume.
 #
-# Usage: restart-session.sh <session-id>
+# Usage: restart-session.sh [--force] <session-id>
+#   --force (or $RESTART_SESSION_FORCE set) restarts over running subagents,
+#   which end with the session: the second press of the restart hotkey, once
+#   the first has shown them. Every other refusal below stands.
 #
 # Refused, with nothing done: an id that is not a full session UUID; a
 # session that is not live, or that two processes hold; the session running
@@ -22,7 +25,7 @@
 # dir>/shell-snapshots/snapshot-…`, how Claude Code runs a Bash call); a
 # file under its transcript's `<id>/subagents/` changed in the last
 # $RESTART_SESSION_QUIET_MINS minutes (default 5), or a subagent it started
-# not marked finished there; or a wakeup or session cron its transcript
+# not marked finished there (unless forced); or a wakeup or session cron its transcript
 # shows still pending, which lives in the process and would be lost. Other
 # children, the MCP servers, do not count. One whose argv cannot be read, or
 # holds an option a resume would drop, or a flag that bypasses permissions,
@@ -132,9 +135,13 @@ PROMPT_SECS="${RESTART_SESSION_PROMPT_SECS:-10}"
 CONFIRM_SECS="${RESTART_SESSION_CONFIRM_SECS:-20}"
 TAB_TIMEOUT="${RESTART_SESSION_TAB_TIMEOUT_SECS:-10}"
 
+if [ "${1:-}" = --force ]; then
+	RESTART_SESSION_FORCE=1
+	shift
+fi
 id="${1:-}"
 if [ $# -ne 1 ] || [ -z "$id" ]; then
-	echo "usage: restart-session.sh <session-id>" >&2
+	echo "usage: restart-session.sh [--force] <session-id>" >&2
 	exit 2
 fi
 

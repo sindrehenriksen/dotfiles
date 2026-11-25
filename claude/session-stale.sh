@@ -5,7 +5,10 @@
 # are read, and the process table and transcripts only once there is a
 # reason to offer.
 #
-# Usage: session-stale.sh <session-id> [<reasons last offered>]
+# Usage: session-stale.sh [--check] <session-id> [<reasons last offered>]
+#            --check runs the restart checks even with nothing stale, for
+#            the restart hotkey's first press, which shows what a restart
+#            would end whatever the reasons.
 #            With the reasons last offered or dismissed (the lines this
 #            printed then), reasons that still match are printed with exit
 #            4 and none of the checks below run: they read the process
@@ -46,7 +49,10 @@
 # Exit 0 with nothing printed: nothing to restart for. Exit 3 with reasons:
 # its tab would close with it (a tab opened before tabs left a prompt), so
 # it cannot be restarted in place (on Linux also a session its shell cannot
-# resume: not started through the `claude` function). Exit 1, nothing printed and why on
+# resume: not started through the `claude` function). Exit 5 with reasons,
+# and its running subagents on stderr (how many, how recently one wrote,
+# what they are for): only they stand in the way, and restart-session.sh
+# --force restarts over them. Exit 1, nothing printed and why on
 # stderr: it cannot be judged or restarted now (not live, not idle, held by
 # two processes). Exit 2: usage.
 #
@@ -83,7 +89,7 @@ CLAUDE_BIN="${SESSION_STALE_CLAUDE_BIN:-$HOME/.local/bin/claude}"
 
 
 usage() {
-	echo "usage: session-stale.sh <session-id> [<reasons last offered>] | --pid <pid> <config-dir>..." >&2
+	echo "usage: session-stale.sh [--check] <session-id> [<reasons last offered>] | --pid <pid> <config-dir>..." >&2
 	exit 2
 }
 
@@ -114,6 +120,11 @@ if [ "${1:-}" = --pid ]; then
 	exit 1
 fi
 
+check=""
+if [ "${1:-}" = --check ]; then
+	check=1
+	shift
+fi
 id="${1:-}"
 known="${2:-}"
 [ $# -ge 1 ] && [ $# -le 2 ] && [ -n "$id" ] || usage
@@ -167,8 +178,9 @@ if [ -n "$current" ] && [ -n "$loaded" ] && [ "$current" != "$loaded" ]; then
 	reasons+=("account: its connectors are another account's than the one logged in now")
 fi
 
-[ "${#reasons[@]}" -gt 0 ] || exit 0
-if [ -n "$known" ] && [ "$(printf '%s\n' "${reasons[@]}")" = "${known%$'\n'}" ]; then
+[ "${#reasons[@]}" -gt 0 ] || [ -n "$check" ] || exit 0
+print_reasons() { [ "${#reasons[@]}" -eq 0 ] || printf '%s\n' "${reasons[@]}"; }
+if [ -n "$known" ] && [ "${#reasons[@]}" -gt 0 ] && [ "$(printf '%s\n' "${reasons[@]}")" = "${known%$'\n'}" ]; then
 	printf '%s\n' "${reasons[@]}"
 	exit 4
 fi
@@ -183,12 +195,18 @@ for t in "$CONFIG_DIR"/projects/*/"$id".jsonl; do
 	subagents+=("$(dirname "$t")/$id/subagents")
 done
 [ "${#transcripts[@]}" -gt 0 ] || not_now "no transcript, so no way to tell whether subagents are running"
-restartable_idle "$pid" "$pidfile" "${subagents[@]}" || not_now "$restartable_why"
+restartable_idle "$pid" "$pidfile" || not_now "$restartable_why"
+active=""
+restartable_subagents "$pidfile" "${subagents[@]}" || active="$restartable_why"
 restartable_schedules "$pidfile" "${transcripts[@]}" || not_now "$restartable_why"
 if ! restartable_prompt "$pid"; then
-	printf '%s\n' "${reasons[@]}"
+	print_reasons
 	exit 3
 fi
 cwd="$(jq -r '.cwd // empty' "$pidfile" 2> /dev/null)"
 restartable_flags "$pid" "${cwd:-/}" || not_now "$restartable_why"
-printf '%s\n' "${reasons[@]}"
+print_reasons
+if [ -n "$active" ]; then
+	echo "session-stale: $active" >&2
+	exit 5
+fi

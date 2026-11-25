@@ -9,7 +9,8 @@
 #
 # Sourced. The caller sets CONFIG_DIR (the session's config dir, no trailing
 # slash), and may set $RESTART_SESSION_PS (a command printing `pid ppid args`
-# for every process, default ps) and $RESTART_SESSION_QUIET_MINS (default 5).
+# for every process, default ps), $RESTART_SESSION_QUIET_MINS (default 5)
+# and $RESTART_SESSION_FORCE (restart over running subagents).
 # Each check returns 0 when it passes, else 1 with the reason in
 # $restartable_why.
 set -u
@@ -82,22 +83,69 @@ interactive_shell() { is_shell "$1" && ! runs_command "$1"; }
 restartable_shq() { printf "'%s'" "${1//\'/\'\\\'\'}"; }
 restartable_mtime() { stat -c %Y "$1" 2> /dev/null || stat -f %m "$1" 2> /dev/null; }
 
+# restartable_subagents <pidfile> [subagents-dir...]: no subagent is running
+# under a subagents dir given: none wrote in the last
+# $RESTART_SESSION_QUIET_MINS minutes, and none this process started has a
+# `<agent>.meta.json` without `finished: true` and a write to it or its
+# transcript in the last two hours. That catches a background subagent
+# waiting on a long model call, when nothing is written for minutes. The
+# bound is there because a subagent that was stopped or failed is left
+# unfinished too: plenty here are, their transcripts untouched for days. One
+# an earlier process left predates this process's start and does not count
+# either. When some are running, $restartable_why says how many, how long
+# since the last of them wrote, and what the first few are for (the
+# description in their meta file, else their file's name).
+restartable_subagents() {
+	local pidfile=$1 quiet="${RESTART_SESSION_QUIET_MINS:-5}" now bound started dir kind f key m j desc age
+	local seen=$'\n' n=0 newest=0 names=""
+	shift
+	now=$(date +%s)
+	bound=$((now - 7200))
+	started=$(($(jq -r '.startedAt // 0' "$pidfile" 2> /dev/null) / 1000))
+	for dir in "$@"; do
+		[ -d "$dir" ] || continue
+		while IFS=$'\t' read -r kind f; do
+			[ -n "$f" ] || continue
+			key="${f%.meta.json}"
+			key="${key%.jsonl}"
+			m="$(restartable_mtime "$f")"
+			j="$(restartable_mtime "$key.jsonl")"
+			[ "${j:-0}" -gt "${m:-0}" ] && m="$j"
+			m="${m:-0}"
+			if [ "$kind" = unfinished ] && { [ "$m" -lt "$started" ] || [ "$m" -lt "$bound" ]; }; then
+				continue
+			fi
+			[ "$m" -gt "$newest" ] && newest=$m
+			case "$seen" in *$'\n'"$key"$'\n'*) continue ;; esac
+			seen="$seen$key"$'\n'
+			n=$((n + 1))
+			[ "$n" -le 3 ] || continue
+			desc="$(jq -r '.description // empty | gsub("\\s+"; " ") | .[0:60]' "$key.meta.json" 2> /dev/null)"
+			names="${names:+$names; }${desc:-$(basename "$key")}"
+		done < <(
+			find "$dir" -type f -mmin "-$quiet" 2> /dev/null | sed $'s/^/recent\t/'
+			find "$dir" -maxdepth 1 -name '*.meta.json' \
+				-exec jq -r 'select(.finished != true) | "unfinished\t" + input_filename' {} + 2> /dev/null
+		)
+	done
+	[ "$n" -gt 0 ] || return 0
+	age=$((now - newest))
+	if [ "$age" -lt 120 ]; then age="$((age > 0 ? age : 0))s"; else age="$((age / 60)) min"; fi
+	[ "$n" -le 3 ] || names="$names; +$((n - 3)) more"
+	restartable_why="$n subagent$([ "$n" -eq 1 ] || echo s) active, last write $age ago ($names)"
+	return 1
+}
+
 # restartable_idle <pid> <pidfile> [subagents-dir...]: its pid file's status
 # is idle; it has no shell of its own running (a child `<shell> -c source
 # <config dir>/shell-snapshots/snapshot-…`, how Claude Code runs a Bash
-# call); and no subagent is running under a subagents dir given: none wrote
-# in the last $RESTART_SESSION_QUIET_MINS minutes, and none this process
-# started has a `<agent>.meta.json` without `finished: true` and a write to
-# it or its transcript in the last two hours. That catches a background
-# subagent waiting on a long model call, when nothing is written for
-# minutes. The bound is there because a subagent that was stopped or failed
-# is left unfinished too: plenty here are, their transcripts untouched for
-# days. One an earlier process left predates this process's start and does
-# not count either. Other children, the MCP servers, do not count. Needs
-# $procs loaded.
+# call); and no subagent is running under a subagents dir given
+# (restartable_subagents). With $RESTART_SESSION_FORCE set the subagents are
+# not looked at: the user has seen what a restart ends and asked for it
+# anyway. Other children, the MCP servers, do not count. Needs $procs
+# loaded.
 restartable_idle() {
-	local pid=$1 pidfile=$2 quiet="${RESTART_SESSION_QUIET_MINS:-5}" state running dir recent started meta m j
-	local bound=$(($(date +%s) - 7200))
+	local pid=$1 pidfile=$2 state running
 	shift 2
 	state="$(jq -r '.status // empty' "$pidfile" 2> /dev/null)"
 	if [ -z "$state" ]; then
@@ -120,25 +168,10 @@ restartable_idle() {
 		restartable_why="not idle: it is running a shell command (pid $running)"
 		return 1
 	fi
-	started=$(($(jq -r '.startedAt // 0' "$pidfile" 2> /dev/null) / 1000))
-	for dir in "$@"; do
-		[ -d "$dir" ] || continue
-		recent="$(find "$dir" -type f -mmin "-$quiet" 2> /dev/null | head -n 1)"
-		if [ -n "$recent" ]; then
-			restartable_why="not idle: a subagent wrote in the last ${quiet} min ($(basename "$recent"))"
-			return 1
-		fi
-		while IFS= read -r meta; do
-			[ -n "$meta" ] || continue
-			m="$(restartable_mtime "$meta")"
-			j="$(restartable_mtime "${meta%.meta.json}.jsonl")"
-			[ "${j:-0}" -gt "$m" ] && m="$j"
-			if [ "$m" -ge "$started" ] && [ "$m" -ge "$bound" ]; then
-				restartable_why="not idle: a subagent it started has not finished ($(basename "$meta" .meta.json))"
-				return 1
-			fi
-		done < <(find "$dir" -maxdepth 1 -name '*.meta.json' -exec jq -r 'select(.finished != true) | input_filename' {} + 2> /dev/null)
-	done
+	if [ $# -gt 0 ] && [ -z "${RESTART_SESSION_FORCE:-}" ] && ! restartable_subagents "$pidfile" "$@"; then
+		restartable_why="not idle: $restartable_why"
+		return 1
+	fi
 	return 0
 }
 

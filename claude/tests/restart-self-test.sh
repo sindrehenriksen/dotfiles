@@ -92,7 +92,7 @@ fresh
 printf 'version: 1 running, 2 installed\n' > "$TMP/stale.out"
 RESTART_SELF_NOW=1000 run_self
 assert_eq "found through the process tree to claude and its pid file: asks session-stale.sh about that session, from inside" \
-	"stale $SID inside=1" "$(calls)"
+	"stale --check $SID inside=1" "$(calls)"
 assert_eq "first press exits 0" "0" "$rc"
 "$SELF" > "$TMP/out2" 2>&1 < /dev/null
 assert_eq "run from outside any session: says so, exit 1" "1:1" "$?:$(grep -c 'not run from inside a Claude Code session' "$TMP/out2")"
@@ -107,19 +107,29 @@ RESTART_SELF_NOW=1000 run_self
 assert_eq "prints what a restart would do, that unsent text is lost, and how to confirm" \
 	"Restart notes? version: 1 running, 2 installed; shell: ~/.shellrc changed since it started.
 Unsent text in its input box is lost. Press Super+Alt+R again within 10s to restart." "$out"
-assert_eq "...records the press, restarts nothing" "1000 $SID|stale $SID inside=1" "$(cat "$TMP/state/self/$CLAUDE_PID")|$(calls)"
+assert_eq "...records the press, restarts nothing" "1000 $SID|stale --check $SID inside=1" "$(cat "$TMP/state/self/$CLAUDE_PID")|$(calls)"
 fresh
 RESTART_SELF_NOW=1000 run_self
 assert_eq "nothing stale is said, and it still waits for the confirming press" \
 	"Restart notes? nothing in it is stale." "$(head -n 1 <<< "$out")"
 fresh
-printf 'not idle: a subagent wrote in the last 5 min (agent-a.jsonl)\n' > "$TMP/stale.err"
+printf 'session-stale: not idle: its status is busy\n' > "$TMP/stale.err"
 echo 1 > "$TMP/stale.rc"
 : > "$TMP/stale.out"
 RESTART_SELF_NOW=1000 run_self
-assert_eq "a restart that would be refused says why" \
-	"A restart of notes would be refused now: not idle: a subagent wrote in the last 5 min (agent-a.jsonl)." "$out"
+assert_eq "a restart that would be refused says why, promising nothing of a second press" \
+	"A restart of notes would be refused now: not idle: its status is busy." "$out"
 assert_eq "...and records nothing, so a second press cannot restart" "0" "$(ls "$TMP/state/self" 2> /dev/null | wc -l | tr -d ' ')"
+fresh
+printf 'session-stale: 2 subagents active, last write 40s ago (Survey the tests; agent-b)\n' > "$TMP/stale.err"
+echo 5 > "$TMP/stale.rc"
+printf 'version: 1 running, 2 installed\n' > "$TMP/stale.out"
+RESTART_SELF_NOW=1000 run_self
+assert_eq "running subagents are shown as what a restart ends, and a second press restarts anyway" \
+	"Restart notes? version: 1 running, 2 installed.
+2 subagents active, last write 40s ago (Survey the tests; agent-b): a restart ends them.
+Unsent text in its input box is lost. Press Super+Alt+R again within 10s to restart anyway." "$out"
+assert_eq "...recording that they were shown" "1000 $SID force" "$(cat "$TMP/state/self/$CLAUDE_PID")"
 fresh
 echo 3 > "$TMP/stale.rc"
 RESTART_SELF_NOW=1000 run_self
@@ -178,18 +188,22 @@ assert_eq "...through the detached half, whose restart-session.sh call has no se
 case "$(cat "$TMP/restart-self.log")" in *"restart-session.sh exited 0"*) ok "...with its outcome in the log" ;; *) bad "...with its outcome in the log (got [$(cat "$TMP/restart-self.log")])" ;; esac
 assert_eq "...and the record of the first press consumed" "0" "$(ls "$TMP/state/self" | wc -l | tr -d ' ')"
 fresh
+FIRST="1000 $SID force" press_after 5
+assert_eq "a second press after one that showed running subagents restarts over them" \
+	"detach restart-self.sh --detached|restart --force $SID session-id=unset" "$(calls)"
+fresh
 press_after 10
 assert_eq "exactly at the window's end it still counts" "restart $SID session-id=unset" "$(calls | sed 's/^detach[^|]*|//')"
 fresh
 press_after 11
 assert_eq "one second after the window: a first press again, restarting nothing" \
-	"Restart notes? nothing in it is stale.|stale $SID inside=1" "$(head -n 1 <<< "$out")|$(calls)"
+	"Restart notes? nothing in it is stale.|stale --check $SID inside=1" "$(head -n 1 <<< "$out")|$(calls)"
 fresh
 FIRST="1000 99999999-0000-0000-0000-000000000000" press_after 3
-assert_eq "a record of another session's press does not count" "stale $SID inside=1" "$(calls)"
+assert_eq "a record of another session's press does not count" "stale --check $SID inside=1" "$(calls)"
 fresh
 press_after -5
-assert_eq "a clock that went backwards does not count either" "stale $SID inside=1" "$(calls)"
+assert_eq "a clock that went backwards does not count either" "stale --check $SID inside=1" "$(calls)"
 
 echo "=== the detached half waits for idle ==="
 fresh

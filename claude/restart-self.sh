@@ -14,15 +14,19 @@
 # ~/.claude). Then two presses, as on the Mac:
 #   First press: prints what a restart would do (the reasons
 #     session-stale.sh gives, or why it would be refused now, or that nothing
-#     in the session is stale) and that unsent text is lost, and records the
-#     time. Nothing is restarted.
+#     in the session is stale), the subagents it would end if any are
+#     running, and that unsent text is lost, and records the time (and that
+#     subagents were shown). Nothing is restarted. A restart that would be
+#     refused for anything else records nothing, so a second press is a
+#     first.
 #   A second press within $RESTART_SELF_WINDOW_SECS (default 10) of the first
 #     restarts: it starts itself again, detached (setsid) with its output in
 #     a log, and returns at once, because restart-session.sh refuses a
 #     session with a shell of its own running, and this is one. The detached
 #     part waits up to $RESTART_SELF_IDLE_SECS (default 60) for the session
 #     to be idle (the pid file's status, and no shell command running), then
-#     runs restart-session.sh <id>, whose checks are the final word. A
+#     runs restart-session.sh <id>, with --force when the first press showed
+#     running subagents, whose checks are the final word. A
 #     refusal or failure there, or no idle in time, is in the log and in a
 #     desktop notification.
 # A session not started through the `claude` shell function, or started
@@ -92,7 +96,8 @@ if [ "${1:-}" = --detached ]; then
 		[ "$SECONDS" -lt "$until_s" ] || fail "not restarted: not idle after ${IDLE_SECS}s ($restartable_why)"
 		sleep 0.5
 	done
-	out="$("$RESTART_BIN" "$id" 2>&1)"
+	# shellcheck disable=SC2086 # nothing, or the one word
+	out="$("$RESTART_BIN" ${4:+--force} "$id" 2>&1)"
 	rc=$?
 	log "restart-session.sh exited $rc: $out"
 	[ "$rc" -eq 0 ] || fail "not restarted: $(printf '%s' "$out" | tail -n 1 | cut -f4)"
@@ -136,12 +141,12 @@ fi
 state="$STATE_DIR/$claude_pid"
 t="$(now)"
 if [ -f "$state" ]; then
-	read -r first_t first_id < "$state"
+	read -r first_t first_id first_force < "$state"
 	rm -f "$state"
 	if [ "${first_id:-}" = "$id" ] && [[ "${first_t:-}" =~ ^[0-9]+$ ]] && [ $((t - first_t)) -ge 0 ] && [ $((t - first_t)) -le "$WINDOW" ]; then
 		mkdir -p "$(dirname "$LOG")"
 		# shellcheck disable=SC2086 # $DETACH is a command with its words
-		$DETACH "$SELF" --detached "$id" "$claude_pid" < /dev/null >> "$LOG" 2>&1
+		$DETACH "$SELF" --detached "$id" "$claude_pid" ${first_force:+force} < /dev/null >> "$LOG" 2>&1
 		echo "Restarting $name once it is idle; it comes back in this tab. Log: $LOG"
 		exit 0
 	fi
@@ -151,22 +156,26 @@ fi
 
 export RESTARTABLE_FROM_INSIDE=1
 errf="$(mktemp)"
-reasons="$(CLAUDE_CONFIG_DIR="$CONFIG_DIR" "$STALE_BIN" "$id" 2> "$errf" < /dev/null)"
+reasons="$(CLAUDE_CONFIG_DIR="$CONFIG_DIR" "$STALE_BIN" --check "$id" 2> "$errf" < /dev/null)"
 rc=$?
 why="$(tr '\n' ' ' < "$errf" | sed 's/^session-stale: //; s/[[:space:]]*$//')"
 rm -f "$errf"
+force=""
 case "$rc" in
-	0) if [ -n "$reasons" ]; then
-		reasons="${reasons//$'\n'/; }"
-	else
-		reasons="nothing in it is stale"
-	fi ;;
+	0) ;;
+	5) force=force ;;
 	3) echo "Can't restart $name in this tab: its tab would close with it (claude --resume $id)."
 		exit 0 ;;
 	*) echo "A restart of $name would be refused now: ${why:-session-stale.sh exited $rc}."
 		exit 0 ;;
 esac
+if [ -n "$reasons" ]; then
+	reasons="${reasons//$'\n'/; }"
+else
+	reasons="nothing in it is stale"
+fi
 mkdir -p -m 700 "$STATE_DIR"
-printf '%s %s\n' "$t" "$id" > "$state"
+printf '%s %s%s\n' "$t" "$id" "${force:+ $force}" > "$state"
 echo "Restart $name? $reasons."
-echo "Unsent text in its input box is lost. Press Super+Alt+R again within ${WINDOW}s to restart."
+[ -z "$force" ] || echo "${why:-Subagents are running}: a restart ends them."
+echo "Unsent text in its input box is lost. Press Super+Alt+R again within ${WINDOW}s to restart${force:+ anyway}."

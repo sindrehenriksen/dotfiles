@@ -1226,7 +1226,9 @@ end
 -- Restart runs claude/restart-session.sh. Cmd+Opt+R, bound only while
 -- Ghostty is the active app, is for the focused tab's session stale or
 -- not: the first press shows what a restart would do, a second within a
--- few seconds does it, after the checks restart-session.sh makes.
+-- few seconds does it, after the checks restart-session.sh makes. Running
+-- subagents are shown by the first press and ended by the second; where a
+-- restart cannot work the first press says why and the second is a first.
 -- The offer's buttons show only with Hammerspoon's notifications set to
 -- Alerts in System Settings; as banners they appear on hover.
 -- ---------------------------------------------------------------------------
@@ -1318,22 +1320,28 @@ function DeskStale.offer_attributes(session, reasons, kind)
 end
 
 -- What the hotkey's first press shows for `session`, from its
--- session-stale.sh result: why a restart would help, or why it would be
--- refused, and what a second press costs.
+-- `session-stale.sh --check` result, and what a second press may then do:
+-- nil where a restart cannot work (the text promises nothing), "force"
+-- where it would end subagents, which the text names (exit 5), or might
+-- (the check itself failed), else true.
 function DeskStale.confirm_text(session, rc, out, err)
   local reasons = (out or ""):gsub("%s+$", ""):gsub("\n", "; ")
-  local why
+  local said = (err or ""):gsub("^session%-stale: ", ""):gsub("%s+$", "")
   if rc == 3 then
-    why = "this tab can't restart it in place"
+    return "Not restarting " .. session.name .. ": this tab can't restart it in place. Exit it and resume it once "
+      .. "(claude --resume " .. session.id .. ").", nil
   elseif rc == 1 then
-    why = "a restart would be refused now: " .. ((err or ""):gsub("^session%-stale: ", ""):gsub("%s+$", ""))
-  elseif reasons ~= "" then
-    why = reasons
-  else
-    why = "nothing in it is stale"
+    return "Not restarting " .. session.name .. ": a restart would be refused now: " .. said .. ".", nil
   end
-  return "Restart " .. session.name .. "? " .. why .. ".\nUnsent text in its input box is lost. "
-    .. "Press Cmd+Opt+R again to restart."
+  local cost, arm = "", true
+  if rc == 5 then
+    cost, arm = "\n" .. said .. ": a restart ends them.", "force"
+  elseif rc ~= 0 then
+    cost, arm = "\nCould not tell whether subagents are running: a restart ends any that are.", "force"
+  end
+  return "Restart " .. session.name .. "? " .. (reasons ~= "" and reasons or "nothing in it is stale") .. "." .. cost
+    .. "\nUnsent text in its input box is lost. Press Cmd+Opt+R again to restart"
+    .. (arm == "force" and " anyway." or "."), arm
 end
 
 -- A restart-session.sh result as { title, informativeText }: its output
@@ -1418,11 +1426,12 @@ end
 -- Restarts `session`, saying so at once and staying on screen until it
 -- ends. A restart that worked says nothing more, since the session coming
 -- back in its tab shows it; one that didn't says why, as an alert and a
--- notification.
-function DeskStale.restart(session)
+-- notification. With `force` it restarts over running subagents.
+function DeskStale.restart(session, force)
   local started = hs.timer.secondsSinceEpoch()
   local working = hs.alert.show("Restarting " .. session.name .. "…", DeskStale.timeouts["restart-session.sh"])
-  run_tool(session, "restart-session.sh", { session.id }, function(rc, out, err, timed_out)
+  local args = force and { "--force", session.id } or { session.id }
+  run_tool(session, "restart-session.sh", args, function(rc, out, err, timed_out)
     hs.alert.closeSpecific(working)
     if rc == 0 and not timed_out then return end
     local report = DeskStale.restart_report(session, rc, out, err, timed_out, hs.timer.secondsSinceEpoch() - started)
@@ -1515,7 +1524,9 @@ end
 -- The first press shows what a restart would do; a second press on the
 -- same session within DeskStale.confirm_secs of that showing does it. It
 -- arms only once the confirmation is on screen, so a quick double press
--- never restarts unseen.
+-- never restarts unseen, and not at all where a restart cannot work. The
+-- second press restarts over running subagents only when the first showed
+-- them: ones started since are refused, and shown by the next press.
 DeskStale.armed = nil
 function DeskStale.press()
   local pressed = hs.timer.secondsSinceEpoch()
@@ -1527,13 +1538,16 @@ function DeskStale.press()
     local armed = DeskStale.armed
     DeskStale.armed = nil
     if armed and armed.pid == session.pid and pressed - armed.at <= DeskStale.confirm_secs then
-      return DeskStale.restart(session)
+      return DeskStale.restart(session, armed.force)
     end
     local working = hs.alert.show("Checking " .. session.name .. "…", DeskStale.timeouts["session-stale.sh"])
-    run_tool(session, "session-stale.sh", { session.id }, function(rc, out, err)
+    run_tool(session, "session-stale.sh", { "--check", session.id }, function(rc, out, err)
       hs.alert.closeSpecific(working)
-      hs.alert.show(DeskStale.confirm_text(session, rc, out, err), DeskStale.confirm_secs)
-      DeskStale.armed = { pid = session.pid, at = hs.timer.secondsSinceEpoch() }
+      local text, arm = DeskStale.confirm_text(session, rc, out, err)
+      hs.alert.show(text, DeskStale.confirm_secs)
+      if arm then
+        DeskStale.armed = { pid = session.pid, at = hs.timer.secondsSinceEpoch(), force = arm == "force" }
+      end
     end)
   end)
 end

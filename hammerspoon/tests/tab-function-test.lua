@@ -859,7 +859,7 @@ DeskStale.hotkey.fn()
 focus_answers("4242\n", S1 .. "\t/b\tnotes\n")
 local first = last_task()
 assert_eq("the hotkey's first press restarts nothing: it asks session-stale.sh what a restart would do",
-  DeskStale.bin_dir .. "/session-stale.sh " .. S1, first.path .. " " .. first.args[1])
+  DeskStale.bin_dir .. "/session-stale.sh --check " .. S1, first.path .. " " .. table.concat(first.args, " "))
 assert_eq("...saying at once that it is checking", "Checking notes…", alerts[#alerts])
 first.done(0, "version: 1 running, 2 installed\n", "")
 assert_eq("...and shows it, with what unsent input costs",
@@ -868,8 +868,8 @@ assert_eq("...and shows it, with what unsent input costs",
 clock = clock + 2
 DeskStale.hotkey.fn()
 focus_answers("4242\n", S1 .. "\t/b\tnotes\n")
-assert_eq("a second press within a few seconds restarts the focused tab's session", DeskStale.bin_dir .. "/restart-session.sh " .. S1,
-  last_task().path .. " " .. last_task().args[1])
+assert_eq("a second press within a few seconds restarts the focused tab's session, unforced", DeskStale.bin_dir .. "/restart-session.sh " .. S1,
+  last_task().path .. " " .. table.concat(last_task().args, " "))
 assert_eq("...saying so at once", "Restarting notes…", alerts[#alerts])
 clock = clock + 7
 local alerts_before_done, notes_before_ok = #alerts, #notes_sent
@@ -890,6 +890,26 @@ assert_eq("...saying when a restart would be refused, and why", true,
 assert_eq("a tab that cannot restart in place says so",
   true, DeskStale.confirm_text(session, 3, "version: x\n", ""):find("this tab can't restart it in place", 1, true) ~= nil)
 assert_eq("nothing stale says so", true, DeskStale.confirm_text(session, 0, "", ""):find("Restart notes? nothing in it is stale.", 1, true) ~= nil)
+assert_eq("...and neither refusal promises that a second press restarts", "nil nil",
+  tostring(alerts[#alerts]:find("again", 1, true)) .. " " .. tostring(DeskStale.confirm_text(session, 3, "version: x\n", ""):find("again", 1, true)))
+clock = clock + 2
+DeskStale.hotkey.fn()
+focus_answers("4242\n", S1 .. "\t/b\tnotes\n")
+assert_eq("a second press after a refusal restarts nothing: it checks again", DeskStale.bin_dir .. "/session-stale.sh", last_task().path)
+last_task().done(5, "version: 1 running, 2 installed\n", "session-stale: 2 subagents active, last write 40s ago (Survey the tests; agent-b)\n")
+assert_eq("running subagents: the first press shows what a restart ends, and that a second restarts anyway",
+  "Restart notes? version: 1 running, 2 installed.\n2 subagents active, last write 40s ago (Survey the tests; agent-b): a restart ends them."
+    .. "\nUnsent text in its input box is lost. Press Cmd+Opt+R again to restart anyway.",
+  alerts[#alerts])
+clock = clock + 2
+DeskStale.hotkey.fn()
+focus_answers("4242\n", S1 .. "\t/b\tnotes\n")
+assert_eq("...and the second press restarts over them", DeskStale.bin_dir .. "/restart-session.sh --force " .. S1,
+  last_task().path .. " " .. table.concat(last_task().args, " "))
+last_task().done(0, "restarted\t" .. S1 .. "\tnotes\tok\n", "")
+local unknown_text, unknown_arm = DeskStale.confirm_text(session, -1, "", "session-stale.sh timed out")
+assert_eq("a check that could not tell says so, and a second press restarts anyway", "true force",
+  tostring(unknown_text:find("Could not tell whether subagents are running", 1, true) ~= nil) .. " " .. tostring(unknown_arm))
 
 DeskStale.armed = nil
 DeskStale.hotkey.fn()
