@@ -135,7 +135,7 @@ command -v claude >/dev/null || curl -fsSL https://claude.ai/install.sh | bash
 # launch. The dependency-updates sweep moves it, in every registration.
 
 # User-scoped, so available in all projects:
-claude mcp add -s user playwright -- npx -y @playwright/mcp@0.0.83
+claude mcp add -s user playwright -- npx -y @playwright/mcp@0.0.85
 
 #### Claude Code per-machine settings (the account's --settings overlay)
 # Add this machine's resolved $TMPDIR to permissions.additionalDirectories so
