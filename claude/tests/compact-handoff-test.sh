@@ -234,6 +234,61 @@ check "session-start: appends the state block" '[[ $out == *"re-read it from dis
 out=$(jq -n '{source:"compact"}' | HOME=$R "$HOOK" session-start)
 check "session-start: without a transcript, names none" '[ "$(head -1 <<<"$out")" = "This session was just compacted: the conversation above is a summary of it, not the conversation itself." ]'
 
+# Skills the transcript shows loaded, checked against the disk. Files dated
+# January are older than the February loads; the rest are as new as this run.
+S="$R/sk"
+skill() { mkdir -p "$1" && echo "# skill" >"$1/SKILL.md"; }
+old() { touch -t 202601010000 "$1/SKILL.md"; }
+git init -q "$S/repo"
+mkdir -p "$S/repo/sub" "$S/cfg/skills" "$S/elsewhere"
+skill "$S/cfg/skills/kept" && old "$S/cfg/skills/kept"
+skill "$S/cfg/skills/edited"
+skill "$S/cfg/skills/reloaded"
+skill "$S/cfg/skills/moved"
+skill "$S/elsewhere/linked" && ln -s "$S/elsewhere/linked" "$S/cfg/skills/linked"
+skill "$S/repo/.claude/skills/slashed"
+skill "$S/repo/.claude/skills/proj" && old "$S/repo/.claude/skills/proj"
+skill "$S/plugins/cache/p/skills/b"
+use() { jq -nc --arg ts "$1" --arg n "$2" '{type:"assistant",timestamp:$ts,message:{content:[{type:"tool_use",name:"Skill",id:("tu-" + $n + $ts),input:{skill:$n}}]}}'; }
+loaded() { jq -nc --arg ts "$1" --arg n "$2" --arg d "$3" '{type:"user",isMeta:true,timestamp:$ts,sourceToolUseID:("tu-" + $n + $ts),message:{content:[{type:"text",text:("Base directory for this skill: " + $d + "\n\n# skill")}]}}'; }
+load() { use "$1" "$2"; loaded "$1" "$2" "$3"; }
+slash() { jq -nc --arg ts "$1" --arg n "$2" '{type:"user",timestamp:$ts,message:{content:("<command-name>/" + $n + "</command-name>\n<command-args></command-args>")}}'; }
+feb=2026-02-01T10:00:00.123Z
+{
+    load $feb kept "$S/cfg/skills/kept"
+    load $feb edited "$S/cfg/skills/edited"
+    load $feb gone "$S/cfg/skills/gone"
+    load $feb moved "$S/old-home/moved"
+    load $feb linked "$S/cfg/skills/linked"
+    load $feb proj "$S/repo/.claude/skills/proj"
+    load $feb reloaded "$S/cfg/skills/reloaded"
+    load 2099-01-01T00:00:00.000Z reloaded "$S/cfg/skills/reloaded"
+    load $feb p:b "$S/plugins/cache/p/skills/b"
+    load $feb bundled-one "$S/bundled-skills/1.0/bundled-one"
+    use $feb typo
+    slash $feb slashed
+    slash $feb login
+    jq -nc --arg d "$S/cfg/skills/dropped" '{type:"attachment",timestamp:"2026-02-02T10:00:00.000Z",attachment:{type:"invoked_skills",skills:[
+        {name:"dropped",path:"userSettings:dropped",content:("Base directory for this skill: " + $d + "\n\n# skill")},
+        {name:"inbuilt",path:"bundled:inbuilt",content:"Base directory for this skill: /nowhere/inbuilt\n\n# skill"}]}}'
+    jq -nc '{type:"user",timestamp:"2026-02-03T10:00:00.000Z",message:{content:[{type:"tool_result",content:"Base directory for this skill: /nowhere/quoted"}]}}'
+    echo 'not json, but names Base directory for this skill: /nowhere/broken'
+} >"$S/t.jsonl"
+skills() { jq -n --arg cwd "$1" --arg t "$2" '{source:"compact",cwd:$cwd,transcript_path:$t}' | HOME=$R CLAUDE_CONFIG_DIR="$S/cfg" "$HOOK" session-start; }
+out=$(skills "$S/repo/sub" "$S/t.jsonl")
+check "skills: names the ones gone from disk, restored-only ones included" 'grep -qxF "  no longer exists, so ignore its restored text: gone, dropped" <<<"$out"'
+changed=$(sed -n '/changed since loaded/,/^$/p' <<<"$out")
+check "skills: one edited since its load is named with its path" 'grep -qxF "    edited  ~/sk/cfg/skills/edited/SKILL.md" <<<"$changed"'
+check "skills: a symlinked skill is read through the link" 'grep -qxF "    linked  ~/sk/cfg/skills/linked/SKILL.md" <<<"$changed"'
+check "skills: one gone from where it loaded is found where it loads from now" 'grep -qxF "    moved  ~/sk/cfg/skills/moved/SKILL.md" <<<"$changed"'
+check "skills: a slash-command load resolves in a parent of the cwd" 'grep -qxF "    slashed  ~/sk/repo/.claude/skills/slashed/SKILL.md" <<<"$changed"'
+check "skills: only those four have changed" '[ "$(grep -c "SKILL.md" <<<"$changed")" -eq 4 ]'
+check "skills: unchanged, reloaded, plugin, bundled, built-in and unresolved names are left out" '[[ $out != *kept* && $out != *proj* && $out != *reloaded* && $out != *p:b* && $out != *bundled-one* && $out != *inbuilt* && $out != *typo* && $out != *login* && $out != *quoted* && $out != *broken* ]]'
+check "skills: the list sits between the note and the state block" '[[ ${out%%Of the skills*} == *"re-read it from disk"* && ${out##*Of the skills} == *"Current state, read from disk"* ]]'
+{ load $feb kept "$S/cfg/skills/kept"; slash $feb login; } >"$S/current.jsonl"
+out=$(skills "$S/repo" "$S/current.jsonl")
+check "skills: nothing is added when all are current" '[[ $out != *"Of the skills"* && $out == *"re-read it from disk"* ]]'
+
 out=$(jq -n '{session_id:"s3",compact_summary:"## Summary\nno kick-off"}' | "$HOOK" post)
 check "post: silent when the summary has none of the sections" '[ -z "$out" ]'
 
