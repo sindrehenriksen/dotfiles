@@ -307,15 +307,15 @@ check "skills: unchanged, reloaded, plugin, bundled, built-in and unresolved nam
 check "skills: the list sits between the note and the state block" '[[ ${out%%Of the skills*} == *"re-read it from disk"* && ${out##*Of the skills} == *"Current state, read from disk"* ]]'
 files=$(sed -n '/file changed since last read, so re-read before relying on it:/,/^$/p' <<<"$out")
 check "files: instruction files changed since their last read are named" '[ "$(sed 1d <<<"$files")" = "    ~/sk/cfg/skills/edited/ref.md
-    ~/sk/repo/AGENTS.md
-    ~/sk/repo/x.instructions.md" ]'
+    ~/sk/repo/: AGENTS.md, x.instructions.md" ]'
 check "files: a skill's SKILL.md read as a file is named once, as the skill" '[ "$(grep -c "edited/SKILL.md" <<<"$out")" -eq 1 ]'
 check "files: unchanged, edited since, and other kinds of file are left out" '[[ $out != *CLAUDE.md* && $out != *rules/r.md* && $out != *notes.md* ]]'
 check "files: one gone from disk is named, one in a gone skill is not" '[[ $out == *$'"'"'  file no longer exists, so ignore its restored text:\n    ~/sk/repo/docs/principles.md\n'"'"'* && $out != *extra.md* ]]'
 mkdir -p "$S/repo/.agents"
 for i in $(seq 1 17); do echo text >"$S/repo/.agents/n$i.md"; readres $feb "$S/repo/.agents/n$i.md"; done >"$S/many.jsonl"
 out=$(skills "$S/repo" "$S/many.jsonl")
-check "files: a long list is cut and says how many it leaves out" '[ "$(grep -c "/.agents/n" <<<"$out")" -eq 15 ] && grep -qxF "    and 2 more" <<<"$out"'
+many=$(grep -F "/.agents/: " <<<"$out")
+check "files: a long list names every file, those of one directory on one line" '[ "$(grep -c . <<<"$many")" -eq 1 ] && [ "$(grep -o "n[0-9]*\.md" <<<"$many" | sort -u | grep -c .)" -eq 17 ] && [[ $out != *" more"* ]]'
 { load $feb kept "$S/cfg/skills/kept"; slash $feb login; readres $feb "$S/repo/CLAUDE.md"; } >"$S/current.jsonl"
 out=$(skills "$S/repo" "$S/current.jsonl")
 check "skills: nothing is added when all are current" '[[ $out != *"Of the skills"* && $out == *"re-read it from disk"* ]]'

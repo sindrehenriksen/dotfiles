@@ -204,9 +204,15 @@ tilde() { local p=$1; [[ $p == "$HOME"/* ]] && p="~${p#"$HOME"}"; printf '%s' "$
 real_path() {
     realpath "$1" 2>/dev/null || (cd -P "$(dirname "$1")" 2>/dev/null && printf '%s/%s\n' "$(pwd)" "$(basename "$1")")
 }
-# Prints stdin's lines indented, the first $1 of them, then how many it left out.
-capped() {
-    awk -v max="$1" 'NR <= max { print "    " $0 } END { if (NR > max) print "    and " NR - max " more" }'
+# Prints the paths on stdin indented, every one of them: a path alone in its
+# directory in full, several in one directory on one line, as
+# `<directory>/: <name>, <name>`.
+by_directory() {
+    awk '{
+            d = $0; sub(/\/[^\/]*$/, "", d); f = substr($0, length(d) + 2)
+            if (!(d in names)) { order[++n] = d; names[d] = f } else { names[d] = names[d] ", " f; many[d] = 1 }
+        }
+        END { for (i = 1; i <= n; i++) { d = order[i]; print "    " d (d in many ? "/: " : "/") names[d] } }'
 }
 
 # Names what the transcript ($1) shows the session loaded or read that the
@@ -280,9 +286,9 @@ stale_context() {
     [ -n "$gone$gone_files$changed$changed_files" ] || return 0
     echo "Of the skills and instruction files this session loaded or read, checked against the disk now:"
     [ -n "$gone" ] && echo "  skill no longer exists, so ignore its restored text: $gone"
-    [ -n "$gone_files" ] && { echo "  file no longer exists, so ignore its restored text:"; printf '%s' "$gone_files" | capped 15; }
+    [ -n "$gone_files" ] && { echo "  file no longer exists, so ignore its restored text:"; printf '%s' "$gone_files" | by_directory; }
     [ -n "$changed" ] && printf '  skill changed since loaded, so re-read before acting under it:\n%s' "$changed"
-    [ -n "$changed_files" ] && { echo "  file changed since last read, so re-read before relying on it:"; printf '%s' "$changed_files" | capped 15; }
+    [ -n "$changed_files" ] && { echo "  file changed since last read, so re-read before relying on it:"; printf '%s' "$changed_files" | by_directory; }
     echo
 }
 
