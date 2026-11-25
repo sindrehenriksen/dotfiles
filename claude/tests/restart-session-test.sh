@@ -564,6 +564,24 @@ RESTART_SESSION_CONFIRM_SECS=2 run_restart "$s8"
 assert_eq "not live again in time: failed, pointing at the tab" \
 	"failed	the resume was typed into its tab, but the session is not live after 2s; look at the tab" "$(status)	$(detail)"
 
+finish() {
+	echo "=== recorder never logged an error ==="
+	if [ -s "$TMP/recorder.log" ]; then bad "recorder log is empty"; cat "$TMP/recorder.log"; else ok "recorder log is empty"; fi
+
+	echo
+	echo "=== summary: $pass passed, $fail failed ==="
+	[ "$fail" -eq 0 ]
+	exit
+}
+
+# Marker mode tells a session its shell can resume by the session's
+# environment, which it reads from /proc; elsewhere (macOS, which types into
+# the tab instead) there is nothing to check.
+if [ ! -r /proc/self/environ ]; then
+	echo "skip: no /proc here; marker mode is Linux's"
+	finish
+fi
+
 echo "=== marker mode (Linux): the resume is left for the session's shell, nothing typed ==="
 export RESTART_SESSION_MODE=marker
 export CLAUDE_RESTART_DIR="$TMP/markers"
@@ -651,9 +669,4 @@ kill -KILL "$p26" 2> /dev/null
 unset CLAUDE_RESTART_DIR
 export RESTART_SESSION_MODE=tab
 
-echo "=== recorder never logged an error ==="
-if [ -s "$TMP/recorder.log" ]; then bad "recorder log is empty"; cat "$TMP/recorder.log"; else ok "recorder log is empty"; fi
-
-echo
-echo "=== summary: $pass passed, $fail failed ==="
-[ "$fail" -eq 0 ]
+finish

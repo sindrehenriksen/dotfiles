@@ -27,6 +27,7 @@ mkdir -p "$ROOT/home" "$ROOT/bin" "$ROOT/markers"
 # The stub: the marker is written for the shell that ran it ($PPID) with its
 # own pid (dead once it ends), a session id and what to run. $STUB_MARKER
 # says what the command is; it leaves a marker only on its first run.
+# $STUB_MARKER_STAMP dates the marker, in the form `touch -t` takes.
 cat > "$ROOT/bin/claude" << 'STUB'
 #!/usr/bin/env bash
 echo "ran $* shell-ok=$([ "${__CLAUDE_FN_SHELL:-}" = "$PPID" ] && echo yes || echo no)"
@@ -34,7 +35,7 @@ n=$(cat "$STUB_COUNT" 2> /dev/null || echo 0)
 echo $((n + 1)) > "$STUB_COUNT"
 if [ "$n" -eq 0 ] && [ -n "${STUB_MARKER:-}" ]; then
 	printf '%s\n%s\n%s\n' "${STUB_MARKER_PID:-$$}" 0000 "$STUB_MARKER" > "$CLAUDE_RESTART_DIR/$PPID"
-	[ -z "${STUB_MARKER_AGE:-}" ] || touch -d "$STUB_MARKER_AGE" "$CLAUDE_RESTART_DIR/$PPID"
+	[ -z "${STUB_MARKER_STAMP:-}" ] || touch -t "$STUB_MARKER_STAMP" "$CLAUDE_RESTART_DIR/$PPID"
 fi
 exit "${STUB_RC:-0}"
 STUB
@@ -77,7 +78,7 @@ rc=0
 	assert_eq "$sh: a marker older than five minutes is ignored, and removed" \
 		"ran a shell-ok=yes
 rc=0
-0" "$(in_shell "$sh" 'claude a; echo rc=$?; ls "$CLAUDE_RESTART_DIR" | wc -l | tr -d " "' STUB_MARKER="claude --resume abc" STUB_MARKER_AGE="1 hour ago")"
+0" "$(in_shell "$sh" 'claude a; echo rc=$?; ls "$CLAUDE_RESTART_DIR" | wc -l | tr -d " "' STUB_MARKER="claude --resume abc" STUB_MARKER_STAMP=202001010000)"
 	assert_eq "$sh: a marker for another shell's pid is not touched" \
 		"ran a shell-ok=yes
 rc=0

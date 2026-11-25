@@ -8,6 +8,14 @@
 # Nothing touches a real session or a notification daemon.
 set -u
 
+# The helper tells a session its shell can resume by the session's
+# environment, which it reads from /proc; elsewhere (macOS, where
+# Hammerspoon does this job) there is nothing to check.
+if [ ! -r /proc/self/environ ]; then
+	echo "skip: no /proc here; restart-self.sh is Linux's"
+	exit 0
+fi
+
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SELF="$HERE/../restart-self.sh"
 
