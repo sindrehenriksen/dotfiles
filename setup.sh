@@ -119,7 +119,7 @@ chmod 600 ~/.secrets.env
 # if mac
 brew install agent-browser
 # if linux
-npm install -g agent-browser@0.33.2
+npm install -g agent-browser@0.43.0
 # both: install browser binary
 agent-browser install
 
