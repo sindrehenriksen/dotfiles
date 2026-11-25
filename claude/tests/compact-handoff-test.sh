@@ -234,8 +234,9 @@ check "session-start: appends the state block" '[[ $out == *"re-read it from dis
 out=$(jq -n '{source:"compact"}' | HOME=$R "$HOOK" session-start)
 check "session-start: without a transcript, names none" '[ "$(head -1 <<<"$out")" = "This session was just compacted: the conversation above is a summary of it, not the conversation itself." ]'
 
-# Skills the transcript shows loaded, checked against the disk. Files dated
-# January are older than the February loads; the rest are as new as this run.
+# Skills the transcript shows loaded and instruction files it shows read,
+# checked against the disk. Files dated January are older than the February
+# loads and reads; the rest are as new as this run.
 S="$R/sk"
 skill() { mkdir -p "$1" && echo "# skill" >"$1/SKILL.md"; }
 old() { touch -t 202601010000 "$1/SKILL.md"; }
@@ -249,12 +250,31 @@ skill "$S/elsewhere/linked" && ln -s "$S/elsewhere/linked" "$S/cfg/skills/linked
 skill "$S/repo/.claude/skills/slashed"
 skill "$S/repo/.claude/skills/proj" && old "$S/repo/.claude/skills/proj"
 skill "$S/plugins/cache/p/skills/b"
+skill "$S/elsewhere/reread" && ln -s "$S/elsewhere/reread" "$S/cfg/skills/reread"
+mkdir -p "$S/repo/.claude/rules" "$S/repo/docs"
+for f in AGENTS.md CLAUDE.md notes.md .claude/rules/r.md x.instructions.md; do echo text >"$S/repo/$f"; done
+touch -t 202601010000 "$S/repo/CLAUDE.md"
+echo text >"$S/cfg/skills/edited/ref.md"
 use() { jq -nc --arg ts "$1" --arg n "$2" '{type:"assistant",timestamp:$ts,message:{content:[{type:"tool_use",name:"Skill",id:("tu-" + $n + $ts),input:{skill:$n}}]}}'; }
 loaded() { jq -nc --arg ts "$1" --arg n "$2" --arg d "$3" '{type:"user",isMeta:true,timestamp:$ts,sourceToolUseID:("tu-" + $n + $ts),message:{content:[{type:"text",text:("Base directory for this skill: " + $d + "\n\n# skill")}]}}'; }
 load() { use "$1" "$2"; loaded "$1" "$2" "$3"; }
 slash() { jq -nc --arg ts "$1" --arg n "$2" '{type:"user",timestamp:$ts,message:{content:("<command-name>/" + $n + "</command-name>\n<command-args></command-args>")}}'; }
+readres() { jq -nc --arg ts "$1" --arg p "$2" '{type:"user",timestamp:$ts,toolUseResult:{type:"text",file:{filePath:$p,content:"text"}},message:{content:[{type:"tool_result",content:"text"}]}}'; }
+editres() { jq -nc --arg ts "$1" --arg p "$2" '{type:"user",timestamp:$ts,toolUseResult:{filePath:$p,oldString:"a",newString:"b"},message:{content:[{type:"tool_result",content:"done"}]}}'; }
 feb=2026-02-01T10:00:00.123Z
 {
+    load $feb reread "$S/cfg/skills/reread"
+    readres 2099-01-01T00:00:00.000Z "$S/elsewhere/reread/SKILL.md"
+    readres $feb "$S/cfg/skills/edited/SKILL.md"
+    readres $feb "$S/cfg/skills/edited/ref.md"
+    readres $feb "$S/cfg/skills/gone/extra.md"
+    readres $feb "$S/repo/AGENTS.md"
+    readres $feb "$S/repo/CLAUDE.md"
+    readres $feb "$S/repo/notes.md"
+    readres $feb "$S/repo/docs/principles.md"
+    readres $feb "$S/repo/.claude/rules/r.md"
+    editres 2099-01-01T00:00:00.000Z "$S/repo/.claude/rules/r.md"
+    editres $feb "$S/repo/x.instructions.md"
     load $feb kept "$S/cfg/skills/kept"
     load $feb edited "$S/cfg/skills/edited"
     load $feb gone "$S/cfg/skills/gone"
@@ -276,16 +296,27 @@ feb=2026-02-01T10:00:00.123Z
 } >"$S/t.jsonl"
 skills() { jq -n --arg cwd "$1" --arg t "$2" '{source:"compact",cwd:$cwd,transcript_path:$t}' | HOME=$R CLAUDE_CONFIG_DIR="$S/cfg" "$HOOK" session-start; }
 out=$(skills "$S/repo/sub" "$S/t.jsonl")
-check "skills: names the ones gone from disk, restored-only ones included" 'grep -qxF "  no longer exists, so ignore its restored text: gone, dropped" <<<"$out"'
-changed=$(sed -n '/changed since loaded/,/^$/p' <<<"$out")
+check "skills: names the ones gone from disk, restored-only ones included" 'grep -qxF "  skill no longer exists, so ignore its restored text: gone, dropped" <<<"$out"'
+changed=$(sed -n '/skill changed since loaded/,/file changed since/p' <<<"$out")
 check "skills: one edited since its load is named with its path" 'grep -qxF "    edited  ~/sk/cfg/skills/edited/SKILL.md" <<<"$changed"'
 check "skills: a symlinked skill is read through the link" 'grep -qxF "    linked  ~/sk/cfg/skills/linked/SKILL.md" <<<"$changed"'
 check "skills: one gone from where it loaded is found where it loads from now" 'grep -qxF "    moved  ~/sk/cfg/skills/moved/SKILL.md" <<<"$changed"'
 check "skills: a slash-command load resolves in a parent of the cwd" 'grep -qxF "    slashed  ~/sk/repo/.claude/skills/slashed/SKILL.md" <<<"$changed"'
-check "skills: only those four have changed" '[ "$(grep -c "SKILL.md" <<<"$changed")" -eq 4 ]'
+check "skills: only those four have changed, one read under another path since among the rest" '[ "$(grep -c "SKILL.md" <<<"$changed")" -eq 4 ] && [[ $out != *reread* ]]'
 check "skills: unchanged, reloaded, plugin, bundled, built-in and unresolved names are left out" '[[ $out != *kept* && $out != *proj* && $out != *reloaded* && $out != *p:b* && $out != *bundled-one* && $out != *inbuilt* && $out != *typo* && $out != *login* && $out != *quoted* && $out != *broken* ]]'
 check "skills: the list sits between the note and the state block" '[[ ${out%%Of the skills*} == *"re-read it from disk"* && ${out##*Of the skills} == *"Current state, read from disk"* ]]'
-{ load $feb kept "$S/cfg/skills/kept"; slash $feb login; } >"$S/current.jsonl"
+files=$(sed -n '/file changed since last read, so re-read before relying on it:/,/^$/p' <<<"$out")
+check "files: instruction files changed since their last read are named" '[ "$(sed 1d <<<"$files")" = "    ~/sk/cfg/skills/edited/ref.md
+    ~/sk/repo/AGENTS.md
+    ~/sk/repo/x.instructions.md" ]'
+check "files: a skill's SKILL.md read as a file is named once, as the skill" '[ "$(grep -c "edited/SKILL.md" <<<"$out")" -eq 1 ]'
+check "files: unchanged, edited since, and other kinds of file are left out" '[[ $out != *CLAUDE.md* && $out != *rules/r.md* && $out != *notes.md* ]]'
+check "files: one gone from disk is named, one in a gone skill is not" '[[ $out == *$'"'"'  file no longer exists, so ignore its restored text:\n    ~/sk/repo/docs/principles.md\n'"'"'* && $out != *extra.md* ]]'
+mkdir -p "$S/repo/.agents"
+for i in $(seq 1 17); do echo text >"$S/repo/.agents/n$i.md"; readres $feb "$S/repo/.agents/n$i.md"; done >"$S/many.jsonl"
+out=$(skills "$S/repo" "$S/many.jsonl")
+check "files: a long list is cut and says how many it leaves out" '[ "$(grep -c "/.agents/n" <<<"$out")" -eq 15 ] && grep -qxF "    and 2 more" <<<"$out"'
+{ load $feb kept "$S/cfg/skills/kept"; slash $feb login; readres $feb "$S/repo/CLAUDE.md"; } >"$S/current.jsonl"
 out=$(skills "$S/repo" "$S/current.jsonl")
 check "skills: nothing is added when all are current" '[[ $out != *"Of the skills"* && $out == *"re-read it from disk"* ]]'
 

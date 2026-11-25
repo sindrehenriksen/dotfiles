@@ -26,9 +26,10 @@
 #   session-start  (SessionStart, matcher `compact`) Adds context saying the
 #         session was just compacted and where its full transcript is, that
 #         the skill and file text restored are copies from when they were
-#         loaded, which of the skills the session loaded are gone from disk
-#         or have changed since (named only when some are; see
-#         stale_skills), then compact-state.sh's block of current state
+#         loaded, which of the skills it loaded and the instruction files
+#         it read are gone from disk or have changed since (named only when
+#         some are; see stale_context), then compact-state.sh's block of
+#         current state
 #         read from disk (git worktrees, background agents, and whatever
 #         COMPACT_STATE_COMMANDS adds). Plain stdout is added as context for
 #         SessionStart.
@@ -138,14 +139,27 @@ post() {
     printf '\xe2\x80\x8b\n%s' "$out"
 }
 
-# The skills a transcript shows loaded, one per line as name, load time
-# (epoch seconds, 0 when unknown) and the directory it was loaded from (empty
-# when the transcript does not say). A load is a Skill tool call, a slash
-# command, or the text Claude Code adds for either, which opens by naming the
-# skill's directory; the latest load of a name gives its time. The list of
-# restored skills a compaction records fills in a directory and marks bundled
-# skills, and gives no time. Plugin (`a:b`) and bundled skills are left out.
-read -r -d '' SKILL_LOADS_JQ <<'JQ'
+# What counts as an instruction file: one a session acts under, so an old
+# copy of it in context misleads. Each alternative matches the end of a path:
+# AGENTS.md, CLAUDE.md, SKILL.md and principles.md anywhere, any file in a
+# skill's directory, under `.claude/rules/` or under `.agents/`, and
+# `*.instructions.md`. Used on raw transcript lines as well as on paths, so a
+# path segment is written `[^"]`, never `.`.
+INSTRUCTION_FILES='/(AGENTS|CLAUDE|SKILL|principles)\.md|/skills/[^/"]+/[^"]+|/\.claude/rules/[^"]+|/\.agents/[^"]+|\.instructions\.md'
+
+# What a transcript shows the session loaded or read, one per line:
+#   S, name, load time, directory   a skill. The time is epoch seconds, 0 when
+#       unknown; the directory is where it was loaded from, empty when the
+#       transcript does not say. A load is a Skill tool call, a slash command,
+#       or the text Claude Code adds for either, which opens by naming the
+#       skill's directory; the latest load of a name gives its time. The list
+#       of restored skills a compaction records fills in a directory and marks
+#       bundled skills, and gives no time. Plugin (`a:b`) and bundled skills
+#       are left out.
+#   F, path, time   an instruction file ($files) and when the session last saw
+#       its content: the latest result of a Read, Edit or Write on it. The
+#       result's time, not the call's, since an Edit lands after its call.
+read -r -d '' SEEN_JQ <<'JQ'
 def basedir: if startswith("Base directory for this skill: ")
     then split("\n")[0] | ltrimstr("Base directory for this skill: ") else "" end;
 def later($t): if $t > (.t // 0) then .t = $t else . end;
@@ -155,46 +169,66 @@ reduce (inputs | fromjson? | select(type == "object" and .timestamp != null) | .
         .message.content[]? | select(.type == "tool_use" and .name == "Skill")
         | {k: "use", t: $t, name: (.input.skill // ""), id: (.id // "")}
       elif .type == "user" then
-        (.message.content | if type == "string" then . else (.[]? | select(.type == "text") | .text) end)
-        | if startswith("Base directory for this skill: ") then {k: "dir", t: $t, dir: basedir, id: ($e.sourceToolUseID // "")}
-          elif test("^\\s*<command-name>/[^<]+</command-name>") then {k: "use", t: $t, name: capture("<command-name>/(?<n>[^<]+)</command-name>").n, id: ""}
-          else empty end
+        ((.message.content | if type == "string" then . else (.[]? | select(.type == "text") | .text) end)
+         | if startswith("Base directory for this skill: ") then {k: "dir", t: $t, dir: basedir, id: ($e.sourceToolUseID // "")}
+           elif test("^\\s*<command-name>/[^<]+</command-name>") then {k: "use", t: $t, name: capture("<command-name>/(?<n>[^<]+)</command-name>").n, id: ""}
+           else empty end),
+        (.toolUseResult | select(type == "object") | (.filePath // .file.filePath?)
+         | select(type == "string" and test("(" + $files + ")$")) | {k: "file", t: $t, path: .})
       elif .type == "attachment" and .attachment.type == "invoked_skills" then
         .attachment.skills[]? | {k: "restored", name: (.name // ""), dir: ((.content // "") | basedir), bundled: ((.path // "") | startswith("bundled:"))}
-      else empty end) as $ev ({ids: {}, s: {}};
+      else empty end) as $ev ({ids: {}, s: {}, f: {}};
     if $ev.k == "use" then
         (if $ev.id != "" then .ids[$ev.id] = $ev.name else . end) | .s[$ev.name] |= later($ev.t)
     elif $ev.k == "dir" then
         (.ids[$ev.id] // ($ev.dir | sub("/+$"; "") | split("/") | last)) as $n
         | .s[$n] |= (later($ev.t) | .dir = $ev.dir)
+    elif $ev.k == "file" then
+        .f[$ev.path] |= later($ev.t)
     else
         .s[$ev.name] |= ((if $ev.dir != "" and .dir == null then .dir = $ev.dir else . end)
             | if $ev.bundled then .bundled = true else . end)
     end)
-| .s | to_entries[]
-| select((.key | test("^[A-Za-z0-9._-]+$")) and (.key | test("^\\.+$") | not) and (.value.bundled | not)
-    and ((.value.dir // "") | test("/bundled-skills/|/plugins/") | not))
-| [.key, (.value.t // 0), (.value.dir // "")] | @tsv
+| (.s | to_entries[]
+   | select((.key | test("^[A-Za-z0-9._-]+$")) and (.key | test("^\\.+$") | not) and (.value.bundled | not)
+       and ((.value.dir // "") | test("/bundled-skills/|/plugins/") | not))
+   | ["S", .key, (.value.t // 0), (.value.dir // "")]),
+  (.f | to_entries[] | ["F", .key, .value.t])
+| @tsv
 JQ
 
 file_mtime() { stat -L -c %Y "$1" 2>/dev/null || stat -L -f %m "$1" 2>/dev/null; }
+tilde() { local p=$1; [[ $p == "$HOME"/* ]] && p="~${p#"$HOME"}"; printf '%s' "$p"; }
+# The path of an existing file with symlinks resolved, so one file reached by
+# two paths compares equal.
+real_path() {
+    realpath "$1" 2>/dev/null || (cd -P "$(dirname "$1")" 2>/dev/null && printf '%s/%s\n' "$(pwd)" "$(basename "$1")")
+}
+# Prints stdin's lines indented, the first $1 of them, then how many it left out.
+capped() {
+    awk -v max="$1" 'NR <= max { print "    " $0 } END { if (NR > max) print "    and " NR - max " more" }'
+}
 
-# Names the skills the transcript ($1) shows loaded that the disk no longer
-# matches: gone, or SKILL.md modified after the load. A skill is looked for
-# where it was loaded from, then where Claude Code loads skills from: the
-# config dir's `skills/` and `.claude/skills/` in the cwd ($2) and its parents
-# up to the repo root, symlinks followed. Only a skill the transcript shows
-# loaded from a directory is called gone, so a built-in command or a skill
-# with no file is never reported. Prints nothing when all are current.
-stale_skills() {
-    local transcript=$1 cwd=$2 loads name t dir d f root parent m gone="" changed="" dirs=()
+# Names what the transcript ($1) shows the session loaded or read that the
+# disk no longer matches: skills, and instruction files (INSTRUCTION_FILES),
+# that are gone or were modified after the session last saw them. A skill is
+# seen at its load or at a later Read of its SKILL.md, a file at its last
+# Read, Edit or Write. A skill is looked for where it was loaded from, then
+# where Claude Code loads skills from: the config dir's `skills/` and
+# `.claude/skills/` in the cwd ($2) and its parents up to the repo root,
+# symlinks followed. Only a skill the transcript shows loaded from a directory
+# is called gone, so a built-in command or a skill with no file is never
+# reported. Prints nothing when all are current.
+stale_context() {
+    local transcript=$1 cwd=$2 seen kind a b c d f root parent m dirs=()
+    local gone="" gone_dirs="" gone_files="" entries="" changed="" changed_files=""
     [ -f "$transcript" ] && [ -r "$transcript" ] || return 0
-    # Only the lines that can hold a load reach jq. rg where there is one:
-    # grep takes seconds over a transcript of a few hundred megabytes.
-    local pattern='"name": ?"Skill"|Base directory for this skill: |<command-name>/|invoked_skills'
-    loads=$(if command -v rg >/dev/null 2>&1; then rg --no-config -N -e "$pattern" "$transcript"; else grep -E "$pattern" "$transcript"; fi 2>/dev/null |
-        jq -n -R -r "$SKILL_LOADS_JQ" 2>/dev/null)
-    [ -n "$loads" ] || return 0
+    # Only the lines that can hold a load or a read reach jq. rg where there
+    # is one: grep takes seconds over a transcript of a few hundred megabytes.
+    local pattern='"name": ?"Skill"|Base directory for this skill: |<command-name>/|invoked_skills|"filePath": ?"[^"]*('"$INSTRUCTION_FILES"')"'
+    seen=$(if command -v rg >/dev/null 2>&1; then rg --no-config -N -e "$pattern" "$transcript"; else grep -E "$pattern" "$transcript"; fi 2>/dev/null |
+        jq -n -R -r --arg files "$INSTRUCTION_FILES" "$SEEN_JQ" 2>/dev/null)
+    [ -n "$seen" ] || return 0
 
     dirs+=("${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills")
     if d=$(cd -P "$cwd" 2>/dev/null && pwd); then
@@ -208,23 +242,47 @@ stale_skills() {
         done
     fi
 
-    while IFS=$'\t' read -r name t dir; do
-        f=""
-        for d in ${dir:+"$dir"} "${dirs[@]/%//$name}"; do
-            [ -f "$d/SKILL.md" ] && { f="$d/SKILL.md"; break; }
-        done
-        if [ -z "$f" ]; then
-            [ -n "$dir" ] && gone+="${gone:+, }$name"
-        elif [ "$t" -gt 0 ] && m=$(file_mtime "$f") && [ "${m:-0}" -gt "$t" ]; then
-            [[ $f == "$HOME"/* ]] && f="~${f#"$HOME"}"
-            changed+="    $name  $f"$'\n'
+    # One line per file still on disk, keyed by its resolved path: when it was
+    # seen, and the skill's name or `-` for a plain file. Skills come first.
+    while IFS=$'\t' read -r kind a b c; do
+        if [ "$kind" = S ]; then
+            f=""
+            for d in ${c:+"$c"} "${dirs[@]/%//$a}"; do
+                [ -f "$d/SKILL.md" ] && { f="$d/SKILL.md"; break; }
+            done
+            if [ -n "$f" ]; then
+                entries+="$(real_path "$f")"$'\t'"$b"$'\t'"$a"$'\t'"$f"$'\n'
+            elif [ -n "$c" ]; then
+                gone+="${gone:+, }$a"
+                gone_dirs+="${c%/}/"$'\n'
+            fi
+        elif [ -e "$a" ]; then
+            entries+="$(real_path "$a")"$'\t'"$b"$'\t-\t'"$a"$'\n'
+        else
+            # A file of a skill already named as gone is not named again.
+            while IFS= read -r d; do
+                [ -n "$d" ] && [[ $a == "$d"* ]] && continue 2
+            done <<<"$gone_dirs"
+            gone_files+="$(tilde "$a")"$'\n'
         fi
-    done <<<"$loads"
+    done <<<"$seen"
 
-    [ -n "$gone$changed" ] || return 0
-    echo "Of the skills this session loaded, checked against the disk now:"
-    [ -n "$gone" ] && echo "  no longer exists, so ignore its restored text: $gone"
-    [ -n "$changed" ] && printf '  changed since loaded, so re-read before acting under it:\n%s' "$changed"
+    # Per file the latest time it was seen under any path, as a skill if it
+    # was loaded as one.
+    while IFS=$'\t' read -r f b a c; do
+        [ -n "$f" ] && [ "$b" -gt 0 ] && m=$(file_mtime "$f") && [ "${m:-0}" -gt "$b" ] || continue
+        if [ "$a" = - ]; then changed_files+="$(tilde "$c")"$'\n'; else changed+="    $a  $(tilde "$c")"$'\n'; fi
+    done < <(printf '%s' "$entries" | awk -F'\t' '
+        !($1 in t) { order[++n] = $1; t[$1] = $2; name[$1] = $3; shown[$1] = $4; next }
+        { if ($2 > t[$1]) t[$1] = $2; if (name[$1] == "-" && $3 != "-") { name[$1] = $3; shown[$1] = $4 } }
+        END { for (i = 1; i <= n; i++) { k = order[i]; printf "%s\t%s\t%s\t%s\n", k, t[k], name[k], shown[k] } }')
+
+    [ -n "$gone$gone_files$changed$changed_files" ] || return 0
+    echo "Of the skills and instruction files this session loaded or read, checked against the disk now:"
+    [ -n "$gone" ] && echo "  skill no longer exists, so ignore its restored text: $gone"
+    [ -n "$gone_files" ] && { echo "  file no longer exists, so ignore its restored text:"; printf '%s' "$gone_files" | capped 15; }
+    [ -n "$changed" ] && printf '  skill changed since loaded, so re-read before acting under it:\n%s' "$changed"
+    [ -n "$changed_files" ] && { echo "  file changed since last read, so re-read before relying on it:"; printf '%s' "$changed_files" | capped 15; }
     echo
 }
 
@@ -242,7 +300,7 @@ session_start() {
     echo
     echo "Skill and file text restored after this compaction are copies from when they were loaded, and some are truncated. Before acting under a skill or instruction file that is still relevant to the work in hand, re-read it from disk; there is no need to re-read the rest. One that no longer exists no longer applies."
     echo
-    stale_skills "$transcript" "$(jq -r '.cwd // ""' <<<"$input" 2>/dev/null)"
+    stale_context "$transcript" "$(jq -r '.cwd // ""' <<<"$input" 2>/dev/null)"
     "$(dirname "${BASH_SOURCE[0]}")/compact-state.sh" <<<"$input"
 }
 
