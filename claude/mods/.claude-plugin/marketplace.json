@@ -1,0 +1,11 @@
+{
+  "name": "dotfiles-mods",
+  "owner": { "name": "dotfiles" },
+  "plugins": [
+    {
+      "name": "stale-skills",
+      "source": "./stale-skills",
+      "description": "After a compaction, leaves out the restored text of skills that were deleted or changed on disk since they were loaded."
+    }
+  ]
+}

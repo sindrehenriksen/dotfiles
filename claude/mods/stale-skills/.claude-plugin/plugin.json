@@ -1,0 +1,13 @@
+{
+  "name": "stale-skills",
+  "version": "0.1.0",
+  "description": "After a compaction, leaves out the restored text of skills that were deleted or changed on disk since they were loaded.",
+  "userConfig": {
+    "isChangedReplaced": {
+      "type": "boolean",
+      "title": "Replace changed skills",
+      "description": "Replace the restored text of a skill whose SKILL.md has changed since it was loaded with one line saying to re-read it.",
+      "default": true
+    }
+  }
+}

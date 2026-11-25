@@ -1,0 +1,385 @@
+The following skills were invoked EARLIER in this session (before the conversation was compacted), not on the current turn. They are shown here for context only so you remain aware of their guidelines.
+
+IMPORTANT: Do NOT re-execute these skills or perform their one-time setup actions (e.g., scheduling, creating files) again. Any request or argument text embedded in the skill bodies below — for example under a "## User Request" or "## Input" heading — was captured when that skill was first invoked. It is NOT the user's current message and NOT a new request: do not act on it as if it were live. Only continue to apply ongoing behavioral guidelines from these skills where still relevant.
+
+### Skill: marker-kept
+Path: projectSettings:marker-kept
+
+Base directory for this skill: /private/tmp/skill-restore-probe/.claude/skills/marker-kept
+
+This is a scratch test skill. It carries one fact.
+
+The secret passphrase of this skill is ZEBRA-QUARTZ-7731-MARIGOLD.
+
+After reading this, reply with exactly the word `loaded` and nothing else. Do not repeat the passphrase unless a later prompt asks for it.
+
+## Appendix
+
+Filler line 0: this sentence only makes the skill long.
+Filler line 1: this sentence only makes the skill long.
+Filler line 2: this sentence only makes the skill long.
+Filler line 3: this sentence only makes the skill long.
+Filler line 4: this sentence only makes the skill long.
+Filler line 5: this sentence only makes the skill long.
+Filler line 6: this sentence only makes the skill long.
+Filler line 7: this sentence only makes the skill long.
+Filler line 8: this sentence only makes the skill long.
+Filler line 9: this sentence only makes the skill long.
+Filler line 10: this sentence only makes the skill long.
+Filler line 11: this sentence only makes the skill long.
+Filler line 12: this sentence only makes the skill long.
+Filler line 13: this sentence only makes the skill long.
+Filler line 14: this sentence only makes the skill long.
+Filler line 15: this sentence only makes the skill long.
+Filler line 16: this sentence only makes the skill long.
+Filler line 17: this sentence only makes the skill long.
+Filler line 18: this sentence only makes the skill long.
+Filler line 19: this sentence only makes the skill long.
+Filler line 20: this sentence only makes the skill long.
+Filler line 21: this sentence only makes the skill long.
+Filler line 22: this sentence only makes the skill long.
+Filler line 23: this sentence only makes the skill long.
+Filler line 24: this sentence only makes the skill long.
+Filler line 25: this sentence only makes the skill long.
+Filler line 26: this sentence only makes the skill long.
+Filler line 27: this sentence only makes the skill long.
+Filler line 28: this sentence only makes the skill long.
+Filler line 29: this sentence only makes the skill long.
+Filler line 30: this sentence only makes the skill long.
+Filler line 31: this sentence only makes the skill long.
+Filler line 32: this sentence only makes the skill long.
+Filler line 33: this sentence only makes the skill long.
+Filler line 34: this sentence only makes the skill long.
+Filler line 35: this sentence only makes the skill long.
+Filler line 36: this sentence only makes the skill long.
+Filler line 37: this sentence only makes the skill long.
+Filler line 38: this sentence only makes the skill long.
+Filler line 39: this sentence only makes the skill long.
+Filler line 40: this sentence only makes the skill long.
+Filler line 41: this sentence only makes the skill long.
+Filler line 42: this sentence only makes the skill long.
+Filler line 43: this sentence only makes the skill long.
+Filler line 44: this sentence only makes the skill long.
+Filler line 45: this sentence only makes the skill long.
+Filler line 46: this sentence only makes the skill long.
+Filler line 47: this sentence only makes the skill long.
+Filler line 48: this sentence only makes the skill long.
+Filler line 49: this sentence only makes the skill long.
+Filler line 50: this sentence only makes the skill long.
+Filler line 51: this sentence only makes the skill long.
+Filler line 52: this sentence only makes the skill long.
+Filler line 53: this sentence only makes the skill long.
+Filler line 54: this sentence only makes the skill long.
+Filler line 55: this sentence only makes the skill long.
+Filler line 56: this sentence only makes the skill long.
+Filler line 57: this sentence only makes the skill long.
+Filler line 58: this sentence only makes the skill long.
+Filler line 59: this sentence only makes the skill long.
+Filler line 60: this sentence only makes the skill long.
+Filler line 61: this sentence only makes the skill long.
+Filler line 62: this sentence only makes the skill long.
+Filler line 63: this sentence only makes the skill long.
+Filler line 64: this sentence only makes the skill long.
+Filler line 65: this sentence only makes the skill long.
+Filler line 66: this sentence only makes the skill long.
+Filler line 67: this sentence only makes the skill long.
+Filler line 68: this sentence only makes the skill long.
+Filler line 69: this sentence only makes the skill long.
+Filler line 70: this sentence only makes the skill long.
+Filler line 71: this sentence only makes the skill long.
+Filler line 72: this sentence only makes the skill long.
+Filler line 73: this sentence only makes the skill long.
+Filler line 74: this sentence only makes the skill long.
+Filler line 75: this sentence only makes the skill long.
+Filler line 76: this sentence only makes the skill long.
+Filler line 77: this sentence only makes the skill long.
+Filler line 78: this sentence only makes the skill long.
+Filler line 79: this sentence only makes the skill long.
+Filler line 80: this sentence only makes the skill long.
+Filler line 81: this sentence only makes the skill long.
+Filler line 82: this sentence only makes the skill long.
+Filler line 83: this sentence only makes the skill long.
+Filler line 84: this sentence only makes the skill long.
+Filler line 85: this sentence only makes the skill long.
+Filler line 86: this sentence only makes the skill long.
+Filler line 87: this sentence only makes the skill long.
+Filler line 88: this sentence only makes the skill long.
+Filler line 89: this sentence only makes the skill long.
+Filler line 90: this sentence only makes the skill long.
+Filler line 91: this sentence only makes the skill long.
+Filler line 92: this sentence only makes the skill long.
+Filler line 93: this sentence only makes the skill long.
+Filler line 94: this sentence only makes the skill long.
+Filler line 95: this sentence only makes the skill long.
+Filler line 96: this sentence only makes the skill long.
+Filler line 97: this sentence only makes the skill long.
+Filler line 98: this sentence only makes the skill long.
+Filler line 99: this sentence only makes the skill long.
+Filler line 100: this sentence only makes the skill long.
+Filler line 101: this sentence only makes the skill long.
+Filler line 102: this sentence only makes the skill long.
+Filler line 103: this sentence only makes the skill long.
+Filler line 104: this sentence only makes the skill long.
+Filler line 105: this sentence only makes the skill long.
+Filler line 106: this sentence only makes the skill long.
+Filler line 107: this sentence only makes the skill long.
+Filler line 108: this sentence only makes the skill long.
+Filler line 109: this sentence only makes the skill long.
+Filler line 110: this sentence only makes the skill long.
+Filler line 111: this sentence only makes the skill long.
+Filler line 112: this sentence only makes the skill long.
+Filler line 113: this sentence only makes the skill long.
+Filler line 114: this sentence only makes the skill long.
+Filler line 115: this sentence only makes the skill long.
+Filler line 116: this sentence only makes the skill long.
+Filler line 117: this sentence only makes the skill long.
+Filler line 118: this sentence only makes the skill long.
+Filler line 119: this sentence only makes the skill long.
+Filler line 120: this sentence only makes the skill long.
+Filler line 121: this sentence only makes the skill long.
+Filler line 122: this sentence only makes the skill long.
+Filler line 123: this sentence only makes the skill long.
+Filler line 124: this sentence only makes the skill long.
+Filler line 125: this sentence only makes the skill long.
+Filler line 126: this sentence only makes the skill long.
+Filler line 127: this sentence only makes the skill long.
+Filler line 128: this sentence only makes the skill long.
+Filler line 129: this sentence only makes the skill long.
+Filler line 130: this sentence only makes the skill long.
+Filler line 131: this sentence only makes the skill long.
+Filler line 132: this sentence only makes the skill long.
+Filler line 133: this sentence only makes the skill long.
+Filler line 134: this sentence only makes the skill long.
+Filler line 135: this sentence only makes the skill long.
+Filler line 136: this sentence only makes the skill long.
+Filler line 137: this sentence only makes the skill long.
+Filler line 138: this sentence only makes the skill long.
+Filler line 139: this sentence only makes the skill long.
+Filler line 140: this sentence only makes the skill long.
+Filler line 141: this sentence only makes the skill long.
+Filler line 142: this sentence only makes the skill long.
+Filler line 143: this sentence only makes the skill long.
+Filler line 144: this sentence only makes the skill long.
+Filler line 145: this sentence only makes the skill long.
+Filler line 146: this sentence only makes the skill long.
+Filler line 147: this sentence only makes the skill long.
+Filler line 148: this sentence only makes the skill long.
+Filler line 149: this sentence only makes the skill long.
+Filler line 150: this sentence only makes the skill long.
+Filler line 151: this sentence only makes the skill long.
+Filler line 152: this sentence only makes the skill long.
+Filler line 153: this sentence only makes the skill long.
+Filler line 154: this sentence only makes the skill long.
+Filler line 155: this sentence only makes the skill long.
+Filler line 156: this sentence only makes the skill long.
+Filler line 157: this sentence only makes the skill long.
+Filler line 158: this sentence only makes the skill long.
+Filler line 159: this sentence only makes the skill long.
+Filler line 160: this sentence only makes the skill long.
+Filler line 161: this sentence only makes the skill long.
+Filler line 162: this sentence only makes the skill long.
+Filler line 163: this sentence only makes the skill long.
+Filler line 164: this sentence only makes the skill long.
+Filler line 165: this sentence only makes the skill long.
+Filler line 166: this sentence only makes the skill long.
+Filler line 167: this sentence only makes the skill long.
+Filler line 168: this sentence only makes the skill long.
+Filler line 169: this sentence only makes the skill long.
+Filler line 170: this sentence only makes the skill long.
+Filler line 171: this sentence only makes the skill long.
+Filler line 172: this sentence only makes the skill long.
+Filler line 173: this sentence only makes the skill long.
+Filler line 174: this sentence only makes the skill long.
+Filler line 175: this sentence only makes the skill long.
+Filler line 176: this sentence only makes the skill long.
+Filler line 177: this sentence only makes the skill long.
+Filler line 178: this sentence only makes the skill long.
+Filler line 179: this sentence only makes the skill long.
+Filler line 180: this sentence only makes the skill long.
+Filler line 181: this sentence only makes the skill long.
+Filler line 182: this sentence only makes the skill long.
+Filler line 183: this sentence only makes the skill long.
+Filler line 184: this sentence only makes the skill long.
+Filler line 185: this sentence only makes the skill long.
+Filler line 186: this sentence only makes the skill long.
+Filler line 187: this sentence only makes the skill long.
+Filler line 188: this sentence only makes the skill long.
+Filler line 189: this sentence only makes the skill long.
+Filler line 190: this sentence only makes the skill long.
+Filler line 191: this sentence only makes the skill long.
+Filler line 192: this sentence only makes the skill long.
+Filler line 193: this sentence only makes the skill long.
+Filler line 194: this sentence only makes the skill long.
+Filler line 195: this sentence only makes the skill long.
+Filler line 196: this sentence only makes the skill long.
+Filler line 197: this sentence only makes the skill long.
+Filler line 198: this sentence only makes the skill long.
+Filler line 199: this sentence only makes the skill long.
+Filler line 200: this sentence only makes the skill long.
+Filler line 201: this sentence only makes the skill long.
+Filler line 202: this sentence only makes the skill long.
+Filler line 203: this sentence only makes the skill long.
+Filler line 204: this sentence only makes the skill long.
+Filler line 205: this sentence only makes the skill long.
+Filler line 206: this sentence only makes the skill long.
+Filler line 207: this sentence only makes the skill long.
+Filler line 208: this sentence only makes the skill long.
+Filler line 209: this sentence only makes the skill long.
+Filler line 210: this sentence only makes the skill long.
+Filler line 211: this sentence only makes the skill long.
+Filler line 212: this sentence only makes the skill long.
+Filler line 213: this sentence only makes the skill long.
+Filler line 214: this sentence only makes the skill long.
+Filler line 215: this sentence only makes the skill long.
+Filler line 216: this sentence only makes the skill long.
+Filler line 217: this sentence only makes the skill long.
+Filler line 218: this sentence only makes the skill long.
+Filler line 219: this sentence only makes the skill long.
+Filler line 220: this sentence only makes the skill long.
+Filler line 221: this sentence only makes the skill long.
+Filler line 222: this sentence only makes the skill long.
+Filler line 223: this sentence only makes the skill long.
+Filler line 224: this sentence only makes the skill long.
+Filler line 225: this sentence only makes the skill long.
+Filler line 226: this sentence only makes the skill long.
+Filler line 227: this sentence only makes the skill long.
+Filler line 228: this sentence only makes the skill long.
+Filler line 229: this sentence only makes the skill long.
+Filler line 230: this sentence only makes the skill long.
+Filler line 231: this sentence only makes the skill long.
+Filler line 232: this sentence only makes the skill long.
+Filler line 233: this sentence only makes the skill long.
+Filler line 234: this sentence only makes the skill long.
+Filler line 235: this sentence only makes the skill long.
+Filler line 236: this sentence only makes the skill long.
+Filler line 237: this sentence only makes the skill long.
+Filler line 238: this sentence only makes the skill long.
+Filler line 239: this sentence only makes the skill long.
+Filler line 240: this sentence only makes the skill long.
+Filler line 241: this sentence only makes the skill long.
+Filler line 242: this sentence only makes the skill long.
+Filler line 243: this sentence only makes the skill long.
+Filler line 244: this sentence only makes the skill long.
+Filler line 245: this sentence only makes the skill long.
+Filler line 246: this sentence only makes the skill long.
+Filler line 247: this sentence only makes the skill long.
+Filler line 248: this sentence only makes the skill long.
+Filler line 249: this sentence only makes the skill long.
+Filler line 250: this sentence only makes the skill long.
+Filler line 251: this sentence only makes the skill long.
+Filler line 252: this sentence only makes the skill long.
+Filler line 253: this sentence only makes the skill long.
+Filler line 254: this sentence only makes the skill long.
+Filler line 255: this sentence only makes the skill long.
+Filler line 256: this sentence only makes the skill long.
+Filler line 257: this sentence only makes the skill long.
+Filler line 258: this sentence only makes the skill long.
+Filler line 259: this sentence only makes the skill long.
+Filler line 260: this sentence only makes the skill long.
+Filler line 261: this sentence only makes the skill long.
+Filler line 262: this sentence only makes the skill long.
+Filler line 263: this sentence only makes the skill long.
+Filler line 264: this sentence only makes the skill long.
+Filler line 265: this sentence only makes the skill long.
+Filler line 266: this sentence only makes the skill long.
+Filler line 267: this sentence only makes the skill long.
+Filler line 268: this sentence only makes the skill long.
+Filler line 269: this sentence only makes the skill long.
+Filler line 270: this sentence only makes the skill long.
+Filler line 271: this sentence only makes the skill long.
+Filler line 272: this sentence only makes the skill long.
+Filler line 273: this sentence only makes the skill long.
+Filler line 274: this sentence only makes the skill long.
+Filler line 275: this sentence only makes the skill long.
+Filler line 276: this sentence only makes the skill long.
+Filler line 277: this sentence only makes the skill long.
+Filler line 278: this sentence only makes the skill long.
+Filler line 279: this sentence only makes the skill long.
+Filler line 280: this sentence only makes the skill long.
+Filler line 281: this sentence only makes the skill long.
+Filler line 282: this sentence only makes the skill long.
+Filler line 283: this sentence only makes the skill long.
+Filler line 284: this sentence only makes the skill long.
+Filler line 285: this sentence only makes the skill long.
+Filler line 286: this sentence only makes the skill long.
+Filler line 287: this sentence only makes the skill long.
+Filler line 288: this sentence only makes the skill long.
+Filler line 289: this sentence only makes the skill long.
+Filler line 290: this sentence only makes the skill long.
+Filler line 291: this sentence only makes the skill long.
+Filler line 292: this sentence only makes the skill long.
+Filler line 293: this sentence only makes the skill long.
+Filler line 294: this sentence only makes the skill long.
+Filler line 295: this sentence only makes the skill long.
+Filler line 296: this sentence only makes the skill long.
+Filler line 297: this sentence only makes the skill long.
+Filler line 298: this sentence only makes the skill long.
+Filler line 299: this sentence only makes the skill long.
+Filler line 300: this sentence only makes the skill long.
+Filler line 301: this sentence only makes the skill long.
+Filler line 302: this sentence only makes the skill long.
+Filler line 303: this sentence only makes the skill long.
+Filler line 304: this sentence only makes the skill long.
+Filler line 305: this sentence only makes the skill long.
+Filler line 306: this sentence only makes the skill long.
+Filler line 307: this sentence only makes the skill long.
+Filler line 308: this sentence only makes the skill long.
+Filler line 309: this sentence only makes the skill long.
+Filler line 310: this sentence only makes the skill long.
+Filler line 311: this sentence only makes the skill long.
+Filler line 312: this sentence only makes the skill long.
+Filler line 313: this sentence only makes the skill long.
+Filler line 314: this sentence only makes the skill long.
+Filler line 315: this sentence only makes the skill long.
+Filler line 316: this sentence only makes the skill long.
+Filler line 317: this sentence only makes the skill long.
+Filler line 318: this sentence only makes the skill long.
+Filler line 319: this sentence only makes the skill long.
+Filler line 320: this sentence only makes the skill long.
+Filler line 321: this sentence only makes the skill long.
+Filler line 322: this sentence only makes the skill long.
+Filler line 323: this sentence only makes the skill long.
+Filler line 324: this sentence only makes the skill long.
+Filler line 325: this sentence only makes the skill long.
+Filler line 326: this sentence only makes the skill long.
+Filler line 327: this sentence only makes the skill long.
+Filler line 328: this sentence only makes the skill long.
+Filler line 329: this sentence only makes the skill long.
+Filler line 330: this sentence only makes the skill long.
+Filler line 331: this sentence only makes the skill long.
+Filler line 332: this sentence only makes the skill long.
+Filler line 333: this sentence only makes the skill long.
+Filler line 334: this sentence only makes the skill long.
+Filler line 335: this sentence only makes the skill long.
+Filler line 336: this sentence only makes the skill long.
+Filler line 337: this sentence only makes the skill long.
+Filler line 338: this sentence only makes
+
+[... skill content truncated for compaction; use Read on the skill path if you need the full text]
+
+---
+
+### Skill: marker-edited
+Path: projectSettings:marker-edited
+
+Base directory for this skill: /private/tmp/skill-restore-probe/.claude/skills/marker-edited
+
+This is a scratch test skill. It carries one fact.
+
+The secret passphrase of this skill is HERON-COBALT-1187-FENNEL.
+
+After reading this, reply with exactly the word `loaded` and nothing else. Do not repeat the passphrase unless a later prompt asks for it.
+
+
+---
+
+### Skill: marker-gone
+Path: projectSettings:marker-gone
+
+Base directory for this skill: /private/tmp/skill-restore-probe/.claude/skills/marker-gone
+
+This is a scratch test skill. It carries one fact.
+
+The secret passphrase of this skill is OTTER-BASALT-4402-JUNIPER.
+
+After reading this, reply with exactly the word `loaded` and nothing else. Do not repeat the passphrase unless a later prompt asks for it.
