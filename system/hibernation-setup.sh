@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Make hibernation work: grow /swap.img to hold a RAM image, tell the kernel and
 # initramfs where to resume from, and lift Ubuntu's polkit refusal. Run with
 # sudo; takes effect at the next boot.

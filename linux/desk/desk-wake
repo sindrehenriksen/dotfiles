@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # systemd-sleep hook: wakes a suspended machine for a scheduled desk pass, but
 # only when it went to sleep on mains power. A systemd timer's WakeSystem=
 # cannot check for power, and a laptop woken on battery in a bag is worse than
