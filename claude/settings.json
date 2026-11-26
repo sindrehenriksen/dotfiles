@@ -427,7 +427,7 @@
     "dotfiles-mods": {
       "source": {
         "source": "directory",
-        "path": "/Library/Application Support/ClaudeCode/mods"
+        "path": "~/dotfiles/claude/mods"
       }
     }
   },
