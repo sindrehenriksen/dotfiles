@@ -45,7 +45,7 @@ Written as the user's next message, in their voice, not as a note to self.
 - **Point at the process skills and the phase or stage to enter**, rather than restating the process.
 - **Block explicitly on what only the user can decide.** Anything an agent could invent a plausible number or scope for and shouldn't becomes "come back to me with a proposal before writing code". This is why the pair exists rather than one prompt.
 - **Name how the change gets verified** when the effect is qualitative — otherwise verification silently becomes "tests pass".
-- Say what to delegate and what stays in the main loop.
+- Say what to delegate and what stays in the main loop, and name `execution` for how: which tier each job gets, and who waits. Don't shorten its rules into the prompt ("the strong tier for builds"): the next session follows the shorthand for its whole life and never opens the skill.
 - Carry nothing Prompt 1 already preserves. Overlap means one of the two is wrong. Prompt 1 carries facts; Prompt 2 carries intent and the open items, a line each, with the detail left to Prompt 1.
 - **It is the prompt the user reads.** Prompt 1 tends to get skimmed, so what the user would want to catch has to be visible here: what the next session may do without asking, pointing at the go Prompt 1 quotes rather than rewording its condition, and what it must bring back. That is intent, so it is no overlap.
 
