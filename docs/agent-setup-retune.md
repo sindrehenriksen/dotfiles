@@ -166,3 +166,29 @@ Two things found then about a long-lived subagent's cost:
   (9–14%). So it is left off. Re-measure at a re-tune, since the answer
   turns on how many workers are long-lived. A per-agent `cacheTtl` exists
   for custom agent types only, not the built-in one or a single call.
+
+## Where the usage went
+
+`claude-usage-tally [--from DATE] [--to DATE]` (local days, default the last
+seven) reads every `~/.claude*/projects` and prints cost per day and model,
+per session (main thread against subagents) and per subagent, plus the
+three numbers below and the main loop's context size per turn. It prints
+numbers and session titles, never message text. Cost is API list price (the
+table at the top of the script, with the date it was read), used as a proxy
+for how fast a subscription limit drains, not as a bill.
+
+- **Subagent share**: the part of total cost spent in subagents. Large
+  means delegation is where the limit goes, so look at their tier and
+  how many there are before the main loop.
+- **Strong-tier share per day**: a seat may use at most half of the weekly
+  limit on the strong tier, so a share well above half on most days means
+  that tier runs out first; move work to the lower tiers.
+- **Cold-wake cost**: cache writes on turns that start over five minutes
+  after the agent's last turn ended (a long tool call is not one), as a
+  share of subagent cost. This is what a lapsed cache costs. The what-if
+  beside it reprices subagents on a one-hour cache (writes at the one-hour
+  rate, wakes between 5 and 60 minutes read instead of rewrite): a negative
+  difference means `subagentPromptCacheTtl: "1h"` would pay.
+
+Run it when usage is running out too fast, and before changing a tier or a
+cache setting, so the change is judged on the numbers.

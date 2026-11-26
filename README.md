@@ -16,6 +16,7 @@ Personal dev environment: zsh, Neovim, Ghostty, Git, AI agent configs. Cross-pla
 | `claude/` | Claude Code global config (`settings.json`, `statusline.sh`, `keybindings.json`), symlinked into `~/.claude/` |
 | `claude/desk-run`, `claude/desk-lib/`, `nvim/lua/desk/` | Desk: a notes file with suggestions staged beside it and reviewed in nvim, scheduled passes that hand a brief to a central session, and a ticket follower — see `docs/desk.md` |
 | `claude/claude-usage-baseline` | Delegation and token baseline from transcript metadata, split at a date; the measurement step in `docs/agent-setup-retune.md`, on re-tuning the agent setup for a new model |
+| `claude/claude-usage-tally` | Where token usage went over a window, priced at API list price as a proxy for subscription drain: strong-tier share, subagent share, cold wakes, a one-hour-cache what-if; see `docs/agent-setup-retune.md`, "Where the usage went" |
 | `agents/skills/` | Agent skills — single source, symlinked to `~/.agents/skills/` and `~/.claude/skills/` (global) plus `~/dotfiles/.claude/skills/` for repo-only skills |
 | `secrets/` | Example secrets templates (real secrets live in `~/.secrets.env`, untracked) |
 | `macos/` | macOS-only: keyboard remapping (Caps Lock, fn/Ctrl swap) via `hidutil` and a login agent — see `macos/README.md` |

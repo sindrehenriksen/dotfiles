@@ -1,0 +1,353 @@
+#!/usr/bin/env -S python3 -I
+"""claude-usage-tally: where Claude Code token usage went, from transcripts.
+
+    claude-usage-tally [--from DATE] [--to DATE] [--root DIR ...]
+
+DATE is YYYY-MM-DD in local time, both ends inclusive; the default is the
+last 7 days up to today. Without --root it reads every `~/.claude*/projects`.
+
+Prints numbers and session titles only, never message text: from each
+transcript line it reads `type`, `timestamp`, whether a user record is a pure
+tool result, the session title, and on assistant records `message.id`,
+`message.model`, the token counts in `message.usage` and the ids of tool
+calls. Messages are deduplicated by `message.id`.
+
+Sections: per day and model; strong-tier share per day; per session (main
+thread against subagents); per subagent; cold wakes; a what-if for a
+one-hour subagent cache lifetime; main-thread turn size.
+"""
+import argparse
+import glob
+import json
+import os
+import statistics
+from collections import defaultdict
+from datetime import datetime, date, timedelta
+
+# API list price, USD per million tokens, read 2026-11-26. Prompts up to
+# 100k tokens; the higher rate for larger prompts is ignored. First
+# substring found in the model name wins; an unknown model is reported and
+# priced as Opus.
+#            substring  input  output  cache read  cache write 5m  cache write 1h
+PRICES = [
+    ("fable",  (8.00, 40.00, 0.20, 10.000, 16.00)),
+    ("opus",   (4.00, 20.00, 0.20,  5.000,  8.00)),
+    ("sonnet", (2.00, 10.00, 0.10,  2.500,  4.00)),
+    ("haiku",  (0.10,  0.50, 0.01,  0.125,  0.20)),
+]
+FALLBACK = "opus"
+STRONG = "fable"  # the tier a subscription seat may use at most half of weekly
+COLD_S = 300      # a wake: more than 5 minutes since the agent's last turn ended
+LONG_S = 3600     # a one-hour cache covers gaps up to this
+KEYS = ("inp", "out", "cr", "c5", "c1")
+
+unknown = set()
+
+
+def price(model):
+    m = (model or "").lower()
+    for k, p in PRICES:
+        if k in m:
+            return p
+    if not (model or "").startswith("<"):  # "<synthetic>" records carry no tokens
+        unknown.add(model or "?")
+    return dict(PRICES)[FALLBACK]
+
+
+def tier(model):
+    m = (model or "").lower()
+    for k, _ in PRICES:
+        if k in m:
+            return k
+    return FALLBACK
+
+
+def usd(model, r, c1_as_hour=False):
+    p = price(model)
+    c5, c1 = r["c5"], r["c1"]
+    if c1_as_hour:
+        c5, c1 = 0, c5 + c1
+    return (r["inp"] * p[0] + r["out"] * p[1] + r["cr"] * p[2]
+            + c5 * p[3] + c1 * p[4]) / 1e6
+
+
+def write_usd(model, c5, c1):
+    p = price(model)
+    return (c5 * p[3] + c1 * p[4]) / 1e6
+
+
+def parse_ts(s):
+    return datetime.fromisoformat(s.replace("Z", "+00:00"))
+
+
+def is_tool_result(o):
+    c = (o.get("message") or {}).get("content")
+    return (isinstance(c, list) and bool(c) and
+            all(isinstance(b, dict) and b.get("type") == "tool_result" for b in c))
+
+
+def load(roots):
+    msgs, titles, skipped = {}, {}, 0
+    for root in roots:
+        for path in glob.glob(root + "/**/*.jsonl", recursive=True):
+            rel = os.path.relpath(path, root).split(os.sep)
+            proj = rel[0]
+            is_sub = "subagents" in rel or "tasks" in rel
+            sess = rel[1] if is_sub else rel[-1][:-6]
+            agent = os.path.basename(path)[:-6] if is_sub else None
+            last_end = None
+            last_user = None   # is_tool_result of the latest user record since the last turn
+            with open(path, errors="replace") as fh:
+                for line in fh:
+                    has_usage = '"usage"' in line
+                    if not has_usage and 'itle"' not in line and not (is_sub and '"user"' in line):
+                        continue
+                    try:
+                        o = json.loads(line)
+                    except Exception:
+                        skipped += 1
+                        continue
+                    t = o.get("type")
+                    if t in ("custom-title", "ai-title") and not is_sub:
+                        ti = o.get("customTitle") or o.get("aiTitle") or o.get("title")
+                        pr = 2 if t == "custom-title" else 1
+                        if ti and titles.get(sess, (0,))[0] <= pr:
+                            titles[sess] = (pr, ti)
+                        continue
+                    if t == "user" and is_sub:
+                        last_user = is_tool_result(o)
+                        continue
+                    if t != "assistant":
+                        continue
+                    m = o.get("message") or {}
+                    u = m.get("usage")
+                    mid = m.get("id")
+                    if not u or not mid or not o.get("timestamp"):
+                        skipped += 1
+                        continue
+                    ts = parse_ts(o["timestamp"])
+                    cc = u.get("cache_creation") or {}
+                    c5, c1 = cc.get("ephemeral_5m_input_tokens"), cc.get("ephemeral_1h_input_tokens")
+                    if c5 is None and c1 is None:
+                        c5, c1 = u.get("cache_creation_input_tokens", 0) or 0, 0
+                    else:
+                        c5, c1 = c5 or 0, c1 or 0
+                    key = (path, mid)
+                    e = msgs.get(key)
+                    if e is None:
+                        # Gap since the agent's previous turn ended. A turn that
+                        # follows a tool result is the tool's duration, not a wake.
+                        gap = None
+                        if last_end is not None and last_user is not True:
+                            gap = (ts - last_end).total_seconds()
+                        e = msgs[key] = dict(
+                            ts=ts, end=ts, sess=sess, proj=proj, gap=gap, first=last_end is None,
+                            agent=agent or (o.get("agentId") if o.get("isSidechain") else None))
+                        last_user = None
+                    e["ts"], e["end"] = min(e["ts"], ts), max(e["end"], ts)
+                    e["model"] = m.get("model") or "?"
+                    e.update(inp=u.get("input_tokens", 0) or 0, out=u.get("output_tokens", 0) or 0,
+                             c5=c5, c1=c1, cr=u.get("cache_read_input_tokens", 0) or 0)
+                    last_end = ts if last_end is None else max(last_end, ts)
+    return msgs, titles, skipped
+
+
+def blank():
+    return dict(n=0, inp=0, out=0, cr=0, c5=0, c1=0, w=0.0)
+
+
+def add(d, e):
+    d["n"] += 1
+    for k in KEYS:
+        d[k] += e[k]
+    d["w"] += usd(e["model"], e)
+
+
+def fmt(d):
+    return "%6d %10d %10d %10d %12d %9d %10.2f" % (
+        d["n"], d["inp"], d["c5"], d["c1"], d["cr"], d["out"], d["w"])
+
+
+HDR = "%6s %10s %10s %10s %12s %9s %10s" % (
+    "msgs", "fresh_in", "cw5m", "cw1h", "cache_read", "output", "usd")
+
+
+def main():
+    ap = argparse.ArgumentParser(description="Tally Claude Code token usage from transcripts.")
+    today = datetime.now().astimezone().date()
+    ap.add_argument("--from", dest="d0", type=date.fromisoformat, default=today - timedelta(days=6),
+                    help="first day, local time (default: 6 days before today)")
+    ap.add_argument("--to", dest="d1", type=date.fromisoformat, default=today,
+                    help="last day, local time, inclusive (default: today)")
+    ap.add_argument("--root", action="append",
+                    help="a projects/ directory (repeatable; default: ~/.claude*/projects)")
+    a = ap.parse_args()
+    home = os.path.expanduser("~")
+    roots = a.root or sorted(glob.glob(home + "/.claude*/projects"))
+    msgs, titles, skipped = load(roots)
+
+    def day(e):
+        return e["ts"].astimezone().date()
+
+    rows = [e for e in msgs.values() if a.d0 <= day(e) <= a.d1]
+    enc_home = home.replace("/", "-")
+
+    def name(sess, proj):
+        t = titles.get(sess, (0, ""))[1]
+        return "%s [%s] %s" % (sess[:8], proj.replace(enc_home, "~")[:28], t[:40])
+
+    print("Window %s to %s (local time), config dirs: %s" % (
+        a.d0, a.d1, ", ".join(r.replace(home, "~") for r in roots) or "none"))
+    print("USD below is API LIST PRICE (per million tokens, read 2026-11-26, prompts up to 100k; the")
+    print("larger-prompt rate is ignored), used as a proxy for how fast a subscription limit drains.")
+    print("It is not a bill. Price table, in PRICES at the top of this script:")
+    for k, p in PRICES:
+        print("  %-7s input %.2f  output %.2f  cache read %.2f  cache write 5m %.3f  1h %.2f" % ((k,) + p))
+    print("%d deduped messages in all, %d in window, %d unreadable lines skipped\n" % (
+        len(msgs), len(rows), skipped))
+    if not rows:
+        print("No usage in the window.")
+        return
+
+    # 1. per day and model
+    print("== 1. per day and model ==")
+    dm = defaultdict(blank)
+    for e in rows:
+        add(dm[(day(e).isoformat(), e["model"])], e)
+    print("%-10s %-22s %s" % ("day", "model", HDR))
+    daily, strong = defaultdict(float), defaultdict(float)
+    for k in sorted(dm):
+        print("%-10s %-22s %s" % (k[0], k[1], fmt(dm[k])))
+        daily[k[0]] += dm[k]["w"]
+        if tier(k[1]) == STRONG:
+            strong[k[0]] += dm[k]["w"]
+    grand = sum(daily.values())
+    print("total: $%.2f" % grand)
+    bym = defaultdict(float)
+    for k, v in dm.items():
+        bym[tier(k[1])] += v["w"]
+    print("by tier: " + ", ".join("%s %.0f%%" % (k, 100 * v / grand)
+                                  for k, v in sorted(bym.items(), key=lambda x: -x[1])))
+
+    # 2. strong-tier share per day
+    print("\n== 2. strong tier (%s) per day: a subscription seat may use at most half of the weekly limit on it ==" % STRONG)
+    print("%-10s %10s %10s %7s" % ("day", STRONG + " usd", "all usd", "share"))
+    for d in sorted(daily):
+        print("%-10s %10.2f %10.2f %6.0f%%" % (d, strong[d], daily[d], 100 * strong[d] / daily[d] if daily[d] else 0))
+    print("%-10s %10.2f %10.2f %6.0f%%" % ("window", sum(strong.values()), grand, 100 * sum(strong.values()) / grand))
+
+    # 3. per session
+    print("\n== 3. per session (top 15 by usd) ==")
+    ss = defaultdict(lambda: defaultdict(blank))
+    sproj = {}
+    for e in rows:
+        add(ss[e["sess"]][("sub" if e["agent"] else "main", e["model"])], e)
+        sproj[e["sess"]] = e["proj"]
+    stot = {s: sum(v["w"] for v in d.values()) for s, d in ss.items()}
+    top = sorted(stot, key=lambda s: -stot[s])
+    for s in top[:15]:
+        mw = sum(v["w"] for k, v in ss[s].items() if k[0] == "main")
+        print("\n%s  total $%.2f (main $%.2f, subagents $%.2f)" % (name(s, sproj[s]), stot[s], mw, stot[s] - mw))
+        for k in sorted(ss[s], key=lambda k: -ss[s][k]["w"]):
+            print("   %-5s %-20s %s" % (k[0], k[1], fmt(ss[s][k])))
+    main_w = sum(v["w"] for d in ss.values() for k, v in d.items() if k[0] == "main")
+    sub_w = grand - main_w
+    print("\nall sessions: main $%.2f (%.0f%%), subagents $%.2f (%.0f%%)" % (
+        main_w, 100 * main_w / grand, sub_w, 100 * sub_w / grand))
+    print("top-5 sessions: %.0f%% of total" % (100 * sum(stot[s] for s in top[:5]) / grand))
+
+    # 4. subagents, cold wakes
+    ag = defaultdict(list)
+    for e in rows:
+        if e["agent"]:
+            ag[(e["sess"], e["agent"])].append(e)
+
+    def cold(e):
+        return e["gap"] is not None and e["gap"] > COLD_S
+
+    print("\n== 4. subagents (top 20 by usd) ==")
+    print("A cold wake is a turn starting more than 5 min after the agent's previous turn ended;")
+    print("a turn that follows a tool result is not one, however long the tool ran.")
+    stats = []
+    for k, lst in ag.items():
+        lst.sort(key=lambda e: e["ts"])
+        r = blank()
+        for e in lst:
+            add(r, e)
+        cw = [e for e in lst if cold(e)]
+        stats.append(dict(k=k, r=r, turns=lst, ncold=len(cw),
+                          coldtok=sum(e["c5"] + e["c1"] for e in cw),
+                          coldusd=sum(write_usd(e["model"], e["c5"], e["c1"]) for e in cw)))
+    stats.sort(key=lambda s: -s["r"]["w"])
+    print("%-32s %-12s %s %5s %10s %9s" % ("agent (session/id)", "model", HDR, "cold", "cold_cw", "cold_usd"))
+    for s in stats[:20]:
+        k = s["k"]
+        print("%-32s %-12s %s %5d %10d %9.2f" % (
+            ("%s/%s" % (k[0][:8], k[1].replace("agent-", "")[:8]))[:32], s["turns"][0]["model"][-12:],
+            fmt(s["r"]), s["ncold"], s["coldtok"], s["coldusd"]))
+
+    print("\n== 5. cold wakes ==")
+    ncold = sum(s["ncold"] for s in stats)
+    ctok = sum(s["coldtok"] for s in stats)
+    cusd = sum(s["coldusd"] for s in stats)
+    nturn = sum(len(s["turns"]) for s in stats)
+    print("subagents: %d, turns: %d, cold wakes: %d" % (len(stats), nturn, ncold))
+    print("cache writes on cold wakes: %d tokens, $%.2f = %.0f%% of subagent cost, %.0f%% of total" % (
+        ctok, cusd, 100 * cusd / sub_w if sub_w else 0, 100 * cusd / grand))
+
+    # 6. what-if: one-hour subagent cache
+    print("\n== 6. what-if: subagent cache lifetime of one hour ==")
+    print("Every subagent cache write is priced at the 1h rate. A cold wake with a gap of 5 to 60")
+    print("minutes becomes a cache read for the rewritten context: the turn's cache-write tokens")
+    print("minus the agent's median write on its other turns (the new material) are read instead.")
+    res = []
+    for s in stats:
+        lst = s["turns"]
+        warm = [e["c5"] + e["c1"] for e in lst if not cold(e) and not e["first"]]
+        med = statistics.median(warm) if warm else 0
+        cur = whatif = 0.0
+        nconv = 0
+        for e in lst:
+            cur += usd(e["model"], e)
+            cw = e["c5"] + e["c1"]
+            conv = cold(e) and e["gap"] <= LONG_S and cw > 0
+            rewrite = cw - min(cw, med) if conv else 0
+            nconv += conv
+            p = price(e["model"])
+            whatif += (e["inp"] * p[0] + e["out"] * p[1] + (e["cr"] + rewrite) * p[2]
+                       + (cw - rewrite) * p[4]) / 1e6
+        res.append((s["k"], cur, whatif, nconv))
+    cur_t = sum(r[1] for r in res)
+    wi_t = sum(r[2] for r in res)
+    print("subagents, total: current $%.2f, what-if $%.2f, difference %+.2f (%+.1f%%)" % (
+        cur_t, wi_t, wi_t - cur_t, 100 * (wi_t - cur_t) / cur_t if cur_t else 0))
+    print("as share of total usage: %+.1f%%" % (100 * (wi_t - cur_t) / grand))
+    print("%-32s %10s %10s %10s %8s" % ("agent, ten largest changes", "current", "what-if", "diff", "wakes"))
+    for k, c, w, n in sorted(res, key=lambda r: -abs(r[2] - r[1]))[:10]:
+        print("%-32s %10.2f %10.2f %+10.2f %8d" % (
+            ("%s/%s" % (k[0][:8], k[1].replace("agent-", "")[:8]))[:32], c, w, w - c, n))
+
+    # 7. main thread turn size
+    print("\n== 7. main threads: turns and cache-read tokens per turn (top 15 sessions) ==")
+    mt = defaultdict(list)
+    for e in rows:
+        if not e["agent"]:
+            mt[e["sess"]].append(e["cr"])
+    print("%-62s %6s %12s %12s" % ("session", "turns", "median_cr", "max_cr"))
+    for s in top[:15]:
+        v = mt.get(s)
+        if v:
+            print("%-62s %6d %12d %12d" % (name(s, sproj[s])[:62], len(v), statistics.median(v), max(v)))
+    allv = [x for v in mt.values() for x in v]
+    if allv:
+        print("all main turns: %d, median cache-read per turn %d, max %d" % (
+            len(allv), statistics.median(allv), max(allv)))
+
+    chk = sum(v["w"] for v in dm.values())
+    print("\ncheck: per-day total $%.2f, per-session total $%.2f, per-model total $%.2f" % (
+        grand, sum(stot.values()), chk))
+    if unknown:
+        print("UNKNOWN MODELS priced as %s: %s" % (FALLBACK, ", ".join(sorted(unknown))))
+
+
+main()
