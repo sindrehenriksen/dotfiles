@@ -36,7 +36,7 @@
 #
 #   idle-prompt  (UserPromptSubmit) For a session that sat idle without
 #         compacting and so keeps acting on old skill text: when the previous
-#         turn ended more than COMPACT_HANDOFF_IDLE_HOURS ago (default 4; the
+#         turn ended more than COMPACT_HANDOFF_IDLE_HOURS ago (default 1; the
 #         time of the last assistant record in the transcript's tail), adds
 #         the same stale_context block as `session-start`, and nothing
 #         else. Prints nothing when it is not idle, when nothing has changed,
@@ -327,7 +327,7 @@ idle_prompt() {
     is_worker "$input" && return 0
     transcript=$(jq -r '.transcript_path // ""' <<<"$input" 2>/dev/null)
     [ -f "$transcript" ] && [ -r "$transcript" ] || return 0
-    hours=${COMPACT_HANDOFF_IDLE_HOURS:-4}
+    hours=${COMPACT_HANDOFF_IDLE_HOURS:-1}
     case $hours in '' | *[!0-9]*) hours=4 ;; esac
     last=$(tail -c 4194304 "$transcript" | jq -R -r '
         fromjson? | select(type == "object" and .type == "assistant" and .timestamp != null)
