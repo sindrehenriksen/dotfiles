@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
 # Claude Code status line. Reads JSON on stdin and prints a single line:
-#   [<vim>] t:<tokens> (<ctx%>)[ | q:<queued>] | [!mem:<rss>] 5h:<rem%> w:<rem%> | <model>[ th:<state>] | <dir>[ <branch>][ #<pr>]
+#   [<vim>] t:<tokens> (<ctx%>)[ | q:<queued>] | [!mem:<rss>] 5h:<rem%> w:<rem%>[ [!]f:<share%>] | <model>[ th:<state>] | <dir>[ <branch>][ #<pr>]
 # q:<queued> is how many messages wait in this session's queue, when any do.
 # th:<state> is the effort level when thinking is on, "on" when thinking is on but the
 # model has no effort parameter, or "off" when thinking is disabled.
 # !mem: appears only above MEM_WARN_KB — see below.
+# f:<share%> is the strong tier's share of the last seven days' usage (claude-usage-tally
+# --strong-share), read from a cache and shown only once one exists; a seat may use the
+# strong tier for at most half of the weekly limit, so it reads !f: above 50%.
 # Segments are omitted when their source fields are absent.
 
 input=$(cat)
@@ -115,10 +118,51 @@ if [ -n "$branch" ] && [ -n "$pr_git_dir" ] && [ "origin/$branch" != "$pr_defaul
     [ -n "$pr" ] && pr="#$pr"
 fi
 
+# Strong-tier share of the last seven days, from claude-usage-tally. That takes
+# around 30 s, so a render never runs it: it prints the cached value and, once the
+# cache is STRONG_TTL old, starts one detached refresh (the lock directory keeps
+# it to one at a time; one older than STRONG_LOCK_STALE is a crashed refresh's).
+# Cache line: "<epoch> [percent]". A failed refresh keeps the old percent with a new
+# epoch, so a broken tally is retried hourly rather than on every render.
+STRONG_TTL=3600
+STRONG_LOCK_STALE=900
+strong_dir="${XDG_STATE_HOME:-$HOME/.local/state}/claude"
+strong_cache="$strong_dir/strong-share"
+strong_at=0
+strong=""
+[ -r "$strong_cache" ] && read -r strong_at strong <"$strong_cache"
+case $strong_at in '' | *[!0-9]*) strong_at=0 ;; esac
+case $strong in '' | *[!0-9]*) strong="" ;; esac
+now=${EPOCHSECONDS:-$(date +%s)}
+if [ $((now - strong_at)) -ge "$STRONG_TTL" ]; then
+    strong_tally="${CLAUDE_USAGE_TALLY:-$(dirname "$(realpath "$0" 2>/dev/null || echo "$0")")/claude-usage-tally}"
+    strong_lock="$strong_dir/strong-share.lock"
+    mkdir -p "$strong_dir" 2>/dev/null
+    if [ -x "$strong_tally" ]; then
+        if [ -d "$strong_lock" ] && [ -n "$(find "$strong_lock" -maxdepth 0 -mmin +$((STRONG_LOCK_STALE / 60)) 2>/dev/null)" ]; then
+            rmdir "$strong_lock" 2>/dev/null
+        fi
+        if mkdir "$strong_lock" 2>/dev/null; then
+            (
+                strong_new=$("$strong_tally" --strong-share 2>/dev/null)
+                case $strong_new in '' | *[!0-9]*) strong_new=$strong ;; esac
+                printf '%s %s\n' "${EPOCHSECONDS:-$(date +%s)}" "$strong_new" >"$strong_cache.$$"
+                mv -f "$strong_cache.$$" "$strong_cache"
+                rmdir "$strong_lock"
+            ) </dev/null >/dev/null 2>&1 &
+        fi
+    fi
+fi
+
 middle=""
 [ -n "$mem" ] && middle="$mem"
 [ -n "$five_rem" ] && middle="${middle:+$middle }5h:${five_rem}%"
 [ -n "$week_rem" ] && middle="${middle:+$middle }w:${week_rem}%"
+if [ -n "$strong" ]; then
+    strong_mark=""
+    [ "$strong" -gt 50 ] && strong_mark="!"
+    middle="${middle:+$middle }${strong_mark}f:${strong}%"
+fi
 
 right="$model"
 case "$thinking" in

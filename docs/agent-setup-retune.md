@@ -182,7 +182,12 @@ for how fast a subscription limit drains, not as a bill.
   how many there are before the main loop.
 - **Strong-tier share per day**: a seat may use at most half of the weekly
   limit on the strong tier, so a share well above half on most days means
-  that tier runs out first; move work to the lower tiers.
+  that tier runs out first; move work to the lower tiers. The status line
+  shows the window's figure as `f:<share>%` beside the weekly one (`!f:`
+  above 50%), from `claude-usage-tally --strong-share`, which prints only
+  that number. The tally takes about 30 seconds, so the status line reads
+  `~/.local/state/claude/strong-share` and refreshes it in the background
+  when it is over an hour old; nothing shows until the first refresh ends.
 - **Cold-wake cost**: cache writes on turns that start over five minutes
   after the agent's last turn ended (a long tool call is not one), as a
   share of subagent cost. This is what a lapsed cache costs. The what-if

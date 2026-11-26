@@ -1,7 +1,7 @@
 #!/usr/bin/env -S python3 -I
 """claude-usage-tally: where Claude Code token usage went, from transcripts.
 
-    claude-usage-tally [--from DATE] [--to DATE] [--root DIR ...]
+    claude-usage-tally [--from DATE] [--to DATE] [--root DIR ...] [--strong-share]
 
 DATE is YYYY-MM-DD in local time, both ends inclusive; the default is the
 last 7 days up to today. Without --root it reads every `~/.claude*/projects`.
@@ -11,6 +11,10 @@ transcript line it reads `type`, `timestamp`, whether a user record is a pure
 tool result, the session title, and on assistant records `message.id`,
 `message.model`, the token counts in `message.usage` and the ids of tool
 calls. Messages are deduplicated by `message.id`.
+
+--strong-share prints only the window's strong-tier share of usage, as a
+whole-number percentage and nothing else (nothing at all when the window has
+no usage); statusline.sh reads it.
 
 Sections: per day and model; strong-tier share per day; per session (main
 thread against subagents); per subagent; cold wakes; a what-if for a
@@ -181,6 +185,8 @@ def main():
                     help="last day, local time, inclusive (default: today)")
     ap.add_argument("--root", action="append",
                     help="a projects/ directory (repeatable; default: ~/.claude*/projects)")
+    ap.add_argument("--strong-share", action="store_true",
+                    help="print only the window's strong-tier share, as a whole-number percent")
     a = ap.parse_args()
     home = os.path.expanduser("~")
     roots = a.root or sorted(glob.glob(home + "/.claude*/projects"))
@@ -190,6 +196,11 @@ def main():
         return e["ts"].astimezone().date()
 
     rows = [e for e in msgs.values() if a.d0 <= day(e) <= a.d1]
+    if a.strong_share:
+        total = sum(usd(e["model"], e) for e in rows)
+        if total > 0:
+            print("%.0f" % (100 * sum(usd(e["model"], e) for e in rows if tier(e["model"]) == STRONG) / total))
+        return
     enc_home = home.replace("/", "-")
 
     def name(sess, proj):
