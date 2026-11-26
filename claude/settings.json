@@ -438,7 +438,8 @@
   "autoMode": {
     "allow": [
       "$defaults",
-      "Pushing, merging or releasing work to a repo's default branch is an authorized landing, including in a repo that deploys on push, once the user has approved doing that work in this session: a go to do a piece of work includes landing it unless something new surfaced since. The approval is in the user's own messages, or quoted from them in the delegating task text of an agent the session handed the landing to."
+      "Pushing, merging or releasing work to a repo's default branch is an authorized landing, including in a repo that deploys on push, once the user has approved doing that work in this session: a go to do a piece of work includes landing it unless something new surfaced since. The approval is in the user's own messages, or quoted from them in the delegating task text of an agent the session handed the landing to.",
+      "Moving mail to the Trash with a mail connector is routine where the workspace's own instruction files record the user's standing go for it, for the session or a subagent it hands a judged list to. Trashing only: permanent deletion, sending, replying, forwarding and filters are not covered."
     ],
     "environment": [
       "### Org-wide",
