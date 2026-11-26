@@ -374,6 +374,11 @@
             "type": "command",
             "command": "$HOME/dotfiles/claude/hooks/session-queue.sh",
             "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "$HOME/dotfiles/claude/hooks/compact-handoff.sh idle-prompt",
+            "timeout": 10
           }
         ]
       }

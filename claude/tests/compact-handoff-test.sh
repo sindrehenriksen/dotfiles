@@ -320,6 +320,32 @@ check "files: a long list names every file, those of one directory on one line" 
 out=$(skills "$S/repo" "$S/current.jsonl")
 check "skills: nothing is added when all are current" '[[ $out != *"Of the skills"* && $out == *"re-read it from disk"* ]]'
 
+# idle-prompt: the same check on a prompt after a long idle. The fixtures
+# above were last active in February, so they are idle; the same transcript
+# with an assistant record from an hour ago is not.
+idle() { jq -n --arg cwd "$1" --arg t "$2" '{hook_event_name:"UserPromptSubmit",prompt:"go on",cwd:$cwd,transcript_path:$t}' | HOME=$R CLAUDE_CONFIG_DIR="$S/cfg" "$HOOK" idle-prompt; }
+ago() { jq -nr --argjson s "$1" '(now - $s) | todate'; }
+assistant() { jq -nc --arg ts "$1" '{type:"assistant",timestamp:$ts,message:{content:[{type:"text",text:"done"}]}}'; }
+{ cat "$S/t.jsonl"; assistant "$(ago 3600)"; } >"$S/recent.jsonl"
+out=$(idle "$S/repo/sub" "$S/recent.jsonl")
+check "idle-prompt: below the threshold, silent even with changes" '[ -z "$out" ]'
+{ cat "$S/t.jsonl"; assistant "$(ago $((5 * 3600)))"; } >"$S/five.jsonl"
+out=$(idle "$S/repo/sub" "$S/five.jsonl")
+check "idle-prompt: above the threshold, a changed skill is named" 'grep -qxF "    edited  ~/sk/cfg/skills/edited/SKILL.md" <<<"$out" && [[ $out == *"skill changed since loaded, so re-read before acting under it:"* ]]'
+check "idle-prompt: says how long it was idle, and not that it was compacted" '[[ $out == "This session'"'"'s previous turn ended about 5 hours ago"* && $out != *"compacted"* && $out != *"Current state"* ]]'
+check "idle-prompt: a deleted skill is to be ignored" 'grep -qxF "  skill no longer exists, so ignore its restored text: gone, dropped" <<<"$out"'
+out=$(COMPACT_HANDOFF_IDLE_HOURS=6 idle "$S/repo/sub" "$S/five.jsonl")
+check "idle-prompt: the threshold is COMPACT_HANDOFF_IDLE_HOURS" '[ -z "$out" ]'
+out=$(idle "$S/repo" "$S/current.jsonl")
+check "idle-prompt: above the threshold with nothing changed, silent" '[ -z "$out" ]'
+out=$(idle "$S/repo" "$S/missing.jsonl")
+check "idle-prompt: no transcript, silent" '[ -z "$out" ]'
+echo "not json" >"$S/junk.jsonl"
+out=$(idle "$S/repo" "$S/junk.jsonl")
+check "idle-prompt: no earlier turn in the transcript, silent" '[ -z "$out" ]'
+out=$(jq -n --arg t "$S/five.jsonl" '{transcript_path:$t,agent_id:"a1"}' | HOME=$R CLAUDE_CONFIG_DIR="$S/cfg" "$HOOK" idle-prompt)
+check "idle-prompt: a subagent gets nothing" '[ -z "$out" ]'
+
 out=$(jq -n '{session_id:"s3",compact_summary:"## Summary\nno kick-off"}' | "$HOOK" post)
 check "post: silent when the summary has none of the sections" '[ -z "$out" ]'
 

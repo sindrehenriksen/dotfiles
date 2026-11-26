@@ -34,6 +34,14 @@
 #         COMPACT_STATE_COMMANDS adds). Plain stdout is added as context for
 #         SessionStart.
 #
+#   idle-prompt  (UserPromptSubmit) For a session that sat idle without
+#         compacting and so keeps acting on old skill text: when the previous
+#         turn ended more than COMPACT_HANDOFF_IDLE_HOURS ago (default 4; the
+#         time of the last assistant record in the transcript's tail), adds
+#         the same stale_context block as `session-start`, and nothing
+#         else. Prints nothing when it is not idle, when nothing has changed,
+#         or when the transcript shows no earlier turn. Reads files only.
+#
 # For a subagent compacting (the hook input carries a non-empty `agent_id`,
 # from Claude Code 2.1.323) there is no user to hand off to and the main
 # session's state is not its own: `pre` and `post` print nothing, and
@@ -310,9 +318,36 @@ session_start() {
     "$(dirname "${BASH_SOURCE[0]}")/compact-state.sh" <<<"$input"
 }
 
+# The previous turn of a main session is over when its last assistant record
+# was written; the prompt being submitted is not one. Only the transcript's
+# tail is read, and a line cut by it fails to parse and is skipped.
+idle_prompt() {
+    local input transcript hours last now idle
+    input=$(cat)
+    is_worker "$input" && return 0
+    transcript=$(jq -r '.transcript_path // ""' <<<"$input" 2>/dev/null)
+    [ -f "$transcript" ] && [ -r "$transcript" ] || return 0
+    hours=${COMPACT_HANDOFF_IDLE_HOURS:-4}
+    case $hours in '' | *[!0-9]*) hours=4 ;; esac
+    last=$(tail -c 4194304 "$transcript" | jq -R -r '
+        fromjson? | select(type == "object" and .type == "assistant" and .timestamp != null)
+        | .timestamp | sub("\\.[0-9]+Z$"; "Z") | try fromdateiso8601 catch empty' 2>/dev/null | tail -1)
+    [ -n "$last" ] || return 0
+    now=$(date +%s)
+    idle=$((now - last))
+    [ "$idle" -gt $((hours * 3600)) ] || return 0
+    local block
+    block=$(stale_context "$transcript" "$(jq -r '.cwd // ""' <<<"$input" 2>/dev/null)")
+    [ -n "$block" ] || return 0
+    echo "This session's previous turn ended about $((idle / 3600)) hours ago. What it loaded earlier may be out of date:"
+    echo
+    printf '%s\n' "$block"
+}
+
 case "${1:-}" in
     pre) pre ;;
     post) post ;;
     session-start) session_start ;;
-    *) echo "usage: $0 pre|post|session-start" >&2; exit 2 ;;
+    idle-prompt) idle_prompt ;;
+    *) echo "usage: $0 pre|post|session-start|idle-prompt" >&2; exit 2 ;;
 esac
