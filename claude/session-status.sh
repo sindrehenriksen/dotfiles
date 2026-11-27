@@ -47,7 +47,9 @@
 # event recorded when that file exists, else the transcript found by id:
 # Claude Code can record a path that never existed for a session resumed
 # from another directory),
-# has_start_event, pid, tty (the last two null unless live), recorded_tty
+# config_dir (the config dir the session lives under: the one whose pid file
+# a live session has, else the one holding its transcript), has_start_event,
+# pid, tty (the last two null unless live), recorded_tty
 # (the tty the latest start event recorded for its process, null when it
 # recorded none: a start without a pid, or a process with no terminal),
 # duplicate_pids
@@ -100,6 +102,118 @@ BATCH_RESCAN_THRESHOLD=5
 # an entry from an older version is rescanned from the start instead of
 # being trusted as unchanged.
 CACHE_VERSION=3
+
+# Seats. A work account can have several config dirs (~/.claude-work,
+# ~/.claude-work-2, ...), one per subscription; a session on any of them is the
+# same account's work, so run from one of them this lists the sessions of all.
+# Each seat is read by a run of this script of its own (its pid files, its
+# transcripts, its cache), and the runs' entries are merged by session id: a
+# live one wins, else the seat that holds the transcript. The personal dir
+# and $CLAUDE_CONFIG_DIR naming something else stay alone.
+# $CLAUDE_SESSION_CONFIG_DIRS (colon-separated) names the seats outright; it
+# is also how a run is held to one seat.
+seat_dirs() {
+    local d
+    if [ -n "${CLAUDE_SESSION_CONFIG_DIRS:-}" ]; then
+        tr ':' '\n' <<< "${CLAUDE_SESSION_CONFIG_DIRS}"
+        return
+    fi
+    case "${CONFIG_DIR%/}" in
+        "$HOME/.claude-work" | "$HOME"/.claude-work-[0-9]*)
+            for d in "$HOME/.claude-work" "$HOME"/.claude-work-[0-9]*; do
+                [ -d "$d" ] && printf '%s\n' "$d"
+            done
+            ;;
+        *) printf '%s\n' "${CONFIG_DIR%/}" ;;
+    esac
+}
+dispatch() { # "$@" is the mode; reads $entries_ndjson
+    case "${1:-}" in
+        resolve)
+            token=${2:-}
+            matches=$(printf '%s\n' "$entries_ndjson" | jq -s -c --arg token "$token" '
+                map(select(._name_source == "user" and .name == $token) | del(._name_source))
+            ')
+            if [ "$(printf '%s' "$matches" | jq 'length')" = "0" ] && [ -n "$token" ]; then
+                # Not a name the user set: an unnamed capture is labelled by its short
+                # session id, so a full id or a unique 8+-character id prefix
+                # resolves too. Never a guess: several matches are reported as
+                # candidates, not ranked.
+                by_id=$(printf '%s\n' "$entries_ndjson" | jq -s -c --arg token "$token" '
+                    ( map(select(.id == $token)) ) as $exact
+                    | if ($exact | length) > 0 then $exact
+                      elif ($token | length) >= 8 then map(select(.id | startswith($token)))
+                      else [] end
+                    | map(del(._name_source))
+                ')
+                if [ "$(printf '%s' "$by_id" | jq 'length')" = "1" ]; then
+                    printf '%s\n' "$by_id" | jq -c '.[0]'
+                    exit 0
+                fi
+                printf '%s\n' "$by_id"
+                exit 1
+            fi
+            if [ "$(printf '%s' "$matches" | jq 'length')" = "1" ]; then
+                printf '%s\n' "$matches" | jq -c '.[0]'
+                exit 0
+            fi
+            # Prefer live over not-live; among whichever set that leaves, the
+            # single most recent last_activity wins outright. A genuine tie
+            # (including "all missing last_activity", which sorts as 0) can't
+            # be narrowed further and is reported as ambiguous.
+            narrowed=$(printf '%s' "$matches" | jq -c '
+                (map(select(.live == true))) as $live
+                | if ($live | length) > 0 then $live else . end
+            ')
+            top=$(printf '%s' "$narrowed" | jq '[.[] | (.last_activity // 0)] | (max // 0)')
+            tied=$(printf '%s' "$narrowed" | jq -c --argjson top "$top" '
+                [.[] | select((.last_activity // 0) == $top)]
+            ')
+            if [ "$(printf '%s' "$tied" | jq 'length')" = "1" ]; then
+                printf '%s\n' "$tied" | jq -c '.[0]'
+                exit 0
+            fi
+            printf '%s\n' "$narrowed"
+            exit 1
+            ;;
+        "")
+            # name_source ("user" vs "ai_or_none") tells apart a session the user
+            # actually named from one only ever known by its auto title — the
+            # 16:30 capture's own "unnamed" needs exactly this,
+            # not just an empty .name (an ai-title fallback is never empty when
+            # Claude Code has assigned one).
+            printf '%s\n' "$entries_ndjson" | jq -c '.name_source = ._name_source | del(._name_source)'
+            ;;
+        *)
+            printf 'session-status.sh: unknown mode: %s\n' "$1" >&2
+            exit 2
+            ;;
+    esac
+}
+
+seats=()
+while IFS= read -r d; do
+    [ -n "$d" ] && seats+=("${d%/}")
+done < <(seat_dirs)
+if [ "${#seats[@]}" -gt 1 ]; then
+    all_ndjson=""
+    for d in "${seats[@]}"; do
+        out=$(CLAUDE_CONFIG_DIR="$d" CLAUDE_SESSION_CONFIG_DIRS="$d" \
+            CLAUDE_SESSION_READER_CACHE="${CLAUDE_SESSION_READER_CACHE:+$CLAUDE_SESSION_READER_CACHE/${d##*/}}" \
+            "$0" < /dev/null 2>/dev/null) || {
+            printf 'session-status.sh: the run for %s failed\n' "$d" >&2
+            exit 1
+        }
+        [ -n "$out" ] && all_ndjson+=$(jq -c --arg seat "$d" '. + {_seat: $seat}' <<< "$out")$'\n'
+    done
+    entries_ndjson=$(jq -s -c '
+        group_by(.id)
+        | map(sort_by([(.live | not), (.config_dir != ._seat)]) | .[0])
+        | .[] | ._name_source = .name_source | del(.name_source, ._seat)
+    ' <<< "$all_ndjson") || exit 1
+    dispatch "$@"
+    exit $?
+fi
 
 mkdir -p "$CACHE_DIR" 2>/dev/null
 
@@ -712,7 +826,8 @@ entries_ndjson=$(jq -n -c \
     --argjson foreign_live "$foreign_live_ids" \
     --slurpfile titlesf "$WORK_DIR/titles.json" \
     --argjson transcripts "$transcript_of_json" \
-    --argjson mtimes "$transcript_mtime_json" '
+    --argjson mtimes "$transcript_mtime_json" \
+    --arg own "${CONFIG_DIR%/}" '
     $titlesf[0] as $titles |
     def norm_ms: if . != null and (type == "number") then (. / 1000 | floor) else null end;
     ( ($events | keys) + ($pidfiles | keys) + ($transcripts | keys) | unique ) as $ids
@@ -785,6 +900,8 @@ entries_ndjson=$(jq -n -c \
         close_failed: $ev.close_failed,
         close_failed_at: $ev.close_failed_at,
         transcript_path: $transcript_path,
+        config_dir: (if $is_live or ($transcript_path | test("/projects/") | not) then $own
+                     else ($transcript_path | sub("/projects/.*$"; "")) end),
         has_start_event: $ev.has_start_event,
         pid: (if $is_live then ($pids[$id] // null) else null end),
         tty: (if $is_live then ($ttys[$id] // null) else null end),
@@ -795,67 +912,6 @@ entries_ndjson=$(jq -n -c \
 ')
 
 # --------------------------------------------------------------------------
-# 5. Mode dispatch: the default (no args) prints every entry; `resolve
-#    <token>` narrows to one, per the file header's spec.
+# 5. Mode dispatch (dispatch, defined near the top).
 # --------------------------------------------------------------------------
-case "${1:-}" in
-    resolve)
-        token=${2:-}
-        matches=$(printf '%s\n' "$entries_ndjson" | jq -s -c --arg token "$token" '
-            map(select(._name_source == "user" and .name == $token) | del(._name_source))
-        ')
-        if [ "$(printf '%s' "$matches" | jq 'length')" = "0" ] && [ -n "$token" ]; then
-            # Not a name the user set: an unnamed capture is labelled by its short
-            # session id, so a full id or a unique 8+-character id prefix
-            # resolves too. Never a guess: several matches are reported as
-            # candidates, not ranked.
-            by_id=$(printf '%s\n' "$entries_ndjson" | jq -s -c --arg token "$token" '
-                ( map(select(.id == $token)) ) as $exact
-                | if ($exact | length) > 0 then $exact
-                  elif ($token | length) >= 8 then map(select(.id | startswith($token)))
-                  else [] end
-                | map(del(._name_source))
-            ')
-            if [ "$(printf '%s' "$by_id" | jq 'length')" = "1" ]; then
-                printf '%s\n' "$by_id" | jq -c '.[0]'
-                exit 0
-            fi
-            printf '%s\n' "$by_id"
-            exit 1
-        fi
-        if [ "$(printf '%s' "$matches" | jq 'length')" = "1" ]; then
-            printf '%s\n' "$matches" | jq -c '.[0]'
-            exit 0
-        fi
-        # Prefer live over not-live; among whichever set that leaves, the
-        # single most recent last_activity wins outright. A genuine tie
-        # (including "all missing last_activity", which sorts as 0) can't
-        # be narrowed further and is reported as ambiguous.
-        narrowed=$(printf '%s' "$matches" | jq -c '
-            (map(select(.live == true))) as $live
-            | if ($live | length) > 0 then $live else . end
-        ')
-        top=$(printf '%s' "$narrowed" | jq '[.[] | (.last_activity // 0)] | (max // 0)')
-        tied=$(printf '%s' "$narrowed" | jq -c --argjson top "$top" '
-            [.[] | select((.last_activity // 0) == $top)]
-        ')
-        if [ "$(printf '%s' "$tied" | jq 'length')" = "1" ]; then
-            printf '%s\n' "$tied" | jq -c '.[0]'
-            exit 0
-        fi
-        printf '%s\n' "$narrowed"
-        exit 1
-        ;;
-    "")
-        # name_source ("user" vs "ai_or_none") tells apart a session the user
-        # actually named from one only ever known by its auto title — the
-        # 16:30 capture's own "unnamed" needs exactly this,
-        # not just an empty .name (an ai-title fallback is never empty when
-        # Claude Code has assigned one).
-        printf '%s\n' "$entries_ndjson" | jq -c '.name_source = ._name_source | del(._name_source)'
-        ;;
-    *)
-        printf 'session-status.sh: unknown mode: %s\n' "$1" >&2
-        exit 2
-        ;;
-esac
+dispatch "$@"

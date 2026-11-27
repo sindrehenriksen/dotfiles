@@ -81,6 +81,7 @@ BASH_SUITES=(
 	claude/tests/session-recorder-test.sh
 	claude/tests/session-stale-test.sh
 	claude/tests/session-status-resolve-test.sh
+	claude/tests/session-status-seats-test.sh
 	claude/tests/session-status-human-test.sh
 	claude/tests/session-status-title-test.sh
 	claude/tests/session-two-process-test.sh
