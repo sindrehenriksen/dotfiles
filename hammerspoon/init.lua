@@ -1236,9 +1236,12 @@ end
 DeskStale = {}
 
 local HOME = os.getenv("HOME") or ""
--- The two config dirs the `claude` account switcher in .shellrc uses; a
--- session's pid file is in one of them.
+-- The config dirs the `claude` account switcher in .shellrc uses (personal,
+-- and each seat of the work account); a session's pid file is in one of them.
+-- session-stale.sh --pid skips a dir that does not exist, so seats not in use
+-- cost nothing.
 DeskStale.config_dirs = { HOME .. "/.claude", HOME .. "/.claude-work" }
+for n = 2, 9 do DeskStale.config_dirs[#DeskStale.config_dirs + 1] = HOME .. "/.claude-work-" .. n end
 DeskStale.bin_dir = HOME .. "/.local/bin"
 DeskStale.settle_secs = 0.4
 -- An offer stands this long: it is withdrawn after, and a click on it
