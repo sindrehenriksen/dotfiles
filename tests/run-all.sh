@@ -90,6 +90,7 @@ BASH_SUITES=(
 	claude/tests/session-queue-test.sh
 	claude/tests/stale-skills-test.sh
 	claude/tests/statusline-test.sh
+	claude/tests/move-session-seat-test.sh
 	git-hooks/test-commit-msg.sh
 	hammerspoon/tests/hs-timeout-test.sh
 	linux/desk/tests/tabs-test.sh
