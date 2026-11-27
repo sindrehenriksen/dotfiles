@@ -8,6 +8,7 @@
 # f:<share%> is the strong tier's share of the last seven days' usage (claude-usage-tally
 # --strong-share), read from a cache and shown only once one exists; a seat may use the
 # strong tier for at most half of the weekly limit, so it reads !f: above 50%.
+# On a work seat, w1 or w2 comes before t:; f: then counts that seat's transcripts only.
 # Segments are omitted when their source fields are absent.
 
 input=$(cat)
@@ -48,6 +49,12 @@ if [ -n "$sid" ]; then
     done
     [ "$queued" -gt 0 ] && left="$left | q:$queued"
 fi
+# Which work seat this session is on (w1 for ~/.claude-work, w2 for ~/.claude-work-2),
+# so two subscriptions side by side can be told apart. Nothing for any other config dir.
+case "${CLAUDE_CONFIG_DIR%/}" in
+    */.claude-work) left="w1 $left" ;;
+    */.claude-work-[0-9]*) left="w${CLAUDE_CONFIG_DIR##*-} $left" ;;
+esac
 [ -n "$vim_mode" ] && left="[${vim_mode:0:1}] $left"
 
 # Resident memory of the Claude Code process this status line was spawned from.
@@ -127,7 +134,15 @@ fi
 STRONG_TTL=3600
 STRONG_LOCK_STALE=900
 strong_dir="${XDG_STATE_HOME:-$HOME/.local/state}/claude"
-strong_cache="$strong_dir/strong-share"
+# Per config dir, since each seat has a limit of its own: the tally reads that dir's
+# transcripts alone, and its cache and lock carry the dir's name.
+strong_key="strong-share"
+strong_roots=()
+if [ -n "${CLAUDE_CONFIG_DIR:-}" ]; then
+    strong_key="strong-share-$(basename "${CLAUDE_CONFIG_DIR%/}")"
+    strong_roots=(--root "${CLAUDE_CONFIG_DIR%/}/projects")
+fi
+strong_cache="$strong_dir/$strong_key"
 strong_at=0
 strong=""
 [ -r "$strong_cache" ] && read -r strong_at strong <"$strong_cache"
@@ -136,7 +151,7 @@ case $strong in '' | *[!0-9]*) strong="" ;; esac
 now=${EPOCHSECONDS:-$(date +%s)}
 if [ $((now - strong_at)) -ge "$STRONG_TTL" ]; then
     strong_tally="${CLAUDE_USAGE_TALLY:-$(dirname "$(realpath "$0" 2>/dev/null || echo "$0")")/claude-usage-tally}"
-    strong_lock="$strong_dir/strong-share.lock"
+    strong_lock="$strong_dir/$strong_key.lock"
     mkdir -p "$strong_dir" 2>/dev/null
     if [ -x "$strong_tally" ]; then
         if [ -d "$strong_lock" ] && [ -n "$(find "$strong_lock" -maxdepth 0 -mmin +$((STRONG_LOCK_STALE / 60)) 2>/dev/null)" ]; then
@@ -144,7 +159,7 @@ if [ $((now - strong_at)) -ge "$STRONG_TTL" ]; then
         fi
         if mkdir "$strong_lock" 2>/dev/null; then
             (
-                strong_new=$("$strong_tally" --strong-share 2>/dev/null)
+                strong_new=$("$strong_tally" --strong-share "${strong_roots[@]}" 2>/dev/null)
                 case $strong_new in '' | *[!0-9]*) strong_new=$strong ;; esac
                 printf '%s %s\n' "${EPOCHSECONDS:-$(date +%s)}" "$strong_new" >"$strong_cache.$$"
                 mv -f "$strong_cache.$$" "$strong_cache"

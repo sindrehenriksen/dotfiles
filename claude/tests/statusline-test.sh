@@ -20,6 +20,7 @@ fi
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
+unset CLAUDE_CONFIG_DIR
 export XDG_STATE_HOME="$TMP/state"
 STATE="$XDG_STATE_HOME/claude"
 CACHE="$STATE/strong-share"
@@ -83,6 +84,21 @@ mkdir -p "$STATE/strong-share.lock"
 render >/dev/null
 sleep 0.2
 check "a refresh already running: none is started" '[ "$(runs)" = 0 ]'
+
+reset
+out=$(CLAUDE_CONFIG_DIR="$HOME/.claude-work-2" render)
+check "seat 2 is named before the token count" '[[ $out == "w2 t:"* ]]'
+out=$(CLAUDE_CONFIG_DIR="$HOME/.claude-work" render)
+check "seat 1 is named" '[[ $out == "w1 t:"* ]]'
+out=$(CLAUDE_CONFIG_DIR="$HOME/.claude" render)
+check "the personal dir is not named" '[[ $out == "t:"* ]]'
+
+reset
+mkdir -p "$STATE"
+echo "1000 33" >"$CACHE"
+out=$(CLAUDE_CONFIG_DIR="$HOME/.claude-work-2" render)
+sleep 1
+check "a seat has its own cache, not the shared one" '[[ $out != *" f:33%"* && $(cat "$CACHE") == "1000 33" && -f "$STATE/strong-share-.claude-work-2" ]]'
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
