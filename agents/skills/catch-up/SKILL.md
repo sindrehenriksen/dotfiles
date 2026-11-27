@@ -10,7 +10,7 @@ The reader has been away for hours and has forgotten the detail. The summary let
 
 ## Gather first, then write
 
-Re-read state from primary sources, not from memory of the conversation: open PRs and their checks, tickets, `git status` and recent commits, background agents (running and finished), queued messages and anything that arrived while away. Never report a running agent's result as known. If something could not be checked, say so in the summary.
+Check what may have moved since it was last seen against its source, rather than trusting memory of the conversation: open PRs and their checks, tickets, `git status` and recent commits, background agents (running and finished), queued messages and anything that arrived while away. What was read moments ago needs no second look. After a compaction, or when the summary lacks a detail the user decided or said, search the session's own transcript for it rather than guess. Never report a running agent's result as known. If something could not be checked, say so in the summary.
 
 ## Shape
 
