@@ -19,7 +19,7 @@ Carrying work across a context boundary. The deliverable is prompts the user pas
 ## Which boundary
 
 - **In-place `/compact`**: the session continues. Two prompts — a keep-list for the compactor, then a kick-off.
-- **Fresh session**: there is no compactor to instruct, so one self-contained prompt only. It must name the repo and cwd and pull its own context from disk, the tracker or the PR.
+- **Fresh session**: there is no compactor to instruct, so one self-contained prompt only. It must name the repo and cwd and pull its own context from disk, the tracker or the PR. It also names the session it replaces: that session's id and the path of its transcript, with the note that a detail the prompt lacks is looked up there by searching (`rg` or `jq` for the term), never by reading the file through, since a long session's transcript is far larger than a context window.
 - **Fan-out across conversations**: one keep-list for the surviving session plus one self-contained prompt per new one. Split on context dependence — work carrying accumulated design context stays where that context is, self-contained items move out. State the split and the reasoning; it's a judgement the user may want to overrule.
 
 ## Prompt 1 — what goes with `/compact`
