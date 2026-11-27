@@ -18,7 +18,7 @@ DESK_RUN_DIR="$(cd -P "$(dirname "$_src")" && pwd)"
 
 # shellcheck source=desk-lib/common.sh
 source "$DESK_RUN_DIR/desk-lib/common.sh"
-for _lib in lock status timeout model-call git-ops tool-results ticket-cache steps brief sleep-inhibit; do
+for _lib in lock status timeout model-call git-ops tool-results ticket-cache steps brief sleep-inhibit warm-up; do
 	# shellcheck disable=SC1090
 	source "$DESK_RUN_DIR/desk-lib/$_lib.sh"
 done
@@ -139,6 +139,12 @@ fi
 
 PASS_SCRATCH="$(desk_scratch_dir "$pass-pass")"
 desk_sleep_inhibit "$pass" "$PASS_SCRATCH"
+
+# Optional: start each listed seat's usage window now (desk-lib/warm-up.sh).
+# Not on a weekend slot of a weekdays-only pass, which makes no model calls.
+if [ "$weekday_only_pass" != "true" ] || [ "$is_weekend" != "true" ]; then
+	desk_warm_up "$pass" "$pass_config" "$PASS_SCRATCH"
+fi
 
 # Every call this pass makes runs this copy of the deny hook, so a pull of
 # this repo mid-pass never changes it under a call. No copy, no pass.

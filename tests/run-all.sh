@@ -56,6 +56,7 @@ BASH_SUITES=(
 	nvim/tests/desk-line-key-test.sh
 	nvim/tests/desk-lock-test.sh
 	nvim/tests/desk-max-budget-test.sh
+	nvim/tests/desk-warm-up-test.sh
 	nvim/tests/desk-notes-diff-test.sh
 	nvim/tests/desk-propose-test.sh
 	nvim/tests/desk-push-test.sh

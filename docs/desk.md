@@ -96,7 +96,7 @@ The bar above the notes has the keys on the left and the status line on the righ
 | `default_max_budget_usd` | `25` | The spend ceiling on every call. |
 | `sources_file`, `timezone`, `tokens` | `sources.json`, none, `[]` | Seeded as `sources.json`; the follow pass's clock; the token table. |
 
-**A pass** has `steps` and optionally `brief`, `weekdays_only` (on a weekend slot only `commit_push` runs; default true for `morning`), `caps` (default `weekly` for `weekly`, else `daily`) and `trigger`: `start_calendar_interval`, `[{hour, minute, weekday?}]`, mirrors the schedule and decides which slot, and so which date, a run belongs to, the once-a-day guard keyed on that date; `same_day_only` makes a slot of an earlier day a no-op. `kind: "follow"` makes it the follow pass.
+**A pass** has `steps` and optionally `brief`, `weekdays_only` (on a weekend slot only `commit_push` runs; default true for `morning`), `caps` (default `weekly` for `weekly`, else `daily`) and `trigger`: `start_calendar_interval`, `[{hour, minute, weekday?}]`, mirrors the schedule and decides which slot, and so which date, a run belongs to, the once-a-day guard keyed on that date; `same_day_only` makes a slot of an earlier day a no-op. `kind: "follow"` makes it the follow pass. `warm_up` (off unless set) is `{config_dirs, model?, timeout?}`: once the pass has taken its lock and passed the once-a-day guard, one minimal tool-less request (default `haiku`, 60 s) runs under each listed Claude config dir, so a seat's five-hour usage window starts with the pass; it sends and writes nothing, logs one line per dir, and a failure never stops the pass (`claude/desk-lib/warm-up.sh`).
 
 | Step kind | What it does |
 |---|---|
