@@ -46,20 +46,26 @@ link ~/dotfiles/agents/AGENTS.md ~/.claude/CLAUDE.md
 link ~/dotfiles/claude/settings.json ~/.claude/settings.json
 link ~/dotfiles/claude/statusline.sh ~/.claude/statusline.sh
 link ~/dotfiles/claude/keybindings.json ~/.claude/keybindings.json
-# Claude Code work-account config dir (shared config symlinked from personal)
-mkdir -p ~/.claude-work
-link ~/dotfiles/agents/AGENTS.md ~/.claude-work/CLAUDE.md
-link ~/dotfiles/claude/settings.json ~/.claude-work/settings.json
-link ~/dotfiles/claude/keybindings.json ~/.claude-work/keybindings.json
-link ~/.claude/plugins ~/.claude-work/plugins
-# Skills are the exception: each account owns its directory, so an overlay
-# repo's skills reach the one account it belongs to and no other. This used to
-# be one symlink to the personal directory, which promoted every overlay's
-# skills to both accounts — migrate it, since ln would only follow it.
-[ -L ~/.claude-work/skills ] && rm ~/.claude-work/skills
-mkdir -p ~/.claude-work/skills
-for skill in "${generic_skills[@]}"; do
-    link ~/dotfiles/agents/skills/"$skill" ~/.claude-work/skills/"$skill"
+# Claude Code work-account config dirs (shared config symlinked from personal).
+# ~/.claude-work is seat 1 and ~/.claude-work-2 a second subscription's seat;
+# the tools that enumerate sessions treat ~/.claude-work and every
+# ~/.claude-work-<n> as one account's seats, so a third is another entry here.
+for seat in ~/.claude-work ~/.claude-work-2; do
+    mkdir -p "$seat"
+    link ~/dotfiles/agents/AGENTS.md "$seat"/CLAUDE.md
+    link ~/dotfiles/claude/settings.json "$seat"/settings.json
+    link ~/dotfiles/claude/keybindings.json "$seat"/keybindings.json
+    link ~/.claude/plugins "$seat"/plugins
+    # Skills are the exception: each account owns its directory, so an overlay
+    # repo's skills reach the one account it belongs to and no other. This used
+    # to be one symlink to the personal directory, which promoted every
+    # overlay's skills to both accounts — migrate it, since ln would only
+    # follow it.
+    [ -L "$seat"/skills ] && rm "$seat"/skills
+    mkdir -p "$seat"/skills
+    for skill in "${generic_skills[@]}"; do
+        link ~/dotfiles/agents/skills/"$skill" "$seat"/skills/"$skill"
+    done
 done
 
 # Desk, on both platforms. The schedulers, nvim and the tab helpers reach
