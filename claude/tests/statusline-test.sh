@@ -25,11 +25,13 @@ export XDG_STATE_HOME="$TMP/state"
 STATE="$XDG_STATE_HOME/claude"
 CACHE="$STATE/strong-share"
 
-# A tally that counts its runs, takes a moment, and prints $FAKE_SHARE.
+# A tally that counts its runs, stays running until $TMP/hold is removed (a
+# case that renders again while a refresh is in flight must not depend on how
+# fast its renders are), and prints $FAKE_SHARE.
 cat >"$TMP/tally" <<EOF
 #!/usr/bin/env bash
 echo run >>"$TMP/runs"
-sleep 0.5
+for _ in \$(seq 1 200); do [ -e "$TMP/hold" ] || break; sleep 0.05; done
 [ "\${1:-}" = --strong-share ] && printf '%s\n' "\${FAKE_SHARE:-}"
 EOF
 chmod +x "$TMP/tally"
@@ -39,8 +41,8 @@ export FAKE_SHARE=42
 INPUT='{"cwd":"/","context_window":{"total_input_tokens":1,"total_output_tokens":1},"rate_limits":{"five_hour":{"used_percentage":99},"seven_day":{"used_percentage":18}},"model":{"display_name":"Claude Fable 5.2"}}'
 render() { bash "$LINE" <<<"$INPUT"; }
 runs() { [ -f "$TMP/runs" ] && wc -l <"$TMP/runs" | tr -d ' ' || echo 0; }
-settle() { local i; for i in $(seq 1 50); do [ -d "$STATE/strong-share.lock" ] || return 0; sleep 0.1; done; }
-reset() { rm -rf "$STATE" "$TMP/runs"; }
+settle() { local i; rm -f "$TMP/hold"; for i in $(seq 1 50); do [ -d "$STATE/strong-share.lock" ] || return 0; sleep 0.1; done; }
+reset() { rm -rf "$STATE" "$TMP/runs"; : >"$TMP/hold"; }
 
 reset
 out=$(render)
@@ -97,7 +99,8 @@ reset
 mkdir -p "$STATE"
 echo "1000 33" >"$CACHE"
 out=$(CLAUDE_CONFIG_DIR="$HOME/.claude-work-2" render)
-sleep 1
+rm -f "$TMP/hold"
+for _ in $(seq 1 50); do [ -d "$STATE/strong-share-.claude-work-2.lock" ] || break; sleep 0.1; done
 check "a seat has its own cache, not the shared one" '[[ $out != *" f:33%"* && $(cat "$CACHE") == "1000 33" && -f "$STATE/strong-share-.claude-work-2" ]]'
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
