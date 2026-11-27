@@ -85,7 +85,7 @@ root and never reaches the bridging repo's `.claude/skills/` — while its
 instruction file, one directory further up, loads fine. The fix is to
 force-link it up: the private installer symlinks each skill directory into the
 skills directory of the *account it belongs to* — `~/.claude/skills/<name>` for a
-personal overlay, `~/.claude-work/skills/<name>` for a work one — which is the
+personal overlay, `~/.claude-work/skills/<name>` for a work one (and `~/.claude-work-2/skills/<name>`, and any further seat, which is a second subscription's config dir of the same account) — which is the
 path the agent actually reads. It does not also link into the vendor-neutral
 `~/.agents/skills/<name>`. Nothing *discovers* a skill there — a skill present
 only in that directory cannot be invoked at all — so the link buys no loading,
