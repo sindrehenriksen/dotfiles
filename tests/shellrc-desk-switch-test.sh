@@ -67,6 +67,10 @@ for sh in bash zsh; do
 		"/x/config.json|/x/state" "$(in_shell "$sh" "$shell_env" "${both[@]}" DESK_CONFIG=/x/config.json DESK_STATE_DIR=/x/state)"
 	assert_eq "$sh: ...and in a session of either account" \
 		"/x/config.json|/x/state|.claude-work" "$(in_shell "$sh" 'claude-work' "${both[@]}" DESK_CONFIG=/x/config.json DESK_STATE_DIR=/x/state)"
+	assert_eq "$sh: claude-work-2 is the work account on its own config dir" \
+		"/w/config.json|/w/state|.claude-work-2" "$(in_shell "$sh" 'claude-work-2' "${both[@]}")"
+	assert_eq "$sh: bare claude keeps the seat a CLAUDE_CONFIG_DIR names" \
+		"/w/config.json|/w/state|.claude-work-2" "$(in_shell "$sh" 'CLAUDE_CONFIG_DIR="$HOME/.claude-work-2" claude' "${both[@]}")"
 	assert_eq "$sh: one set on the command line wins over the switch's own" \
 		"/x/config.json||.claude-work" "$(in_shell "$sh" 'DESK_CONFIG=/x/config.json claude-work' "${both[@]}")"
 	assert_eq "$sh: a nested shell does not mistake the switch's value for one set by hand" \

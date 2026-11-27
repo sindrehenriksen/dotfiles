@@ -153,7 +153,10 @@ fi
 # Default account is personal. Override per machine with DEFAULT_ACCOUNT=work
 # in ~/.shellrc.early (untracked) to flip every account-aware tool at once, or
 # CLAUDE_DEFAULT_ACCOUNT=work for just this one.
-# Explicit: claude-personal, claude-work. Each account uses its own config dir,
+# Explicit: claude-personal, claude-work, claude-work-2 (a second work seat: its
+# own config dir and login, the same work account settings otherwise, so two
+# subscriptions run side by side and no session ever switches login).
+# Each account uses its own config dir,
 # which means MCP servers registered via `claude mcp add` are per-account —
 # register work MCPs with `claude-work mcp add`, personal ones with `claude`.
 # Also exports GH_CONFIG_DIR so `gh` inside the Claude session targets the
@@ -172,17 +175,13 @@ fi
 # below: a single-`_` name does not survive Claude Code's shell snapshot,
 # so `claude` inside a Claude session fails to find it.
 __claude-run() {
-    local account=$1; shift
-    local dir=~/.claude
+    local account=$1 dir=$2; shift 2
     local extra=$CLAUDE_PERSONAL_SETTINGS
-    if [ "$account" = work ]; then
-        dir=~/.claude-work
-        extra=$CLAUDE_WORK_SETTINGS
-    fi
+    [ "$account" = work ] && extra=$CLAUDE_WORK_SETTINGS
     [ -n "$extra" ] && set -- --settings "$extra" "$@"
     local desk_config desk_state desk_mark
     __desk-instance "$account"
-    echo "[claude] using ${account} account" >&2
+    echo "[claude] using ${account} account (${dir##*/})" >&2
     # CLAUDE_CODE_NO_FLICKER=1 enables alt-screen rendering so the input stays
     # pinned and scrolling doesn't snap to bottom. Upstream's accepted answer
     # for anthropics/claude-code#13591 — also reachable via `/tui fullscreen`.
@@ -224,21 +223,30 @@ __claude-restart-cmd() {
     [ -n "$cmd" ] && [ -n "$fresh" ] || return 1
     printf '%s\n' "$cmd"
 }
-# Bare `claude` honors a CLAUDE_CONFIG_DIR that names one of the two config
-# dirs, as bare `gh` honors GH_CONFIG_DIR: a session started from inside a
-# session keeps its account, and so does `CLAUDE_CONFIG_DIR=… claude`, the
-# form a desk pass and reopen-sessions.sh start a tab's session with.
+# Bare `claude` honors a CLAUDE_CONFIG_DIR that names one of the config dirs
+# (~/.claude, ~/.claude-work, ~/.claude-work-<n>), as bare `gh` honors
+# GH_CONFIG_DIR: a session started from inside a session keeps its account and
+# its seat, and so does `CLAUDE_CONFIG_DIR=… claude`, the form a desk pass and
+# reopen-sessions.sh start a tab's session with. The path is spelled exactly as
+# here, without a trailing slash: Claude Code keys the Keychain entry holding
+# the login on it, so a different spelling is a different, logged-out dir.
+# Every seat of an account shares its gh login and desk instance.
 claude() {
-    local account
+    local account dir
     case "${CLAUDE_CONFIG_DIR%/}" in
-        "$HOME/.claude-work") account=work ;;
-        "$HOME/.claude") account=personal ;;
-        *) account=${CLAUDE_DEFAULT_ACCOUNT:-${DEFAULT_ACCOUNT:-personal}} ;;
+        "$HOME/.claude-work" | "$HOME"/.claude-work-[0-9]*) account=work dir=${CLAUDE_CONFIG_DIR%/} ;;
+        "$HOME/.claude") account=personal dir=$HOME/.claude ;;
+        *)
+            account=${CLAUDE_DEFAULT_ACCOUNT:-${DEFAULT_ACCOUNT:-personal}}
+            dir=~/.claude
+            [ "$account" = work ] && dir=~/.claude-work
+            ;;
     esac
-    __claude-run "$account" "$@"
+    __claude-run "$account" "$dir" "$@"
 }
-claude-personal() { __claude-run personal "$@"; }
-claude-work()     { __claude-run work "$@"; }
+claude-personal() { __claude-run personal ~/.claude "$@"; }
+claude-work()     { __claude-run work ~/.claude-work "$@"; }
+claude-work-2()   { __claude-run work ~/.claude-work-2 "$@"; }
 
 
 #### Desk instance switcher
