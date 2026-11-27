@@ -423,6 +423,9 @@
     "command": "~/.claude/statusline.sh",
     "hideVimModeIndicator": true
   },
+  "enabledPlugins": {
+    "stale-skills@dotfiles-mods": true
+  },
   "extraKnownMarketplaces": {
     "dotfiles-mods": {
       "source": {
@@ -443,7 +446,7 @@
     "enabled": true,
     "mode": "hold"
   },
-  "theme": "dark",
+  "theme": "auto",
   "editorMode": "vim",
   "remoteControlAtStartup": true,
   "agentPushNotifEnabled": true,
@@ -479,8 +482,5 @@
       "**Trusted repo**: The current working directory and its origin remote. Repos under the user's own GitHub account are trusted destinations; anything else is not."
     ]
   },
-  "voiceEnabled": true,
-  "enabledPlugins": {
-    "stale-skills@dotfiles-mods": true
-  }
+  "voiceEnabled": true
 }

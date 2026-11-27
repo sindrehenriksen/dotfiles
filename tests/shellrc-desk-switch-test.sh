@@ -71,6 +71,12 @@ for sh in bash zsh; do
 		"/w/config.json|/w/state|.claude-work-2" "$(in_shell "$sh" 'claude-work-2' "${both[@]}")"
 	assert_eq "$sh: bare claude keeps the seat a CLAUDE_CONFIG_DIR names" \
 		"/w/config.json|/w/state|.claude-work-2" "$(in_shell "$sh" 'CLAUDE_CONFIG_DIR="$HOME/.claude-work-2" claude' "${both[@]}")"
+	assert_eq "$sh: CLAUDE_WORK_SEAT=2 makes bare claude on a work machine start on seat 2" \
+		"/w/config.json|/w/state|.claude-work-2" "$(in_shell "$sh" 'claude' "${both[@]}" DEFAULT_ACCOUNT=work CLAUDE_WORK_SEAT=2)"
+	assert_eq "$sh: ...a session on seat 1 keeps seat 1" \
+		"/w/config.json|/w/state|.claude-work" "$(in_shell "$sh" 'CLAUDE_CONFIG_DIR="$HOME/.claude-work" claude' "${both[@]}" DEFAULT_ACCOUNT=work CLAUDE_WORK_SEAT=2)"
+	assert_eq "$sh: ...and claude-work stays explicit" \
+		"/w/config.json|/w/state|.claude-work" "$(in_shell "$sh" 'claude-work' "${both[@]}" DEFAULT_ACCOUNT=work CLAUDE_WORK_SEAT=2)"
 	assert_eq "$sh: one set on the command line wins over the switch's own" \
 		"/x/config.json||.claude-work" "$(in_shell "$sh" 'DESK_CONFIG=/x/config.json claude-work' "${both[@]}")"
 	assert_eq "$sh: a nested shell does not mistake the switch's value for one set by hand" \

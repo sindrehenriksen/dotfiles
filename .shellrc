@@ -231,6 +231,9 @@ __claude-restart-cmd() {
 # here, without a trailing slash: Claude Code keys the Keychain entry holding
 # the login on it, so a different spelling is a different, logged-out dir.
 # Every seat of an account shares its gh login and desk instance.
+# CLAUDE_WORK_SEAT (machine-local, ~/.shellrc.early; default 1) picks which
+# seat bare `claude` starts on when the account is work and no CLAUDE_CONFIG_DIR
+# names one: CLAUDE_WORK_SEAT=2 makes it ~/.claude-work-2.
 claude() {
     local account dir
     case "${CLAUDE_CONFIG_DIR%/}" in
@@ -239,7 +242,10 @@ claude() {
         *)
             account=${CLAUDE_DEFAULT_ACCOUNT:-${DEFAULT_ACCOUNT:-personal}}
             dir=~/.claude
-            [ "$account" = work ] && dir=~/.claude-work
+            if [ "$account" = work ]; then
+                dir=~/.claude-work
+                case ${CLAUDE_WORK_SEAT:-1} in 1 | '') ;; *[!0-9]*) ;; *) dir=~/.claude-work-$CLAUDE_WORK_SEAT ;; esac
+            fi
             ;;
     esac
     __claude-run "$account" "$dir" "$@"
