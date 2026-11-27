@@ -55,7 +55,8 @@ assert_eq "one log line" "morning warm-up: seat2 window started (haiku)" "$(prin
 logged=""
 cfg="{\"warm_up\":{\"config_dirs\":[\"$ROOT/seat1\",\"$ROOT/seat2\",\"$ROOT/missing\"],\"model\":\"sonnet\"}}"
 FAKE_FAIL=seat1 desk_warm_up morning "$cfg" "$ROOT/scratch"
-assert_eq "a failure does not stop the function (returns 0)" 0 $?
+rc=$?
+assert_eq "a failure does not stop the function (returns 0)" 0 "$rc"
 assert_eq "both existing dirs were tried, in order" "seat1 seat2" "$(cut -d'|' -f1 "$ROOT/calls.log" | xargs -n1 basename | tr '\n' ' ' | sed 's/ $//')"
 case "$logged" in *"seat1 failed"*"seat2 window started (sonnet)"*"missing is not a directory"*) ok "one line each, the failure and the missing dir named" ;; *) bad "log: $logged" ;; esac
 
