@@ -18,7 +18,7 @@ One screen if possible. Tables only for enumerable facts (PR, state, what is nex
 
 1. **Title**: one line saying where things stand.
 2. **What happened since your last message**: what finished, what was cut off, what fell short of what was promised, each with its reason in one line. No apology padding.
-3. **What I need you for**: numbered, first, since the reader came for it. One action per item, with:
+3. **What I need you for**: numbered. This is what the reader came for, so keep section 2 short enough that both are on screen together. One action per item, with:
    - a one-or-two-line reminder of why, written for someone who forgot;
    - what happens if they do nothing;
    - the deadline, if any.
