@@ -15,7 +15,8 @@
 #
 # Which sessions. Those the reader (session-status.sh) reports live, under
 # each config dir in $GHOSTTY_UPDATE_CONFIG_DIRS (colon-separated; default
-# ~/.claude and ~/.claude-work, the two the `claude` account switcher uses),
+# ~/.claude and ~/.claude-work and every ~/.claude-work-<n>, the config dirs
+# the `claude` account switcher uses),
 # whose tty a Ghostty terminal holds with the session in its foreground, as
 # desk-close-tab.sh `find` names it for close-session.sh. A session on a tty
 # no Ghostty terminal holds is left alone.
@@ -146,7 +147,15 @@ TAB_HELPER="${DESK_CLOSE_TAB_BIN:-desk-close-tab.sh}"
 TAB_TIMEOUT="${GHOSTTY_UPDATE_TAB_TIMEOUT_SECS:-10}"
 BREW="${GHOSTTY_UPDATE_BREW:-brew}"
 STATE_DIR="${DESK_STATE_DIR:-$HOME/.local/state/desk}"
-CONFIG_DIRS="${GHOSTTY_UPDATE_CONFIG_DIRS:-$HOME/.claude:$HOME/.claude-work}"
+# Every config dir there is: personal, and each seat of the work account.
+default_config_dirs() {
+	local d out="$HOME/.claude"
+	for d in "$HOME/.claude-work" "$HOME"/.claude-work-[0-9]*; do
+		[ -d "$d" ] && out="$out:$d"
+	done
+	printf '%s' "$out"
+}
+CONFIG_DIRS="${GHOSTTY_UPDATE_CONFIG_DIRS:-$(default_config_dirs)}"
 DELAY_SECS="${GHOSTTY_UPDATE_DELAY_SECS:-5}"
 CALLER_SECS="${GHOSTTY_UPDATE_CALLER_SECS:-120}"
 GRACE="${GHOSTTY_UPDATE_GRACE_SECS:-10}"
@@ -322,7 +331,7 @@ unplanned_claudes() { # planned pid...
 		case "$planned" in *" $pid "*) continue ;; esac
 		sid=""
 		IFS=: read -r -a dirs <<< "$CONFIG_DIRS"
-		for d in "${dirs[@]}" "$HOME/.claude" "$HOME/.claude-work"; do
+		for d in "${dirs[@]}" "$HOME/.claude" "$HOME/.claude-work" "$HOME"/.claude-work-[0-9]*; do
 			sid="$(jq -r '.sessionId // empty' "${d%/}/sessions/$pid.json" 2> /dev/null)"
 			[ -n "$sid" ] && break
 		done
@@ -764,7 +773,7 @@ read_live() {
 	for d in "${dirs[@]}"; do
 		d="${d%/}"
 		[ -d "$d" ] || continue
-		CLAUDE_CONFIG_DIR="$d" "$READER" < /dev/null 2> /dev/null \
+		CLAUDE_CONFIG_DIR="$d" CLAUDE_SESSION_CONFIG_DIRS="$d" "$READER" < /dev/null 2> /dev/null \
 			| jq -c --arg d "$d" 'select(.live == true) | . + {config_dir: $d}' 2> /dev/null
 	done
 }

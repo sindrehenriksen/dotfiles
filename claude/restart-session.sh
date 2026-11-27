@@ -163,6 +163,10 @@ n="$(jq -s 'length' <<< "$entries")"
 [ "$n" -gt 0 ] || report refused "no such session"
 [ "$n" -eq 1 ] || report refused "the reader reports $n entries for this id"
 name="$(jq -r '.name // ""' <<< "$entries")"
+# The session may live on another seat of the account than the caller's: its
+# pid file, and the dir it is resumed under, are that seat's.
+entry_dir="$(jq -r '.config_dir // empty' <<< "$entries")"
+[ -z "$entry_dir" ] || CONFIG_DIR="${entry_dir%/}"
 [ "$(jq -r '.live == true' <<< "$entries")" = "true" ] || report refused "not live"
 [ "$(jq -r '.duplicate_pids == true' <<< "$entries")" = "false" ] \
 	|| report refused "more than one process holds this session"

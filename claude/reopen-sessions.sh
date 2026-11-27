@@ -167,6 +167,13 @@ NOW="${REOPEN_NOW:-$(date +%s)}"
 # last one by that little.
 BOOT_TOLERANCE_SECS=300
 
+# A work account's seats (~/.claude-work, ~/.claude-work-<n>) are one account's
+# config dirs: a run on one may reopen a session that lives on another.
+is_work_seat() {
+	case "${1%/}" in "$HOME/.claude-work" | "$HOME"/.claude-work-[0-9]*) return 0 ;; esac
+	return 1
+}
+
 die_inputs() {
 	printf 'reopen-sessions: %s\n' "$1" >&2
 	exit 3
@@ -391,6 +398,10 @@ for line in "${cand_lines[@]+"${cand_lines[@]}"}"; do
 		continue
 	fi
 	tp="$(jq -r '.transcript_path // ""' <<< "$entry")"
+	# The seat the session lives on, as the reader names it (a work account
+	# can have several); the caller's own when it names none.
+	cdir="$(jq -r '.config_dir // empty' <<< "$entry")"
+	cdir="${cdir:-$CONFIG_DIR}"
 	if [ -z "$cwd" ] || [ ! -d "$cwd" ]; then
 		add_result failed "$id" "$name" "$cwd" "$lh" "$wd" "recorded cwd does not exist"
 		continue
@@ -400,15 +411,18 @@ for line in "${cand_lines[@]+"${cand_lines[@]}"}"; do
 		continue
 	fi
 	case "$tp" in
-		"$CONFIG_DIR"/projects/*) ;;
+		"$cdir"/projects/*) [ "$cdir" = "$CONFIG_DIR" ] || { is_work_seat "$cdir" && is_work_seat "$CONFIG_DIR"; } || tp="" ;;
+	esac
+	case "$tp" in
+		"$cdir"/projects/*) ;;
 		*)
-			add_result failed "$id" "$name" "$cwd" "$lh" "$wd" "transcript is under another Claude config dir than $CONFIG_DIR; run with that CLAUDE_CONFIG_DIR"
+			add_result failed "$id" "$name" "$cwd" "$lh" "$wd" "transcript is under another Claude config dir than $cdir; run with that CLAUDE_CONFIG_DIR"
 			continue
 			;;
 	esac
-	to_open+=("$(jq -cn --arg id "$id" --arg name "$name" --arg cwd "$cwd" --arg lh "$lh" --arg wd "$wd" --arg how "$how" --arg tp "$tp" \
+	to_open+=("$(jq -cn --arg id "$id" --arg name "$name" --arg cwd "$cwd" --arg lh "$lh" --arg wd "$wd" --arg how "$how" --arg tp "$tp" --arg cdir "$cdir" \
 		--arg terminal "$(jq -r '.c.terminal // ""' <<< "$line")" --argjson tt "$(jq -r '.c.terminal_time // 0' <<< "$line")" \
-		'{id: $id, name: $name, cwd: $cwd, lh: $lh, wd: $wd, how: $how, tp: $tp, terminal: $terminal, terminal_time: $tt}')")
+		'{id: $id, name: $name, cwd: $cwd, lh: $lh, wd: $wd, how: $how, tp: $tp, cdir: $cdir, terminal: $terminal, terminal_time: $tt}')")
 done
 
 # --------------------------------------------------------------------------
@@ -423,15 +437,15 @@ reader_entry() { # id -> the reader's current entry, or nothing
 
 # The single place a tab is asked for. Refuses anything not UUID-shaped
 # again here, so no path into it can resume with an empty id.
-open_tab() { # id cwd -> sets open_detail; returns 0 when the opener reported success
-	local id="$1" cwd="$2" out rc printed
+open_tab() { # id cwd config-dir -> sets open_detail; returns 0 when the opener reported success
+	local id="$1" cwd="$2" cdir="$3" out rc printed
 	if ! is_uuid "$id"; then
 		open_detail="not a session id"
 		return 1
 	fi
 	out="$(mktemp "${TMPDIR:-/tmp}/reopen-sessions.XXXXXX")"
 	run_with_timeout "$TAB_TIMEOUT" "$out" \
-		"$OPENER" "CLAUDE_CONFIG_DIR=$(shq "$CONFIG_DIR") claude --resume $(shq "$id")" "$id" "$cwd" background \
+		"$OPENER" "CLAUDE_CONFIG_DIR=$(shq "$cdir") claude --resume $(shq "$id")" "$id" "$cwd" background \
 		< /dev/null
 	rc=$?
 	printed="$(cat "$out" "$out.stderr" 2> /dev/null | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
@@ -516,6 +530,7 @@ for item in "${to_open[@]+"${to_open[@]}"}"; do
 	wd="$(jq -r '.wd' <<< "$item")"
 	how="$(jq -r '.how' <<< "$item")"
 	tp="$(jq -r '.tp' <<< "$item")"
+	cdir="$(jq -r '.cdir' <<< "$item")"
 	terminal="$(jq -r '.terminal' <<< "$item")"
 	tabnote=""
 	[ "$(jq -r '.shared // false' <<< "$item")" = true ] && tabnote="another session was recorded in its tab since"
@@ -542,7 +557,7 @@ for item in "${to_open[@]+"${to_open[@]}"}"; do
 	placed=""
 	if [ -n "$terminal" ]; then
 		if restored_tab "$terminal"; then
-			tab_call type "$terminal" "$tab_shell_pid" "$(tab_resume_text "$cwd" "$CONFIG_DIR" "--resume $id")"
+			tab_call type "$terminal" "$tab_shell_pid" "$(tab_resume_text "$cwd" "$cdir" "--resume $id")"
 			if [ "$tab_rc" -eq 0 ]; then
 				placed=restored-tab
 				where="its restored tab"
@@ -557,7 +572,7 @@ for item in "${to_open[@]+"${to_open[@]}"}"; do
 		fi
 	fi
 	if [ -z "$placed" ]; then
-		if open_tab "$id" "$cwd"; then
+		if open_tab "$id" "$cwd" "$cdir"; then
 			placed=new-tab
 			where="a background tab${tabnote:+ ($tabnote)}"
 		else
